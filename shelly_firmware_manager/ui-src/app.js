@@ -60,7 +60,9 @@ async function api(path, body) {
 /** rc7: send a firmware file as raw body (the only non-JSON write); errors throw with the server text. */
 async function uploadFile(file) {
   const r = await fetch("api/firmware/upload", {method: "POST", body: file,
-    headers: {"Content-Type": "application/octet-stream", "X-CSRF-Token": CSRF, "X-Filename": file.name.slice(0, 200)}});
+    // Header values must be ASCII: other characters of the file name are replaced (display only)
+    headers: {"Content-Type": "application/octet-stream", "X-CSRF-Token": CSRF,
+      "X-Filename": file.name.replace(/[^\x20-\x7e]/g, "_").slice(0, 200)}});
   if (!r.ok) throw new Error(await r.text() || r.status);
   return r.json();
 }

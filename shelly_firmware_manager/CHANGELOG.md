@@ -2,6 +2,18 @@
 
 ## 3.0.0
 
+Released 2026-11-07 (final release after rc1–rc7).
+
+Changes in the final release (after rc7)
+- Fix: firmware uploads are kept in the activity log after a restart (the log dropped
+  the entry type "upload" when it was loaded).
+- Fix: uploading a file whose name contains non-ASCII characters (e.g. umlauts) failed
+  in the browser; such characters are now replaced in the transferred name (display
+  only).
+- README rewritten for users: shorter, with a table of contents, current state only.
+- Final review: complete test run, code security review of all modules, check of the
+  pinned packages and the base image for known vulnerabilities (see the test report).
+
 Changes in rc7
 - Firmware is no longer deleted automatically. All downloaded versions stay in the store
   (before: only the two highest versions per firmware ID were kept). Housekeeping only

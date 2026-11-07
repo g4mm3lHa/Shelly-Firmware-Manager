@@ -436,3 +436,13 @@ async def test_state_shows_the_downgrade_marker(mgr, net):
     await mgr.scan()
     mgr.devices[B]["downgrade"] = True
     assert next(d for d in mgr.public_state()["devices"] if d["id"] == B)["downgrade"] is True
+
+
+async def test_upload_log_entries_survive_a_restart(mgr, net):
+    """3.0.0 final review: the log kind "upload" is kept when the log is loaded again."""
+    await mgr.scan()
+    data = firmware_zip()
+    staged = await mgr.stage_upload(chunks(data), "fw.zip", len(data), "alice")
+    mgr.confirm_upload(staged["token"], "Plus1", "1.2.0", None, "alice")
+    m = manager.Manager(dict(OPTIONS), session=None, token="t")
+    assert any(e["kind"] == "upload" and e["version"] == "1.2.0" for e in m.events.entries)

@@ -159,7 +159,7 @@ with sync_playwright() as pw:
         # Upload: pre-filled form; wrong SHA shows an inline error (430), store (last case)
         f.locator("#fw-upload").click()
         f.locator("#dlg-body input[type=file]").set_input_files(
-            files=[{"name": "plus1-1.1.0.zip", "mimeType": "application/zip", "buffer": firmware_zip()}])
+            files=[{"name": "plüs1-1.1.0.zip", "mimeType": "application/zip", "buffer": firmware_zip()}])
         page.screenshot(path=OUT / f"{case}-upload-choose.png")
         f.locator("#dlg-btns button", has_text="Upload").click()
         f.wait_for_selector("#dlg-body select")
