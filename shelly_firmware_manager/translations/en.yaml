@@ -1,0 +1,31 @@
+configuration:
+  check_interval_days:
+    name: Check every (days)
+    description: Automatic check every 1-30 days.
+  check_time:
+    name: Check time
+    description: Time of the automatic check (HH:MM, time zone of Home Assistant).
+  download_base_url:
+    name: Download base URL for the Shellys
+  restrict_downloads_to_devices:
+    name: Serve downloads only to known Shellys
+  max_parallel_installs:
+    name: Parallel installations (max.)
+    description: Maximum number of approved updates installed at the same time (1-20); further approvals wait.
+  gen1_updates_enabled:
+    name: Enable Gen1 updates
+    description: >-
+      Gen1 firmware is offered by Shelly only via plain HTTP without a checksum. Switch off to skip Gen1 devices.
+  log_retention_days:
+    name: Log retention (days)
+  log_entry_limit:
+    name: Log size (max. entries)
+    description: 100-3000 entries.
+  gen1_allowed_types:
+    name: Allowed Gen1 types
+  pinned_certificates:
+    name: Pinned certificates
+    description: >-
+      Host and SHA-256 fingerprint for Shelly servers using the private Allterco CA. Multiple entries per host are allowed.
+network:
+  8098/tcp: Firmware downloads for the Shellys

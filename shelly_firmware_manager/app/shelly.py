@@ -1,0 +1,716 @@
+"""Access to Shelly devices and the manufacturer's firmware servers.
+
+All functions are stateless and receive the shared aiohttp session.
+
+Security:
+- Devices are only contacted at private IP addresses (SSRF protection), the
+  resolved IP is pinned (DNS rebinding) and redirects are forbidden.
+- Device authentication: Gen1 Basic Auth, Gen2+ Digest Auth (SHA-256, user
+  "admin"). Credentials are only sent in the scheme matching the device's
+  generation (no downgrade from Digest to Basic) and only after a challenge.
+- Metadata and firmware come only from shelly.cloud; every redirect is checked
+  again. Metadata and Gen2+ firmware only via HTTPS. Gen1 firmware is offered by
+  Shelly only via plain HTTP and without a checksum, so its integrity and origin
+  CANNOT be verified – the SHA-256 computed here only identifies the stored file
+  and detects later modification on disk.
+- File names consist only of the SHA-256 plus a fixed extension.
+- Values written to a device (name, NTP server, power-on action, AP/Bluetooth
+  switch, password protection) are validated against strict patterns or the
+  options the device itself reported. Gen1 passwords are sent as query
+  parameters (documented API); errors raised here never contain the URL.
+"""
+
+import asyncio
+import base64
+import hashlib
+import ipaddress
+import json
+import re
+import secrets
+import socket
+from dataclasses import dataclass, field
+from pathlib import Path
+from urllib.parse import quote, urljoin, urlsplit
+
+import aiohttp
+from tls import explain_tls_error
+from yarl import URL
+
+MAX_FW_SIZE = 64 * 1024 * 1024  # upper limit for a firmware file
+MIN_FW_SIZE = 1024  # anything smaller is certainly no firmware
+FW_EXTENSIONS = (".zip", ".bin", ".gbl")
+FW_NAME_RE = re.compile(r"^[0-9a-f]{64}\.(zip|bin|gbl)$")
+VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)(\d+))?")
+
+DEVICE_TIMEOUT = aiohttp.ClientTimeout(total=15)
+CLOUD_TIMEOUT = aiohttp.ClientTimeout(total=30)
+DOWNLOAD_TIMEOUT = aiohttp.ClientTimeout(total=300, sock_read=60)
+MAX_DEVICE_BODY = 1024 * 1024  # upper limit for a device response
+MAX_CLOUD_JSON = 2 * 1024 * 1024  # upper limit for a version offer / firmware list
+AUTH_USER = "admin"  # fixed user name of Gen2+ devices, also the Gen1 default
+DIGEST_PARAM_RE = re.compile(r'(\w+)=(?:"([^"]*)"|([^,\s]*))')
+
+GEN2_META_URL = "https://updates.shelly.cloud/update/{app}"
+GEN1_META_URL = "https://api.shelly.cloud/files/firmware"
+
+# Device settings that can be edited in the UI
+NAME_RE = re.compile(r"^[^\x00-\x1f\x7f]{0,64}$")  # printable, max. 64 characters
+NTP_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(:\d{1,5})?$")  # host[:port]
+# Gen2+: config key prefix -> (RPC namespace, documented "initial_state" values)
+GEN2_OUTPUTS = {
+    "switch": ("Switch", ("off", "on", "restore_last", "match_input")),
+    "light": ("Light", ("off", "on", "restore_last")),
+    "rgb": ("RGB", ("off", "on", "restore_last")),
+    "rgbw": ("RGBW", ("off", "on", "restore_last")),
+    "cct": ("CCT", ("off", "on", "restore_last")),
+}
+# Gen1: "default_state" values; "switch" (follow input) only where the device has an input
+GEN1_STATES = ("off", "on", "last")
+GEN1_OUTPUT_KINDS = ("relay", "light", "color", "white")  # /settings/<kind>/<index>
+
+
+class ShellyError(RuntimeError):
+    """Expected error – shown to the user as a message."""
+
+
+class AuthError(ShellyError):
+    """The device requires a password or rejected the stored one (severity: error)."""
+
+
+class UnsupportedError(ShellyError):
+    """The device does not provide the requested method/endpoint (not an outage)."""
+
+
+# Feature state values stored per device besides True (on/active) and False:
+UNSUPPORTED = "unsupported"  # the device/firmware does not offer the feature
+# None = unknown (not read yet, or the last read failed) – never shown as "off"
+
+
+def clip(value, limit=200):
+    """Limit external values before they are stored or displayed."""
+    return str(value if value is not None else "")[:limit]
+
+
+def parse_version(text):
+    """Comparable tuple from Shelly version strings.
+
+    Gen1: '20230913-112003/v1.14.0-gcb84623', Gen2+: '1.4.4' or '1.5.0-beta2'.
+    Final versions rank higher than pre-releases of the same number.
+    """
+    match = VERSION_RE.search(str(text or ""))
+    if not match:
+        raise ShellyError(f"Unknown version format: {clip(text, 80)!r}")
+    major, minor, patch, pre, pre_num = match.groups()
+    rank = {"alpha": 0, "beta": 1, "rc": 2}.get(pre, 3)
+    return int(major), int(minor), int(patch), rank, int(pre_num or 0)
+
+
+# --------------------------------------------------------------------------- Devices
+
+
+def is_lan_address(ip):
+    """True for addresses of a private network (no loopback, link-local, multicast …).
+
+    is_private alone is not enough: Python also counts loopback/link-local as private.
+    """
+    return ip.is_private and not (
+        ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified or ip.is_reserved
+    )
+
+
+async def resolve_device_origin(configuration_url):
+    """Returns 'http://<private-ip>:<port>' from the integration's configuration_url."""
+    parts = urlsplit(configuration_url or "")
+    if parts.scheme != "http" or not parts.hostname or parts.username or parts.password:
+        raise ShellyError("No usable local device address in the device registry")
+    port = parts.port or 80
+
+    loop = asyncio.get_running_loop()
+    infos = await loop.getaddrinfo(parts.hostname, port, type=socket.SOCK_STREAM)
+    addresses = sorted({info[4][0].split("%")[0] for info in infos})
+    for address in addresses:
+        if not is_lan_address(ipaddress.ip_address(address)):
+            raise ShellyError(f"Device address {address} is not in a private network")
+
+    ip = addresses[0]
+    host = f"[{ip}]" if ":" in ip else ip
+    return f"http://{host}:{port}"
+
+
+def origin_ip(origin):
+    """IP address from an origin created by resolve_device_origin."""
+    return urlsplit(origin).hostname
+
+
+# --------------------------------------------------------------------------- Authentication
+
+
+def _sha256(text):
+    """Hex SHA-256 of a UTF-8 string (Digest Auth building block)."""
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def gen2_ha1(realm, password):
+    """HA1 of the Gen2+ Digest Auth: SHA-256('admin:<device id>:<password>')."""
+    return _sha256(f"{AUTH_USER}:{realm}:{password}")
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceAuth:
+    """Credentials for one device. The secrets are excluded from repr() so they
+    can never end up in a log line or an error message by accident.
+
+    gen1 uses password (Basic Auth). Gen2+ uses either a stored ha1 bound to
+    realm (= Shelly device ID) or a plain password from which HA1 is derived.
+    """
+
+    gen: int
+    password: str | None = field(default=None, repr=False)
+    ha1: str | None = field(default=None, repr=False)
+    realm: str | None = None
+
+    def authorization(self, challenge, method, uri):
+        """Authorization header answering the device's WWW-Authenticate challenge."""
+        scheme, _, params = challenge.partition(" ")
+        if self.gen == 1:
+            if scheme.lower() != "basic" or self.password is None:
+                raise ShellyError("Unexpected authentication request from the Shelly")
+            token = base64.b64encode(f"{AUTH_USER}:{self.password}".encode()).decode()
+            return f"Basic {token}"
+        # Gen2+: Digest with SHA-256 only – never fall back to Basic (plain password)
+        values = {m[0].lower(): m[1] or m[2] for m in DIGEST_PARAM_RE.findall(params)}
+        realm, nonce = values.get("realm", ""), values.get("nonce", "")
+        if scheme.lower() != "digest" or values.get("algorithm", "SHA-256").upper() != "SHA-256":
+            raise ShellyError("Unexpected authentication request from the Shelly")
+        if not realm or not nonce or "auth" not in [q.strip() for q in values.get("qop", "auth").split(",")]:
+            raise ShellyError("Incomplete authentication request from the Shelly")
+        if self.ha1:
+            if realm != self.realm:
+                raise ShellyError("Stored device password belongs to another device ID – enter it again")
+            ha1 = self.ha1
+        else:
+            ha1 = gen2_ha1(realm, self.password or "")
+        cnonce, nc = secrets.token_hex(8), "00000001"
+        response = _sha256(f"{ha1}:{nonce}:{nc}:{cnonce}:auth:{_sha256(f'{method}:{uri}')}")
+        return (
+            f'Digest username="{AUTH_USER}", realm="{realm}", nonce="{nonce}", uri="{uri}", '
+            f'algorithm=SHA-256, qop=auth, nc={nc}, cnonce="{cnonce}", response="{response}"'
+        )
+
+
+async def _call(session, origin, path, auth, params=None, body=None):
+    """One request to a device; answers an authentication challenge once.
+
+    Returns (HTTP status, parsed JSON or None). Redirects are forbidden (they
+    could lead out of the LAN) and the response size is limited.
+    """
+    url = URL(origin + path)
+    if params:
+        url = url.with_query(params)
+    method = "GET" if body is None else "POST"
+    headers = None
+    for attempt in range(2):
+        async with session.request(
+            method,
+            url,
+            json=body,
+            headers=headers,
+            allow_redirects=False,
+            timeout=DEVICE_TIMEOUT,
+        ) as resp:
+            if resp.status == 401:
+                if attempt or auth is None:
+                    raise AuthError(
+                        "The Shelly rejected the password"
+                        if attempt
+                        else "The Shelly requires a password – store it in the device's password dialog"
+                    )
+                headers = {
+                    "Authorization": auth.authorization(
+                        resp.headers.get("WWW-Authenticate", ""), method, url.raw_path_qs
+                    )
+                }
+                continue
+            raw = await read_limited(resp, MAX_DEVICE_BODY, "Response from the device too large")
+            try:
+                return resp.status, json.loads(raw.decode("utf-8", "replace"))
+            except ValueError:
+                return resp.status, None
+    raise ShellyError("Authentication with the Shelly failed")  # not reached
+
+
+async def _device_json(session, origin, path, auth=None, params=None):
+    """GET on the device; HTTP errors and invalid JSON become a ShellyError."""
+    status, data = await _call(session, origin, path, auth, params=params)
+    if status == 404:
+        raise UnsupportedError(f"Not supported by this device ({clip(path, 40)})")
+    if status >= 400:
+        raise ShellyError(f"Shelly rejected the request (HTTP {status})")
+    if not isinstance(data, dict):
+        raise ShellyError("Invalid response from the device")
+    return data
+
+
+async def _rpc(session, origin, method, params=None, auth=None):
+    """Gen2+ JSON-RPC call; device errors become a ShellyError with the device's message."""
+    body = {"id": 1, "method": method, "params": params or {}}
+    status, result = await _call(session, origin, "/rpc", auth, body=body)
+    if isinstance(result, dict) and result.get("error"):  # also sent with HTTP errors
+        error = result["error"]
+        if isinstance(error, dict) and error.get("code") == 404:  # "No handler for <method>"
+            raise UnsupportedError(f"Not supported by this device ({clip(method, 40)})")
+        raise ShellyError(f"Device reports: {clip(error)}")
+    if status >= 400:
+        raise ShellyError(f"Shelly rejected the request (HTTP {status})")
+    if not isinstance(result, dict):
+        raise ShellyError("Invalid response from the device")
+    return result.get("result") or {}
+
+
+async def device_info(session, origin, auth_for=None, on_identity=None):
+    """Uniform device information for Gen1 and Gen2+.
+
+    auth_for(gen) returns the credentials once the generation is known (/shelly
+    itself never needs authentication). shelly_id is the Gen2+ device ID, which is
+    also the Digest Auth realm. on_identity(gen, shelly_id) is called right after
+    /shelly – so a device whose password is missing or wrong is still identified
+    and a device password can be set for it.
+
+    v3: the Gen2+ /shelly answer already is Shelly.GetDeviceInfo (id, mac, model,
+    gen, fw_id, ver, app, auth_en), so the second request is only made if a field
+    is missing. auth_enabled is the protection status reported by the device
+    itself (Gen2+ auth_en, Gen1 auth; None if not reported) – never derived from
+    stored credentials."""
+    info = await _device_json(session, origin, "/shelly")
+    gen = int(info.get("gen") or 1)
+    if on_identity:
+        on_identity(gen, clip(info.get("id"), 64) if gen >= 2 else None)
+    protected = info.get("auth_en" if gen >= 2 else "auth")
+    protected = protected if isinstance(protected, bool) else None
+    if gen >= 2:
+        if not all(info.get(k) for k in ("app", "ver", "fw_id")):
+            auth = auth_for(gen) if auth_for else None
+            info = await _device_json(session, origin, "/rpc/Shelly.GetDeviceInfo", auth)
+        return {
+            "auth_enabled": protected,
+            "gen": int(info["gen"]),
+            "shelly_id": clip(info.get("id"), 64),
+            "type": clip(info["app"], 64),
+            "model": clip(info.get("model"), 64),
+            "mac": clip(info.get("mac"), 32).upper(),
+            "version": clip(info["ver"], 64),
+            "build": clip(info["fw_id"], 128),
+        }
+    return {
+        "auth_enabled": protected,
+        "gen": 1,
+        "shelly_id": None,
+        "type": clip(info["type"], 64),
+        "model": clip(info["type"], 64),
+        "mac": clip(info.get("mac"), 32).upper(),
+        "version": clip(info["fw"], 128),
+        "build": clip(info["fw"], 128),
+    }
+
+
+async def trigger_update(session, gen, origin, firmware_url, auth=None):
+    """Tells the device to load the firmware from firmware_url."""
+    if gen == 1:
+        await _device_json(session, origin, "/ota", auth, {"url": firmware_url})
+    else:
+        await _rpc(session, origin, "Shelly.Update", {"url": firmware_url}, auth)
+
+
+# --------------------------------------------------------------------------- Device settings
+
+
+def _output(key, name, state, options):
+    """One output for the power-on dialog. The current value is always selectable."""
+    state = clip(state, 32)
+    return {
+        "key": key,
+        "name": clip(name, 64) or key,
+        "aop": state,
+        "options": list(options) + ([state] if state and state not in options else []),
+    }
+
+
+def _flag(value):
+    """A reported on/off switch, else UNSUPPORTED (the device lacks the field)."""
+    return value if isinstance(value, bool) else UNSUPPORTED
+
+
+async def _list_active(read, key, active):
+    """True/False whether a device list has an active entry; UNSUPPORTED if the
+    device lacks the endpoint; None (unknown) on any other failure – a timeout or
+    an authentication error is never taken for "unsupported"."""
+    try:
+        data = await read()
+    except UnsupportedError:
+        return UNSUPPORTED
+    except (TimeoutError, ShellyError, aiohttp.ClientError):
+        return None
+    entries = data.get(key)
+    if isinstance(entries, dict):  # Gen1 /settings/actions: {name: [entries]}
+        entries = [e for group in entries.values() if isinstance(group, list) for e in group]
+    if not isinstance(entries, list):
+        return None
+    return any(isinstance(e, dict) and active(e) for e in entries)
+
+
+async def read_settings(session, gen, origin, fw_type, auth=None, extended=False):
+    """Shelly name, NTP server, eco mode, AP and Bluetooth switch and power-on action
+    of all outputs – one request (Gen2+ Shelly.GetConfig, Gen1 /settings).
+
+    Switch values are True/False or UNSUPPORTED. extended=True (checks and Reload
+    Device Info only) also reads whether actions/webhooks and schedules are active:
+    Gen2+ needs Webhook.List and Schedule.List (no batch RPC exists), Gen1 needs
+    /settings/actions; schedules of Gen1 are part of /settings. Only the boolean
+    "has an active entry" is kept – never URLs, calls or scripts."""
+    outputs = []
+    extra = {}
+    if gen >= 2:
+        config = await _rpc(session, origin, "Shelly.GetConfig", auth=auth)
+        system = config.get("sys") or {}
+        name = (system.get("device") or {}).get("name")
+        ntp = (system.get("sntp") or {}).get("server")
+        eco = (system.get("device") or {}).get("eco_mode")
+        extra["ap"] = _flag(((config.get("wifi") or {}).get("ap") or {}).get("enable"))
+        # Only the legacy global switch counts; firmware 2.0+ removed it (Bluetooth
+        # then runs on demand) and ble.rpc.enable is no global switch.
+        extra["ble"] = _flag((config.get("ble") or {}).get("enable"))
+        if extended:
+            extra["actions"] = await _list_active(
+                lambda: _rpc(session, origin, "Webhook.List", auth=auth), "hooks", lambda e: e.get("enable") is True
+            )
+            extra["schedules"] = await _list_active(
+                lambda: _rpc(session, origin, "Schedule.List", auth=auth), "jobs", lambda e: e.get("enable") is True
+            )
+        for key, comp in config.items():
+            kind, _, index = key.partition(":")
+            if (
+                kind in GEN2_OUTPUTS
+                and index.isdigit()
+                and isinstance(comp, dict)
+                and "initial_state" in comp
+            ):
+                outputs.append(_output(key, comp.get("name"), comp["initial_state"], GEN2_OUTPUTS[kind][1]))
+        outputs.sort(key=lambda o: (o["key"].split(":")[0], int(o["key"].split(":")[1])))
+    else:
+        settings = await _device_json(session, origin, "/settings", auth)
+        name = settings.get("name")
+        ntp = (settings.get("sntp") or {}).get("server")
+        eco = settings.get("eco_mode_enabled")  # not in the official Gen1 docs, reported by /settings
+        # Read-only on Gen1: enabling the AP disables the station mode (official
+        # docs), the device would leave the network – see GEN1_AP_NOTE.
+        extra["ap"] = _flag((settings.get("wifi_ap") or {}).get("enabled"))
+        extra["ble"] = UNSUPPORTED  # Gen1 devices have no Bluetooth switch
+        if extended:
+            channels = [c for c in (settings.get("relays") or []) + (settings.get("lights") or []) if isinstance(c, dict)]
+            if any("schedule" in c for c in channels):
+                extra["schedules"] = any(c.get("schedule") is True and c.get("schedule_rules") for c in channels)
+            else:
+                extra["schedules"] = UNSUPPORTED
+            extra["actions"] = await _list_active(
+                lambda: _device_json(session, origin, "/settings/actions", auth),
+                "actions",
+                lambda e: e.get("enabled") is True and bool(e.get("urls")),
+            )
+        mode = settings.get("mode")
+        if mode != "roller":  # roller mode: relays drive a cover, no power-on action
+            for i, relay in enumerate(settings.get("relays") or []):
+                if isinstance(relay, dict) and "default_state" in relay:
+                    states = GEN1_STATES + (("switch",) if "btn_type" in relay else ())
+                    outputs.append(_output(f"relay:{i}", relay.get("name"), relay["default_state"], states))
+        # RGBW2/Bulb use /settings/color|white/<i>, dimmers and others /settings/light/<i>
+        kind = mode if mode in ("color", "white") else "light"
+        dimmer = str(fw_type).startswith("SHDM")  # Shelly Dimmer 1/2 also support "switch"
+        for i, light in enumerate(settings.get("lights") or []):
+            if isinstance(light, dict) and "default_state" in light:
+                states = GEN1_STATES + (("switch",) if dimmer else ())
+                outputs.append(_output(f"{kind}:{i}", light.get("name"), light["default_state"], states))
+    return {
+        "shelly_name": clip(name, 64) or None,
+        "ntp": clip(ntp, 260) or None,
+        "eco": _flag(eco),
+        "outputs": outputs,
+        **extra,
+    }
+
+
+def validate_settings(changes, outputs):
+    """Checks requested changes; returns them cleaned or raises ValueError."""
+    clean = {}
+    if "name" in changes:
+        name = changes["name"]
+        if not isinstance(name, str) or not NAME_RE.match(name):
+            raise ValueError("Invalid name (max. 64 printable characters)")
+        clean["name"] = name.strip()
+    if "ntp" in changes:
+        ntp = changes["ntp"]
+        if not isinstance(ntp, str) or not NTP_RE.match(ntp.strip()):
+            raise ValueError("Invalid NTP server (host name or IP address, optional :port)")
+        clean["ntp"] = ntp.strip()
+    for key, label in (("eco", "eco mode"), ("ap", "access point"), ("ble", "Bluetooth")):
+        if key in changes:
+            if not isinstance(changes[key], bool):
+                raise ValueError(f"Invalid {label} (true or false)")
+            clean[key] = changes[key]
+    if "aop" in changes:
+        known = {o["key"]: o["options"] for o in outputs}
+        aop = changes["aop"]
+        if not isinstance(aop, dict) or not aop:
+            raise ValueError("No power-on action given")
+        for key, value in aop.items():
+            if value not in known.get(key, ()):
+                raise ValueError(f"Invalid power-on action for {clip(key, 32)}")
+        clean["aop"] = dict(aop)
+    if not clean:
+        raise ValueError("Nothing to change")
+    return clean
+
+
+async def write_settings(session, gen, origin, changes, auth=None):
+    """Sends validated changes to the device. Returns True if it requests a restart."""
+    restart = False
+    if gen >= 2:
+        system = {}
+        device = {k: changes[c] for c, k in (("name", "name"), ("eco", "eco_mode")) if c in changes}
+        if device:
+            system["device"] = device
+        if "ntp" in changes:
+            system["sntp"] = {"server": changes["ntp"]}
+        if system:
+            result = await _rpc(session, origin, "Sys.SetConfig", {"config": system}, auth)
+            restart |= bool(result.get("restart_required"))
+        if "ap" in changes:  # only ap.enable – the device keeps all other Wi-Fi settings
+            result = await _rpc(session, origin, "Wifi.SetConfig", {"config": {"ap": {"enable": changes["ap"]}}}, auth)
+            restart |= bool(result.get("restart_required"))
+        if "ble" in changes:  # legacy global switch only (callers check it is supported)
+            result = await _rpc(session, origin, "BLE.SetConfig", {"config": {"enable": changes["ble"]}}, auth)
+            restart |= bool(result.get("restart_required"))
+        for key, value in changes.get("aop", {}).items():
+            kind, _, index = key.partition(":")
+            params = {"id": int(index), "config": {"initial_state": value}}
+            result = await _rpc(session, origin, f"{GEN2_OUTPUTS[kind][0]}.SetConfig", params, auth)
+            restart |= bool(result.get("restart_required"))
+        return restart
+
+    # Gen1: settings are changed via GET with query parameters
+    if "ap" in changes or "ble" in changes:
+        raise ValueError(GEN1_AP_NOTE if "ap" in changes else "Gen1 devices have no Bluetooth switch")
+    params = {}
+    if "name" in changes:
+        params["name"] = changes["name"]
+    if "ntp" in changes:
+        params["sntp_server"] = changes["ntp"]
+    if "eco" in changes:
+        params["eco_mode_enabled"] = "true" if changes["eco"] else "false"
+    if params:
+        await _device_json(session, origin, "/settings", auth, params)
+    for key, value in changes.get("aop", {}).items():
+        kind, _, index = key.partition(":")
+        if kind not in GEN1_OUTPUT_KINDS or not index.isdigit():
+            raise ValueError(f"Unknown output {clip(key, 32)}")
+        await _device_json(session, origin, f"/settings/{kind}/{int(index)}", auth, {"default_state": value})
+    return restart
+
+
+GEN1_AP_NOTE = (
+    "Not available on Gen1: enabling the access point turns off the Wi-Fi client mode, "
+    "the device would leave your network"
+)
+
+
+async def protection_status(session, origin):
+    """Password protection as reported by /shelly (no authentication needed):
+    True/False, None if the device does not report it."""
+    info = await _device_json(session, origin, "/shelly")
+    value = info.get("auth_en" if int(info.get("gen") or 1) >= 2 else "auth")
+    return value if isinstance(value, bool) else None
+
+
+async def set_protection(session, gen, origin, realm, new_auth, auth=None):
+    """Enable/change (new_auth = DeviceAuth of the new password) or disable
+    (new_auth None) the device's password protection.
+
+    Gen2+: Shelly.SetAuth with user admin, realm = device ID and the HA1 (null
+    disables; realm = Shelly device ID). Gen1: /settings/login with user admin. The caller must verify the
+    result – a lost or ambiguous answer proves nothing. Network errors are
+    re-raised without any URL (Gen1 carries the password in the query)."""
+    try:
+        if gen >= 2:
+            if not realm:
+                raise ShellyError("Device ID unknown – run a check first")
+            params = {"user": AUTH_USER, "realm": realm, "ha1": new_auth.ha1 if new_auth else None}
+            await _rpc(session, origin, "Shelly.SetAuth", params, auth)
+        elif new_auth:
+            params = {"enabled": "1", "username": AUTH_USER, "password": new_auth.password}
+            await _device_json(session, origin, "/settings/login", auth, params)
+        else:
+            await _device_json(session, origin, "/settings/login", auth, {"enabled": "0"})
+    except aiohttp.ClientError as err:
+        raise ShellyError(f"Device not reachable ({type(err).__name__})") from None
+
+
+async def restart(session, gen, origin, auth=None):
+    """Restarts the device (Gen2+ Shelly.Reboot, Gen1 /reboot)."""
+    if gen >= 2:
+        await _rpc(session, origin, "Shelly.Reboot", auth=auth)
+    else:
+        await _device_json(session, origin, "/reboot", auth)
+
+
+# --------------------------------------------------------------------------- Manufacturer
+
+
+async def read_limited(resp, limit, message):
+    """Complete response body, aborting as soon as it exceeds limit bytes."""
+    raw = bytearray()
+    async for chunk in resp.content.iter_chunked(64 * 1024):
+        raw += chunk
+        if len(raw) > limit:
+            raise ShellyError(message)
+    return bytes(raw)
+
+
+async def _cloud_json(session, url, pins):
+    """JSON from the manufacturer's server; redirects only within shelly.cloud and HTTPS."""
+    for _ in range(4):
+        check_download_url(url, https_only=True)
+        async with _CloudRequest(session, url, pins, CLOUD_TIMEOUT) as resp:
+            if resp.status in (301, 302, 303, 307, 308):
+                url = urljoin(url, resp.headers.get("Location", ""))
+                continue
+            resp.raise_for_status()
+            raw = await read_limited(
+                resp, MAX_CLOUD_JSON, "Response from the manufacturer's server too large"
+            )
+            try:
+                return json.loads(raw.decode("utf-8", "replace"))
+            except ValueError as err:
+                raise ShellyError("Invalid response from the manufacturer's server") from err
+    raise ShellyError("Too many redirects from the manufacturer's server")
+
+
+class _CloudRequest:
+    """session.get() for manufacturer servers: applies certificate pinning and
+    translates TLS errors into a readable message including the fingerprint."""
+
+    def __init__(self, session, url, pins, timeout):
+        """Prepare the request; nothing is sent before 'async with'."""
+        self.url = url
+        ssl_param = pins.ssl_for(url) if pins else True
+        self.request = session.get(url, ssl=ssl_param, allow_redirects=False, timeout=timeout)
+
+    async def __aenter__(self):
+        """Send the request and return the response (TLS errors explained)."""
+        try:
+            return await self.request.__aenter__()
+        except (aiohttp.ClientConnectorCertificateError, aiohttp.ServerFingerprintMismatch) as err:
+            raise ShellyError(await explain_tls_error(self.url, err)) from None
+
+    async def __aexit__(self, *exc):
+        """Release the connection."""
+        return await self.request.__aexit__(*exc)
+
+
+async def fetch_cloud_text(session, url, pins, limit):
+    """Text page (e.g. changelog) from a shelly.cloud server: HTTPS only, redirects
+    only within shelly.cloud, certificate pinning, size limit. Sends no device data."""
+    for _ in range(4):
+        check_download_url(url, https_only=True)
+        async with _CloudRequest(session, url, pins, CLOUD_TIMEOUT) as resp:
+            if resp.status in (301, 302, 303, 307, 308):
+                url = urljoin(url, resp.headers.get("Location", ""))
+                continue
+            resp.raise_for_status()
+            raw = await read_limited(
+                resp, limit, f"Page larger than {limit // 1024 // 1024} MiB: {clip(url)}"
+            )
+            return raw.decode(resp.charset or "utf-8", "replace")
+    raise ShellyError("Too many redirects from the manufacturer's server")
+
+
+async def fetch_offer(session, info, gen1_allowed, pins=None):
+    """Stable firmware offer {'version', 'url'} or None."""
+    if info["gen"] >= 2:
+        meta = await _cloud_json(session, GEN2_META_URL.format(app=quote(info["type"], safe="")), pins)
+        stable = meta.get("stable") if isinstance(meta, dict) else None
+        if not isinstance(stable, dict) or not stable.get("url"):
+            return None
+        if int(stable.get("nsteps") or 1) > 1:
+            raise ShellyError("Multi-step update offered – please check manually as described by Shelly")
+        return {"version": clip(stable.get("version"), 64), "url": str(stable["url"])}
+
+    if info["type"] not in gen1_allowed:
+        raise ShellyError(f"Gen1 type {info['type']} is not in the list of allowed types")
+    meta = await _cloud_json(session, GEN1_META_URL, pins)
+    if not isinstance(meta, dict) or not meta.get("isok"):
+        raise ShellyError("Gen1 firmware server reports an error")
+    entry = (meta.get("data") or {}).get(info["type"])
+    if not isinstance(entry, dict) or not entry.get("url"):
+        return None
+    return {"version": clip(entry.get("version"), 128), "url": str(entry["url"])}
+
+
+def check_download_url(url, https_only=False):
+    """Allow only the manufacturer's servers (shelly.cloud) for metadata and firmware."""
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    trusted = host == "shelly.cloud" or host.endswith(".shelly.cloud")
+    schemes = ("https",) if https_only else ("http", "https")
+    if parts.scheme not in schemes or parts.username or not trusted:
+        raise ShellyError(f"Download source not allowed: {clip(url)}")
+
+
+async def download_firmware(session, url, target_dir: Path, pins=None, https_only=False):
+    """Downloads the firmware to target_dir. Returns (file name, sha256, size, https).
+
+    https_only: required for Gen2+ (every hop must be HTTPS). https in the result
+    tells whether the whole transfer was protected by TLS."""
+    secure = True
+    for _ in range(5):  # at most 4 redirects
+        check_download_url(url, https_only=https_only)  # check every hop again
+        secure &= urlsplit(url).scheme == "https"
+        async with _CloudRequest(session, url, pins, DOWNLOAD_TIMEOUT) as resp:
+            if resp.status in (301, 302, 303, 307, 308):
+                url = urljoin(url, resp.headers.get("Location", ""))
+                continue
+            resp.raise_for_status()
+            return (*await _store(resp, url, target_dir), secure)
+    raise ShellyError("Too many redirects during download")
+
+
+async def _store(resp, url, target_dir: Path):
+    """Stores the response size-limited and atomically as <sha256>.<ext>."""
+    ext = Path(urlsplit(url).path).suffix.lower()
+    ext = ext if ext in FW_EXTENSIONS else ".bin"
+    temp = target_dir / f".part-{secrets.token_hex(8)}"
+    digest, size = hashlib.sha256(), 0
+    try:
+        with temp.open("wb") as handle:
+            async for chunk in resp.content.iter_chunked(128 * 1024):
+                size += len(chunk)
+                if size > MAX_FW_SIZE:
+                    raise ShellyError("Firmware larger than 64 MiB")
+                digest.update(chunk)
+                handle.write(chunk)
+        if size < MIN_FW_SIZE:
+            raise ShellyError("Firmware file implausibly small")
+        name = digest.hexdigest() + ext
+        temp.replace(target_dir / name)  # atomic: never a half-written file visible
+        return name, digest.hexdigest(), size
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def file_sha256(target_dir: Path, name):
+    """Checksum of a stored file; rejects foreign file names."""
+    if not FW_NAME_RE.match(name or ""):
+        raise ShellyError("Invalid firmware file name")
+    digest = hashlib.sha256()
+    with (target_dir / name).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(128 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()

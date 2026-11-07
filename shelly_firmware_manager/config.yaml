@@ -1,0 +1,74 @@
+name: Shelly Firmware Manager
+version: "3.0.0"
+slug: shelly_firmware_manager
+description: >-
+  Downloads Shelly firmware via Home Assistant, provides it through its own
+  local download server and installs it after manual approval.
+arch:
+  - aarch64
+  - amd64
+startup: application
+boot: auto
+init: true
+# Minimum Home Assistant version
+homeassistant: "2026.10.0"
+
+# Core API proxy (device registry, notifications). Of the Supervisor API only
+# /addons/self/options and /addons/self/restart are used (no hassio_api, no host access).
+homeassistant_api: true
+
+# Management UI via Ingress only (HA login, admins only).
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:download-circle
+panel_title: Shelly Firmware
+panel_admin: true
+
+# Download server for the Shellys. Serves firmware files only, no UI.
+ports:
+  8098/tcp: 8098
+ports_description:
+  8098/tcp: Firmware downloads for the Shellys (read-only)
+
+# No "map": no access to the Home Assistant configuration folder.
+# Firmware, state, passwords and logs live in the app's private /data.
+# Settings tab: /addons/self/options + /addons/self/restart are open to every app,
+# so no "hassio_api" permission is needed.
+
+options:
+  # Automatic check every N days at HH:MM (time zone of Home Assistant)
+  check_interval_days: 7
+  check_time: "02:45"
+  download_base_url: "http://192.168.178.50:8098"
+  restrict_downloads_to_devices: true
+  max_parallel_installs: 5
+  gen1_updates_enabled: true
+  log_retention_days: 90
+  log_entry_limit: 1000
+  gen1_allowed_types:
+    - SHSW-1
+    - SHSW-PM
+    - SHSW-25
+    - SHPLG-S
+    - SHEM
+  # Default pins for the Shelly servers with the in-house Allterco CA (see README)
+  pinned_certificates:
+    - host: updates.shelly.cloud
+      sha256: "6B:B3:78:67:78:EB:2A:7E:E1:D5:D2:75:CE:CC:01:D5:3D:DC:17:45:E8:00:2A:94:00:46:8F:F5:77:EF:EA:C0"
+    - host: fwcdn.shelly.cloud
+      sha256: "BA:A5:BA:08:4E:6B:B4:03:2E:AE:16:C0:79:75:9B:BD:D1:40:54:F7:A4:ED:82:A0:32:CE:1C:10:28:2D:1B:A4"
+schema:
+  check_interval_days: "int(1,30)"
+  check_time: "match(^([01]\\d|2[0-3]):[0-5]\\d$)"
+  download_base_url: url
+  restrict_downloads_to_devices: bool
+  max_parallel_installs: "int(1,20)"
+  gen1_updates_enabled: bool
+  log_retention_days: "int(1,365)"
+  log_entry_limit: "int(100,3000)"
+  gen1_allowed_types:
+    - "match(^[A-Za-z0-9-]{1,32}$)"
+  # Certificate pinning for Shelly servers with an in-house CA (O=Allterco)
+  pinned_certificates:
+    - host: "match(^([a-z0-9-]+\\.)*shelly\\.cloud$)"
+      sha256: "match(^[0-9A-Fa-f: ]{64,95}$)"
