@@ -1,22 +1,17 @@
-"""HTTP tests of the UI app: new single-device endpoint, CSRF, Ingress, 409s."""
+"""HTTP tests of the UI app: endpoints, CSRF, Ingress, 409s, upload, headers.
+
+All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test servers."""
 
 import asyncio
+import json
 import re
 
-import pytest
+import shelly
 import web_ui
 from aiohttp.test_utils import TestClient, TestServer
+
 from conftest import A, B
-
-
-@pytest.fixture
-async def client(mgr):
-    """Test client; the test server connects from 127.0.0.1 = 'Ingress' here."""
-    app = web_ui.build_ui_app(mgr, ingress_ip="127.0.0.1")
-    async with TestClient(TestServer(app)) as c:
-        page = await (await c.get("/")).text()
-        c.csrf = re.search(r'name="csrf" content="([0-9a-f]{64})"', page).group(1)
-        yield c
+from helpers import binary, firmware_zip, store
 
 
 def hdr(c):
@@ -174,3 +169,66 @@ async def test_password_endpoint_validation(client, mgr, net):
     assert r.status == 400 and "Secret-9" not in await r.text()
     r = await client.post(url, json={"mode": "forget", "confirm": True}, headers=hdr(client))
     assert r.status == 200 and (await r.json())["password_set"] is False
+
+
+async def test_http_upload_flow(client, mgr, net):
+    await mgr.scan()
+    data = firmware_zip({"name": "Plus1", "version": "1.3.0"}, size=60000)  # larger than 32 KB
+    r = await client.post("/api/firmware/upload", data=data, headers=binary(client))
+    assert r.status == 200, await r.text()
+    staged = await r.json()
+    assert staged["detected"]["version"] == "1.3.0" and "path" not in staged
+    r = await client.post("/api/firmware/upload/confirm", json={"token": staged["token"], "type": "Plus1",
+                          "version": "1.3.0"}, headers={"X-CSRF-Token": client.csrf})
+    assert r.status == 200 and (await r.json())["version"] == "1.3.0"
+    listing = await (await client.get("/api/firmware")).json()
+    assert listing["total_size"] == mgr.store_size() and len(listing["firmware"]) == 2
+
+
+async def test_http_upload_guards(client, mgr, net):
+    data = firmware_zip()
+    r = await client.post("/api/firmware/upload", data=data, headers={**binary(client), "X-CSRF-Token": "x"})
+    assert r.status == 403
+    r = await client.post("/api/firmware/upload", json={"a": 1}, headers={"X-CSRF-Token": client.csrf})
+    assert r.status == 415  # JSON is not accepted here
+    # Binary bodies stay refused everywhere else, and JSON keeps its 32 KB limit
+    r = await client.post("/api/firmware/upload/confirm", data=data, headers=binary(client))
+    assert r.status == 415
+    r = await client.post("/api/firmware/upload/confirm", data=json.dumps({"x": "y" * 40000}),
+                          headers={"X-CSRF-Token": client.csrf, "Content-Type": "application/json"})
+    assert r.status == 413
+    # Announced size above 64 MiB: refused before the body is read (last – the
+    # server closes the connection)
+    r = await client.post("/api/firmware/upload", data=data,
+                          headers={**binary(client), "Content-Length": str(shelly.MAX_FW_SIZE + 1)})
+    assert r.status == 413
+
+
+async def test_http_downgrade_and_delete_need_acknowledgment(client, mgr, net):
+    await mgr.scan()
+    name, sha = store(mgr, "Plus1", "1.4.0")
+    r = await client.get(f"/api/devices/{B}/downgrades")
+    body = await r.json()
+    assert body["installed"] == "1.5.0" and [v["version"] for v in body["versions"]] == ["1.4.0"]
+    assert body["blocked"] is None
+    hdr = {"X-CSRF-Token": client.csrf}
+    r = await client.post(f"/api/devices/{B}/install", json={"sha256": sha, "confirm": True, "downgrade": True},
+                          headers=hdr)
+    assert r.status == 400
+    r = await client.post(f"/api/devices/{B}/install", json={"sha256": "1" * 64, "confirm": True,
+                          "downgrade": True, "acknowledged": True}, headers=hdr)
+    assert r.status == 409
+    r = await client.post(f"/api/firmware/{name}/delete", json={"confirm": True}, headers=hdr)
+    assert r.status == 400 and name in mgr.firmware
+    r = await client.post(f"/api/firmware/{name}/delete", json={"confirm": True, "acknowledged": True}, headers=hdr)
+    assert r.status == 200 and name not in mgr.firmware
+    provided = mgr.devices[A]["file"]
+    r = await client.post(f"/api/firmware/{provided}/delete", json={"confirm": True, "acknowledged": True},
+                          headers=hdr)
+    assert r.status == 409
+
+
+async def test_state_shows_the_downgrade_marker(mgr, net):
+    await mgr.scan()
+    mgr.devices[B]["downgrade"] = True
+    assert next(d for d in mgr.public_state()["devices"] if d["id"] == B)["downgrade"] is True

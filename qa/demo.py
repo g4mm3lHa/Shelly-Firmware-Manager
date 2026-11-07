@@ -36,7 +36,7 @@ if scenario == "legacy":
     opts["download_base_url"] = app_options.LEGACY_DOWNLOAD_BASE
 elif scenario == "missing":
     del opts["download_base_url"]
-m = manager.Manager(opts, session=None, token="t", version="3.0.0")
+m = manager.Manager(opts, session=None, token="t", version="3.0.1")
 now = int(time.time())
 names = ["Kitchen light", "Living room ceiling with a really long device name", "Hall", "Garage door", "Pool pump",
          "Office desk", "Bedroom shutter", "Heat pump 3EM", "Garden plug", "Basement", "Attic fan", "Terrace",

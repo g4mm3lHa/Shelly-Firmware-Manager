@@ -58,12 +58,6 @@ STATUS_ERROR = "error"
 STATUS_UNREGISTERED = "unregistered"
 STATUS_SKIPPED = "skipped"  # Gen1 device while Gen1 updates are disabled
 PENDING = (STATUS_READY, STATUS_INSTALLING)  # device holds a firmware file
-# Status values of 2.0 – renamed in 2.1, translated once when loading
-LEGACY_STATUS = {
-    "current": STATUS_CURRENT,
-    "unclear": STATUS_UNCLEAR,
-    "not registered": STATUS_UNREGISTERED,
-}
 
 INSTALL_FIRST_CHECK_S = 30  # wait after the update command
 INSTALL_POLL_S = 10  # then check every 10 s
@@ -85,14 +79,13 @@ PART_PREFIX = ".part-"  # temporary download files (see shelly._store)
 # and version. Only one upload is staged at a time.
 UPLOAD_PREFIX = PART_PREFIX + "upload-"
 UPLOAD_TTL_S = 900  # a staged upload that is not confirmed within 15 min is dropped
-UPLOAD_CHUNK = 128 * 1024
 MAX_MANIFEST = 64 * 1024  # upper limit for a manifest.json read from an uploaded ZIP
 STABLE_VERSION_RE = re.compile(r"^\d{1,4}\.\d{1,4}\.\d{1,4}$")  # stable Gen2+ versions only
 SOURCE_DOWNLOAD = "download"  # downloaded from the manufacturer by a check
 SOURCE_UPLOAD = "upload"  # uploaded manually in the Firmware tab
 
 UI_TABLES = ("devices",)  # tables whose sort order/columns are stored
-UI_VERSION = 3  # 3.0: column order, "action" replaces "eco"/"restart" (v2 is migrated)
+UI_VERSION = 3  # table settings format since 3.0 (older formats are dropped, not migrated)
 COLUMN_RE = re.compile(r"^[a-z_]{1,32}$")
 MAX_COLUMNS = 30
 
@@ -102,7 +95,6 @@ MAX_COLUMNS = 30
 # Wi-Fi and Home Assistant load low. Internal constant, not a setting.
 CHECK_PARALLEL = 4
 PASSWORD_MODES = ("store", "enable", "change", "remove", "forget")
-OPTIONS_MIGRATION = 3  # state["migrations"]["options"]: Supervisor store cleaned for v3
 MAX_SERVED_IPS = 16  # download diagnosis: client addresses recorded per file
 
 # download_base_url problems that block installations (rc6, R1)
@@ -156,7 +148,6 @@ class Manager:
         self.progress = None  # running check: {"kind", "total", "done", "errors", "phase"}
         self.storage_error = None  # last failure writing state.json (shown in the UI)
         self.schedule = None  # automatic check schedule (see schedule.py), persisted
-        self.migrations = {}  # completed one-time migrations, persisted
         self.reloading = set()  # device IDs whose Reload Device Info is running
         self._provisions = {}  # (firmware ID, version) -> running provide task (single flight)
         self._downloads_running = 0  # for the progress phase of a parallel check
@@ -169,14 +160,12 @@ class Manager:
         self._remove_partial_downloads()
         self.credentials = Credentials(CREDENTIALS_FILE)
         self.changelogs = Changelogs(CHANGELOG_FILE)
-        # v3 limit option: every install starts once at the default of 1000 (the old
-        # log_max_entries key is dropped by the Supervisor); pruning trims at once.
         self.events = EventLog(EVENTS_FILE, options["log_retention_days"], options["log_entry_limit"])
         self._load()
         self.schedule, changed = schedule.configure(
             self.schedule, self.check_days, self.check_time, time.time(), self.tz
         )
-        if changed:  # new install, v2 upgrade or changed interval/time: anchor anew
+        if changed:  # new install or changed interval/time: anchor anew
             self.save()
 
     # ------------------------------------------------------------ Persistence
@@ -191,64 +180,21 @@ class Manager:
             self.last_scan = data.get("last_scan")
             self.scanned_version = data.get("scanned_version")
             self.firmware = data.get("firmware") if isinstance(data.get("firmware"), dict) else {}
-            if isinstance(data.get("ui"), dict) and data.get("ui_version") in (2, UI_VERSION):
-                self.ui = data["ui"] if data["ui_version"] == UI_VERSION else self._migrate_ui(data["ui"])
+            if isinstance(data.get("ui"), dict) and data.get("ui_version") == UI_VERSION:
+                self.ui = data["ui"]
             self.schedule = data.get("schedule") if isinstance(data.get("schedule"), dict) else None
-            self.migrations = data.get("migrations") if isinstance(data.get("migrations"), dict) else {}
             confirmed = data.get("download_base_confirmed")
             self.download_base_confirmed = confirmed if isinstance(confirmed, str) else None
         except FileNotFoundError:
-            self.migrations = {"options": OPTIONS_MIGRATION}  # fresh install: nothing to clean
             return
         except (ValueError, OSError) as err:
             log.warning("State file unreadable, starting fresh: %s", err)
             return
         for dev in self.devices.values():
-            dev["status"] = LEGACY_STATUS.get(dev.get("status"), dev.get("status"))
-            # Before 2.2.1 only the last attempt was stored: a device without error
-            # was checked successfully at that time.
-            if "last_success" not in dev and dev.get("status") not in (STATUS_ERROR, None):
-                dev["last_success"] = dev.get("last_check")
             # A restart during an installation leaves an unclear state
             if dev.get("status") == STATUS_INSTALLING:
                 dev.update(status=STATUS_UNCLEAR, message="App was restarted during the installation")
             dev.pop("downgrade", None)  # marker of a running downgrade (rc7), memory semantics
-
-    @staticmethod
-    def _migrate_ui(old):
-        """v2 table settings -> v3: "eco"/"restart" become the "action" column
-        (hidden only if both were hidden), the removed AOP column is dropped
-        (rc3: AOP is an icon in the action column), a sort on a removed column
-        falls back to the device name."""
-        entry = old.get("devices") if isinstance(old.get("devices"), dict) else {}
-        hidden = {c for c in entry.get("hidden") or [] if isinstance(c, str) and COLUMN_RE.match(c)}
-        if {"eco", "restart"} <= hidden:
-            hidden.add("action")
-        hidden -= {"eco", "restart", "aop"}
-        sort = entry.get("sort")
-        if not (isinstance(sort, list) and len(sort) == 2 and sort[0] not in ("eco", "restart", "aop")):
-            sort = ["device", "asc"]
-        return {"devices": {"sort": sort, "hidden": sorted(hidden)}}
-
-    async def migrate_options(self):
-        """One-time v3 cleanup of the options stored by the Supervisor.
-
-        The Supervisor drops unknown keys only from what it passes to the app;
-        its own store may still hold the removed shared password. Saving the
-        current, already cleaned option set once replaces that store. Runs at
-        start before any device check; the value is never read or logged. On
-        failure it is retried at the next start."""
-        if self.migrations.get("options") == OPTIONS_MIGRATION:
-            return True
-        try:
-            await self._supervisor_post("/addons/self/options", {"options": self.options})
-        except ShellyError as err:
-            log.warning("Cleaning the stored app options failed, retrying at the next start: %s", err)
-            return False
-        self.migrations = {"options": OPTIONS_MIGRATION}
-        self.save()
-        log.info("Stored app options cleaned for v3 (removed options deleted)")
-        return True
 
     @staticmethod
     def _remove_partial_downloads():
@@ -273,7 +219,6 @@ class Manager:
             "ui": self.ui,
             "ui_version": UI_VERSION,
             "schedule": self.schedule,
-            "migrations": self.migrations,
             "download_base_confirmed": self.download_base_confirmed,
         }
         try:
@@ -602,7 +547,8 @@ class Manager:
                         if size > shelly.MAX_FW_SIZE or size > length:
                             raise ValueError("Upload larger than announced or than 64 MiB")
                         digest.update(chunk)
-                        handle.write(chunk)
+                        # Worker thread: a slow disk never blocks the event loop
+                        await asyncio.to_thread(handle.write, chunk)
                 if size != length:
                     raise ValueError("Upload incomplete")
                 if ext == ".zip" and not await asyncio.to_thread(zipfile.is_zipfile, path):
@@ -929,7 +875,11 @@ class Manager:
             problem = dev.get("settings_error")
             if problem:  # firmware checked, device settings/status not readable
                 findings.append(
-                    {"device": dev.get("name"), "error": f"Device status: {problem['message']}", "severity": problem["severity"]}
+                    {
+                        "device": dev.get("name"),
+                        "error": f"Device status: {problem['message']}",
+                        "severity": problem["severity"],
+                    }
                 )
         counts = {level: sum(1 for f in findings if f["severity"] == level) for level in ("warning", "error")}
         updates = sum(1 for f in findings if "offer" in f)
@@ -1018,7 +968,11 @@ class Manager:
                 self.credentials.remove(entry["id"])
                 continue
             entries[entry["id"]] = entry
-        order = sorted(entries, key=lambda i: str(entries[i].get("name_by_user") or entries[i].get("name") or i).lower())
+        def label(i):
+            """Sort key: the name shown in HA (user-given name first)."""
+            return str(entries[i].get("name_by_user") or entries[i].get("name") or i).lower()
+
+        order = sorted(entries, key=label)
         return {i: entries[i] for i in order}
 
     async def _check_entry(self, device_id, entry, offers):
@@ -1463,9 +1417,13 @@ class Manager:
             self.credentials.store(device_id, new)  # replaces the old credential only now
             return {"protected": True}
         if mode == "change" and await self._auth_works(dev, current):
-            raise ShellyError(self._unverified("The password was not changed – the previous password still works", answer))
+            raise ShellyError(
+                self._unverified("The password was not changed – the previous password still works", answer)
+            )
         raise ShellyError(
-            self._unverified("The new password could not be confirmed – the previously stored password was kept", answer)
+            self._unverified(
+                "The new password could not be confirmed – the previously stored password was kept", answer
+            )
         )
 
     async def _auth_works(self, dev, auth):

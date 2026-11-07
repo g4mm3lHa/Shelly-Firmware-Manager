@@ -1,4 +1,4 @@
-# Shelly Firmware Manager 3.0.0
+# Shelly Firmware Manager 3.0.1
 
 Home Assistant app that keeps your Shelly devices (Gen1 to Gen4) up to date – locally
 and under your control. It finds all Shellys of the Shelly integration, checks for new
@@ -239,26 +239,35 @@ server interfaces are not officially guaranteed.
 - **From 3.0.0 release candidates:** if the old example address
   `http://192.168.178.50:8098` is still set, installations are blocked until you change
   it or confirm it with "This address is correct".
-- **From 2.x:** the check runs every 7 days at 02:45 instead of hourly. The former shared
-  Shelly password is removed – store passwords per device. Backups made before the
-  upgrade still contain the old password.
-- **From 1.x:** update to a 2.x version first, or remove and reinstall the app.
+- **From 3.0.0:** nothing to do. The activity log is converted once to its new storage
+  format at the first start.
+- **From 2.x or 1.x:** 3.0.1 no longer contains the conversion code of these versions.
+  Update to 3.0.0 first and start it once (it removes the former shared Shelly password
+  from the stored options and converts the table settings), then update to 3.0.1 – or
+  remove and reinstall the app. Backups made before the 3.0 upgrade still contain the
+  old shared password.
 
 ## Development
 
 Not part of the app image. The UI sources are in `shelly_firmware_manager/ui-src/`;
 `tools/build_ui.py` builds the shipped files in `app/static/` (pinned esbuild 0.28.2,
-`--check` verifies them). Tests mock all network access:
+`--check` verifies them). Tests mock all network access. One command runs the checks
+in the efficient order (lint, build check, version match, backend tests, optionally
+the Playwright UI checks against demo servers with fake data):
 
 ```
-python -m pytest -c tests/pytest.ini tests -q   # backend (needs pytest, pytest-asyncio, aiohttp)
-python qa/demo.py shelly_firmware_manager/app 8801 idle &   # demo server with fake data
-python qa/ui_test.py <screenshot dir>           # UI checks with Playwright (see qa/)
+tools/dev/check.sh          # lint + build check + backend tests (seconds)
+tools/dev/check.sh ui       # ... + UI quick matrix and feature checks (under a minute)
+tools/dev/check.sh full     # ... + full UI matrix and mobile captures (final gate)
+tools/dev/check.sh build    # rebuild app/static from ui-src first
 ```
+
+`tools/dev/` also works offline with the bundled wheels (see `tools/dev/README.md`).
+A map of modules, stored data, API routes and tests is in `docs/CODEMAP.md`.
 
 Layout: `shelly_firmware_manager/` (app definition, Dockerfile, pinned wheels, `app/`
-Python sources, `ui-src/`), `tests/`, `qa/` (UI checks, screenshots), `tools/`, `docs/`
-(requirements of the release candidates), `candidates/` (current test report).
+Python sources, `ui-src/`), `tests/` (by area), `qa/` (UI checks, demo server,
+screenshots), `tools/`, `docs/`, `candidates/` (current test report).
 
 ## Credits
 

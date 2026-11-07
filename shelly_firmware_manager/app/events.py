@@ -1,11 +1,17 @@
 """Activity log of the app (Logs tab), stored only in /data/events.json.
 
 Recorded: checks, firmware downloads and uploads, installations and downgrades that
-were actually started, deleted firmware, setting changes on Shellys, per-device password changes (set /
-removed / test failed) and app option changes. Not recorded: approvals that never
-started, restarts, anything secret (passwords and hashes never reach this module;
-for secret options only the key is logged).
+were actually started, deleted firmware, setting changes on Shellys, per-device password
+changes (set / removed / test failed) and app option changes. Not recorded: approvals
+that never started, restarts, anything secret (passwords and hashes never reach this
+module; for secret options only the key is logged).
 Retention: entries older than retention_days and beyond max_entries are dropped.
+
+Storage (3.0.1): JSON Lines – one entry per line, a new entry is appended, so adding
+an entry no longer rewrites the whole log. The file is rewritten (atomically) only
+when the dropped entries on disk exceed COMPACT_SLACK lines, at start after a trim,
+and once to convert the JSON array written by 3.0.0. A damaged line (e.g. a write cut
+off by a power loss) is skipped.
 
 Severity (v3): every new entry carries "severity" = success | warning | error.
 Historic entries without it are never rewritten; readers derive it from "ok".
@@ -22,11 +28,17 @@ log = logging.getLogger("sfm.events")
 
 KINDS = ("check", "download", "upload", "install", "delete", "setting", "password", "options")
 SEVERITIES = ("success", "warning", "error")  # ordered from lowest to highest
+COMPACT_SLACK = 200  # dropped lines tolerated in the file before it is rewritten
 
 
 def worst(*severities):
     """Highest of the given severities (aggregation for one log entry)."""
     return max(severities, key=SEVERITIES.index, default="success")
+
+
+def _line(entry):
+    """One entry as a JSON line (compact, ASCII-safe)."""
+    return json.dumps(entry, separators=(",", ":")) + "\n"
 
 
 class EventLog:
@@ -38,19 +50,37 @@ class EventLog:
         self.retention_s = int(retention_days) * 86400
         self.max_entries = int(max_entries)
         self.entries = []
+        self._lines = 0  # lines in the file (kept and already dropped entries)
+        rewrite = False
         try:
-            data = json.loads(path.read_text())
-            if isinstance(data, list):
-                self.entries = [e for e in data if isinstance(e, dict) and e.get("kind") in KINDS]
+            text = self.path.read_text()
         except FileNotFoundError:
-            pass
-        except (ValueError, OSError) as err:
+            text = ""
+        except OSError as err:
             log.warning("Log file unreadable, starting a new one: %s", err)
-        if self._prune():
-            self._save()
+            text, rewrite = "", True
+        if text.lstrip().startswith("["):  # JSON array of 3.0.0: convert once
+            try:
+                data = json.loads(text)
+            except ValueError as err:
+                log.warning("Log file unreadable, starting a new one: %s", err)
+                data = []
+            rows = data if isinstance(data, list) else []
+            rewrite = True
+        else:
+            rows = []
+            for raw in text.splitlines():
+                self._lines += 1
+                try:
+                    rows.append(json.loads(raw))
+                except ValueError:
+                    rewrite = True  # damaged line: dropped by the next rewrite
+        self.entries = [e for e in rows if isinstance(e, dict) and e.get("kind") in KINDS]
+        if self._prune() or rewrite or len(self.entries) != self._lines:
+            self._compact()
 
     def add(self, kind, ok=True, severity=None, **fields):
-        """Append an entry (kind from KINDS) and persist the log at once.
+        """Append an entry (kind from KINDS) and persist it at once (one line).
 
         severity defaults to "success"/"error" from ok; "ok" is kept for the
         legacy readers and is False only for errors."""
@@ -59,9 +89,14 @@ class EventLog:
         entry.update({k: v for k, v in fields.items() if v is not None})
         self.entries.append(entry)
         self._prune()
-        try:
-            self._save()
-        except OSError as err:  # a full disk must not break a check or installation
+        if self._lines + 1 - len(self.entries) > COMPACT_SLACK:
+            self._compact()  # contains the new entry
+            return entry
+        try:  # a full disk must not break a check or installation
+            with self.path.open("a") as handle:
+                handle.write(_line(entry))
+            self._lines += 1
+        except OSError as err:
             log.warning("Log could not be written: %s", err)
         return entry
 
@@ -76,11 +111,17 @@ class EventLog:
         self.entries = [e for e in self.entries if e.get("ts", 0) >= limit][-self.max_entries :]
         return len(self.entries) != before
 
-    def _save(self):
-        """Write atomically (temporary file first, then rename)."""
+    def _compact(self):
+        """Rewrite the file with the kept entries (temporary file, then rename)."""
         temp = self.path.with_suffix(".tmp")
-        temp.write_text(json.dumps(self.entries, separators=(",", ":")))
-        temp.replace(self.path)
+        try:
+            temp.write_text("".join(_line(e) for e in self.entries))
+            temp.replace(self.path)
+        except OSError as err:
+            temp.unlink(missing_ok=True)
+            log.warning("Log could not be written: %s", err)
+            return
+        self._lines = len(self.entries)
 
 
 def user_from(headers):

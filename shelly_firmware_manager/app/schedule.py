@@ -69,7 +69,8 @@ def configure(state, days, clock, now, tz):
     An unchanged configuration keeps the state (anchor and last attempt); a new
     or changed one is anchored at the next occurrence of the clock time and has
     no attempt yet. Returns (state, changed)."""
-    if isinstance(state, dict) and state.get("days") == days and state.get("time") == clock and _date(state.get("anchor")):
+    unchanged = isinstance(state, dict) and state.get("days") == days and state.get("time") == clock
+    if unchanged and _date(state.get("anchor")):
         return state, False
     today = datetime.fromtimestamp(now, tz).date()
     anchor = today if instant(today, clock, tz) > now else today + timedelta(days=1)

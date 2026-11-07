@@ -1,15 +1,24 @@
-"""Playwright UI checks of the 3.0 candidate in the HA default theme (light/dark).
+"""Playwright UI checks of the device list, menus, dialogs and tabs in the HA default
+theme (light/dark), standalone and embedded like the HA panel.
 
-Runs against demo.py servers; writes screenshots and results.json."""
+Runs against demo.py servers ("idle" on 8801, "busy" on 8802; qa/run_ui.py starts
+them); writes screenshots and results.json to <shots-dir>.
+Usage: python qa/ui_test.py <shots-dir> [--full]
+Default (per change, 3.0.1): quick matrix of 5 cases – 360 px light embedded, 430 px
+dark, 1440 px dark, busy 360 px light and busy 1440 px dark. --full: all 13 cases
+(360/430/1440 × light/dark, embedded at 360/430, busy 360/1440) – final gate only."""
 
 import json
 import re
 import sys
 from pathlib import Path
 
+from common import launch
 from playwright.sync_api import sync_playwright
 
-OUT = Path(sys.argv[1] if len(sys.argv) > 1 else "shots")
+ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
+FULL = "--full" in sys.argv
+OUT = Path(ARGS[0] if ARGS else "shots")
 OUT.mkdir(exist_ok=True)
 IDLE, BUSY = "http://127.0.0.1:8801", "http://127.0.0.1:8802"
 results = []
@@ -65,7 +74,7 @@ def check(page, name, ok, detail=""):
 
 def run_case(pw, width, scheme, embedded, base=IDLE, tag="idle"):
     """All checks for one viewport/scheme/mode."""
-    browser = pw.chromium.launch(executable_path="/home/user/.cache/ms-playwright/chromium-1217/chrome-linux64/chrome")
+    browser = launch(pw)
     ctx = browser.new_context(viewport={"width": width, "height": 900 if width > 700 else 780},
                               color_scheme=scheme, device_scale_factor=1, has_touch=width <= 700)
     page = ctx.new_page()
@@ -153,17 +162,24 @@ def run_case(pw, width, scheme, embedded, base=IDLE, tag="idle"):
 
 
 with sync_playwright() as pw:
-    for width in (360, 430, 1440):
-        for scheme in ("light", "dark"):
-            run_case(pw, width, scheme, embedded=False)
-            if width <= 430:
-                run_case(pw, width, scheme, embedded=True)
-    for width in (360, 1440):
-        for scheme in ("light", "dark"):
-            run_case(pw, width, scheme, embedded=False, base=BUSY, tag="busy")
+    if FULL:
+        for width in (360, 430, 1440):
+            for scheme in ("light", "dark"):
+                run_case(pw, width, scheme, embedded=False)
+                if width <= 430:
+                    run_case(pw, width, scheme, embedded=True)
+        for width in (360, 1440):
+            for scheme in ("light", "dark"):
+                run_case(pw, width, scheme, embedded=False, base=BUSY, tag="busy")
+    else:
+        run_case(pw, 360, "light", embedded=True)
+        run_case(pw, 430, "dark", embedded=False)
+        run_case(pw, 1440, "dark", embedded=False)
+        run_case(pw, 360, "light", embedded=False, base=BUSY, tag="busy")
+        run_case(pw, 1440, "dark", embedded=False, base=BUSY, tag="busy")
 
 Path(OUT / "results.json").write_text(json.dumps(results, indent=1))
 bad = [r for r in results if not r["ok"]]
-print(f"{len(results) - len(bad)}/{len(results)} passed")
+print(f"ui_test ({'full' if FULL else 'quick'}): {len(results) - len(bad)}/{len(results)} passed")
 for r in bad:
     print("FAIL", r["case"], r["detail"][:300])

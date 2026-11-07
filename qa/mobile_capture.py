@@ -1,8 +1,10 @@
-"""Capture devices, firmware and settings at 360/430/390-embedded/1440 px (light/dark)
-for the 3.0.0 rc2 mobile fix. Needs demo.py on port 8711; patches firmware and
-settings responses with long names, extra versions and a pinned certificate."""
-import json, sys, glob
+"""Screenshots of devices, firmware and settings at 360/430/390-embedded/1440 px
+(light/dark) with long names, extra versions and a pinned certificate (patched API
+responses); reports page errors and horizontal overflow. On demand / final gate only.
+Needs demo.py on port 8711 (qa/run_ui.py full starts it)."""
+import json, sys
 from pathlib import Path
+from common import find_browser
 from playwright.sync_api import sync_playwright
 OUT = Path(sys.argv[1]); OUT.mkdir(parents=True, exist_ok=True)
 B = "http://127.0.0.1:8711"
@@ -20,8 +22,10 @@ def set_patch(route):
     r = route.fetch(); d = r.json()
     d["pinned_certificates"] = [{"host": "updates.shelly.cloud", "sha256": "AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89"}]
     route.fulfill(response=r, body=json.dumps(d))
+problems = []  # cases with page errors or horizontal overflow
 with sync_playwright() as pw:
-    br = pw.chromium.launch(executable_path=glob.glob("/home/user/.cache/ms-playwright/chromium_headless_shell-1217/*/chrome-headless-shell")[0])
+    shell = find_browser("shell")
+    br = pw.chromium.launch(executable_path=shell) if shell else pw.chromium.launch()
     cases = [(360, "dark", False), (360, "light", False), (430, "dark", False), (430, "light", False), (390, "dark", True), (1440, "dark", False), (1440, "light", False)]
     for w, scheme, emb in cases:
         ctx = br.new_context(viewport={"width": w, "height": 900}, color_scheme=scheme, device_scale_factor=1)
@@ -62,5 +66,9 @@ with sync_playwright() as pw:
         print("  settings overflow", ov)
         print(tag, "errs", errs, "dev", info, "fw-sw", fwsw, "set-sw", ssw)
         if w < 700: print("  fw rows", fwinfo)
+        if errs or ov or max(info["sw"], fwsw, ssw) > w:
+            problems.append(tag)
         ctx.close()
     br.close()
+print(f"mobile_capture: {len(cases) - len(problems)}/{len(cases)} passed" + (f" (problems: {problems})" if problems else ""))
+sys.exit(1 if problems else 0)

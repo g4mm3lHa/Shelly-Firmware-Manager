@@ -3,9 +3,8 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 
-# Workspace-only helpers (never part of the repository)
+# Workspace: extracted wheels of tools/dev/run.sh
 .devdeps/
-dev/
 
 # Ad-hoc QA output (default output folder of the qa scripts; test results go into
 # the RC test report, curated screenshots are kept in qa/screenshots/)
