@@ -8,7 +8,7 @@ const CSRF = document.querySelector("meta[name=csrf]").content;
 // Inside the HA panel (Ingress iframe) HA shows the app name already: compact header on phones
 if (window.parent !== window) document.documentElement.classList.add("embedded");
 const $ = id => document.getElementById(id);
-const ui = {state: null, firmware: [], logs: [], options: null, view: "devices",
+const ui = {state: null, firmware: [], firmwareTotal: 0, logs: [], options: null, view: "devices",
   devFilter: "all", logFilter: "all", rendered: ""};
 const selected = new Set();       // device IDs ticked for a (multi) installation
 const openDetails = new Set();    // keys of expanded <details>, kept across re-renders
@@ -54,6 +54,13 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme
 async function api(path, body) {
   const opt = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json", "X-CSRF-Token": CSRF}, body: JSON.stringify(body)};
   const r = await fetch(path, opt);
+  if (!r.ok) throw new Error(await r.text() || r.status);
+  return r.json();
+}
+/** rc7: send a firmware file as raw body (the only non-JSON write); errors throw with the server text. */
+async function uploadFile(file) {
+  const r = await fetch("api/firmware/upload", {method: "POST", body: file,
+    headers: {"Content-Type": "application/octet-stream", "X-CSRF-Token": CSRF, "X-Filename": file.name.slice(0, 200)}});
   if (!r.ok) throw new Error(await r.text() || r.status);
   return r.json();
 }
@@ -189,6 +196,9 @@ const hasUpdate = d => ["available", "ready", "installing"].includes(d.status);
 // while the download base URL is missing or the unconfirmed former example (rc6)
 const installable = (d, s) => d.status === "ready" && !d.installing && !d.ignored && !s.scanning &&
   !(s.download_base && s.download_base.issue);
+// rc7: a downgrade needs a reached Gen2+ device, no check/installation and a valid download URL
+const downgradable = (d, s) => d.gen >= 2 && !!d.ip && !d.installing && d.status !== "installing" && !s.scanning &&
+  d.activity !== "reloading" && !(s.download_base && s.download_base.issue);
 // Settings can be read/changed once the device was reached and while it is not updating or reloading
 const editable = d => !!d.ip && !!d.gen && !d.installing && d.status !== "installing" && d.activity !== "reloading";
 const FILTERS = {all: ["All", () => true], updates: ["Updates", d => hasUpdate(d) && !d.ignored],
@@ -529,6 +539,8 @@ function openRowMenu(d, anchor) {
   const busy = ui.state && ui.state.busy;
   add("Check for updates", () => checkDevice(d), !busy && !d.installing);
   if (installable(d, ui.state)) add("Install update", () => openInstall([d]), true);   // only for Ready
+  // rc7: downgrade to a stored older version – Gen2+ only, also up to date / ignored devices
+  if (d.gen >= 2) add("Downgrade", () => openDowngrade(d), downgradable(d, ui.state));
   add("Reload device info", () => reloadDevice(d), !busy && !d.installing && !d.activity && !!d.ip);
   if (busy) items.push(el("div", `Not available – ${busy}`, "menu-hint"));   // reason, also for touch
   add(d.ignored ? "Resume device" : "Ignore device", () => setIgnored(d, !d.ignored), !d.installing);
@@ -634,6 +646,57 @@ function openInstall(devs) {
       }
       errors.length ? message("Installation", errors.join("\n"), "error") : closeModal();
     }}]);
+}
+// ---------------------------------------------------------------- Downgrade (rc7)
+// Flow: list of stored older versions -> installation dialog for the selected
+// version -> second confirmation with acknowledgment (as for the device password).
+const DOWNGRADE_WARNING = "A downgrade installs an older firmware. The device may refuse it, settings added by newer versions may be lost, and some devices may need a factory reset afterwards. Install only if you need this version.";
+const UPLOAD_HINT = "An uploaded file does not come from the Shelly update server; its origin is only as trustworthy as its source.";
+/** Label of a stored version for lists and dialogs. */
+const fwSource = v => v.source === "upload" ? (v.sha_checked ? "Uploaded (SHA-256 checked)" : "Uploaded (SHA-256 not checked)") : "Downloaded from Shelly";
+/** Step 1: choose one of the stored older versions. */
+async function openDowngrade(d) {
+  const title = `Downgrade – ${d.name}`;
+  modal(title, [el("p", "Loading stored versions …", "hint")], [{text: "Cancel"}]);
+  let r;
+  try { r = await api(`${devUrl(d)}/downgrades`); } catch (e) { message(title, e.message, "error"); return; }
+  if (r.blocked) { message(title, r.blocked, "error"); return; }
+  if (!r.versions.length) {
+    message(title, `No stored version of ${r.type || d.type} is older than the installed version ${r.installed || "–"}. Older versions stay stored once newer ones were downloaded, or can be uploaded in the Firmware tab.`);
+    return;
+  }
+  const list = el("div", null, "modes");
+  r.versions.forEach((v, i) => {
+    const radio = el("input"); radio.type = "radio"; radio.name = "dg-version"; radio.value = String(i); radio.checked = i === 0;
+    const label = box("label", "check", radio, " ", el("span", v.version, "name"),
+      el("span", ` · ${mb(v.size || 0)} · ${fmt(v.downloaded)} `, "sub"), v.source === "upload" ? el("span", "Uploaded", "tag warn") : null);
+    list.append(label);
+  });
+  modal(title, [valueList([["Firmware ID", r.type], ["Installed", r.installed]]), el("p", "Stored older versions (newest first):"), list,
+    el("p", "Newer versions are installed with “Install update”.", "hint")],
+  [{text: "Cancel"}, {text: "Continue", kind: "primary", action: () => {
+    downgradeInstall(d, r.versions[Number(list.querySelector("input:checked").value)]);
+  }}]);
+}
+/** Step 2: the known installation dialog, with the selected older version as target. */
+function downgradeInstall(d, v) {
+  const content = [valueList([["Device", d.name], ["Shelly", d.shelly_name], ["IP", d.ip], ["Generation", d.gen], ["Firmware ID", d.type],
+    ["Model", d.model], ["Installed", d.version], ["Target (older)", v.version], ["Size", mb(v.size || 0)], ["SHA-256", v.sha256], ["Source", fwSource(v)]]),
+  el("div", DOWNGRADE_WARNING, "warnbox")];
+  if (v.source === "upload") content.push(el("div", UPLOAD_HINT, "warnbox"));
+  content.push(el("p", "The device restarts during the installation.", "hint"));
+  modal("Downgrade?", content, [{text: "Cancel"}, {text: "Continue", kind: "primary", action: () => downgradeConfirm(d, v)}]);
+}
+/** Step 3: explicit confirmation; the red button needs the acknowledgment. */
+function downgradeConfirm(d, v) {
+  const title = "Downgrade?", ack = el("input"); ack.type = "checkbox";
+  modal(title, [el("p", `Install ${v.version} on ${d.name} (installed: ${d.version})?`), el("div", DOWNGRADE_WARNING, "warnbox"),
+    box("label", "check", ack, " I understand that the downgrade may fail or reset settings")],
+  [{text: "Cancel"}, {text: "Downgrade", kind: "danger", action: async () => {
+    try { await api(`${devUrl(d)}/install`, {sha256: v.sha256, confirm: true, downgrade: true, acknowledged: ack.checked}); closeModal(); }
+    catch (e) { message(title, e.message, "error"); }
+  }}]);
+  const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; };
 }
 $("scan").onclick = () => api("api/scan", {}).then(() => load(true)).catch(e => message("Check", e.message, "error"));
 
@@ -807,14 +870,14 @@ function passwordConfirm(d, title, mode, password) {
 function renderFirmware() {
   const q = $("fw-search").value.trim().toLowerCase();
   const list = ui.firmware.filter(f => !q || [f.type, f.version, ...f.used_by].some(v => String(v || "").toLowerCase().includes(q)));
-  const total = ui.firmware.reduce((n, f) => n + (f.size || 0), 0);
+  const total = ui.firmwareTotal;
   $("fw-summary").textContent = `${ui.firmware.length} file${ui.firmware.length === 1 ? "" : "s"} · ${mb(total)} stored`;
   const groups = new Map();
   for (const f of list) { if (!groups.has(f.type)) groups.set(f.type, []); groups.get(f.type).push(f); }
   const cards = [...groups.keys()].sort(collator.compare).map(type => {
     const files = groups.get(type).sort((a, b) => collator.compare(b.version || "", a.version || ""));
     const head = box("div", "card-head", el("h2", type), el("span", `Gen ${files[0].gen ?? "?"}`, "tag"),
-      files.some(f => !f.https) ? el("span", "HTTP only", "tag warn") : null);
+      files.some(f => f.source !== "upload" && !f.https) ? el("span", "HTTP only", "tag warn") : null);
     const card = box("div", "card", head);
     files.forEach((f, i) => card.append(firmwareRow(f, i === 0)));
     return card;
@@ -833,21 +896,71 @@ function firmwareRow(f, latest) {
   devices.classList.add("fw-dev");
   const dl = el("a", null, "icon"); dl.href = `api/firmware/${encodeURIComponent(f.name)}/download`; dl.setAttribute("download", "");
   dl.title = "Download"; dl.setAttribute("aria-label", `Download ${f.type} ${f.version}`); dl.append(icon("download"));
-  const del = iconButton("delete", f.deletable ? "Delete" : "Locked during a check or installation", () => deleteFirmware(f), "red");
+  const del = iconButton("delete", f.deletable ? "Delete" : (f.locked || "Locked"), () => deleteFirmware(f), "red");
   del.disabled = !f.deletable;
   // Class names only place the cells on phones (grid areas); the desktop grid is unchanged
-  return box("div", "fw-row", box("div", "fw-ver", el("span", f.version, "name"), latest ? el("span", "latest", "tag primary") : null),
+  const uploaded = f.source === "upload" ? el("span", "Uploaded", "tag warn") : null;
+  if (uploaded) uploaded.title = fwSource(f);
+  return box("div", "fw-row", box("div", "fw-ver", el("span", f.version, "name"), latest ? el("span", "latest", "tag primary") : null, uploaded),
     el("span", mb(f.size || 0), "nowrap fw-size"), el("span", fmt(f.downloaded), "nowrap sub fw-date"), sha, devices, box("div", "actions", dl, del));
 }
-/** Confirm and delete a stored firmware. */
+/** Delete a stored firmware: dialog, then a second confirmation with
+ *  acknowledgment (as for the device password, rc7). Nothing is deleted automatically. */
 function deleteFirmware(f) {
-  const note = f.used_by.length ? `It is provided as an update for: ${f.used_by.join(", ")}. These devices download it again at the next check.` : null;
-  modal("Delete firmware?", [valueList([["Firmware ID", f.type], ["Version", f.version], ["SHA-256", f.sha256]]), note ? el("p", note, "hint") : el("span")],
-    [{text: "Cancel"}, {text: "Delete", kind: "danger", action: async () => {
-      try { await api(`api/firmware/${encodeURIComponent(f.name)}/delete`, {}); closeModal(); }
-      catch (e) { message("Delete firmware", e.message, "error"); }
-    }}]);
+  const title = "Delete firmware?", details = valueList([["Firmware ID", f.type], ["Version", f.version], ["Source", fwSource(f)], ["SHA-256", f.sha256]]);
+  modal(title, [details, el("p", f.source === "upload" ? "An uploaded file can only be restored by uploading it again." :
+    "Only versions that Shelly still offers can be downloaded again; older versions are gone for good.", "hint")],
+  [{text: "Cancel"}, {text: "Continue", kind: "primary", action: () => {
+    const ack = el("input"); ack.type = "checkbox";
+    modal(title, [el("p", `Delete ${f.type} ${f.version} permanently?`), box("label", "check", ack, " I understand that this file cannot be restored by the app")],
+      [{text: "Cancel"}, {text: "Delete", kind: "danger", action: async () => {
+        try { await api(`api/firmware/${encodeURIComponent(f.name)}/delete`, {confirm: true, acknowledged: ack.checked}); closeModal(); }
+        catch (e) { message("Delete firmware", e.message, "error"); }
+      }}]);
+    const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; };
+  }}]);
 }
+/** rc7: upload an older firmware file – step 1 choose and transfer, step 2 confirm
+ *  firmware ID and version (pre-filled from the file where possible), optional SHA-256. */
+function openUpload() {
+  const title = "Upload firmware", input = el("input"); input.type = "file"; input.accept = ".zip,.bin,.gbl";
+  modal(title, [box("label", "field", "Firmware file (.zip, .bin or .gbl, max. 64 MiB)", input),
+    el("p", "Only for Gen2+ devices known to this app and stable versions. Use files from a source you trust.", "hint"), el("div", UPLOAD_HINT, "warnbox")],
+  [{text: "Cancel"}, {text: "Upload", kind: "primary", action: async () => {
+    const file = input.files && input.files[0];
+    if (!file) { message(title, "No file selected.", "error"); return; }
+    if (file.size > 64 * 1048576) { message(title, "Firmware larger than 64 MiB.", "error"); return; }
+    modal(title, [el("p", `Uploading ${file.name} …`, "hint")], []);
+    try { uploadConfirm(await uploadFile(file)); } catch (e) { message(title, e.message, "error"); }
+  }}]);
+}
+function uploadConfirm(r) {
+  const title = "Upload firmware";
+  if (!r.types.length) { api("api/firmware/upload/cancel", {token: r.token}).catch(() => {}); message(title, "No Gen2+ device is known yet – run a check first.", "error"); return; }
+  const type = el("select"); type.setAttribute("aria-label", "Firmware ID");
+  for (const t of r.types) { const o = el("option", t); o.value = t; o.selected = t.toLowerCase() === String(r.detected.type || "").toLowerCase(); type.append(o); }
+  const version = el("input"); version.type = "text"; version.maxLength = 14; version.placeholder = "e.g. 1.4.4"; version.value = r.detected.version || "";
+  const sha = el("input"); sha.type = "text"; sha.maxLength = 64; sha.placeholder = "optional – compared with the file"; sha.spellcheck = false;
+  const detected = r.detected.type || r.detected.version
+    ? `Read from the file: ${r.detected.type || "no firmware ID"} · ${r.detected.version || "no version"} – please check.`
+    : "The file contains no readable firmware ID or version – please enter them.";
+  const content = [valueList([["File", r.filename], ["Size", mb(r.size)], ["SHA-256", r.sha256]]), el("p", detected, "hint"),
+    box("label", "field", "Firmware ID", type), box("label", "field", "Version (stable, X.Y.Z)", version), box("label", "field", "Expected SHA-256", sha)];
+  if (r.duplicate) content.push(el("div", `This file is already stored as ${r.duplicate}.`, "warnbox"));
+  const error = el("p", null, "bad"); error.hidden = true; error.setAttribute("role", "alert"); content.push(error);
+  const cancel = () => api("api/firmware/upload/cancel", {token: r.token}).catch(() => {}).then(closeModal);
+  modal(title, content, [{text: "Cancel", action: cancel}, {text: "Store", kind: "primary", action: async () => {
+    try {
+      const res = await api("api/firmware/upload/confirm", {token: r.token, type: type.value, version: version.value.trim(), sha256: sha.value.trim()});
+      toast(`${res.type} ${res.version} stored`); closeModal();
+    } catch (e) {
+      // The upload stays staged: show the error and let the user correct the values
+      for (const b of $("dlg-btns").children) b.disabled = false;
+      error.textContent = e.message; error.hidden = false;
+    }
+  }}]);
+}
+$("fw-upload").onclick = openUpload;
 $("fw-search").oninput = () => render(true);
 
 // ---------------------------------------------------------------- Logs
@@ -857,7 +970,7 @@ const SEVERITY_LABELS = {success: "Success", warning: "Warning", error: "Error"}
 const LOG_FILTERS = {all: ["All", () => true], checks: ["Checks", e => e.kind === "check"],
   installs: ["Installations", e => e.kind === "install"], settings: ["Settings", e => ["setting", "password", "options"].includes(e.kind)],
   warnings: ["Warnings", e => severity(e) === "warning"], errors: ["Errors", e => severity(e) === "error"]};
-const KIND_LABELS = {check: "Check", download: "Download", install: "Installation", delete: "Deleted", setting: "Setting",
+const KIND_LABELS = {check: "Check", download: "Download", upload: "Upload", install: "Installation", delete: "Deleted", setting: "Setting",
   password: "Password", options: "App settings"};
 // Successful actions (3.0), failed actions are logged with the mode; older entries: set/removed/test_failed
 const PASSWORD_ACTIONS = {stored: "password stored", enabled: "password protection enabled", changed: "password changed",
@@ -884,9 +997,11 @@ function logContent(e) {
       return [box("div", null, `Firmware downloaded: ${e.type} ${e.version} · ${mb(e.size || 0)} · SHA ${(e.sha256 || "").slice(0, 12)}… `,
         e.https === false ? el("span", "HTTP only", "tag warn") : null)];
     case "install":
-      return [el("div", `${e.device}: installation ${INSTALL_EVENTS[e.event] || e.event} · ${arrow(e.old, e.new)}`), e.detail ? el("div", e.detail, "sub") : null].filter(Boolean);
+      return [el("div", `${e.device}: ${e.downgrade ? "downgrade" : "installation"} ${INSTALL_EVENTS[e.event] || e.event} · ${arrow(e.old, e.new)}`), e.detail ? el("div", e.detail, "sub") : null].filter(Boolean);
     case "delete":
-      return [el("div", `Firmware deleted: ${e.type} ${e.version}`)];
+      return [el("div", `Firmware deleted: ${e.type} ${e.version}${e.source === "upload" ? " (uploaded)" : ""}`)];
+    case "upload":
+      return [el("div", `Firmware uploaded: ${e.type} ${e.version} · ${mb(e.size || 0)} · SHA ${(e.sha256 || "").slice(0, 12)}… · ${e.sha_checked ? "SHA-256 checked" : "SHA-256 not checked"}`)];
     case "setting":
       return [el("div", e.device), ...(e.changes || []).map(c => el("div", `${c.setting}: ${arrow(c.old, c.new)}`, "sub")), e.error ? el("div", e.error, "bad") : null].filter(Boolean);
     case "password":
@@ -919,7 +1034,8 @@ function logSummary(e) {
     }
     case "download": return [`${e.type} ${e.version}`];
     case "delete": return [`${e.type} ${e.version}`];
-    case "install": return [`${e.device}: ${INSTALL_EVENTS[e.event] || e.event}`];
+    case "upload": return [`${e.type} ${e.version}`];
+    case "install": return [`${e.device}: ${e.downgrade ? "downgrade " : ""}${INSTALL_EVENTS[e.event] || e.event}`];
     case "setting": return [e.device];
     case "password": return [`${e.device}: ${PASSWORD_ACTIONS[e.action] || e.action}`];
     case "options": return [e.confirmed ? "Download base URL confirmed" : e.ok ? "App settings saved" : "App settings not saved"];
@@ -1214,7 +1330,7 @@ async function load(force) {
       if (s.ui && s.ui.devices) adoptPrefs(s.ui.devices);
       prefsLoaded = true; syncChooser();
     }
-    if (ui.view === "firmware") ui.firmware = (await api("api/firmware")).firmware;
+    if (ui.view === "firmware") { const f = await api("api/firmware"); ui.firmware = f.firmware; ui.firmwareTotal = f.total_size || 0; }
     if (ui.view === "logs" && (force || Date.now() - lastLogs > 30000)) { ui.logs = (await api("api/logs")).entries; lastLogs = Date.now(); }
     ui.state = s;
     render(force);

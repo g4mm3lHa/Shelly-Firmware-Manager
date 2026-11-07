@@ -7,6 +7,7 @@ shelly._store)."""
 import asyncio
 
 import pytest
+import manager
 from conftest import A
 
 
@@ -32,8 +33,9 @@ async def test_cancelled_check_leaves_no_running_download(mgr, net):
 async def test_cancelled_single_check_leaves_no_running_download(mgr, net):
     """Same for the single-device check."""
     await mgr.scan()  # device known
-    for name in list(mgr.firmware):  # force a new download
-        mgr.delete_firmware(name)
+    for name in list(mgr.firmware):  # force a new download (rc7: a provided file
+        (manager.FW_DIR / name).unlink()  # cannot be deleted in the UI, remove it directly)
+    mgr.firmware.clear()
     net.download_gate = asyncio.Event()
     mgr.reserve_check("device", A)
     task = asyncio.create_task(mgr.check_device(A))

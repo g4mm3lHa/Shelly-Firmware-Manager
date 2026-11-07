@@ -33,7 +33,8 @@
 <div class="toolbar">
 <input id="fw-search" type="search" placeholder="Search firmware ID, version or device" aria-label="Search firmware">
 <span class="meta" id="fw-summary"></span>
-<button class="icon" id="fw-info" aria-label="Retention" data-tip="The two highest versions are kept per firmware ID; firmware provided for a device is always kept. Stored firmware is reused for further devices after a SHA-256 check instead of being downloaded again."></button>
+<button class="icon" id="fw-info" aria-label="Storage" data-tip="Firmware is never deleted automatically – delete files here when they are no longer needed. Older versions allow a downgrade of Gen2+ devices (device menu “Downgrade”). Stored firmware is reused for further devices after a SHA-256 check instead of being downloaded again; uploaded files are only used for downgrades."></button>
+<button id="fw-upload">Upload firmware</button>
 </div>
 <div id="fw-cards"></div>
 </section>

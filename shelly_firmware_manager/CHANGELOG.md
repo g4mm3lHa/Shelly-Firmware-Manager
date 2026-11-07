@@ -2,6 +2,43 @@
 
 ## 3.0.0
 
+Changes in rc7
+- Firmware is no longer deleted automatically. All downloaded versions stay in the store
+  (before: only the two highest versions per firmware ID were kept). Housekeeping only
+  removes leftovers of interrupted downloads/uploads, files that are not in the store
+  and store entries whose file is missing.
+- Delete in the Firmware tab asks twice: the second step needs the checkbox "I
+  understand that this file cannot be restored by the app" (checked by the server as
+  well). Delete is locked during a check and for a file that is provided as pending
+  update or being installed (before, a provided file could be deleted and the device
+  went back to "Available"); the button tooltip names the reason. The log records the
+  source of a deleted file.
+- Downgrade for Gen2+ devices: "Downgrade" in the row menu lists all
+  stored stable versions of the firmware ID that are older than the installed one,
+  newest first; the installation dialog shows the selected version as target with a
+  warning, and a second confirmation with acknowledgment (as for device passwords)
+  starts it. Same installation path as an update (download server, SHA-256 check, OTA
+  events, verification of the exact target version); logged as downgrade; HA
+  notification "Shelly downgraded". Also offered for up-to-date and ignored devices,
+  never for Gen1. A newer version known from the last check is shown as available
+  again afterwards and provided again at the next check (from the store).
+- Manual upload of firmware files in the Firmware tab ("Upload firmware"): `.zip`,
+  `.bin` or `.gbl`, max. 64 MiB. Two steps: the file is transferred and its SHA-256
+  shown, firmware ID and version are pre-filled from a `manifest.json` in a ZIP where
+  present; the user confirms or corrects them (firmware ID of a known Gen2+ device,
+  stable version X.Y.Z) and may enter the expected SHA-256 (must match if given). Files
+  or versions already stored are refused. Uploads are marked "Uploaded", logged, and
+  used only for downgrades – never as the manufacturer's update. New endpoint
+  `POST /api/firmware/upload` with its own limit (raw body, Content-Length required,
+  streamed to disk); the 32 KB JSON limit stays for all other requests.
+- The ⓘ of the Firmware tab describes the new storage rules; the total size of the
+  store comes from the server.
+- Tests: `tests/test_rc7.py` (no automatic deletion, housekeeping, delete lock and
+  second confirmation, downgrade list/gating/installation/failure/restart, upload with
+  manifest, SHA-256 check, refusals, expiry, HTTP guards incl. body limits);
+  `tests/test_rc4.py` adapted (a provided file can no longer be deleted);
+  `qa/rc7_ui_test.py` and demo scenario `rc7`.
+
 Changes in rc6
 - `download_base_url` has no default any more (schema `url?`): a fresh installation
   starts with an empty field, and installations are refused with a clear message until

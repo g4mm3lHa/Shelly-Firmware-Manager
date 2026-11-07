@@ -190,7 +190,8 @@ Devices · Firmware · Logs · Settings.
   "Install update" button next to "Close". Ignored devices show an additional yellow
   "Ignored" label next to the status (not clickable).
 - Row menu ⋮: Check for updates, Install update (only when installable, see above),
-  Reload device info, Ignore / Resume device, Open web UI, NTP server, Power-on action,
+  Downgrade (Gen2+ only, see "Downgrade" below), Reload device info,
+  Ignore / Resume device, Open web UI, NTP server, Power-on action,
   Eco mode, Device password, Status details, Restart. While a check or an installation
   runs, "Check for updates" is disabled and the reason is shown.
 - "Check for updates" checks only this device like the full check (reuses stored
@@ -240,6 +241,24 @@ Devices · Firmware · Logs · Settings.
   changed or if the Shelly requires a restart. The app reads the values back.
 - Settings, restart and eco mode are locked while the device is installing.
 
+#### Downgrade (Gen2+)
+
+"Downgrade" in the row menu lists all stored stable versions of the
+device's firmware ID that are older than the installed one, newest first (uploaded
+files are marked). After choosing one, the installation dialog shows the older version
+as target with a warning; a second confirmation with the checkbox "I understand that
+the downgrade may fail or reset settings" starts it (as for device passwords). The
+installation runs exactly like an update (download server, SHA-256, OTA events,
+verification of the exact target version) and is logged as "downgrade". It is also
+offered for devices that are up to date and for ignored devices; never for Gen1. If a
+newer version was known from the last check, the device shows "Available" afterwards
+and the newer version is provided again at the next check.
+
+Shelly's servers only offer the current version. Older versions are therefore only
+available if the app downloaded them earlier (nothing is deleted automatically) or if
+they were uploaded in the Firmware tab. A device may refuse a downgrade, and settings
+added by newer firmware may be lost.
+
 Gen2+ devices receive the update command over their local RPC WebSocket
 (`ws://<device IP>/rpc`), so the app gets the device's own update events: the status
 shows the download progress ("Installing 55 %"), and an update error reported by the
@@ -265,14 +284,28 @@ Possible diagnoses:
 
 ### Firmware
 
-- Search, "n files · x MB stored"; ⓘ explains the retention.
+- Search, "n files · x MB stored" (total size of the store); ⓘ explains the storage.
 - One card per firmware ID (generation tag, "HTTP only" for Gen1), versions as rows,
-  the newest marked "latest"; "For n devices ▾" lists the devices it is provided for.
-- SHA-256 shortened with a copy button; icon buttons to download and delete (delete is
-  greyed out during checks and installations and always asks for confirmation).
-- The two highest versions are kept per firmware ID; files currently provided for a
-  device are always kept. A stored file with matching SHA-256 is reused instead of being
-  downloaded again; the offer is requested only once per firmware ID and check.
+  the newest marked "latest", uploaded files marked "Uploaded"; "For n devices ▾"
+  lists the devices it is provided for.
+- SHA-256 shortened with a copy button; icon buttons to download and delete.
+- Firmware is **never deleted automatically** – all downloaded versions stay until they
+  are deleted here. Delete asks twice (second step with the checkbox "I understand that
+  this file cannot be restored by the app"). It is locked during a check and for a file
+  that is provided as pending update or being installed; the button tooltip names the
+  reason. Leftovers of interrupted downloads/uploads and files that are not in the store
+  are cleaned up automatically.
+- A stored file with matching SHA-256 is reused instead of being downloaded again; the
+  offer is requested only once per firmware ID and check. Uploaded files are never used
+  as the manufacturer's update, only for downgrades.
+- "Upload firmware": choose a `.zip`, `.bin` or `.gbl` file (max. 64 MiB). The file is
+  transferred, its SHA-256 shown, and firmware ID and version are pre-filled from a
+  `manifest.json` in a ZIP if present. Confirm or correct them (firmware ID of a known
+  Gen2+ device, stable version X.Y.Z) and optionally enter the expected SHA-256: if
+  given, it must match, otherwise the upload is refused (it can be corrected without a
+  new transfer). Files or versions that are already stored are refused. Uploads are
+  logged with user and SHA-256. The origin of an uploaded file cannot be verified by the
+  app – use files from a source you trust.
 
 ### Logs
 
@@ -285,8 +318,10 @@ before 3.0 are not changed and are shown as success or error. It contains:
 - checks: time, scheduled/manual, user (manual), number of devices, duration, result,
   expandable per device: new version or error;
 - firmware downloads: firmware ID, version, size, SHA-256;
-- installations that actually started: start, confirmed (old → new), unconfirmed,
-  failed – with the approving user;
+- firmware uploads: firmware ID, version, size, SHA-256, whether a SHA-256 was checked,
+  user;
+- installations and downgrades that actually started: start, confirmed (old → new),
+  unconfirmed, failed – with the approving user;
 - deleted firmware with user;
 - Shelly setting changes (name, NTP, power-on action, eco mode): device, old → new,
   user, result;
@@ -422,6 +457,7 @@ python qa/lan_hint_test.py <shots dir>  # download URL hints in the Settings tab
 python qa/demo.py shelly_firmware_manager/app 8803 legacy &
 python qa/demo.py shelly_firmware_manager/app 8804 missing &
 python qa/rc6_ui_test.py <shots dir>    # download URL notice and device progress
+python qa/rc7_ui_test.py <shots dir>    # downgrade, upload, two-step delete (demo rc7 on 8805)
 ```
 
 Further scripts: `qa/mobile_capture.py` (phone screenshots, demo on port 8711),
@@ -472,8 +508,11 @@ qa/                        UI checks with Playwright against a local demo server
   is checked before the final release.
 - Ingress UI (HA admins only): only the Ingress proxy IP, CSRF token for every write
   request and every request that contacts a Shelly, JSON only, 32 KB body limit, strict
-  CSP, no innerHTML – all values are inserted as text. An approval is bound to the
-  SHA-256 of the file. Input is validated (name ≤ 64 printable characters, NTP
+  CSP, no innerHTML – all values are inserted as text. Only exception to JSON: the
+  firmware upload (raw file, `application/octet-stream`, Content-Length required, at
+  most 64 MiB, streamed to disk under a temporary name, never read into memory as a
+  whole; CSRF as for every write). An approval is bound to the SHA-256 of the file;
+  downgrades and deleting firmware need a second confirmation checked by the server. Input is validated (name ≤ 64 printable characters, NTP
   host[:port], eco mode true/false, power-on action only from the values the device
   offers, app options against the schema).
 - Device responses are limited to 1 MB, changelog pages to 4 MB; the changelog is parsed
@@ -481,8 +520,9 @@ qa/                        UI checks with Playwright against a local demo server
 - Remaining risks: the download server cannot authenticate the Shellys; the IP binding
   only works if Docker passes the sender IP; the SHA-256 is calculated by the app and
   proves integrity between app and Shelly, not origin – Gen2+ downloads are protected by
-  HTTPS, Gen1 firmware cannot be verified at all (HTTP only, no checksum); there is no
-  signature check; communication with the Shellys is unencrypted (Basic Auth ≈ plain
+  HTTPS, Gen1 firmware cannot be verified at all (HTTP only, no checksum); the origin of
+  an uploaded file cannot be verified (an optional SHA-256 only proves it is the file the
+  user expected); there is no signature check; communication with the Shellys is unencrypted (Basic Auth ≈ plain
   text); plain-text passwords are part of backups; manufacturer endpoints are not
   officially guaranteed.
 
