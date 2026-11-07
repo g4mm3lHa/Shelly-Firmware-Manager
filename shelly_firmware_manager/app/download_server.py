@@ -42,14 +42,15 @@ def build_download_app(mgr: Manager):
         path = FW_DIR / name
         if not path.is_file() or path.is_symlink():
             raise web.HTTPNotFound()
+        headers = {  # security headers are set by harden()
+            "Content-Type": "application/octet-stream",
+            "Content-Disposition": f'attachment; filename="{name}"',
+        }
+        if request.method != "GET":  # HEAD: no transfer, not counted (rc6 R6)
+            return web.FileResponse(path, headers=headers)
+        mgr.record_download(name, client)  # the transfer starts now (diagnosis per device)
         log.info("Download %s to %s", name, client)
-        return web.FileResponse(
-            path,
-            headers={  # security headers are set by harden()
-                "Content-Type": "application/octet-stream",
-                "Content-Disposition": f'attachment; filename="{name}"',
-            },
-        )
+        return web.FileResponse(path, headers=headers)
 
     @web.middleware
     async def harden(request, handler):

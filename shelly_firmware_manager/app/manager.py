@@ -17,6 +17,7 @@ the UI shows it while polling, nothing of it is persisted.
 """
 
 import asyncio
+import contextlib
 import hmac
 import json
 import logging
@@ -87,6 +88,16 @@ MAX_COLUMNS = 30
 CHECK_PARALLEL = 4
 PASSWORD_MODES = ("store", "enable", "change", "remove", "forget")
 OPTIONS_MIGRATION = 3  # state["migrations"]["options"]: Supervisor store cleaned for v3
+MAX_SERVED_IPS = 16  # download diagnosis: client addresses recorded per file
+
+# download_base_url problems that block installations (rc6, R1)
+DOWNLOAD_BASE_MESSAGES = {
+    "missing": "Installations are disabled: set the download base URL (LAN IP address of Home "
+    "Assistant and port 8098) in the Settings tab.",
+    "unconfirmed": "Installations are disabled: the download base URL is still the former example "
+    f"value {app_options.LEGACY_DOWNLOAD_BASE}. Change it in the Settings tab or confirm that it "
+    "really is the address of Home Assistant.",
+}
 
 
 def severity_of(err):
@@ -107,7 +118,9 @@ class Manager:
         self.check_days = int(options["check_interval_days"])
         self.check_time = options["check_time"]
         self.tz, self.tz_name = schedule.local_zone()
-        self.download_base = options["download_base_url"].rstrip("/")
+        # Optional since rc6: no default, installations are refused while it is unset
+        self.download_base = (options.get("download_base_url") or "").rstrip("/") or None
+        self.download_base_confirmed = None  # confirmed legacy example value (persisted)
         self.restrict_downloads = bool(options["restrict_downloads_to_devices"])
         self.gen1_allowed = frozenset(options.get("gen1_allowed_types", []))
         self.gen1_enabled = bool(options["gen1_updates_enabled"])
@@ -121,7 +134,7 @@ class Manager:
         self.last_scan = None
         self.scanned_version = None  # app version of the last check
         self.devices = {}  # HA device ID -> state
-        self.downloads = {}  # file name -> {"served": n, "rejected": {ip, ...}}
+        self.downloads = {}  # file name -> {"served": {ip: n}, "rejected": {ip, ...}}
         self.firmware = {}  # file name -> metadata of the stored firmware
         self.ui = {}  # table settings (sort order, hidden columns) for all users
         self.activity = {}  # HA device ID -> ACTIVITY_* while a check runs
@@ -165,6 +178,8 @@ class Manager:
                 self.ui = data["ui"] if data["ui_version"] == UI_VERSION else self._migrate_ui(data["ui"])
             self.schedule = data.get("schedule") if isinstance(data.get("schedule"), dict) else None
             self.migrations = data.get("migrations") if isinstance(data.get("migrations"), dict) else {}
+            confirmed = data.get("download_base_confirmed")
+            self.download_base_confirmed = confirmed if isinstance(confirmed, str) else None
         except FileNotFoundError:
             self.migrations = {"options": OPTIONS_MIGRATION}  # fresh install: nothing to clean
             return
@@ -241,6 +256,7 @@ class Manager:
             "ui_version": UI_VERSION,
             "schedule": self.schedule,
             "migrations": self.migrations,
+            "download_base_confirmed": self.download_base_confirmed,
         }
         try:
             temp.write_text(json.dumps(state, separators=(",", ":")))
@@ -455,7 +471,43 @@ class Manager:
         log.info("App options changed by %s (%s) – restarting", user, ", ".join(changed))
         self.events.add("options", changes=diff, user=user)
         self.options = new
+        if "download_base_url" in changed and self.download_base_confirmed is not None:
+            self.download_base_confirmed = None  # a confirmation never outlives a change
+            self.save()
         return changed
+
+    # ------------------------------------------------------------ Download base URL
+
+    @property
+    def download_base_issue(self):
+        """Why installations are blocked by download_base_url (rc6, R1), else None.
+
+        "missing": not set (optional option without default). "unconfirmed": still the
+        former example value, which is only accepted after an explicit confirmation –
+        it may really be the address of Home Assistant (FritzBox default network)."""
+        if not self.download_base:
+            return "missing"
+        legacy = app_options.LEGACY_DOWNLOAD_BASE.rstrip("/")
+        if self.download_base == legacy and self.download_base_confirmed != legacy:
+            return "unconfirmed"
+        return None
+
+    def confirm_download_base(self, url, user=None):
+        """Confirm that the former example value really is the address of Home
+        Assistant. url must be the current value (no confirmation of a stale view).
+        Stored in state.json; no option change, no restart. Logged."""
+        current = isinstance(url, str) and url.rstrip("/") == self.download_base
+        if self.download_base_issue != "unconfirmed" or not current:
+            raise ShellyError("Nothing to confirm – the download base URL has changed, reload the page")
+        self.download_base_confirmed = self.download_base
+        self.save()
+        log.info("Download base URL %s confirmed by %s", self.download_base, user)
+        self.events.add(
+            "options",
+            confirmed=True,
+            changes=[{"option": "download_base_url", "old": "not confirmed", "new": "confirmed"}],
+            user=user,
+        )
 
     async def restart_app(self):
         """Ask the Supervisor to restart this app so new options take effect."""
@@ -1157,6 +1209,7 @@ class Manager:
         device is in progress at most once. approved_by is only written to the log."""
         if (
             self.checking
+            or self.download_base_issue
             or device_id in self.installing
             or device_id in self.reloading
             or not self.approval_matches(device_id, sha)
@@ -1203,26 +1256,40 @@ class Manager:
         if current["mac"] != dev.get("mac") or current["build"] != dev.get("pending_build"):
             raise ShellyError("Device or firmware changed since the check – please check again")
 
-        # 2. Trigger the update; the Shelly downloads from the app's download server
-        self.downloads.pop(dev["file"], None)
-        await shelly.trigger_update(
-            self.session, dev["gen"], dev["origin"], f"{self.download_base}/{dev['file']}", auth
-        )
+        # 2. Trigger the update; the Shelly downloads from the app's download server.
+        # Gen2+ (rc6, R3): over the device WebSocket, so the device's own OTA events
+        # (progress, error) arrive; plain HTTP as fallback if the WebSocket is unusable.
+        url = f"{self.download_base}/{dev['file']}"
+        self._reset_download(dev)
+        ota = {"error": None, "failed": asyncio.Event()}
+        reader = await self._update_over_websocket(dev, url, auth, ota) if dev["gen"] >= 2 else None
+        if reader is None:
+            await shelly.trigger_update(self.session, dev["gen"], dev["origin"], url, auth)
         dev.update(status=STATUS_INSTALLING, message="Update accepted, waiting for restart")
         self.save()
+        try:
+            return await self._await_target_version(device_id, dev, ota)
+        finally:
+            if reader is not None:
+                reader.cancel()
+                await asyncio.gather(reader, return_exceptions=True)
+            dev.pop("ota_progress", None)
 
-        # 3. Report success only when the device reports exactly the target version
-        # (parsed version number; Gen1 the vX.Y.Z part): wait 30 s, then check every
-        # 10 s until the Shelly is reachable again. A different version (also a newer
-        # one) is never reported as success. If it has not even requested the file
-        # after 3 min, stop waiting – the update will never arrive.
+    async def _await_target_version(self, device_id, dev, ota):
+        """3. Report success only when the device reports exactly the target version
+        (parsed version number; Gen1 the vX.Y.Z part): wait 30 s, then check every
+        10 s until the Shelly is reachable again. A different version (also a newer
+        one) is never reported as success. If it has not even requested the file
+        after 3 min, stop waiting – the update will never arrive. A Gen2+ ota_error
+        event ends the wait at once (raises OtaError).
+        Returns (confirmed, diagnosis or None)."""
         target = shelly.parse_version(dev["pending_version"])
         old = shelly.parse_version(dev["version"]) if dev.get("version") else None
         unexpected = None  # last reported version that is neither old nor target
         started = time.monotonic()
-        await asyncio.sleep(INSTALL_FIRST_CHECK_S)
+        await self._pause(ota, INSTALL_FIRST_CHECK_S)
         while (elapsed := time.monotonic() - started) < INSTALL_WAIT_S:
-            downloaded = bool(self.downloads.get(dev["file"], {}).get("served"))
+            downloaded = self._downloaded(dev)
             try:
                 info = await shelly.device_info(self.session, dev["origin"], self._auth_for(device_id))
                 reported = shelly.parse_version(info["version"])
@@ -1244,12 +1311,13 @@ class Manager:
                     break  # reachable, old version, nothing downloaded
             except (TimeoutError, aiohttp.ClientError, ShellyError) as err:
                 log.debug("Waiting for %s: %s", dev["name"], err)  # restart – expected
-            dev["message"] = (
-                "Firmware transferred, waiting for restart"
-                if downloaded
-                else "Waiting for the Shelly to download the firmware"
-            )
-            await asyncio.sleep(INSTALL_POLL_S)
+            if dev.get("ota_progress") is None:  # the device's own progress is more precise
+                dev["message"] = (
+                    "Firmware transferred, waiting for restart"
+                    if downloaded
+                    else "Waiting for the Shelly to download the firmware"
+                )
+            await self._pause(ota, INSTALL_POLL_S)
 
         diagnosis = (
             f"The Shelly reports {unexpected} instead of the target version {dev['pending_version']}"
@@ -1260,28 +1328,118 @@ class Manager:
         dev.update(status=STATUS_UNCLEAR, message=f"Target version not confirmed. {diagnosis}")
         return False, diagnosis
 
+    async def _update_over_websocket(self, dev, url, auth, ota):
+        """Gen2+: open the device WebSocket and send Shelly.Update over it.
+
+        Returns the task that reads the device's OTA events, or None if the
+        WebSocket is not usable before anything was sent (the caller then sends the
+        command over HTTP). A refusal by the device raises as with HTTP. If the
+        command was sent but its answer is lost, the update may run: it is never
+        sent a second time, the events and the version polling continue."""
+        headers = getattr(self.session, "headers", None)
+        channel = shelly.OtaChannel(dev["origin"], auth, headers)
+        try:
+            await channel.__aenter__()
+        except (TimeoutError, aiohttp.ClientError, OSError, ShellyError) as err:
+            log.info("%s: device WebSocket not available (%s) – update command via HTTP",
+                     dev["name"], clip(err, 120) or type(err).__name__)
+            return None
+        try:
+            accepted = await channel.update(url)
+        except shelly.ChannelUnavailable as err:
+            await channel.__aexit__(None, None, None)
+            log.info("%s: device WebSocket closed (%s) – update command via HTTP", dev["name"], err)
+            return None
+        except BaseException:
+            await channel.__aexit__(None, None, None)
+            raise
+        if accepted is None:
+            log.warning("%s: no answer to the update command – waiting for the device", dev["name"])
+        return asyncio.create_task(self._read_ota_events(dev, channel, ota))
+
+    async def _read_ota_events(self, dev, channel, ota):
+        """Follow the OTA events of one installation until the device restarts:
+        progress and state go to the device row, ota_error ends the installation."""
+        try:
+            async for event in channel.events():
+                kind, msg = event["event"], event["msg"]
+                if kind == "ota_progress" and event["progress"] is not None:
+                    dev["ota_progress"] = event["progress"]
+                    dev["message"] = f"The Shelly is downloading the firmware: {event['progress']} %"
+                elif kind == "ota_begin":
+                    dev["ota_progress"] = dev.get("ota_progress") or 0
+                    dev["message"] = "The Shelly started the update"
+                elif kind == "ota_success":
+                    dev["ota_progress"] = 100
+                    dev["message"] = "Update applied, the Shelly restarts"
+                elif kind == "ota_error":
+                    ota["error"] = msg or "no details"
+                    ota["failed"].set()
+                    return
+        except (TimeoutError, aiohttp.ClientError, OSError) as err:
+            log.debug("%s: device WebSocket ended: %s", dev["name"], err)  # restart – expected
+        finally:
+            await channel.__aexit__(None, None, None)
+
+    async def _pause(self, ota, seconds):
+        """Sleep while waiting for the device; ends at once on a Gen2+ ota_error."""
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(ota["failed"].wait(), seconds)
+        if ota["failed"].is_set():
+            raise shelly.OtaError(
+                f"The Shelly reports an update error: {ota['error']}. Check that "
+                f"{self.download_base} is reachable from the Shelly (LAN IP address of Home "
+                "Assistant, port 8098)"
+            )
+
     # ------------------------------------------------------------ Download server
 
     def may_download(self, name, client_ip):
         """May client_ip download the file name? Only provided files, optionally only to Shellys.
-        Attempts on provided files are recorded for the installation diagnosis."""
+        Rejected attempts on provided files are recorded for the installation diagnosis;
+        served downloads are counted by record_download (GET only, rc6 R6)."""
         owners = [d for d in self.devices.values() if d.get("status") in PENDING and d.get("file") == name]
         if not owners:
             return False  # unknown file: record nothing
         allowed = not self.restrict_downloads or any(
             shelly.origin_ip(d.get("origin", "")) == client_ip for d in owners
         )
-        record = self.downloads.setdefault(name, {"served": 0, "rejected": set()})
-        if allowed:
-            record["served"] += 1
-        elif len(record["rejected"]) < 8:  # limited in case someone floods requests
+        record = self.downloads.setdefault(name, {"served": {}, "rejected": set()})
+        if not allowed and len(record["rejected"]) < 8:  # limited in case someone floods requests
             record["rejected"].add(client_ip)
         return allowed
+
+    def record_download(self, name, client_ip):
+        """Count a GET that starts the transfer of a provided file, per client
+        address (rc6 R4: parallel installations of one firmware share the file)."""
+        record = self.downloads.get(name)
+        if record is None:
+            return
+        served = record["served"]
+        if client_ip in served or len(served) < MAX_SERVED_IPS:
+            served[client_ip] = served.get(client_ip, 0) + 1
+
+    def _reset_download(self, dev):
+        """Forget earlier downloads of this device only (installation start)."""
+        record = self.downloads.get(dev.get("file"))
+        if record is not None:
+            record["served"].pop(shelly.origin_ip(dev.get("origin", "")), None)
+
+    def _downloaded(self, dev):
+        """True if this device has started downloading its file. A request from an
+        address that belongs to no known device (Docker without the sender IP, see
+        restrict_downloads_to_devices) cannot be attributed and counts for every
+        device of that file, as before rc6."""
+        served = (self.downloads.get(dev.get("file")) or {}).get("served") or {}
+        if served.get(shelly.origin_ip(dev.get("origin", ""))):
+            return True
+        known = {shelly.origin_ip(d["origin"]) for d in self.devices.values() if d.get("origin")}
+        return any(count and address not in known for address, count in served.items())
 
     def _install_diagnosis(self, dev):
         """Explains why the target version was not reached."""
         record = self.downloads.get(dev.get("file"), {})
-        if record.get("served"):
+        if self._downloaded(dev):
             return (
                 "The Shelly downloaded the firmware but still reports "
                 f"{dev.get('version')} – check the device log or the Shelly's web interface"
@@ -1329,6 +1487,7 @@ class Manager:
             "info_refreshed",
             "settings_error",
             "error_level",
+            "ota_progress",
         )
         devices = []
         for key, dev in self.devices.items():
@@ -1359,5 +1518,10 @@ class Manager:
             "progress": dict(self.progress) if self.progress else None,
             "storage_error": self.storage_error,
             "gen1_enabled": self.gen1_enabled,
+            "download_base": {
+                "url": self.download_base,
+                "issue": self.download_base_issue,
+                "message": DOWNLOAD_BASE_MESSAGES.get(self.download_base_issue),
+            },
             "ui": self.ui,
         }

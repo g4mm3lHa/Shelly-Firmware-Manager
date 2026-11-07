@@ -1,9 +1,10 @@
-"""rc4 UI check: hint for a non-local download_base_url in the Settings tab.
+"""rc4/rc6 UI check: hints for download_base_url in the Settings tab.
 
 Needs demo.py on port 8801 (idle). Usage: python qa/lan_hint_test.py <shots-dir>
 Checks at 360 px (light, embedded) and 1440 px (dark): no hint for the demo's LAN
-URL, a hint for a public host and for localhost, none again for a .local name,
-no horizontal overflow, no console errors. Saves screenshots of the hint."""
+IP, the "not local" hint for a public IP and for localhost, the host-name hint (rc6,
+R2) for a public name and for a .local name, no horizontal overflow, no console
+errors. Saves screenshots of the hints."""
 
 import sys
 from pathlib import Path
@@ -42,8 +43,8 @@ with sync_playwright() as pw:
         case = f"{width}-{scheme}{'-embedded' if embedded else ''}"
         warn = f.locator("#opt-download_base_url-warn")
         check(f"{case}: no hint for the LAN URL", warn.is_hidden())
-        f.fill("#opt-download_base_url", "https://example.com:8098")
-        check(f"{case}: hint for a public host", warn.is_visible() and "local network" in warn.text_content())
+        f.fill("#opt-download_base_url", "http://203.0.113.10:8098")
+        check(f"{case}: hint for a public IP", warn.is_visible() and "local network" in warn.text_content())
         described = f.get_attribute("#opt-download_base_url", "aria-describedby") or ""
         check(f"{case}: hint linked for screen readers", "opt-download_base_url-warn" in described, described)
         overflow = f.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
@@ -53,7 +54,13 @@ with sync_playwright() as pw:
         f.fill("#opt-download_base_url", "http://localhost:8098")
         check(f"{case}: hint for localhost", warn.is_visible())
         f.fill("#opt-download_base_url", "http://homeassistant.local:8098")
-        check(f"{case}: no hint for a .local name", warn.is_hidden())
+        check(f"{case}: host-name hint for a .local name", warn.is_visible() and "host name" in warn.text_content())
+        f.locator("#opt-download_base_url").scroll_into_view_if_needed()
+        page.screenshot(path=OUT / f"host-name-hint-{case}.png")
+        f.fill("#opt-download_base_url", "https://example.com:8098")
+        check(f"{case}: host-name hint for a public name", warn.is_visible() and "host name" in warn.text_content())
+        f.fill("#opt-download_base_url", "http://192.168.1.20:8098")
+        check(f"{case}: no hint for a LAN IP", warn.is_hidden())
         check(f"{case}: no console errors", not errors, str(errors[:2]))
         ctx.close()
     browser.close()

@@ -29,6 +29,10 @@ DEFAULTS = {
 # All option keys of config.yaml. Anything else in options.json (e.g. the removed
 # "shelly_password" or "check_interval_hours" of v2) is ignored everywhere.
 KEYS = frozenset({*INT_RANGES, *BOOLS, *DEFAULTS, "download_base_url", "gen1_allowed_types", "pinned_certificates"})
+# Former default/example of download_base_url (up to rc5). Since rc6 the option is
+# optional without default; this value only counts after an explicit confirmation.
+LEGACY_DOWNLOAD_BASE = "http://192.168.178.50:8098"
+OPTIONAL = ("download_base_url",)  # options that can be removed (empty input)
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 GEN1_TYPE_RE = re.compile(r"^[A-Za-z0-9-]{1,32}$")
 MAX_LIST = 100
@@ -93,12 +97,18 @@ def _validate(key, value):
 def merge(options, changes):
     """New complete option set from the current options and the requested changes.
 
-    Returns (new options, list of changed keys); absent keys keep their value."""
+    Returns (new options, list of changed keys); absent keys keep their value. An
+    optional option given as "" (or null) is removed from the set (unset)."""
     if not isinstance(changes, dict):
         raise ValueError("JSON object expected")
     new = with_defaults(options)
     changed = []
     for key, value in changes.items():
+        if key in OPTIONAL and value in ("", None):
+            if key in new:
+                del new[key]
+                changed.append(key)
+            continue
         clean = _validate(key, value)
         if new.get(key) != clean:
             new[key] = clean

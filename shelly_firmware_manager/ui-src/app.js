@@ -185,8 +185,10 @@ const STATUS_LABELS = {"up-to-date": "Up-To-Date", available: "Available", ready
   installing: "Installing", unconfirmed: "Unconfirmed", error: "Error", unregistered: "Unregistered", skipped: "Skipped"};
 const shownStatus = d => d.installing && d.status === "ready" ? "queued" : d.status;
 const hasUpdate = d => ["available", "ready", "installing"].includes(d.status);
-// Ignored devices are not installable until they are resumed
-const installable = (d, s) => d.status === "ready" && !d.installing && !d.ignored && !s.scanning;
+// Ignored devices are not installable until they are resumed; nothing is installable
+// while the download base URL is missing or the unconfirmed former example (rc6)
+const installable = (d, s) => d.status === "ready" && !d.installing && !d.ignored && !s.scanning &&
+  !(s.download_base && s.download_base.issue);
 // Settings can be read/changed once the device was reached and while it is not updating or reloading
 const editable = d => !!d.ip && !!d.gen && !d.installing && d.status !== "installing" && d.activity !== "reloading";
 const FILTERS = {all: ["All", () => true], updates: ["Updates", d => hasUpdate(d) && !d.ignored],
@@ -298,7 +300,10 @@ function statusCell(d) {
     chip.append(ACTIVITY_LABELS[d.activity] || d.activity);
     return chip;
   }
-  const key = shownStatus(d), p = el("button", STATUS_LABELS[key] || key || "–", "pill p-" + (key || "").replace(/[^a-z]/g, ""));
+  const key = shownStatus(d);
+  // Gen2+ installations report the device's own download progress (rc6)
+  const label = (STATUS_LABELS[key] || key || "–") + (key === "installing" && typeof d.ota_progress === "number" ? ` ${d.ota_progress} %` : "");
+  const p = el("button", label, "pill p-" + (key || "").replace(/[^a-z]/g, ""));
   p.onclick = () => showStatus(d); attachTip(p, () => statusText(d));
   return p;
 }
@@ -887,6 +892,7 @@ function logContent(e) {
     case "password":
       return [el("div", `${e.device}: ${PASSWORD_ACTIONS[e.action] || e.action}`), e.error ? el("div", e.error, "bad") : null].filter(Boolean);
     case "options":
+      if (e.confirmed) return [el("div", "Download base URL confirmed as the address of Home Assistant")];
       return [el("div", e.ok ? "App settings saved – app restarted" : "App settings could not be saved"),
         ...(e.changes || []).map(c => el("div", c.redacted ? `${optionLabel(c.option)}: changed` : `${optionLabel(c.option)}: ${arrow(c.old, c.new)}`, "sub")),
         e.error ? el("div", e.error, "bad") : null].filter(Boolean);
@@ -916,7 +922,7 @@ function logSummary(e) {
     case "install": return [`${e.device}: ${INSTALL_EVENTS[e.event] || e.event}`];
     case "setting": return [e.device];
     case "password": return [`${e.device}: ${PASSWORD_ACTIONS[e.action] || e.action}`];
-    case "options": return [e.ok ? "App settings saved" : "App settings not saved"];
+    case "options": return [e.confirmed ? "Download base URL confirmed" : e.ok ? "App settings saved" : "App settings not saved"];
     default: return [e.kind];
   }
 }
@@ -977,7 +983,7 @@ const OPTION_GROUPS = ["Checks", "Firmware & storage", "Logs", "Advanced"];
 const OPTION_FIELDS = [
   ["check_interval_days", "Check every (days)", "number", "1–30 days", "Checks"],
   ["check_time", "Check time", "time", "Local time of Home Assistant", "Checks"],
-  ["download_base_url", "Download base URL for the Shellys", "text", "LAN IP of Home Assistant + host port, e.g. http://192.168.178.50:8098", "Firmware & storage"],
+  ["download_base_url", "Download base URL for the Shellys", "text", "LAN IP address of Home Assistant + host port 8098, e.g. http://192.168.1.20:8098 (no host name). Required for installations", "Firmware & storage"],
   ["restrict_downloads_to_devices", "Serve downloads only to known Shellys", "bool", "Switch off if downloads are rejected from 172.30.x.x", "Firmware & storage"],
   ["gen1_updates_enabled", "Enable Gen1 updates", "bool", "Gen1 firmware is only available via plain HTTP without a checksum", "Firmware & storage"],
   ["gen1_allowed_types", "Allowed Gen1 types", "list", "Comma-separated, e.g. SHSW-1, SHSW-PM", "Firmware & storage"],
@@ -988,21 +994,25 @@ const OPTION_FIELDS = [
 ];
 let settingsInputs = {};
 
-// The Shellys download the firmware from download_base_url, so it must point into the
-// local network. Not enforced (the Supervisor schema only requires a URL); the
-// Settings tab shows a hint for hosts that do not look local. Hosts counted as
-// local: private IPv4 ranges, IPv6 unique-local (fc00::/7) and link-local (fe80::/10),
-// single-label names and the local-use domains .local, .lan, .home.arpa, .internal.
+// The Shellys download the firmware from download_base_url, so it must point to Home
+// Assistant in the local network. Not enforced (the Supervisor schema only requires a
+// URL); the Settings tab shows a hint while typing. No hint for private IPv4 ranges,
+// IPv6 unique-local (fc00::/7) and link-local (fe80::/10). Any other IP address (and
+// localhost) gets the "not local" hint; every host name (rc6, R2 – also .local, .lan,
+// single-label names) gets the advice to use the IP: Shellys often cannot resolve names.
 const LAN_IPV4 = /^(10\.\d{1,3}|172\.(1[6-9]|2\d|3[01])|192\.168)\.\d{1,3}\.\d{1,3}$/;
 const LAN_IPV6 = /^\[(f[cd][0-9a-f]{2}|fe[89ab][0-9a-f]):/i;
-const LAN_NAME = /^[a-z0-9-]+$|\.(local|lan|home\.arpa|internal)$/i;
-/** Hint text if the URL's host is not a local address, else "" (also for invalid URLs:
- *  the server validates the format). */
+const ANY_IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
+const HINT_NOT_LOCAL = "This host is not in your local network. The Shellys download the firmware from this URL – use the LAN IP of Home Assistant.";
+const HINT_HOST_NAME = "Use the LAN IP address of Home Assistant instead of a host name – Shellys often cannot resolve host names, the update then fails with a connection error.";
+/** Hint text for the URL's host, else "" (also for invalid URLs: the server validates
+ *  the format). */
 function lanHint(value) {
   let host;
   try { host = new URL(value).hostname; } catch (e) { return ""; }
-  if (!host || LAN_IPV4.test(host) || LAN_IPV6.test(host) || (LAN_NAME.test(host) && !/^\d+$/.test(host) && host !== "localhost")) return "";
-  return "This host is not in your local network. The Shellys download the firmware from this URL – use the LAN IP of Home Assistant.";
+  if (!host || LAN_IPV4.test(host) || LAN_IPV6.test(host)) return "";
+  if (ANY_IPV4.test(host) || host.startsWith("[") || host === "localhost") return HINT_NOT_LOCAL;
+  return HINT_HOST_NAME;
 }
 
 /** Build the grouped settings cards with one common Save button. */
@@ -1071,7 +1081,7 @@ function optionChanges() {
     else if (type === "list") value = input.value.split(",").map(s => s.trim()).filter(Boolean).sort();
     else if (type === "pins") value = input.values();
     else value = input.value.trim();
-    const old = type === "list" ? [...(o[key] || [])].sort() : type === "pins" ? o[key] || [] : o[key];
+    const old = type === "list" ? [...(o[key] || [])].sort() : type === "pins" ? o[key] || [] : type === "text" ? o[key] ?? "" : o[key];
     if (JSON.stringify(value) !== JSON.stringify(old)) changes[key] = value;
   }
   return changes;
@@ -1112,6 +1122,7 @@ function render(force) {
   $("busy").textContent = s.storage_error ? `Storage error: ${s.storage_error}` : s.progress ? "" : s.busy || "";
   $("busy").classList.toggle("error", !!s.storage_error);
   renderProgress(s.progress);
+  renderNotice(s.download_base || {});
   $("scan").disabled = !!s.busy;   // blocked during a check or installations
   const key = JSON.stringify([ui.view, mobileQuery.matches, s, ui.view === "firmware" ? ui.firmware : ui.view === "logs" ? ui.logs : null]);
   if (!force && key === ui.rendered) return;
@@ -1130,6 +1141,32 @@ function renderMeta(s) {
   const cycle = el("span", `Every ${days} · ${sc.time}`, "pill meta-pill");
   attachTip(cycle, () => `Next automatic check: ${next} (${sc.timezone})`); cycle.tabIndex = 0;
   $("meta").replaceChildren(el("span", `Last checked: ${fmt(s.last_scan)}`, "pill meta-pill"), cycle);
+}
+/** Notice while installations are disabled by the download base URL (rc6, R1): not set,
+ *  or still the former example value that the admin has not confirmed yet. Rebuilt only
+ *  when the problem changes, so polling does not steal the focus from its buttons. */
+function renderNotice(info) {
+  const n = $("notice"), key = info.issue ? `${info.issue}|${info.url}` : "";
+  if (n.dataset.key === key) return;
+  n.dataset.key = key; n.hidden = !info.issue;
+  if (!info.issue) { n.replaceChildren(); return; }
+  const buttons = el("div", null, "notice-btns");
+  if (info.issue === "unconfirmed") {
+    const yes = el("button", "This address is correct", "primary"); yes.onclick = () => confirmDownloadBase(info.url);
+    buttons.append(yes);
+  }
+  const open = el("button", "Open settings"); open.onclick = () => showView("settings");
+  buttons.append(open);
+  n.replaceChildren(el("span", info.message), buttons);
+}
+/** Confirm that the former example URL really is the address of Home Assistant. */
+function confirmDownloadBase(url) {
+  modal("Confirm download base URL", [el("p", `Is ${url} really the LAN address of Home Assistant with the host port 8098?`),
+    el("p", "The Shellys download the firmware from this address. If it is wrong, every update fails. The confirmation ends when the address is changed.", "hint")],
+  [{text: "Cancel"}, {text: "Yes, this is correct", kind: "primary", action: async () => {
+    try { await api("api/settings/download-base/confirm", {url}); closeModal(); }
+    catch (e) { message("Download base URL", e.message, "error"); }
+  }}]);
 }
 const PHASES = {queued: "starting", registry: "reading the device list", devices: "checking devices",
   download: "downloading firmware", changelog: "checking firmware information"};

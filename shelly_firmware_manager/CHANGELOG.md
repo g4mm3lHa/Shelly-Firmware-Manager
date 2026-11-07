@@ -2,6 +2,49 @@
 
 ## 3.0.0
 
+Changes in rc6
+- `download_base_url` has no default any more (schema `url?`): a fresh installation
+  starts with an empty field, and installations are refused with a clear message until
+  it is set. Installations that still have the former example value
+  `http://192.168.178.50:8098` are treated the same, unless an admin confirms with "This
+  address is correct" that it really is the address of Home Assistant (stored in the
+  app state, no restart; the confirmation ends when the address changes; logged).
+  A notice above the tabs explains the blocked installations with the buttons "Open
+  settings" and, for the former example value, "This address is correct". Clearing the
+  field in the Settings tab unsets the option. Background: in a live test of rc4 an
+  update failed because the example value was still set.
+- Settings: the download URL hint also appears for every host name (also `.local`,
+  `.lan`, single-label names) and recommends the IP address of Home Assistant, because
+  Shellys often cannot resolve host names. Public IP addresses and localhost keep the
+  "not in your local network" hint. Still only a hint.
+- Gen2+ installations send `Shelly.Update` over the device's local RPC WebSocket
+  (`ws://<device IP>/rpc`) and receive the device's update events: the status shows the
+  download progress ("Installing 55 %"), and `ota_error` (e.g. "Connection error: -14")
+  ends the installation at once as an error with the device's message and a hint to
+  check `download_base_url` and port 8098 – instead of waiting 3 minutes. Same private
+  IP as before, no redirects, frames limited to 64 KB, SHA-256 Digest auth with the
+  stored hash only. If the WebSocket is not available, the command is sent over HTTP as
+  before; the command is never sent twice. Version polling unchanged. Gen1 unchanged.
+- Download diagnosis per device: parallel installations of the same firmware share one
+  file; a download by one device no longer counts for another one (requests from an
+  address that belongs to no device – Docker hiding the sender IP – still count for all
+  devices of the file, as before).
+- Only a GET that starts the transfer counts as served download (HEAD requests and
+  rejected requests did or could count before).
+- Stop: both web servers are cleaned up in parallel, so a stop takes at most 5 s for
+  open connections (was up to 2 × 5 s).
+- Image: pip, setuptools and wheel are removed from the runtime image (not used by the
+  app). The pinned base image is unchanged.
+- Checked without change: shared offer/download tasks of a cancelled check are cancelled
+  with it (rc4 result confirmed for the offer task as well, `tests/test_rc6.py`).
+- Documented: the app runs as root inside its container; a non-root user is checked
+  before the final release.
+- Tests: `tests/test_rc6.py` (download URL states and confirmation, WebSocket update
+  with a local Gen2 test server incl. Digest auth, redirect refusal, immediate
+  ota_error, progress, HTTP fallback, diagnosis per device, GET-only counting, parallel
+  stop, cancelled shared tasks); `qa/rc6_ui_test.py` (notice, confirmation, progress)
+  and `qa/lan_hint_test.py` extended; demo scenarios `legacy` and `missing`.
+
 Changes in rc5
 - Clean stop: the app now handles SIGTERM (stop/restart by the Supervisor) and SIGINT.
   It cancels the check schedule, running checks and installations, saves the state

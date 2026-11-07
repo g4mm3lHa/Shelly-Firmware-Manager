@@ -37,7 +37,7 @@ def run_install(mgr, monkeypatch):
                 return {"mac": "AA", "build": "b-old", "version": old}
             calls.append("poll")
             if served:
-                mgr.downloads["x.zip"] = {"served": 1, "rejected": set()}
+                mgr.downloads["x.zip"] = {"served": {"192.168.1.10": 1}, "rejected": set()}
             version = answers[min(len(calls) - 2, len(answers) - 1)]
             return {"mac": "AA", "build": "b-new", "version": version}
 

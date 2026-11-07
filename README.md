@@ -20,7 +20,9 @@ See `shelly_firmware_manager/CHANGELOG.md` for the version history.
 2. Settings → Apps → App store → ⋮ → "Check for updates" → "Local apps" →
    "Shelly Firmware Manager" → Install.
 3. Start the app, enable "Show in sidebar" and adjust the options in the app's
-   "Settings" tab (or in the "Configuration" tab of the app page).
+   "Settings" tab (or in the "Configuration" tab of the app page). Set
+   `download_base_url` first: it has no default, and installations are refused until it
+   is set.
 4. Firewall: allow Shellys → Home Assistant IP, TCP 8098 (in addition to the existing
    rules of the Shelly integration).
 
@@ -34,7 +36,8 @@ Updating: replace the folder, "Check for updates", then "Update". An update does
 start a check; the first automatic check runs at the next scheduled time.
 
 Stopping or restarting the app (also for updates and Home Assistant restarts) cancels
-running checks and installations cleanly within a few seconds and saves the state. An
+running checks and installations cleanly within a few seconds and saves the state; both
+web servers are stopped in parallel (at most 5 s). An
 installation interrupted this way is shown as "Unconfirmed" after the next start –
 check the device and run "Check for updates" again.
 
@@ -44,7 +47,7 @@ check the device and run "Check for updates" again.
 |---|---|
 | `check_interval_days` | Automatic check every 1–30 days (default 7) |
 | `check_time` | Time of the automatic check, `HH:MM` in the Home Assistant time zone (default `02:45`) |
-| `download_base_url` | e.g. `http://192.168.178.50:8098` – HA IP + host port ("Network" section). The Settings tab shows a hint if the host is not a local address |
+| `download_base_url` | LAN IP address of Home Assistant + host port ("Network" section), e.g. `http://192.168.1.20:8098`. No default: installations are refused until it is set. Use the IP, not a host name – Shellys often cannot resolve names. The Settings tab shows a hint for host names and for addresses outside the local network |
 | `restrict_downloads_to_devices` | on: firmware is served only to the IP of the respective Shelly. If downloads are rejected and the log shows a 172.30.x.x address, switch it off |
 | `max_parallel_installs` | Maximum number of installations running at the same time (1–20, default 5) |
 | `gen1_updates_enabled` | Look up and install Gen1 firmware (default on; see "Gen1 firmware") |
@@ -66,6 +69,12 @@ options once through the Supervisor so the old shared password no longer remains
 the app options. It is not copied to any device entry and nothing is written to the
 devices. Home Assistant backups created before the upgrade still contain the old shared
 password – delete or protect them accordingly.
+
+Upgrading from 3.0.0 rc1–rc5: these versions used `http://192.168.178.50:8098` as
+example default. If that value is still stored, installations are refused and a notice
+asks to change it – or to confirm with "This address is correct" that it really is the
+address of Home Assistant (`192.168.178.x` is the default network of many routers).
+The confirmation is stored in the app state and ends when the address is changed.
 
 Versions before 2.0 are no longer migrated. When upgrading from 1.x, update to a 2.x
 version first or remove and reinstall the app.
@@ -231,6 +240,13 @@ Devices · Firmware · Logs · Settings.
   changed or if the Shelly requires a restart. The app reads the values back.
 - Settings, restart and eco mode are locked while the device is installing.
 
+Gen2+ devices receive the update command over their local RPC WebSocket
+(`ws://<device IP>/rpc`), so the app gets the device's own update events: the status
+shows the download progress ("Installing 55 %"), and an update error reported by the
+device (e.g. "Connection error: -14") ends the installation at once with that message
+and a hint to check `download_base_url` and port 8098. If the WebSocket is not
+available, the command is sent over HTTP as before. Gen1 is unchanged.
+
 After the update command the app waits 30 seconds and then checks every 10 seconds
 whether the Shelly is reachable again and reports exactly the target version (Gen1:
 the version number). Any other version – also a newer one – ends as "Unconfirmed" with
@@ -239,7 +255,9 @@ reachable, still reports the old version and has not requested the firmware afte
 minutes, it stops with a diagnosis; the wait ends after 5 minutes at the latest.
 Possible diagnoses:
 - "The Shelly never requested the firmware" – `download_base_url` must be the LAN IP of
-  Home Assistant with port 8098 and reachable from the Shelly.
+  Home Assistant with port 8098 and reachable from the Shelly. The download diagnosis
+  is kept per device: parallel installations of the same firmware do not affect each
+  other (unless Docker hides the sender IP, see the next point).
 - "Download rejected: request came from 172.30.x.x …" – Docker does not pass the real
   sender IP; switch off `restrict_downloads_to_devices`.
 - "The Shelly downloaded the firmware but still reports …" – the device loaded the file
@@ -288,10 +306,15 @@ compact tile (time, type, severity, short summary); details are collapsed until 
 All options of the configuration table above, grouped into the cards Checks, Firmware &
 storage, Logs and Advanced (stacked on phones, with the save area staying visible at
 the bottom). "Unsaved changes" appears as soon as a value differs from the stored one.
-While typing the download base URL, a hint appears if its host is not a local address
-(private IPv4, IPv6 unique-local or link-local, single-label names, `.local`, `.lan`,
-`.home.arpa`, `.internal`); it does not block saving. Saving shows which options
+While typing the download base URL, a hint appears for every host name (also `.local`
+names: Shellys often cannot resolve them – use the IP) and for IP addresses outside the
+local network (no hint for private IPv4, IPv6 unique-local or link-local addresses); it
+does not block saving. Clearing the field unsets the option. Saving shows which options
 changed, saves them and restarts the app.
+
+While installations are disabled by the download base URL (not set, or the former
+example value not yet confirmed) a notice above the tabs explains it, with the buttons
+"Open settings" and, for the former example value, "This address is correct".
 
 ## Certificate pinning
 
@@ -337,7 +360,10 @@ The app only opens these connections:
     (`name`, `sntp_server`, `eco_mode_enabled`) and `/settings/relay|light|color|white/<n>`
     (`default_state`). Gen1 `eco_mode_enabled` is not in the official API docs.
   - restart, only after confirmation: Gen2+ `Shelly.Reboot`, Gen1 `/reboot`
-  - update command: `/ota` or `/rpc` `Shelly.Update`
+  - update command: Gen1 `/ota`; Gen2+ `Shelly.Update` over the device WebSocket
+    `ws://<device IP>/rpc` (same private IP, no redirects, frames limited to 64 KB,
+    Digest auth with the stored hash), which also delivers the device's update events
+    (`ota_begin`, `ota_progress`, `ota_success`, `ota_error`); HTTP `/rpc` as fallback
 - Shelly manufacturer servers (neutral User-Agent, no device data):
   - version offer via HTTPS: Gen2+ `updates.shelly.cloud/update/<firmware ID>`, Gen1
     `api.shelly.cloud/files/firmware`. Documented exception: for Gen2+ the firmware ID
@@ -392,7 +418,10 @@ UI checks with Playwright (Chromium) against a local demo server with fake data
 python qa/demo.py shelly_firmware_manager/app 8801 idle &
 python qa/demo.py shelly_firmware_manager/app 8802 busy &
 python qa/ui_test.py <shots dir>        # 360/430/1440 px, light/dark, embedded, idle/busy
-python qa/lan_hint_test.py <shots dir>  # download URL hint in the Settings tab (port 8801)
+python qa/lan_hint_test.py <shots dir>  # download URL hints in the Settings tab (port 8801)
+python qa/demo.py shelly_firmware_manager/app 8803 legacy &
+python qa/demo.py shelly_firmware_manager/app 8804 missing &
+python qa/rc6_ui_test.py <shots dir>    # download URL notice and device progress
 ```
 
 Further scripts: `qa/mobile_capture.py` (phone screenshots, demo on port 8711),
@@ -436,7 +465,11 @@ qa/                        UI checks with Playwright against a local demo server
   `app.js` and `style.css` (no data) are cached by the browser, keyed by a content hash.
 - Download server (port 8098, no authentication): one route, GET/HEAD only, file name
   must be `<sha256>.<zip|bin|gbl>`; only files of a currently provided update, by default
-  only to the IP of the target device. No directory listing, no server banner.
+  only to the IP of the target device. No directory listing, no server banner. Only a
+  GET that starts the transfer counts as download for the diagnosis (not HEAD).
+- Image: no pip/setuptools/wheel in the runtime image. The app process runs as root
+  inside its container (the Supervisor mounts `/data`); running it as a non-root user
+  is checked before the final release.
 - Ingress UI (HA admins only): only the Ingress proxy IP, CSRF token for every write
   request and every request that contacts a Shelly, JSON only, 32 KB body limit, strict
   CSP, no innerHTML – all values are inserted as text. An approval is bound to the

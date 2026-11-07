@@ -127,11 +127,22 @@ def net(monkeypatch, tmp_path):
     async def refresh(*_args, **_kwargs):
         return None
 
+    class NoWebSocket:
+        """rc6: Gen2+ installations try the device WebSocket first; in tests there is
+        none unless a test installs its own fake (the HTTP fallback is used)."""
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            raise OSError("no device WebSocket in tests")
+
     monkeypatch.setattr(shelly, "resolve_device_origin", resolve)
     monkeypatch.setattr(shelly, "device_info", device_info)
     monkeypatch.setattr(shelly, "read_settings", read_settings)
     monkeypatch.setattr(shelly, "fetch_offer", fetch_offer)
     monkeypatch.setattr(shelly, "download_firmware", download_firmware)
+    monkeypatch.setattr(shelly, "OtaChannel", NoWebSocket)
     fake.refresh = refresh
     fake.data = data
     return fake

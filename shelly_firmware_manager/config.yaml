@@ -39,7 +39,8 @@ options:
   # Automatic check every N days at HH:MM (time zone of Home Assistant)
   check_interval_days: 7
   check_time: "02:45"
-  download_base_url: "http://192.168.178.50:8098"
+  # download_base_url has no default (rc6): LAN IP of Home Assistant + port 8098,
+  # e.g. http://<HA-IP>:8098 – installations are refused until it is set
   restrict_downloads_to_devices: true
   max_parallel_installs: 5
   gen1_updates_enabled: true
@@ -60,7 +61,7 @@ options:
 schema:
   check_interval_days: "int(1,30)"
   check_time: "match(^([01]\\d|2[0-3]):[0-5]\\d$)"
-  download_base_url: url
+  download_base_url: "url?"
   restrict_downloads_to_devices: bool
   max_parallel_installs: "int(1,20)"
   gen1_updates_enabled: bool

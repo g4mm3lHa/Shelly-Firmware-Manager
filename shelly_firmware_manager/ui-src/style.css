@@ -21,6 +21,13 @@ a{color:var(--primary-color)}
 .progress{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px;color:var(--secondary-text-color);font-size:.85em}
 .progress[hidden]{display:none}
 .progress progress{flex:1 1 160px;max-width:320px;height:6px;accent-color:var(--primary-color)}
+/* Installations disabled by the download base URL (rc6): message with buttons */
+.notice{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;margin-top:10px;padding:10px 12px;
+  border-left:3px solid var(--warning-color);border-radius:8px;
+  background:color-mix(in srgb,var(--warning-color) 12%,var(--card-background-color))}
+.notice[hidden]{display:none}
+.notice>span{flex:1 1 260px}
+.notice-btns{display:flex;gap:8px;flex-wrap:wrap}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .muted{color:var(--secondary-text-color)}
 .small{font-size:.85em}

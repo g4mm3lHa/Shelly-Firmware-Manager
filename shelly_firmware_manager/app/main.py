@@ -88,8 +88,10 @@ async def main():
             mgr.check_time,
             mgr.tz_name,
             schedule.iso_utc(schedule.next_run(mgr.schedule, time.time(), mgr.tz)),
-            mgr.download_base,
+            mgr.download_base or "(not set – installations disabled)",
         )
+        if mgr.download_base_issue == "unconfirmed":
+            log.warning("download_base_url is the former example value – confirm it in the Settings tab")
         for host, pin in sorted(pins.pins.items()):
             log.info("Certificate pinning active for %s (%d fingerprint(s))", host, len(pin.digests))
         # SIGTERM (Supervisor stop) and SIGINT end the app cleanly with exit code 0:
@@ -111,8 +113,9 @@ async def main():
             for task in (scheduler, stopper):
                 task.cancel()
             results = await asyncio.gather(scheduler, stopper, return_exceptions=True)
-            for runner in runners:
-                await runner.cleanup()
+            # Both servers in parallel (rc6 R5): the stop needs at most one
+            # SHUTDOWN_TIMEOUT_S, not one per server – well inside the 10 s of the Supervisor
+            await asyncio.gather(*(runner.cleanup() for runner in runners))
             log.info("Stopped")
         # A scheduler that ended with an error is reported (non-zero exit code)
         if isinstance(results[0], Exception):

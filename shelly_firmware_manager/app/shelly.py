@@ -18,6 +18,8 @@ Security:
   switch, password protection) are validated against strict patterns or the
   options the device itself reported. Gen1 passwords are sent as query
   parameters (documented API); errors raised here never contain the URL.
+- Gen2+ installations use the device's RPC WebSocket at the same pinned origin
+  (OtaChannel): no redirects, frame size limit, SHA-256 Digest auth only.
 """
 
 import asyncio
@@ -50,6 +52,13 @@ MAX_CLOUD_JSON = 2 * 1024 * 1024  # upper limit for a version offer / firmware l
 AUTH_USER = "admin"  # fixed user name of Gen2+ devices, also the Gen1 default
 DIGEST_PARAM_RE = re.compile(r'(\w+)=(?:"([^"]*)"|([^,\s]*))')
 
+# Gen2+ RPC over WebSocket (used during an installation to receive the OTA events)
+OTA_WS_CONNECT_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=10)
+OTA_WS_ANSWER_S = 15  # wait for the answer to Shelly.Update (and the auth round trip)
+MAX_WS_FRAME = 64 * 1024  # upper limit for one WebSocket frame from the device
+OTA_EVENTS = ("ota_begin", "ota_progress", "ota_success", "ota_error")
+WS_HA2_INPUT = "dummy_method:dummy_uri"  # fixed HA2 input of the WebSocket Digest auth
+
 GEN2_META_URL = "https://updates.shelly.cloud/update/{app}"
 GEN1_META_URL = "https://api.shelly.cloud/files/firmware"
 
@@ -79,6 +88,14 @@ class AuthError(ShellyError):
 
 class UnsupportedError(ShellyError):
     """The device does not provide the requested method/endpoint (not an outage)."""
+
+
+class OtaError(ShellyError):
+    """The device reported a failed update (Gen2+ event ota_error)."""
+
+
+class ChannelUnavailable(Exception):  # noqa: N818 – not an error of the device
+    """The WebSocket could not send the update command (nothing reached the device)."""
 
 
 # Feature state values stored per device besides True (on/active) and False:
@@ -196,6 +213,39 @@ class DeviceAuth:
             f'Digest username="{AUTH_USER}", realm="{realm}", nonce="{nonce}", uri="{uri}", '
             f'algorithm=SHA-256, qop=auth, nc={nc}, cnonce="{cnonce}", response="{response}"'
         )
+
+    def ws_auth(self, challenge):
+        """"auth" object for Gen2+ RPC over WebSocket, answering a 401 challenge.
+
+        Official Gen2 docs: the challenge is the JSON in error.message (auth_type
+        "digest", nonce, realm = device ID, algorithm SHA-256); the response is
+        SHA-256(ha1:nonce:nc:cnonce:auth:ha2) with ha2 = SHA-256("dummy_method:dummy_uri"),
+        nc = "00000001" and a numeric cnonce. The same realm check and SHA-256-only
+        rule as for HTTP apply (no downgrade)."""
+        if self.gen == 1 or not isinstance(challenge, dict):
+            raise ShellyError("Unexpected authentication request from the Shelly")
+        if challenge.get("auth_type") != "digest" or str(challenge.get("algorithm", "SHA-256")).upper() != "SHA-256":
+            raise ShellyError("Unexpected authentication request from the Shelly")
+        realm, nonce = str(challenge.get("realm") or ""), challenge.get("nonce")
+        if not realm or nonce in (None, "") or not isinstance(nonce, (str, int)) or isinstance(nonce, bool):
+            raise ShellyError("Incomplete authentication request from the Shelly")
+        if self.ha1:
+            if realm != self.realm:
+                raise ShellyError("Stored device password belongs to another device ID – enter it again")
+            ha1 = self.ha1
+        else:
+            ha1 = gen2_ha1(realm, self.password or "")
+        cnonce, nc = secrets.randbelow(2**31), "00000001"
+        response = _sha256(f"{ha1}:{nonce}:{nc}:{cnonce}:auth:{_sha256(WS_HA2_INPUT)}")
+        return {
+            "realm": realm,
+            "username": AUTH_USER,
+            "nonce": nonce,
+            "cnonce": cnonce,
+            "nc": nc,
+            "response": response,
+            "algorithm": "SHA-256",
+        }
 
 
 async def _call(session, origin, path, auth, params=None, body=None):
@@ -319,6 +369,160 @@ async def trigger_update(session, gen, origin, firmware_url, auth=None):
         await _device_json(session, origin, "/ota", auth, {"url": firmware_url})
     else:
         await _rpc(session, origin, "Shelly.Update", {"url": firmware_url}, auth)
+
+
+async def _refuse_redirect(_session, _context, _params):
+    """aiohttp trace hook: a redirect would lead away from the device – refuse it."""
+    raise ShellyError("The Shelly answered the WebSocket request with a redirect")
+
+
+class OtaChannel:
+    """Gen2+ installation over the device's RPC WebSocket (ws://<ip>/rpc).
+
+    The official Gen2 API reports the update only as notifications of the sys
+    component (ota_begin, ota_progress with progress_percent, ota_success,
+    ota_error); there is no pollable OTA status and HTTP gets no notifications.
+    The device sends notifications over the WebSocket once the client has sent a
+    request with "src" – here the Shelly.Update command itself.
+
+    Security: the URL is built from the pinned private-IP origin (no DNS),
+    redirects are refused, frames are limited to MAX_WS_FRAME, no proxy from the
+    environment, Digest auth only as SHA-256 (DeviceAuth.ws_auth). Only the event
+    name, a clipped message and the percentage leave this class.
+
+    Usage: async with OtaChannel(origin, auth) as ota:
+               accepted = await ota.update(url)
+               async for event in ota.events(): ...
+    Connection errors raise from __aenter__; the caller may then fall back to HTTP.
+    """
+
+    def __init__(self, origin, auth=None, headers=None):
+        """Prepare the channel; nothing is sent before 'async with'."""
+        if not origin.startswith("http://"):
+            raise ShellyError("Invalid device address")
+        self.url = "ws://" + origin[len("http://") :] + "/rpc"
+        self.auth = auth
+        self.headers = headers
+        self.src = f"sfm-{secrets.token_hex(4)}"
+        self.session = None
+        self.ws = None
+        self._early = []  # OTA events received while waiting for the command answer
+
+    async def __aenter__(self):
+        """Open the WebSocket (own short-lived session: redirects are refused)."""
+        trace = aiohttp.TraceConfig()
+        trace.on_request_redirect.append(_refuse_redirect)
+        self.session = aiohttp.ClientSession(
+            headers=self.headers, trust_env=False, timeout=OTA_WS_CONNECT_TIMEOUT, trace_configs=[trace]
+        )
+        try:
+            self.ws = await self.session.ws_connect(
+                self.url, timeout=aiohttp.ClientWSTimeout(ws_close=5), max_msg_size=MAX_WS_FRAME
+            )
+        except BaseException:
+            await self.session.close()
+            raise
+        return self
+
+    async def __aexit__(self, *exc):
+        """Close the WebSocket and its session."""
+        try:
+            if self.ws is not None:
+                await self.ws.close()
+        finally:
+            await self.session.close()
+
+    async def update(self, firmware_url):
+        """Send Shelly.Update. True if the device accepted it, None if no answer
+        arrived in time (the update may still run – never send it twice).
+        Raises AuthError/ShellyError if the device refused it."""
+        params = {"url": firmware_url}
+        try:
+            await self.ws.send_json({"id": 1, "src": self.src, "method": "Shelly.Update", "params": params})
+        except (aiohttp.ClientError, OSError, RuntimeError) as err:  # closed before sending
+            raise ChannelUnavailable(type(err).__name__) from None
+        answer = await self._answer(1)
+        if answer is None:
+            return None
+        error = answer.get("error")
+        if isinstance(error, dict) and error.get("code") == 401:
+            if self.auth is None:
+                raise AuthError("The Shelly requires a password – store it in the device's password dialog")
+            try:
+                challenge = json.loads(str(error.get("message") or ""))
+            except ValueError:
+                raise ShellyError("Invalid authentication request from the Shelly") from None
+            frame = {"id": 2, "src": self.src, "method": "Shelly.Update", "params": params}
+            frame["auth"] = self.auth.ws_auth(challenge)
+            await self.ws.send_json(frame)
+            answer = await self._answer(2)
+            if answer is None:
+                return None
+            error = answer.get("error")
+            if isinstance(error, dict) and error.get("code") == 401:
+                raise AuthError("The Shelly rejected the password")
+        if error:
+            raise ShellyError(f"Device reports: {clip(error)}")
+        return True
+
+    async def _answer(self, frame_id):
+        """Answer frame with frame_id; OTA events arriving meanwhile are kept.
+        None if no answer arrives within OTA_WS_ANSWER_S or the connection ends."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + OTA_WS_ANSWER_S
+        while (left := deadline - loop.time()) > 0:
+            try:
+                frame = await self._receive(left)
+            except TimeoutError:
+                return None
+            if frame is None:
+                return None
+            if frame.get("id") == frame_id and ("result" in frame or "error" in frame):
+                return frame
+            self._early.extend(_ota_events(frame))
+        return None
+
+    async def _receive(self, wait=None):
+        """Next JSON object frame; None when the connection is closed."""
+        while True:
+            msg = await self.ws.receive(timeout=wait)
+            if msg.type != aiohttp.WSMsgType.TEXT:
+                if msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSING, aiohttp.WSMsgType.CLOSED,
+                                aiohttp.WSMsgType.ERROR):
+                    return None
+                continue  # binary, ping/pong: not part of the RPC protocol
+            try:
+                frame = json.loads(msg.data)
+            except ValueError:
+                continue
+            if isinstance(frame, dict):
+                return frame
+
+    async def events(self):
+        """OTA events of the device until the connection ends (device restart)."""
+        while self._early:
+            yield self._early.pop(0)
+        while (frame := await self._receive()) is not None:
+            for event in _ota_events(frame):
+                yield event
+
+
+def _ota_events(frame):
+    """OTA events of the sys component in a NotifyEvent frame, reduced to
+    {"event", "msg", "progress"} (progress: 0–100 or None)."""
+    params = frame.get("params") if frame.get("method") == "NotifyEvent" else None
+    events = params.get("events") if isinstance(params, dict) else None
+    result = []
+    for event in events if isinstance(events, list) else []:
+        if not isinstance(event, dict) or event.get("component") != "sys" or event.get("event") not in OTA_EVENTS:
+            continue
+        progress = event.get("progress_percent")
+        if isinstance(progress, bool) or not isinstance(progress, (int, float)):
+            progress = None
+        else:
+            progress = max(0, min(100, int(progress)))
+        result.append({"event": event["event"], "msg": clip(event.get("msg"), 200), "progress": progress})
+    return result
 
 
 # --------------------------------------------------------------------------- Device settings

@@ -1,6 +1,8 @@
 """Local demo server with fake data for UI tests (no network access).
 
-Usage: python demo.py <app_dir> <port> <scenario: idle|busy>
+Usage: python demo.py <app_dir> <port> <scenario: idle|busy|legacy|missing>
+legacy: download_base_url is the former example value (not confirmed) and one device
+installs with device progress; missing: download_base_url not set (rc6).
 Serves the UI app below /ui/ and a same-origin wrapper /wrap that embeds it in an
 iframe (like the HA Ingress panel)."""
 
@@ -28,6 +30,11 @@ if hasattr(web_ui, "FW_DIR"):
 opts = {"check_interval_days": 7, "check_time": "02:45", "download_base_url": "http://192.168.1.2:8098", "restrict_downloads_to_devices": True,
         "gen1_updates_enabled": True, "gen1_allowed_types": ["SHSW-1"], "max_parallel_installs": 2,
         "log_retention_days": 30, "log_entry_limit": 1000}
+if scenario == "legacy":
+    import app_options  # noqa: E402
+    opts["download_base_url"] = app_options.LEGACY_DOWNLOAD_BASE
+elif scenario == "missing":
+    del opts["download_base_url"]
 m = manager.Manager(opts, session=None, token="t", version="3.0.0")
 now = int(time.time())
 names = ["Kitchen light", "Living room ceiling with a really long device name", "Hall", "Garage door", "Pool pump",
@@ -68,6 +75,10 @@ m.events.add("check", severity="error", trigger="manual", devices=25, duration=1
                        {"device": "Garage door", "error": "The Shelly rejected the password", "severity": "error"}])
 m.events.add("password", device="Kitchen light", action="enabled", user="demo")
 m.devices[f"{4:032x}"]["settings_error"] = {"message": "Device not reachable", "severity": "warning"}
+if scenario == "legacy":  # an installation started before (device progress shown)
+    ids = list(m.devices)
+    m.devices[ids[7]].update(status="installing", ota_progress=55, message="The Shelly is downloading the firmware: 55 %")
+    m.installing.add(ids[7])
 if scenario == "busy":
     ids = list(m.devices)
     m.progress = {"kind": "all", "total": 25, "done": 18, "errors": 2, "phase": "devices"}

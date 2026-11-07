@@ -26,7 +26,7 @@ import aiohttp
 from aiohttp import web
 from download_server import strip_server_header
 from events import user_from
-from manager import FW_DIR, Manager
+from manager import DOWNLOAD_BASE_MESSAGES, FW_DIR, Manager
 from shelly import FW_NAME_RE, ShellyError
 
 log = logging.getLogger("sfm.ui")
@@ -192,6 +192,8 @@ def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
             raise web.HTTPBadRequest(text="Confirmation incomplete")
         if mgr.checking:
             raise web.HTTPConflict(text="Check in progress – please try again afterwards")
+        if mgr.download_base_issue:  # rc6 R1: unset or unconfirmed former example value
+            raise web.HTTPConflict(text=DOWNLOAD_BASE_MESSAGES[mgr.download_base_issue])
         if device_id in mgr.installing:
             raise web.HTTPConflict(text="Installation for this device is already running")
         if not mgr.approval_matches(device_id, sha):
@@ -330,6 +332,16 @@ def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
             background(restart_later())
         return web.json_response({"changed": changed, "restarting": bool(changed)})
 
+    async def confirm_download_base(request):
+        """Confirm that the former example download URL really is the address of Home
+        Assistant (body {"url": <current value>}); stored in the state, no restart."""
+        url = (await json_body(request)).get("url")
+        try:
+            mgr.confirm_download_base(url, user_from(request.headers))
+        except ShellyError as err:
+            raise web.HTTPConflict(text=str(err)) from None
+        return web.json_response({"confirmed": True})
+
     app = web.Application(middlewares=[security], client_max_size=32 * 1024)
     app.on_response_prepare.append(strip_server_header)
     app.on_shutdown.append(cancel_background)
@@ -352,5 +364,6 @@ def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
     app.router.add_get("/api/logs", logs)
     app.router.add_get("/api/settings", options_get)
     app.router.add_post("/api/settings", options_save)
+    app.router.add_post("/api/settings/download-base/confirm", confirm_download_base)
     app.router.add_static("/static/", STATIC_DIR, show_index=False, follow_symlinks=False, name="static")
     return app
