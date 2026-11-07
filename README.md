@@ -190,7 +190,7 @@ Devices · Firmware · Logs · Settings.
   "Install update" button next to "Close". Ignored devices show an additional yellow
   "Ignored" label next to the status (not clickable).
 - Row menu ⋮: Check for updates, Install update (only when installable, see above),
-  Install older version … (Gen2+ only, see "Downgrade" below), Reload device info,
+  Downgrade (Gen2+ only, see "Downgrade" below), Reload device info,
   Ignore / Resume device, Open web UI, NTP server, Power-on action,
   Eco mode, Device password, Status details, Restart. While a check or an installation
   runs, "Check for updates" is disabled and the reason is shown.
@@ -243,7 +243,7 @@ Devices · Firmware · Logs · Settings.
 
 #### Downgrade (Gen2+)
 
-"Install older version …" in the row menu lists all stored stable versions of the
+"Downgrade" in the row menu lists all stored stable versions of the
 device's firmware ID that are older than the installed one, newest first (uploaded
 files are marked). After choosing one, the installation dialog shows the older version
 as target with a warning; a second confirmation with the checkbox "I understand that

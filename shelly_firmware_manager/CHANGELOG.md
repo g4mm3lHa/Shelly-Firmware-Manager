@@ -13,7 +13,7 @@ Changes in rc7
   update or being installed (before, a provided file could be deleted and the device
   went back to "Available"); the button tooltip names the reason. The log records the
   source of a deleted file.
-- Downgrade for Gen2+ devices: "Install older version …" in the row menu lists all
+- Downgrade for Gen2+ devices: "Downgrade" in the row menu lists all
   stored stable versions of the firmware ID that are older than the installed one,
   newest first; the installation dialog shows the selected version as target with a
   warning, and a second confirmation with acknowledgment (as for device passwords)

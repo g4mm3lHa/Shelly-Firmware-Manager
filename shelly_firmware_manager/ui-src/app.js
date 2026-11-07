@@ -540,7 +540,7 @@ function openRowMenu(d, anchor) {
   add("Check for updates", () => checkDevice(d), !busy && !d.installing);
   if (installable(d, ui.state)) add("Install update", () => openInstall([d]), true);   // only for Ready
   // rc7: downgrade to a stored older version – Gen2+ only, also up to date / ignored devices
-  if (d.gen >= 2) add("Install older version …", () => openDowngrade(d), downgradable(d, ui.state));
+  if (d.gen >= 2) add("Downgrade", () => openDowngrade(d), downgradable(d, ui.state));
   add("Reload device info", () => reloadDevice(d), !busy && !d.installing && !d.activity && !!d.ip);
   if (busy) items.push(el("div", `Not available – ${busy}`, "menu-hint"));   // reason, also for touch
   add(d.ignored ? "Resume device" : "Ignore device", () => setIgnored(d, !d.ignored), !d.installing);
@@ -656,7 +656,7 @@ const UPLOAD_HINT = "An uploaded file does not come from the Shelly update serve
 const fwSource = v => v.source === "upload" ? (v.sha_checked ? "Uploaded (SHA-256 checked)" : "Uploaded (SHA-256 not checked)") : "Downloaded from Shelly";
 /** Step 1: choose one of the stored older versions. */
 async function openDowngrade(d) {
-  const title = `Install older version – ${d.name}`;
+  const title = `Downgrade – ${d.name}`;
   modal(title, [el("p", "Loading stored versions …", "hint")], [{text: "Cancel"}]);
   let r;
   try { r = await api(`${devUrl(d)}/downgrades`); } catch (e) { message(title, e.message, "error"); return; }
@@ -685,14 +685,14 @@ function downgradeInstall(d, v) {
   el("div", DOWNGRADE_WARNING, "warnbox")];
   if (v.source === "upload") content.push(el("div", UPLOAD_HINT, "warnbox"));
   content.push(el("p", "The device restarts during the installation.", "hint"));
-  modal("Install older version?", content, [{text: "Cancel"}, {text: "Continue", kind: "primary", action: () => downgradeConfirm(d, v)}]);
+  modal("Downgrade?", content, [{text: "Cancel"}, {text: "Continue", kind: "primary", action: () => downgradeConfirm(d, v)}]);
 }
 /** Step 3: explicit confirmation; the red button needs the acknowledgment. */
 function downgradeConfirm(d, v) {
-  const title = "Install older version?", ack = el("input"); ack.type = "checkbox";
+  const title = "Downgrade?", ack = el("input"); ack.type = "checkbox";
   modal(title, [el("p", `Install ${v.version} on ${d.name} (installed: ${d.version})?`), el("div", DOWNGRADE_WARNING, "warnbox"),
     box("label", "check", ack, " I understand that the downgrade may fail or reset settings")],
-  [{text: "Cancel"}, {text: "Install older version", kind: "danger", action: async () => {
+  [{text: "Cancel"}, {text: "Downgrade", kind: "danger", action: async () => {
     try { await api(`${devUrl(d)}/install`, {sha256: v.sha256, confirm: true, downgrade: true, acknowledged: ack.checked}); closeModal(); }
     catch (e) { message(title, e.message, "error"); }
   }}]);

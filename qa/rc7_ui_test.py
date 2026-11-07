@@ -80,7 +80,7 @@ with sync_playwright() as pw:
         last = index == len(cases) - 1
         case = f"rc7-{width}-{scheme}{'-embedded' if embedded else ''}"
         ctx, page, f, errors = open_page(browser, width, scheme, embedded)
-        entry = "Install older version …"
+        entry = "Downgrade"
 
         # Menu entry: Gen2+ (also ignored), never Gen1
         items = dict(menu_items(f, "Hall"))
@@ -110,17 +110,17 @@ with sync_playwright() as pw:
         # Step 2: installation dialog with the older target
         f.locator("#dlg-btns button", has_text="Continue").click()
         d = dialog(f)
-        check(f"{case}: install dialog with older target", d["title"] == "Install older version?" and "Target (older)" in d["body"]
+        check(f"{case}: install dialog with older target", d["title"] == "Downgrade?" and "Target (older)" in d["body"]
               and "1.3.0" in d["body"] and "A downgrade installs an older firmware" in d["body"], d["body"][:200])
         page.screenshot(path=OUT / f"{case}-downgrade-install.png")
 
         # Step 3: second confirmation
         f.locator("#dlg-btns button", has_text="Continue").click()
         d = dialog(f)
-        go = dict(d["buttons"]).get("Install older version")
+        go = dict(d["buttons"]).get("Downgrade")
         check(f"{case}: confirmation button disabled", go is True, str(d["buttons"]))
         f.locator("#dlg-body input[type=checkbox]").check()
-        go = dict(dialog(f)["buttons"]).get("Install older version")
+        go = dict(dialog(f)["buttons"]).get("Downgrade")
         check(f"{case}: enabled after acknowledgment", go is False)
         page.screenshot(path=OUT / f"{case}-downgrade-confirm.png")
         f.locator("#dlg-btns button", has_text="Cancel").click()   # nothing is installed in the demo
