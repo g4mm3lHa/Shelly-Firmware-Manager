@@ -10,7 +10,9 @@ parallelism never duplicates a request or a file. Installations run in parallel
 up to a limit (asyncio.Semaphore); checks and installations exclude each other.
 Installations are always started manually. Ignored devices are left out of the
 full check (an explicit single-device check is still possible).
-Per firmware ID the two highest versions are kept.
+Stored firmware is never deleted automatically (rc7): the user deletes files in
+the Firmware tab. Older stored versions allow a downgrade of Gen2+ devices, and
+older files can be uploaded manually (two steps: stage, then confirm).
 
 Progress of a running check is kept in memory only (self.progress, self.activity):
 the UI shows it while polling, nothing of it is persisted.
@@ -18,11 +20,14 @@ the UI shows it while polling, nothing of it is persisted.
 
 import asyncio
 import contextlib
+import hashlib
 import hmac
 import json
 import logging
 import re
+import secrets
 import time
+import zipfile
 from pathlib import Path
 
 import aiohttp
@@ -65,7 +70,6 @@ INSTALL_POLL_S = 10  # then check every 10 s
 INSTALL_NO_DOWNLOAD_S = 180  # no download request: give up after 3 min (a Shelly may
 # still answer with the old version for a while after accepting the update)
 INSTALL_WAIT_S = 300  # upper limit in case the Shelly gets stuck
-KEEP_PER_TYPE = 2  # stored firmwares per firmware ID
 SUPERVISOR = "http://supervisor"  # Supervisor API (Core API proxy below /core)
 SUPERVISOR_TIMEOUT = aiohttp.ClientTimeout(total=15)
 
@@ -75,6 +79,17 @@ ACTIVITY_CHECKING = "checking"  # device / manufacturer server is being queried
 ACTIVITY_DOWNLOADING = "downloading"  # firmware for this device is being downloaded
 ACTIVITY_RELOADING = "reloading"  # Reload Device Info is reading the device
 PART_PREFIX = ".part-"  # temporary download files (see shelly._store)
+
+# Manual firmware upload (rc7): the file is first staged (temporary name below
+# FW_DIR, removed at start like an incomplete download), then confirmed with type
+# and version. Only one upload is staged at a time.
+UPLOAD_PREFIX = PART_PREFIX + "upload-"
+UPLOAD_TTL_S = 900  # a staged upload that is not confirmed within 15 min is dropped
+UPLOAD_CHUNK = 128 * 1024
+MAX_MANIFEST = 64 * 1024  # upper limit for a manifest.json read from an uploaded ZIP
+STABLE_VERSION_RE = re.compile(r"^\d{1,4}\.\d{1,4}\.\d{1,4}$")  # stable Gen2+ versions only
+SOURCE_DOWNLOAD = "download"  # downloaded from the manufacturer by a check
+SOURCE_UPLOAD = "upload"  # uploaded manually in the Firmware tab
 
 UI_TABLES = ("devices",)  # tables whose sort order/columns are stored
 UI_VERSION = 3  # 3.0: column order, "action" replaces "eco"/"restart" (v2 is migrated)
@@ -145,6 +160,8 @@ class Manager:
         self.reloading = set()  # device IDs whose Reload Device Info is running
         self._provisions = {}  # (firmware ID, version) -> running provide task (single flight)
         self._downloads_running = 0  # for the progress phase of a parallel check
+        self._upload = None  # staged manual upload (see stage_upload), memory only
+        self._upload_lock = asyncio.Lock()  # one upload transfer at a time
         # Set whenever the schedule changes (check finished): wakes the scheduler in
         # main.py instead of letting it poll every minute.
         self.schedule_changed = asyncio.Event()
@@ -195,6 +212,7 @@ class Manager:
             # A restart during an installation leaves an unclear state
             if dev.get("status") == STATUS_INSTALLING:
                 dev.update(status=STATUS_UNCLEAR, message="App was restarted during the installation")
+            dev.pop("downgrade", None)  # marker of a running downgrade (rc7), memory semantics
 
     @staticmethod
     def _migrate_ui(old):
@@ -299,50 +317,59 @@ class Manager:
 
     # ------------------------------------------------------------ Firmware store
 
-    def _register_firmware(self, name, fw_type, gen, version, sha, size, https=None):
-        """Add a firmware to the store (basis for reuse and retention).
-        https: whether the download was protected by TLS (Gen1: never)."""
-        self.firmware[name] = {
+    def _register_firmware(self, name, fw_type, gen, version, sha, size, https=None, source=SOURCE_DOWNLOAD,
+                           sha_checked=None):
+        """Add a firmware to the store (basis for reuse and downgrades).
+        https: whether the download was protected by TLS (Gen1: never; uploads: None).
+        source: SOURCE_DOWNLOAD or SOURCE_UPLOAD; sha_checked (uploads only): whether
+        the user supplied a SHA-256 that matched the file."""
+        meta = {
             "type": clip(fw_type, 64),
             "gen": gen,
             "version": clip(version, 64),
             "sha256": sha,
             "size": size,
-            "downloaded": int(time.time()),
-            "https": bool(https) if https is not None else gen != 1,
+            "downloaded": int(time.time()),  # time of download or upload
+            "https": (bool(https) if https is not None else gen != 1) if source == SOURCE_DOWNLOAD else None,
+            "source": source,
         }
+        if source == SOURCE_UPLOAD:
+            meta["sha_checked"] = bool(sha_checked)
+        self.firmware[name] = meta
+
+    @staticmethod
+    def _source(meta):
+        """Origin of a store entry; entries before rc7 were always downloaded."""
+        return SOURCE_UPLOAD if meta.get("source") == SOURCE_UPLOAD else SOURCE_DOWNLOAD
 
     def _in_use(self):
-        """Files a device currently holds as update or is installing."""
+        """Files a device currently holds as update or is installing (incl. downgrades)."""
         return {d["file"] for d in self.devices.values() if d.get("status") in PENDING and d.get("file")}
 
     def cleanup_firmware(self):
-        """Keep only the two highest versions per firmware ID.
+        """Housekeeping of the store – never deletes a registered firmware (rc7).
 
-        Files currently provided for a device are kept in addition.
-        Missing files disappear from the store, unknown files from the disk."""
+        Store entries whose file is missing are dropped; files on disk that are not
+        in the store are removed. Temporary files (running downloads and staged
+        uploads, PART_PREFIX) are left alone: they are removed by their own code
+        path or at the next start."""
         self.firmware = {n: m for n, m in self.firmware.items() if (FW_DIR / n).is_file()}
-        by_type = {}
-        for name, meta in self.firmware.items():
-            by_type.setdefault(meta.get("type"), []).append(name)
-        in_use = self._in_use()
-        keep = set(in_use)
-        for names in by_type.values():
-            names.sort(
-                key=lambda n: shelly.parse_version(self.firmware[n].get("version") or ""), reverse=True
-            )
-            keep.update(names[:KEEP_PER_TYPE])
-        self.firmware = {n: m for n, m in self.firmware.items() if n in keep}
         for path in FW_DIR.iterdir():
-            if path.name not in keep:
+            if path.name in self.firmware or path.name.startswith(PART_PREFIX):
+                continue
+            if path.is_file() or path.is_symlink():
                 path.unlink(missing_ok=True)
+                log.info("Removed unknown file %s from the firmware store", path.name)
         # Download diagnosis only for files currently provided
+        in_use = self._in_use()
         self.downloads = {k: v for k, v in self.downloads.items() if k in in_use}
 
     async def _stored_firmware(self, fw_type, version):
-        """Already stored firmware for ID and version – after checksum verification."""
+        """Already stored firmware for ID and version – after checksum verification.
+        Only files downloaded from the manufacturer are reused for an offered
+        update; an uploaded file is never provided as the manufacturer's offer."""
         for name, meta in list(self.firmware.items()):
-            if meta.get("type") == fw_type and meta.get("version") == version:
+            if meta.get("type") == fw_type and meta.get("version") == version and self._source(meta) == SOURCE_DOWNLOAD:
                 try:
                     if await asyncio.to_thread(shelly.file_sha256, FW_DIR, name) == meta.get("sha256"):
                         return name, meta
@@ -352,48 +379,311 @@ class Manager:
                 self.firmware.pop(name, None)
         return None
 
+    def _delete_lock(self, name):
+        """Reason why a stored firmware cannot be deleted now, else None (rc7 Q9)."""
+        if self.checking:
+            return "Locked during a check"
+        holders = [d for d in self.devices.values() if d.get("file") == name]
+        installing = {self.devices.get(i, {}).get("file") for i in self.installing}
+        if name in installing or any(d.get("status") == STATUS_INSTALLING for d in holders):
+            return "Locked: being installed"
+        if any(d.get("status") == STATUS_READY for d in holders):
+            return "Locked: provided as pending update"
+        return None
+
     def firmware_list(self):
         """Stored firmwares for the "Firmware" tab."""
         users = {}  # file name -> devices it is provided for
         for dev in self.devices.values():
             if dev.get("status") in PENDING and dev.get("file"):
                 users.setdefault(dev["file"], []).append(dev.get("name") or "?")
-        installing = {self.devices.get(i, {}).get("file") for i in self.installing}
-        return [
-            {
-                "name": name,
-                **{k: meta.get(k) for k in ("type", "gen", "version", "sha256", "size", "downloaded")},
-                "https": meta.get("https", meta.get("gen") != 1),
-                "used_by": sorted(users.get(name, [])),
-                "deletable": not self.checking and name not in installing,
-            }
-            for name, meta in self.firmware.items()
-        ]
+        result = []
+        for name, meta in self.firmware.items():
+            lock = self._delete_lock(name)
+            source = self._source(meta)
+            result.append(
+                {
+                    "name": name,
+                    **{k: meta.get(k) for k in ("type", "gen", "version", "sha256", "size", "downloaded")},
+                    "https": meta.get("https", meta.get("gen") != 1) if source == SOURCE_DOWNLOAD else None,
+                    "source": source,
+                    "sha_checked": bool(meta.get("sha_checked")) if source == SOURCE_UPLOAD else None,
+                    "used_by": sorted(users.get(name, [])),
+                    "deletable": lock is None,
+                    "locked": lock,
+                }
+            )
+        return result
 
-    def delete_firmware(self, name, user="unknown"):
-        """Delete a stored firmware. Blocked during a check or an installation using it.
-        Devices it was provided for download it again at the next check."""
+    def store_size(self):
+        """Total size of all stored firmware files in bytes (information only)."""
+        return sum(int(meta.get("size") or 0) for meta in self.firmware.values())
+
+    def delete_firmware(self, name, user="unknown", confirm=False, acknowledged=False):
+        """Delete a stored firmware – only manually, with a second confirmation
+        (confirm and acknowledged, as for the device password; rc7 Q9).
+
+        Refused during a check and for a file that is installed right now or held
+        as pending update for a device (the device must be checked or installed
+        first). Devices that may later need it download it again at a check."""
         if name not in self.firmware:
             raise KeyError(name)
-        if self.checking:
-            raise ShellyError("Check in progress – please try again afterwards")
-        if name in {self.devices.get(i, {}).get("file") for i in self.installing}:
-            raise ShellyError("Firmware is being installed")
-        for dev in self.devices.values():
-            if dev.get("file") == name and dev.get("status") == STATUS_READY:
-                dev.update(
-                    status=STATUS_AVAILABLE,
-                    file=None,
-                    sha256=None,
-                    message="Firmware deleted – will be downloaded again at the next check",
-                )
+        lock = self._delete_lock(name)
+        if lock:
+            raise ShellyError(lock.replace("Locked", "Firmware cannot be deleted", 1))
+        if confirm is not True or acknowledged is not True:
+            raise ValueError("Deletion not confirmed")
         meta = self.firmware.pop(name)
         (FW_DIR / name).unlink(missing_ok=True)
         log.info("Firmware %s deleted by %s", name, user)
         self.events.add(
-            "delete", type=meta.get("type"), version=meta.get("version"), sha256=meta.get("sha256"), user=user
+            "delete",
+            type=meta.get("type"),
+            version=meta.get("version"),
+            sha256=meta.get("sha256"),
+            source=self._source(meta),
+            user=user,
         )
         self.save()
+
+    # ------------------------------------------------------------ Downgrade (rc7)
+
+    def downgrade_versions(self, device_id):
+        """Stored stable versions of the device's firmware ID that are older than the
+        installed one, newest first (rc7). Gen1: never (empty list).
+
+        One entry per version; a manufacturer download is preferred over an upload
+        of the same version."""
+        dev = self.devices[device_id]
+        if (dev.get("gen") or 1) < 2 or not dev.get("type"):
+            return []
+        try:
+            installed = shelly.parse_version(dev.get("version"))
+        except ShellyError:
+            return []
+        best = {}  # version -> (name, meta)
+        for name, meta in self.firmware.items():
+            if meta.get("type") != dev["type"] or (meta.get("gen") or 1) < 2:
+                continue
+            version = str(meta.get("version") or "")
+            try:
+                parsed = shelly.parse_version(version)
+            except ShellyError:
+                continue
+            if parsed >= installed or parsed[3] != 3 or not (FW_DIR / name).is_file():
+                continue  # not older, not a final release, or file missing
+            current = best.get(version)
+            if current is None or (self._source(current[1]) == SOURCE_UPLOAD and self._source(meta) == SOURCE_DOWNLOAD):
+                best[version] = (name, meta)
+        ordered = sorted(best.values(), key=lambda item: shelly.parse_version(item[1]["version"]), reverse=True)
+        return [
+            {
+                "name": name,
+                "version": meta.get("version"),
+                "sha256": meta.get("sha256"),
+                "size": meta.get("size"),
+                "downloaded": meta.get("downloaded"),
+                "source": self._source(meta),
+                "sha_checked": bool(meta.get("sha_checked")) if self._source(meta) == SOURCE_UPLOAD else None,
+            }
+            for name, meta in ordered
+        ]
+
+    def downgrade_match(self, device_id, sha):
+        """The offered downgrade entry with exactly this SHA-256, else None."""
+        if not isinstance(sha, str):
+            return None
+        return next(
+            (v for v in self.downgrade_versions(device_id) if hmac.compare_digest(str(v["sha256"]), sha)), None
+        )
+
+    def downgrade_blocker(self, device_id):
+        """Why no downgrade can be started for the device now, else None."""
+        dev = self.devices[device_id]
+        if (dev.get("gen") or 1) < 2:
+            return "Downgrades are not offered for Gen1 devices"
+        if self.checking:
+            return "Check in progress – please try again afterwards"
+        if self.download_base_issue:
+            return DOWNLOAD_BASE_MESSAGES[self.download_base_issue]
+        if device_id in self.installing or dev.get("status") == STATUS_INSTALLING:
+            return "Installation for this device is already running"
+        if device_id in self.reloading:
+            return "Device info is being reloaded – please try again in a moment"
+        if not dev.get("origin") or not dev.get("build") or not dev.get("mac"):
+            return "Device has not been checked successfully yet"
+        return None
+
+    # ------------------------------------------------------------ Manual upload (rc7)
+
+    def _drop_upload(self):
+        """Forget the staged upload and remove its temporary file."""
+        staged, self._upload = self._upload, None
+        if staged:
+            staged["path"].unlink(missing_ok=True)
+
+    def _staged(self, token):
+        """The staged upload for token (expired ones are dropped), else ShellyError."""
+        staged = self._upload
+        if staged and time.monotonic() - staged["created"] > UPLOAD_TTL_S:
+            self._drop_upload()
+            staged = None
+        if not staged or not isinstance(token, str) or not hmac.compare_digest(staged["token"], token):
+            raise ShellyError("No pending upload – please upload the file again")
+        return staged
+
+    def upload_types(self):
+        """Firmware IDs an upload can be assigned to: those of known Gen2+ devices."""
+        types = {}
+        for dev in self.devices.values():
+            if (dev.get("gen") or 1) >= 2 and dev.get("type"):
+                types[dev["type"]] = max(types.get(dev["type"], 0), dev["gen"])
+        return types
+
+    @staticmethod
+    def _read_manifest(path):
+        """Type/version hints from a manifest.json in a ZIP (top level or one folder
+        deep). Only pre-fills the form – the user confirms or corrects both values.
+        Returns {"type": str|None, "version": str|None}; never raises."""
+        found = {"type": None, "version": None}
+        try:
+            with zipfile.ZipFile(path) as archive:
+                member = next(
+                    (
+                        i
+                        for i in archive.infolist()
+                        if i.filename.rsplit("/", 1)[-1] == "manifest.json" and i.filename.count("/") <= 1
+                    ),
+                    None,
+                )
+                if member is None or member.file_size > MAX_MANIFEST:
+                    return found
+                with archive.open(member) as handle:
+                    data = json.loads(handle.read(MAX_MANIFEST + 1)[:MAX_MANIFEST])
+        except (OSError, ValueError, zipfile.BadZipFile, RuntimeError, NotImplementedError):
+            return found
+        if not isinstance(data, dict):
+            return found
+        name = data.get("name") or data.get("app")
+        if isinstance(name, str) and re.fullmatch(r"[A-Za-z0-9._-]{1,64}", name):
+            found["type"] = name
+        for key in ("version", "build_id", "fw_id"):
+            match = shelly.VERSION_RE.search(str(data.get(key) or ""))
+            if match:
+                found["version"] = clip(match.group(0), 64)
+                break
+        return found
+
+    async def stage_upload(self, chunks, filename, length, user="unknown"):
+        """Step 1 of a manual upload: store the file under a temporary name.
+
+        chunks: async iterator of bytes (the request body, streamed – never held in
+        memory as a whole); length: declared Content-Length. Checks extension, size
+        limits and (for .zip) the archive format, computes the SHA-256 and reads
+        type/version hints from a manifest. Replaces an earlier staged upload.
+        Returns the data for the confirmation form (no file path)."""
+        ext = Path(str(filename or "")).suffix.lower()
+        if ext not in shelly.FW_EXTENSIONS:
+            raise ValueError("Only .zip, .bin or .gbl firmware files can be uploaded")
+        if not isinstance(length, int) or length < shelly.MIN_FW_SIZE:
+            raise ValueError("Firmware file implausibly small")
+        if length > shelly.MAX_FW_SIZE:
+            raise ValueError("Firmware larger than 64 MiB")
+        if self._upload_lock.locked():
+            raise ShellyError("Another upload is in progress – please wait")
+        async with self._upload_lock:
+            self._drop_upload()
+            path = FW_DIR / f"{UPLOAD_PREFIX}{secrets.token_hex(8)}"
+            digest, size = hashlib.sha256(), 0
+            try:
+                with path.open("wb") as handle:
+                    async for chunk in chunks:
+                        size += len(chunk)
+                        if size > shelly.MAX_FW_SIZE or size > length:
+                            raise ValueError("Upload larger than announced or than 64 MiB")
+                        digest.update(chunk)
+                        handle.write(chunk)
+                if size != length:
+                    raise ValueError("Upload incomplete")
+                if ext == ".zip" and not await asyncio.to_thread(zipfile.is_zipfile, path):
+                    raise ValueError("The .zip file is not a valid ZIP archive")
+                detected = await asyncio.to_thread(self._read_manifest, path) if ext == ".zip" else {}
+            except BaseException:
+                path.unlink(missing_ok=True)
+                raise
+            sha = digest.hexdigest()
+            self._upload = {
+                "token": secrets.token_hex(16),
+                "path": path,
+                "ext": ext,
+                "sha256": sha,
+                "size": size,
+                "created": time.monotonic(),
+                "filename": clip(Path(str(filename)).name, 120),
+            }
+        log.info("Firmware upload staged by %s (%s, %d bytes, SHA-256 %s)", user, self._upload["filename"], size, sha)
+        stored = self._by_sha(sha)
+        return {
+            "token": self._upload["token"],
+            "filename": self._upload["filename"],
+            "sha256": sha,
+            "size": size,
+            "detected": {"type": detected.get("type"), "version": detected.get("version")},
+            "types": sorted(self.upload_types()),
+            "duplicate": f"{stored.get('type')} {stored.get('version')}" if stored else None,
+        }
+
+    def _by_sha(self, sha):
+        """Store entry with this SHA-256 (any file extension), else None."""
+        return next((m for m in self.firmware.values() if m.get("sha256") == sha), None)
+
+    def confirm_upload(self, token, fw_type, version, expected_sha=None, user="unknown"):
+        """Step 2: register the staged file with the confirmed type and version.
+
+        type: firmware ID of a known Gen2+ device; version: stable X.Y.Z; an optional
+        expected SHA-256 must match the file (otherwise refused, the upload stays
+        staged for a correction). A file or a type/version that is already stored is
+        refused. Returns the new store entry."""
+        staged = self._staged(token)
+        types = self.upload_types()
+        if not isinstance(fw_type, str) or fw_type not in types:
+            raise ValueError("Choose the firmware ID of a known Gen2+ device")
+        if not isinstance(version, str) or not STABLE_VERSION_RE.match(version.strip()):
+            raise ValueError("Version must be a stable release number such as 1.4.4")
+        version = version.strip()
+        checked = False
+        if expected_sha not in (None, ""):
+            expected = str(expected_sha).strip().lower()
+            if not re.fullmatch(r"[0-9a-f]{64}", expected):
+                raise ValueError("The SHA-256 must have 64 hexadecimal characters")
+            if not hmac.compare_digest(expected, staged["sha256"]):
+                raise ShellyError("The SHA-256 of the uploaded file does not match the entered value")
+            checked = True
+        name = f"{staged['sha256']}{staged['ext']}"
+        known = self._by_sha(staged["sha256"])
+        if known:
+            raise ShellyError(f"This file is already stored as {known.get('type')} {known.get('version')}")
+        if any(m.get("type") == fw_type and m.get("version") == version for m in self.firmware.values()):
+            raise ShellyError(f"{fw_type} {version} is already stored")
+        staged["path"].replace(FW_DIR / name)  # same directory: atomic
+        self._upload = None
+        self._register_firmware(
+            name, fw_type, types[fw_type], version, staged["sha256"], staged["size"],
+            source=SOURCE_UPLOAD, sha_checked=checked,
+        )
+        log.info("Firmware %s %s uploaded by %s (SHA-256 %s)", fw_type, version, user, staged["sha256"])
+        self.events.add(
+            "upload", type=fw_type, version=version, size=staged["size"], sha256=staged["sha256"],
+            sha_checked=checked, user=user,
+        )
+        self.save()
+        return {"name": name, **self.firmware[name]}
+
+    def cancel_upload(self, token):
+        """Discard the staged upload (Cancel in the confirmation form)."""
+        with contextlib.suppress(ShellyError):
+            self._staged(token)
+            self._drop_upload()
 
     # ------------------------------------------------------------ Home Assistant
 
@@ -1201,28 +1491,56 @@ class Manager:
             return False  # Gen1 updates disabled in the settings
         return dev.get("status") == STATUS_READY and hmac.compare_digest(str(dev.get("sha256")), sha)
 
-    async def install(self, device_id, sha, approved_by):
+    async def install(self, device_id, sha, approved_by, downgrade=False):
         """Install an approved update. True only if the target version is confirmed.
 
         Several installations run in parallel, at most max_parallel_installs at a
         time; others wait for a free slot. Nothing starts during a check, and each
-        device is in progress at most once. approved_by is only written to the log."""
+        device is in progress at most once. approved_by is only written to the log.
+
+        downgrade (rc7, Gen2+ only): install the stored older version with this
+        SHA-256 instead of the provided update. The confirmation flags are checked by
+        the web UI; the same install path (pre-check, download server, OTA events,
+        verification of the exact target version) is used."""
         if (
             self.checking
             or self.download_base_issue
             or device_id in self.installing
             or device_id in self.reloading
-            or not self.approval_matches(device_id, sha)
         ):
+            return False
+        if downgrade:
+            target = self.downgrade_match(device_id, sha) if device_id in self.devices else None
+            if target is None or self.downgrade_blocker(device_id):
+                return False
+        elif not self.approval_matches(device_id, sha):
             return False
         dev = self.devices[device_id]
         self.installing.add(device_id)  # no await before this: no double starts possible
+        if downgrade:
+            # The device now holds the older file: the download server serves it to
+            # this device only while the installation runs (status installing). The
+            # update provided before (if any) is provided again at the next check.
+            dev.update(
+                status=STATUS_INSTALLING,
+                file=target["name"],
+                sha256=target["sha256"],
+                size=target["size"],
+                pending_version=target["version"],
+                pending_build=dev.get("build"),
+                source_url=None,
+                downgrade=True,
+            )
+            self.save()
         dev["message"] = "Approved, waiting for a free installation slot"
-        log.info("Installation %s → %s approved by %s", dev["name"], dev["pending_version"], approved_by)
+        log.info(
+            "%s %s → %s approved by %s",
+            "Downgrade" if downgrade else "Installation", dev["name"], dev["pending_version"], approved_by,
+        )
         entry = None  # log context, set once the installation actually starts
         try:
             async with self.install_slots:
-                dev["message"] = "Installation started"
+                dev["message"] = "Downgrade started" if downgrade else "Installation started"
                 entry = {
                     "device": dev.get("name"),
                     "type": dev.get("type"),
@@ -1230,8 +1548,12 @@ class Manager:
                     "new": dev.get("pending_version"),
                     "user": approved_by,
                 }
+                if downgrade:
+                    entry["downgrade"] = True
                 self.events.add("install", event="started", **entry)
                 ok, diagnosis = await self._install(device_id, dev, sha)
+                if ok and downgrade:
+                    self._after_downgrade(dev)
                 event = "confirmed" if ok else "unconfirmed"
                 self.events.add("install", ok=ok, event=event, detail=diagnosis, **entry)
                 return ok
@@ -1242,8 +1564,26 @@ class Manager:
             return False
         finally:
             self.installing.discard(device_id)
-            self.cleanup_firmware()  # keeps files of installations still running
+            dev.pop("downgrade", None)
+            self.cleanup_firmware()  # housekeeping only, stored firmware stays
             self.save()
+
+    @staticmethod
+    def _after_downgrade(dev):
+        """After a confirmed downgrade: a newer version known from the last check is
+        shown as available again (it is provided at the next check)."""
+        offer = dev.get("offer_version")
+        try:
+            newer = bool(offer) and shelly.parse_version(offer) > shelly.parse_version(dev.get("version"))
+        except ShellyError:
+            newer = False
+        if newer:
+            dev.update(
+                status=STATUS_AVAILABLE,
+                message=f"Downgraded to {dev.get('version')} – version {offer} is provided again at the next check",
+            )
+        else:
+            dev["message"] = f"Downgraded to {dev.get('version')}"
 
     async def _install(self, device_id, dev, sha):
         """Actual installation: pre-check, update command, wait for the target version.
@@ -1302,7 +1642,8 @@ class Manager:
                         last_update=int(time.time()),
                         message="Updated",
                     )
-                    await self.notify(f"Shelly updated: {dev['name']}", info["version"], f"sfm_{device_id}")
+                    title = "Shelly downgraded" if dev.get("downgrade") else "Shelly updated"
+                    await self.notify(f"{title}: {dev['name']}", info["version"], f"sfm_{device_id}")
                     return True, None
                 # Neither old nor target: keep waiting (polling is unchanged), but the
                 # result can only be "unconfirmed" with this version as hint
@@ -1488,6 +1829,7 @@ class Manager:
             "settings_error",
             "error_level",
             "ota_progress",
+            "downgrade",
         )
         devices = []
         for key, dev in self.devices.items():

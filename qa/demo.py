@@ -1,8 +1,9 @@
 """Local demo server with fake data for UI tests (no network access).
 
-Usage: python demo.py <app_dir> <port> <scenario: idle|busy|legacy|missing>
+Usage: python demo.py <app_dir> <port> <scenario: idle|busy|legacy|missing|rc7>
 legacy: download_base_url is the former example value (not confirmed) and one device
-installs with device progress; missing: download_base_url not set (rc6).
+installs with device progress; missing: download_base_url not set (rc6); rc7: idle
+plus stored older versions (one of them uploaded) for downgrade and upload checks.
 Serves the UI app below /ui/ and a same-origin wrapper /wrap that embeds it in an
 iframe (like the HA Ingress panel)."""
 
@@ -53,7 +54,7 @@ for i, n in enumerate(names):
     gen = 1 if st == "skipped" else (2 + i % 2)
     m.devices[f"{i:032x}"] = {
         "name": n, "shelly_name": f"shelly-{i}", "gen": gen, "model": "SNSW-001X16EU", "type": "Plus1" if gen > 1 else "SHSW-1",
-        "version": "1.4.0", "offer_version": "1.5.0" if st in ("ready", "available") else None, "status": st,
+        "version": "1.4.0", "build": "20250101-000000/1.4.0-gdemo", "mac": f"AABBCC00{i:04X}", "offer_version": "1.5.0" if st in ("ready", "available") else None, "status": st,
         "message": "Device not reachable" if st == "error" else "", "origin": f"http://192.168.1.{10 + i}",
         "last_check": now - 3600, "last_success": now - (90000 if st == "error" else 3600),
         "last_update": now - 86400 * 3 if i % 3 == 0 else None, "ntp": "time.local", "eco": i % 2 == 0,
@@ -65,6 +66,14 @@ for i, n in enumerate(names):
         "actions": [False, True, None][i % 3], "schedules": [True, False, "unsupported", None][i % 4],
         "auth_enabled": [False, True, None][i % 3], "ignored": i in (3, 12),
     }
+if scenario == "rc7":  # older versions for the downgrade list, one uploaded (rc7)
+    for version, source in (("1.3.1", "download"), ("1.3.0", "download"), ("1.2.0", "upload")):
+        older = f"Plus1 {version} ".encode() * 6000
+        older_sha = hashlib.sha256(older).hexdigest()
+        (data / "fw" / f"{older_sha}.zip").write_bytes(older)
+        m._register_firmware(f"{older_sha}.zip", "Plus1", 2, version, older_sha, len(older), True, source=source,
+                             sha_checked=False)
+        m.firmware[f"{older_sha}.zip"]["downloaded"] = now - 86400 * (40 if source == "upload" else 20)
 m.last_scan = now - 3600
 m.scanned_version = "2.2.1"
 m.events.add("check", trigger="manual", devices=25, duration=41.2, result="ok", findings=[], user="demo")
