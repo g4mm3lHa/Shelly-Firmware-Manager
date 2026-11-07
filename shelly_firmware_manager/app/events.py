@@ -1,7 +1,7 @@
 """Activity log of the app (Logs tab), stored only in /data/events.json.
 
-Recorded: checks, firmware downloads, installations that were actually started,
-deleted firmware, setting changes on Shellys, per-device password changes (set /
+Recorded: checks, firmware downloads and uploads, installations and downgrades that
+were actually started, deleted firmware, setting changes on Shellys, per-device password changes (set /
 removed / test failed) and app option changes. Not recorded: approvals that never
 started, restarts, anything secret (passwords and hashes never reach this module;
 for secret options only the key is logged).
@@ -20,7 +20,7 @@ from shelly import clip
 
 log = logging.getLogger("sfm.events")
 
-KINDS = ("check", "download", "install", "delete", "setting", "password", "options")
+KINDS = ("check", "download", "upload", "install", "delete", "setting", "password", "options")
 SEVERITIES = ("success", "warning", "error")  # ordered from lowest to highest
 
 
