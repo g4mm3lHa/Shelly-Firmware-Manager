@@ -94,6 +94,25 @@ async def test_gen2_identity_from_shelly_endpoint(device_api):
     assert [c[0] for c in calls] == ["/shelly"] and info["auth_enabled"] is True and info["type"] == "Plus1"
 
 
+@pytest.mark.parametrize(
+    "answer",
+    [
+        {"gen": 2, "id": "x", "ver": "1.4.4", "fw_id": "b"},  # Gen2+ without "app"
+        {"type": "SHSW-1", "mac": "aa"},  # Gen1 without "fw"
+        {"gen": "two"},  # no number
+        {"gen": {"x": 1}},  # wrong type
+    ],
+)
+async def test_incomplete_identity_is_a_readable_device_error(device_api, answer):
+    """3.1.0: a missing or wrongly typed field becomes a ShellyError with a readable
+    message instead of a bare KeyError/ValueError text such as "'fw'"."""
+    calls, answers = device_api
+    answers["/shelly"] = answer
+    answers["/rpc/Shelly.GetDeviceInfo"] = answer
+    with pytest.raises(ShellyError, match="device information|Invalid value"):
+        await shelly.device_info(None, "http://1.2.3.4")
+
+
 async def test_gen1_password_errors_never_contain_the_url(monkeypatch):
     """Network errors of /settings/login are re-raised without URL/query."""
     import aiohttp

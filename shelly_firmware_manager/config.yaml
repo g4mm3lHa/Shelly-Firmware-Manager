@@ -10,6 +10,9 @@ arch:
 startup: application
 boot: auto
 init: true
+# Supervisor watchdog: restarts the app if the download server stops answering (e.g.
+# the process ended with an error). TCP check only – nothing is requested or logged.
+watchdog: "tcp://[HOST]:[PORT:8098]"
 # Minimum Home Assistant version
 homeassistant: "2026.10.0"
 

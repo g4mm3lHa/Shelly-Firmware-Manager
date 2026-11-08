@@ -59,3 +59,18 @@ async def test_no_cache_and_clock_jump_fetch(store):
     stored(store, 2, ["1.5.0"], age=-3600)  # clock went back
     await store.refresh(None, {2}, None, {2: {"1.5.0"}})
     assert len(store.calls) == 2
+
+
+async def test_page_is_parsed_in_a_worker_thread(store, monkeypatch):
+    """3.1.0: the (up to 4 MiB) page is parsed outside the event loop thread."""
+    import threading
+
+    original, threads = changelog.parse, []
+
+    def parse(gen, html):
+        threads.append(threading.current_thread())
+        return original(gen, html)
+
+    monkeypatch.setattr(changelog, "parse", parse)
+    await store.refresh(None, {2}, None, {2: {"1.5.0"}})
+    assert threads and threads[0] is not threading.main_thread()

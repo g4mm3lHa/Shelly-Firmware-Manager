@@ -1758,7 +1758,10 @@ class Manager:
     # ------------------------------------------------------------ UI
 
     def public_state(self):
-        """Only fields the UI needs (no internal addresses/builds)."""
+        """Only fields the UI needs: no credentials, builds or download diagnosis.
+
+        The device's private IP address and its web interface URL are included on
+        purpose (IP column, link to the device); both come from the validated origin."""
         fields = (
             "name",
             "shelly_name",

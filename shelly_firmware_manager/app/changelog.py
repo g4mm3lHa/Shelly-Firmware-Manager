@@ -14,6 +14,7 @@ The HTML is parsed server-side with the standard library parser into plain text
 /data/changelog.json. The UI only ever receives plain strings.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -254,7 +255,8 @@ class Changelogs:
                 continue
             try:
                 html = await fetch_cloud_text(session, SOURCES[gen], pins, MAX_PAGE)
-                versions = parse(gen, html)
+                # Worker thread: parsing the ~1.2 MB Gen1 page must not block the event loop
+                versions = await asyncio.to_thread(parse, gen, html)
                 if not versions:
                     raise ShellyError("no versions found – page layout changed?")
                 self.data[str(gen)] = {"fetched": int(time.time()), "versions": versions}

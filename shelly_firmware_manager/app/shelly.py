@@ -332,15 +332,35 @@ async def device_info(session, origin, auth_for=None, on_identity=None):
     itself (Gen2+ auth_en, Gen1 auth; None if not reported) – never derived from
     stored credentials."""
     info = await _device_json(session, origin, "/shelly")
-    gen = int(info.get("gen") or 1)
+    gen = _int_field(info, "gen", 1)
     if on_identity:
         on_identity(gen, clip(info.get("id"), 64) if gen >= 2 else None)
     protected = info.get("auth_en" if gen >= 2 else "auth")
     protected = protected if isinstance(protected, bool) else None
+    if gen >= 2 and not all(info.get(k) for k in ("app", "ver", "fw_id")):
+        auth = auth_for(gen) if auth_for else None
+        info = await _device_json(session, origin, "/rpc/Shelly.GetDeviceInfo", auth)
+    try:
+        return _identity(info, gen, protected)
+    except (KeyError, TypeError, ValueError):  # a field is missing or has the wrong type
+        raise ShellyError("Incomplete device information from the Shelly") from None
+
+
+def _int_field(data, key, default):
+    """Integer field of a device or manufacturer answer; ShellyError if it is no number."""
+    value = data.get(key) or default
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ShellyError(f"Invalid value for {key!r} in the answer")
+    try:
+        return int(value)
+    except ValueError:
+        raise ShellyError(f"Invalid value for {key!r} in the answer") from None
+
+
+def _identity(info, gen, protected):
+    """Uniform identity fields from a /shelly or Shelly.GetDeviceInfo answer
+    (raises KeyError/TypeError/ValueError if a required field is missing)."""
     if gen >= 2:
-        if not all(info.get(k) for k in ("app", "ver", "fw_id")):
-            auth = auth_for(gen) if auth_for else None
-            info = await _device_json(session, origin, "/rpc/Shelly.GetDeviceInfo", auth)
         return {
             "auth_enabled": protected,
             "gen": int(info["gen"]),
@@ -841,7 +861,7 @@ async def fetch_offer(session, info, gen1_allowed, pins=None):
         stable = meta.get("stable") if isinstance(meta, dict) else None
         if not isinstance(stable, dict) or not stable.get("url"):
             return None
-        if int(stable.get("nsteps") or 1) > 1:
+        if _int_field(stable, "nsteps", 1) > 1:
             raise ShellyError("Multi-step update offered – please check manually as described by Shelly")
         return {"version": clip(stable.get("version"), 64), "url": str(stable["url"])}
 

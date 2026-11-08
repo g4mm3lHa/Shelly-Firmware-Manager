@@ -1,0 +1,22 @@
+# Development tool configuration only – not part of the image and no package metadata.
+# Read by tools/dev/check.sh and by editors/IDE extensions (ruff, pytest), so every
+# tool applies the same rules.
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"  # Python of the image (frozen: 3.12.16)
+
+[tool.ruff.lint]
+# App code (shelly_firmware_manager/app): style, pyflakes, bugbear, security (bandit),
+# async pitfalls, pyupgrade, simplifications, blind except
+select = ["E", "F", "W", "B", "S", "ASYNC", "UP", "SIM", "BLE"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests, tools and QA scripts: pyflakes and bugbear only
+"{tests,tools,qa}/**" = ["E", "W", "S", "ASYNC", "UP", "SIM", "BLE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# pytest-asyncio (or tools/dev/asyncio_shim.py offline): one event loop per test
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

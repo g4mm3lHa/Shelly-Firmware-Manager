@@ -22,8 +22,8 @@ if [ "$MODE" = "build" ]; then
   step "build UI"; python3 tools/build_ui.py; MODE=tests
 fi
 step "ruff"
-ruff check --select E,F,W,B,S,ASYNC,UP,SIM,BLE --line-length 120 shelly_firmware_manager/app
-ruff check --select F,B --line-length 120 tests tools qa
+# Rules per directory: pyproject.toml (app: full set, tests/tools/qa: F and B)
+ruff check shelly_firmware_manager/app tests tools qa
 step "build check"; python3 tools/build_ui.py --check
 step "version"
 python3 - <<'PY'
@@ -34,7 +34,7 @@ assert cfg == code, f"config.yaml {cfg} != main.py {code}"
 print(f"{cfg} (config.yaml = main.py)")
 PY
 step "pytest"
-"$DEV/run.sh" python3 -m pytest -c tests/pytest.ini $PYTEST_PLUGIN tests -q -p no:cacheprovider
+"$DEV/run.sh" python3 -m pytest $PYTEST_PLUGIN tests -q -p no:cacheprovider
 case "$MODE" in
   ui) step "UI quick"; "$DEV/run.sh" python3 qa/run_ui.py quick "${2:-}" ;;
   full) step "UI full"; "$DEV/run.sh" python3 qa/run_ui.py full "${2:-}" ;;

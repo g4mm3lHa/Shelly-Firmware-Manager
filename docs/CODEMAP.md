@@ -25,7 +25,7 @@ both servers in parallel (cancels checks/installations, saves the state), exit 0
 | `app_options.py` | option validation, merge, log diff | `with_defaults`, `merge`, `change_list`, `LEGACY_DOWNLOAD_BASE` |
 | `events.py` | activity log (JSON Lines), severity | `EventLog.add/list`, `worst`, `user_from`, `KINDS` |
 | `credentials.py` | per-device passwords (0600; Gen2 HA1 only) | `Credentials.auth_for/candidate/store/remove` |
-| `changelog.py` | changelog pages → plain text, cache | `Changelogs.refresh/between`, `parse` |
+| `changelog.py` | changelog pages → plain text (parsed in a worker thread), cache | `Changelogs.refresh/between`, `parse` |
 | `tls.py` | certificate pinning for `*.shelly.cloud` | `CertificatePins.ssl_for`, `explain_tls_error` |
 
 ### `Manager` by area
@@ -124,14 +124,14 @@ delete), logs, settings (`OPTION_FIELDS`). Build: `tools/build_ui.py`; never edi
 | `test_check.py` | full/single check, reservation, progress, single flight, cancellation, ignored, Reload Device Info, log severity, manufacturer server access |
 | `test_install.py` | target version verification, OTA WebSocket channel, HTTP fallback, download diagnosis |
 | `test_firmware_store.py` | store housekeeping, delete, downgrade, upload |
-| `test_device_settings.py` | settings/capabilities, AP/BLE, password workflow, no secrets |
+| `test_device_settings.py` | device identity (incomplete answers), settings/capabilities, AP/BLE, password workflow, no secrets |
 | `test_schedule.py` | schedule, DST, catch-up, deferral |
 | `test_options.py` | option bounds, unknown keys, `download_base_url` missing/unconfirmed |
 | `test_state.py` | state.json, activity log storage, credentials, UI settings |
 | `test_web.py` | HTTP endpoints, CSRF, Ingress, 409s, upload/downgrade/delete over HTTP |
 | `test_security.py` | CSP and headers, 32 KB limit, download server refusals |
 | `test_lifecycle.py` | SIGTERM, parallel server stop |
-| `test_changelog.py` | changelog cache |
+| `test_changelog.py` | changelog cache, parsing off the event loop |
 | `test_build.py` | built UI files match `ui-src` |
 
 `conftest.py`: `net` (FakeNet: registry, devices A/B/C, offers, downloads; all `/data`
@@ -147,4 +147,4 @@ paths in tmp), `mgr`, `client` (UI test client with CSRF token).
 | `mobile_capture.py` | 8711 idle | screenshots + overflow, full only |
 
 `tools/dev/check.sh [tests|ui|full|build]` runs everything in order: ruff → build
-check → version match → pytest → UI.
+check → version match → pytest → UI. Rules of ruff and pytest: `pyproject.toml`.

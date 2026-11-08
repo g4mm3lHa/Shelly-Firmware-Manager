@@ -359,3 +359,13 @@ async def test_cloud_json_and_text_share_redirect_and_limit_checks(monkeypatch):
         await shelly.fetch_cloud_text(None, "https://shelly-api-docs.shelly.cloud/x", None, 1024)
     with pytest.raises(shelly.ShellyError, match="larger"):
         await shelly.fetch_cloud_text(None, "https://shelly-api-docs.shelly.cloud/big", None, 1024)
+
+
+async def test_offer_with_invalid_step_count_is_a_readable_error(monkeypatch):
+    """3.1.0: a non-numeric "nsteps" in the manufacturer's offer is reported as
+    ShellyError, not as "invalid literal for int()"."""
+    fake_cloud(monkeypatch, {
+        "https://updates.shelly.cloud/update/Plus1": (200, {}, b'{"stable": {"url": "u", "version": "1.5.0", "nsteps": "x"}}'),
+    })
+    with pytest.raises(ShellyError, match="nsteps"):
+        await shelly.fetch_offer(None, {"gen": 2, "type": "Plus1"}, frozenset())
