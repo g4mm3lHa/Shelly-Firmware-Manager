@@ -9,3 +9,6 @@ __pycache__/
 # Ad-hoc QA output (default output folder of the qa scripts; test results go into
 # the RC test report, curated screenshots are kept in qa/screenshots/)
 shots/
+# Stray output of a qa run in the repository root (qa/run_ui.py uses a temp folder)
+/*.png
+/results.json

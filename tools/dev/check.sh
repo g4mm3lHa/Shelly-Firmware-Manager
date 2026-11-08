@@ -36,7 +36,7 @@ PY
 step "pytest"
 "$DEV/run.sh" python3 -m pytest -c tests/pytest.ini $PYTEST_PLUGIN tests -q -p no:cacheprovider
 case "$MODE" in
-  ui) step "UI quick"; "$DEV/run.sh" python3 qa/run_ui.py quick "${2:-}" ;;
-  full) step "UI full"; "$DEV/run.sh" python3 qa/run_ui.py full "${2:-}" ;;
+  ui) step "UI quick"; "$DEV/run.sh" python3 qa/run_ui.py quick ${2:+"$2"} ;;
+  full) step "UI full"; "$DEV/run.sh" python3 qa/run_ui.py full ${2:+"$2"} ;;
 esac
 step "all checks passed"
