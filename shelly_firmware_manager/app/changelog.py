@@ -43,7 +43,7 @@ SPACE_RE = re.compile(r"\s+")
 
 def _clean(text):
     """Collapse whitespace and drop zero-width characters of anchor links."""
-    return SPACE_RE.sub(" ", text.replace("​", "")).strip()
+    return SPACE_RE.sub(" ", text.replace("\u200b", "")).strip()
 
 
 def _entry(category, text, models=()):

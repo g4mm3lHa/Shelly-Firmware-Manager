@@ -1,5 +1,32 @@
 # Changelog
 
+## 3.0.1
+
+Maintenance release: clean-up based on 3.0.0, no new functions.
+
+- Activity log: stored as JSON Lines (one entry per line). A new entry is appended
+  instead of rewriting the whole log (up to 3000 entries); the file is rewritten only
+  after 200 dropped entries. The 3.0.0 log is converted once at the first start;
+  entries stay unchanged. A line cut off by a power loss is skipped.
+- Firmware downloads and uploads write to disk in a worker thread, so a slow disk
+  (e.g. SD card) no longer delays the UI and other requests during a transfer.
+- Manufacturer server access: JSON and changelog pages share one code path for
+  redirects (only within shelly.cloud, HTTPS), certificate pinning and size limits –
+  behaviour unchanged.
+- Removed the conversion code for versions before 3.0 (2.x status names and table
+  settings, the one-time cleanup of the former shared password in the stored options).
+  Upgrades from 2.x or 1.x go through 3.0.0 first (see README).
+- Removed unused code: a duplicate upload constant and the style rules of the former
+  AOP column. Code style findings fixed (long lines, an invisible character literal).
+- Development (not part of the image): tests grouped by area instead of by release
+  candidate, the former workspace smoke test is part of the test suite
+  (`tests/test_security.py`), test runtime about 3 s instead of 5 s; workspace helpers
+  and one check script in `tools/dev/`; UI checks: quick matrix per change, full matrix
+  only for the final gate, feature checks in one file (`qa/ui_features.py`), one runner
+  that starts and stops the demo servers (`qa/run_ui.py`), browser found automatically;
+  obsolete scripts (`qa/resources.py`, `qa/cache_test.py`) and the finished rc6/rc7
+  backlogs removed; `docs/CODEMAP.md` added.
+
 ## 3.0.0
 
 Released 2026-11-07 (final release after rc1–rc7).

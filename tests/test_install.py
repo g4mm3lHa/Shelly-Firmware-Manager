@@ -1,121 +1,95 @@
-"""rc6: download_base_url without default (R1), Gen2+ OTA events over the device
-WebSocket (R3), download diagnosis per device (R4), parallel stop (R5), GET-only
-download counting (R6) and shared tasks of a cancelled check (R7).
+"""Installation: target version verification, Gen2+ OTA WebSocket, HTTP fallback,
+download diagnosis per device.
 
-All device traffic goes to local test servers on 127.0.0.1 or to fakes."""
+All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test servers."""
 
-import asyncio
 import hashlib
 import json
-import re
 import time
 
-import app_options
 import download_server
-import main
 import manager
 import pytest
 import shelly
-import web_ui
 from aiohttp import WSMsgType, web
 from aiohttp.test_utils import TestClient, TestServer
-from conftest import OPTIONS, A, B
-from test_rc5 import app_env, _send_sigterm  # noqa: F401 – fixture reused
 
-LEGACY = app_options.LEGACY_DOWNLOAD_BASE
+from conftest import A, B
+
+
+def test_install_timing_constants():
+    """Polling unchanged (30 s, every 10 s, max. 5 min); early abort after 3 min."""
+    assert (manager.INSTALL_FIRST_CHECK_S, manager.INSTALL_POLL_S) == (30, 10)
+    assert (manager.INSTALL_NO_DOWNLOAD_S, manager.INSTALL_WAIT_S) == (180, 300)
+
+
+@pytest.fixture
+def run_install(mgr, monkeypatch):
+    """Run Manager._install against a device answering with the given versions."""
+    monkeypatch.setattr(manager, "INSTALL_FIRST_CHECK_S", 0)
+    monkeypatch.setattr(manager, "INSTALL_POLL_S", 0.01)
+    monkeypatch.setattr(manager, "INSTALL_NO_DOWNLOAD_S", 0.08)
+    monkeypatch.setattr(manager, "INSTALL_WAIT_S", 0.3)
+
+    async def run(old, target, answers, gen=2, served=False):
+        dev = {"name": "Kitchen", "gen": gen, "origin": "http://192.168.1.10", "mac": "AA", "file": "x.zip",
+               "version": old, "pending_version": target, "pending_build": "b-old"}
+        mgr.devices[A] = dev
+        calls = []
+
+        async def device_info(*_args, **_kwargs):
+            if not calls:  # pre-check before the update command
+                calls.append("pre")
+                return {"mac": "AA", "build": "b-old", "version": old}
+            calls.append("poll")
+            if served:
+                mgr.downloads["x.zip"] = {"served": {"192.168.1.10": 1}, "rejected": set()}
+            version = answers[min(len(calls) - 2, len(answers) - 1)]
+            return {"mac": "AA", "build": "b-new", "version": version}
+
+        async def trigger(*_args):
+            return None
+
+        monkeypatch.setattr(shelly, "file_sha256", lambda *_a: "s")
+        monkeypatch.setattr(shelly, "device_info", device_info)
+        monkeypatch.setattr(shelly, "trigger_update", trigger)
+        ok, diagnosis = await mgr._install(A, dev, "s")
+        return ok, diagnosis, dev, calls.count("poll")
+
+    return run
+
+
+async def test_exact_target_version_is_success(run_install):
+    ok, diagnosis, dev, _ = await run_install("1.4.0", "1.5.0", ["1.4.0", "1.5.0"], served=True)
+    assert ok and diagnosis is None and dev["status"] == manager.STATUS_CURRENT
+
+
+async def test_gen1_compares_the_version_number(run_install):
+    ok, *_ = await run_install("20230101-000000/v1.13.0-gaaaa", "20230913-112003/v1.14.0-gcb84623",
+                               ["20230913-112003/v1.14.0-gcb84623"], gen=1, served=True)
+    assert ok
+
+
+async def test_newer_version_is_unconfirmed_with_hint(run_install):
+    """A newer version than the target is no longer reported as success."""
+    ok, diagnosis, dev, polls = await run_install("1.4.0", "1.5.0", ["1.6.0"])
+    assert not ok and dev["status"] == manager.STATUS_UNCLEAR
+    assert "1.6.0" in diagnosis and "1.5.0" in diagnosis
+    assert polls > 10  # no early abort: waits until the upper limit
+
+
+async def test_old_version_without_download_aborts_after_no_download_limit(run_install):
+    ok, diagnosis, dev, polls = await run_install("1.4.0", "1.5.0", ["1.4.0"])
+    assert not ok and "never requested" in diagnosis
+    assert 3 <= polls < 15  # stopped at INSTALL_NO_DOWNLOAD_S, well before INSTALL_WAIT_S
+
+
+async def test_old_version_after_download_keeps_waiting(run_install):
+    ok, diagnosis, _dev, polls = await run_install("1.4.0", "1.5.0", ["1.4.0"], served=True)
+    assert not ok and "downloaded the firmware" in diagnosis and polls > 10
+
+
 REAL_CHANNEL = shelly.OtaChannel  # conftest replaces it with a fake per test
-
-
-def make_manager(net, **options):
-    """Manager with custom options (net fixture patches files and network)."""
-    m = manager.Manager({**OPTIONS, **options}, session=None, token="t")
-    m.notify = lambda *_a: asyncio.sleep(0)
-    return m
-
-
-def without_url():
-    """Options as delivered by the Supervisor when download_base_url is unset."""
-    return {k: v for k, v in OPTIONS.items() if k != "download_base_url"}
-
-
-# ---------------------------------------------------------------- R1
-
-
-async def test_missing_url_blocks_installations(net):
-    m = manager.Manager(without_url(), session=None, token="t")
-    assert m.download_base is None and m.download_base_issue == "missing"
-    m.devices[A] = {"status": manager.STATUS_READY, "sha256": "a" * 64, "gen": 2}
-    assert await m.install(A, "a" * 64, "u") is False
-    state = m.public_state()["download_base"]
-    assert state["issue"] == "missing" and "Settings tab" in state["message"]
-
-
-async def test_legacy_value_needs_confirmation_which_persists(net):
-    m = make_manager(net, download_base_url=LEGACY)
-    assert m.download_base_issue == "unconfirmed"
-    with pytest.raises(manager.ShellyError):
-        m.confirm_download_base("http://192.168.178.51:8098", user="u")  # stale view
-    m.confirm_download_base(LEGACY, user="alice")
-    assert m.download_base_issue is None
-    entry = m.events.entries[-1]
-    assert entry["kind"] == "options" and entry["confirmed"] and entry["user"] == "alice"
-    m2 = make_manager(net, download_base_url=LEGACY + "/")  # restart, trailing slash
-    assert m2.download_base_issue is None
-    m3 = make_manager(net, download_base_url="http://192.168.1.5:8098")
-    assert m3.download_base_issue is None  # any other address needs no confirmation
-
-
-async def test_changing_the_url_drops_the_confirmation(net):
-    m = make_manager(net, download_base_url=LEGACY)
-    m.confirm_download_base(LEGACY)
-
-    async def post(*_args):
-        return None
-
-    m._supervisor_post = post
-    assert await m.save_options({"download_base_url": "http://192.168.1.5:8098"}) == ["download_base_url"]
-    assert m.download_base_confirmed is None
-    assert json.loads(manager.STATE_FILE.read_text())["download_base_confirmed"] is None
-
-
-def test_empty_url_unsets_the_option():
-    new, changed = app_options.merge({**OPTIONS}, {"download_base_url": ""})
-    assert changed == ["download_base_url"] and "download_base_url" not in new
-    new, changed = app_options.merge(without_url(), {"download_base_url": ""})
-    assert changed == [] and "download_base_url" not in new
-    with pytest.raises(ValueError):
-        app_options.merge(OPTIONS, {"check_time": ""})  # only optional options can be emptied
-
-
-async def web_client(m):
-    """Test client of the UI app with the CSRF token."""
-    client = TestClient(TestServer(web_ui.build_ui_app(m, ingress_ip="127.0.0.1")))
-    await client.start_server()
-    page = await (await client.get("/")).text()
-    client.csrf = re.search(r'name="csrf" content="([0-9a-f]{64})"', page).group(1)
-    return client
-
-
-async def test_web_install_refused_and_confirm_endpoint(net):
-    m = make_manager(net, download_base_url=LEGACY)
-    m.devices[A] = {"status": manager.STATUS_READY, "sha256": "a" * 64, "gen": 2, "name": "K"}
-    client = await web_client(m)
-    try:
-        hdr = {"X-CSRF-Token": client.csrf}
-        r = await client.post(f"/api/devices/{A}/install", json={"sha256": "a" * 64, "confirm": True}, headers=hdr)
-        assert r.status == 409 and "former example value" in await r.text()
-        url = "/api/settings/download-base/confirm"
-        assert (await client.post(url, json={"url": LEGACY})).status == 403  # CSRF
-        assert (await client.post(url, json={"url": "http://x:1"}, headers=hdr)).status == 409
-        r = await client.post(url, json={"url": LEGACY}, headers=hdr)
-        assert r.status == 200 and m.download_base_issue is None
-        state = await (await client.get("/api/state")).json()
-        assert state["download_base"] == {"url": LEGACY, "issue": None, "message": None}
-    finally:
-        await client.close()
-
-
-# ---------------------------------------------------------------- R3: device WebSocket
 
 
 class FakeShelly:
@@ -299,9 +273,6 @@ async def test_no_websocket_falls_back_to_http(mgr, fast_install, monkeypatch):
     assert fast_install["http"] == 2
 
 
-# ---------------------------------------------------------------- R4 / R6
-
-
 async def test_download_diagnosis_per_device(mgr):
     for key, ip in ((A, "192.168.1.10"), (B, "192.168.1.11")):
         mgr.devices[key] = {"status": manager.STATUS_READY, "file": "x.zip", "origin": f"http://{ip}"}
@@ -327,51 +298,3 @@ async def test_only_get_counts_as_served(mgr, monkeypatch):
         r = await client.get(f"/{name}")
         assert r.status == 200 and await r.read() == content
     assert mgr.downloads[name]["served"] == {"127.0.0.1": 1}
-
-
-# ---------------------------------------------------------------- R5
-
-
-async def test_servers_are_stopped_in_parallel(app_env, monkeypatch):  # noqa: F811
-    from aiohttp import web as aioweb
-
-    running, overlap = 0, []
-    original = aioweb.AppRunner.cleanup
-
-    async def slow_cleanup(self):
-        nonlocal running
-        running += 1
-        overlap.append(running)
-        await asyncio.sleep(0.2)
-        running -= 1
-        await original(self)
-
-    monkeypatch.setattr(aioweb.AppRunner, "cleanup", slow_cleanup)
-    task = asyncio.create_task(main.main())
-    await asyncio.sleep(0.2)
-    await _send_sigterm()
-    assert await asyncio.wait_for(task, 5) is None
-    assert max(overlap) == 2  # both servers stopped at the same time
-
-
-# ---------------------------------------------------------------- R7
-
-
-async def test_cancelled_check_cancels_shared_offer_task(mgr, net, monkeypatch):
-    """Two devices of one type wait for one shared offer task; cancelling the check
-    leaves no task running (rc4 result confirmed for the offer as well)."""
-    gate = asyncio.Event()
-
-    async def slow_offer(*_args, **_kwargs):
-        await gate.wait()
-
-    monkeypatch.setattr(shelly, "fetch_offer", slow_offer)
-    task = asyncio.create_task(mgr.scan())
-    await asyncio.sleep(0.05)
-    current = asyncio.current_task()
-    pending = [t for t in asyncio.all_tasks() if t is not current and t is not task and not t.done()]
-    assert pending  # device tasks and the shared offer task are running
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    assert [t for t in asyncio.all_tasks() if t is not current and not t.done()] == []

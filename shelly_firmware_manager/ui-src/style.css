@@ -119,7 +119,7 @@ td.c-menu{text-align:right}
   /* Fixed column widths: the columns of both device cards line up */
   table{table-layout:fixed}
   .c-select{width:40px}.c-ip{width:150px}.c-gen{width:56px}.c-firmware{width:170px}.c-status{width:140px}
-  .c-aop{width:80px}.c-action{width:164px}.c-last_update{width:150px}.c-ntp{width:150px}
+  .c-action{width:164px}.c-last_update{width:150px}.c-ntp{width:150px}
   th.c-menu,td.c-menu{width:52px}
   td.c-device .name,td.c-device .sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 }
@@ -295,7 +295,7 @@ dialog table th,dialog table td{padding:6px 8px}
   td.c-ip{grid-column:3/5;grid-row:2;text-align:right}
   td.c-details{grid-column:2/5;grid-row:3}
   td.c-firmware .sub{display:none}   /* firmware ID is listed in the details */
-  td.c-aop,td.c-gen,td.c-action,td.c-last_update,td.c-ntp{display:none}
+  td.c-gen,td.c-action,td.c-last_update,td.c-ntp{display:none}
   td.c-details summary{cursor:pointer;color:var(--primary-color);padding:12px 0;min-height:44px}
   .detail-actions{margin-bottom:8px}   /* labeled buttons side by side, wrapping */
   td.c-status .status-cell{justify-content:flex-end}

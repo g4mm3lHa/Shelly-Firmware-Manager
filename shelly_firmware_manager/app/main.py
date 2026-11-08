@@ -20,7 +20,7 @@ from manager import Manager
 from tls import CertificatePins
 from web_ui import build_ui_app
 
-VERSION = "3.0.0"  # must match config.yaml
+VERSION = "3.0.1"  # must match config.yaml
 
 OPTIONS_FILE = Path("/data/options.json")
 UI_PORT = 8099  # Ingress (internal)
@@ -74,9 +74,6 @@ async def main():
 
     async with aiohttp.ClientSession(headers={"User-Agent": USER_AGENT}, trust_env=False) as session:
         mgr = Manager(options, session, token, pins, version=VERSION)
-        # One-time v3 cleanup of the Supervisor's option store (removed shared
-        # password) – before the UI can start any device check
-        await mgr.migrate_options()
         runners = [
             await start_site(build_ui_app(mgr), UI_PORT),
             await start_site(build_download_app(mgr), DOWNLOAD_PORT),

@@ -1,11 +1,6 @@
-"""rc5: SIGTERM from the Supervisor stops the app cleanly (exit code 0).
+"""App lifecycle: SIGTERM stops cleanly (exit code 0), parallel server stop.
 
-main.main() runs with the options file, all /data paths (conftest) and both ports
-redirected; no network is used (registry and devices come from FakeNet). The tests
-send a real SIGTERM to the test process, which the app's handler must catch – a
-guard fails the test first if no handler is installed, so pytest itself is never
-terminated.
-"""
+All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test servers."""
 
 import asyncio
 import json
@@ -15,6 +10,7 @@ import signal
 import main
 import manager
 import pytest
+
 from conftest import OPTIONS
 
 
@@ -104,3 +100,25 @@ async def test_scheduler_error_is_still_reported(app_env, monkeypatch):
     monkeypatch.setattr(main, "run_schedule", broken)
     with pytest.raises(RuntimeError, match="scheduler broke"):
         await asyncio.wait_for(main.main(), 5)
+
+
+async def test_servers_are_stopped_in_parallel(app_env, monkeypatch):  # noqa: F811
+    from aiohttp import web as aioweb
+
+    running, overlap = 0, []
+    original = aioweb.AppRunner.cleanup
+
+    async def slow_cleanup(self):
+        nonlocal running
+        running += 1
+        overlap.append(running)
+        await asyncio.sleep(0.2)
+        running -= 1
+        await original(self)
+
+    monkeypatch.setattr(aioweb.AppRunner, "cleanup", slow_cleanup)
+    task = asyncio.create_task(main.main())
+    await asyncio.sleep(0.2)
+    await _send_sigterm()
+    assert await asyncio.wait_for(task, 5) is None
+    assert max(overlap) == 2  # both servers stopped at the same time

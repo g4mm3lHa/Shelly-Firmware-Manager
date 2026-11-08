@@ -26,8 +26,8 @@ DEFAULTS = {
     "log_retention_days": 90,
     "log_entry_limit": 1000,
 }
-# All option keys of config.yaml. Anything else in options.json (e.g. the removed
-# "shelly_password" or "check_interval_hours" of v2) is ignored everywhere.
+# All option keys of config.yaml. Anything else in options.json is ignored everywhere,
+# so an unknown (e.g. removed) key can never reach the UI, the log or a save request.
 KEYS = frozenset({*INT_RANGES, *BOOLS, *DEFAULTS, "download_base_url", "gen1_allowed_types", "pinned_certificates"})
 # Former default/example of download_base_url (up to rc5). Since rc6 the option is
 # optional without default; this value only counts after an explicit confirmation.

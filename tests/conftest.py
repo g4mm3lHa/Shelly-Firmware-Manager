@@ -4,6 +4,7 @@ No test opens a connection: the HA registry, the Shellys and the Shelly cloud ar
 replaced by in-memory fakes (FakeNet)."""
 
 import asyncio
+import re
 import sys
 from pathlib import Path
 
@@ -14,6 +15,8 @@ sys.path.insert(0, str(APP))
 
 import manager
 import shelly
+import web_ui
+from aiohttp.test_utils import TestClient, TestServer
 
 OPTIONS = {
     "check_interval_days": 7,
@@ -151,7 +154,7 @@ def net(monkeypatch, tmp_path):
 @pytest.fixture
 async def mgr(net):
     """Manager with fake registry; notifications are recorded instead of sent."""
-    m = manager.Manager(dict(OPTIONS), session=None, token="t", version="3.0.0")
+    m = manager.Manager(dict(OPTIONS), session=None, token="t", version="3.0.1")
 
     async def registry():
         await asyncio.sleep(0)
@@ -165,3 +168,14 @@ async def mgr(net):
     m.notify = notify
     m.changelogs.refresh = net.refresh
     return m
+
+
+@pytest.fixture
+async def client(mgr):
+    """Test client of the UI app with the CSRF token of the delivered page; the test
+    server connects from 127.0.0.1, which plays the Ingress proxy here."""
+    app = web_ui.build_ui_app(mgr, ingress_ip="127.0.0.1")
+    async with TestClient(TestServer(app)) as c:
+        page = await (await c.get("/")).text()
+        c.csrf = re.search(r'name="csrf" content="([0-9a-f]{64})"', page).group(1)
+        yield c

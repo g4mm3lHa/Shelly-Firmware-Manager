@@ -1,48 +1,17 @@
-"""rc7: no automatic firmware deletion, manual delete with second confirmation,
-downgrade of Gen2+ devices to stored older versions, manual firmware upload.
+"""Firmware store: no automatic deletion, manual delete, downgrade of Gen2+ devices,
+manual upload (stage + confirm).
 
-All device traffic goes to fakes (conftest.FakeNet); no real device action."""
+All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test servers."""
 
-import asyncio
 import hashlib
-import io
-import json
-import re
-import zipfile
 
 import manager
 import pytest
 import shelly
-import web_ui
-from aiohttp.test_utils import TestClient, TestServer
+from shelly import ShellyError
+
 from conftest import OPTIONS, A, B
-
-
-def store(mgr, fw_type, version, gen=2, source=manager.SOURCE_DOWNLOAD, content=None):
-    """Put a firmware file into the store (as a check or an upload would)."""
-    data = content or (f"{fw_type}-{version}-".encode() * 2000)
-    sha = hashlib.sha256(data).hexdigest()
-    name = f"{sha}.zip"
-    (manager.FW_DIR / name).write_bytes(data)
-    mgr._register_firmware(name, fw_type, gen, version, sha, len(data), True, source=source)
-    return name, sha
-
-
-def firmware_zip(manifest=None, size=5000):
-    """A small ZIP as a Gen2+ firmware file, optionally with manifest.json."""
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as archive:
-        if manifest is not None:
-            archive.writestr("manifest.json", json.dumps(manifest))
-        archive.writestr("app.bin", b"\x00" * size)
-    return buf.getvalue()
-
-
-async def chunks(data, size=4096):
-    """Async iterator over data, like a streamed request body."""
-    for i in range(0, len(data), size):
-        await asyncio.sleep(0)
-        yield data[i : i + size]
+from helpers import chunks, firmware_zip, store
 
 
 @pytest.fixture
@@ -52,9 +21,6 @@ def fast_install(monkeypatch):
     monkeypatch.setattr(manager, "INSTALL_POLL_S", 0.01)
     monkeypatch.setattr(manager, "INSTALL_NO_DOWNLOAD_S", 0.1)
     monkeypatch.setattr(manager, "INSTALL_WAIT_S", 0.3)
-
-
-# ---------------------------------------------------------------- Store / housekeeping
 
 
 async def test_no_automatic_deletion_of_stored_firmware(mgr, net):
@@ -106,9 +72,6 @@ async def test_entries_before_rc7_count_as_downloads(mgr, net):
     assert mgr.firmware_list()[0]["source"] == "download"
 
 
-# ---------------------------------------------------------------- Manual delete (Q9)
-
-
 async def test_delete_locked_while_provided_or_installing(mgr, net):
     await mgr.scan()
     provided = mgr.devices[A]["file"]
@@ -131,9 +94,6 @@ async def test_delete_needs_second_confirmation(mgr, net):
     assert name not in mgr.firmware and not (manager.FW_DIR / name).exists()
     entry = mgr.events.entries[-1]
     assert entry["kind"] == "delete" and entry["source"] == "download" and entry["user"] == "u"
-
-
-# ---------------------------------------------------------------- Downgrade list
 
 
 async def test_downgrade_lists_all_older_stable_versions(mgr, net):
@@ -182,9 +142,6 @@ async def test_downgrade_blocked_during_check_and_without_download_url(mgr, net)
     mgr.progress = None
     mgr.download_base = None
     assert "download base URL" in mgr.downgrade_blocker(B)
-
-
-# ---------------------------------------------------------------- Downgrade install
 
 
 async def test_downgrade_installs_the_selected_version(mgr, net, monkeypatch, fast_install):
@@ -243,9 +200,6 @@ async def test_restart_during_downgrade_is_unconfirmed(mgr, net):
     mgr.save()
     m = manager.Manager(dict(OPTIONS), session=None, token="t")
     assert m.devices[B]["status"] == manager.STATUS_UNCLEAR and "downgrade" not in m.devices[B]
-
-
-# ---------------------------------------------------------------- Upload
 
 
 async def test_upload_prefills_from_manifest_and_registers(mgr, net):
@@ -359,90 +313,13 @@ async def test_uploaded_file_is_never_provided_as_offer(mgr, net):
     assert provided["source"] == "download"
 
 
-# ---------------------------------------------------------------- HTTP
-
-
-@pytest.fixture
-async def client(mgr):
-    app = web_ui.build_ui_app(mgr, ingress_ip="127.0.0.1")
-    async with TestClient(TestServer(app)) as c:
-        page = await (await c.get("/")).text()
-        c.csrf = re.search(r'name="csrf" content="([0-9a-f]{64})"', page).group(1)
-        yield c
-
-
-def binary(c, name="fw.zip"):
-    return {"X-CSRF-Token": c.csrf, "Content-Type": "application/octet-stream", "X-Filename": name}
-
-
-async def test_http_upload_flow(client, mgr, net):
+async def test_deletion_refused_during_check(mgr, net):
+    """Firmware cannot be deleted while a check is reserved or running."""
     await mgr.scan()
-    data = firmware_zip({"name": "Plus1", "version": "1.3.0"}, size=60000)  # larger than 32 KB
-    r = await client.post("/api/firmware/upload", data=data, headers=binary(client))
-    assert r.status == 200, await r.text()
-    staged = await r.json()
-    assert staged["detected"]["version"] == "1.3.0" and "path" not in staged
-    r = await client.post("/api/firmware/upload/confirm", json={"token": staged["token"], "type": "Plus1",
-                          "version": "1.3.0"}, headers={"X-CSRF-Token": client.csrf})
-    assert r.status == 200 and (await r.json())["version"] == "1.3.0"
-    listing = await (await client.get("/api/firmware")).json()
-    assert listing["total_size"] == mgr.store_size() and len(listing["firmware"]) == 2
-
-
-async def test_http_upload_guards(client, mgr, net):
-    data = firmware_zip()
-    r = await client.post("/api/firmware/upload", data=data, headers={**binary(client), "X-CSRF-Token": "x"})
-    assert r.status == 403
-    r = await client.post("/api/firmware/upload", json={"a": 1}, headers={"X-CSRF-Token": client.csrf})
-    assert r.status == 415  # JSON is not accepted here
-    # Binary bodies stay refused everywhere else, and JSON keeps its 32 KB limit
-    r = await client.post("/api/firmware/upload/confirm", data=data, headers=binary(client))
-    assert r.status == 415
-    r = await client.post("/api/firmware/upload/confirm", data=json.dumps({"x": "y" * 40000}),
-                          headers={"X-CSRF-Token": client.csrf, "Content-Type": "application/json"})
-    assert r.status == 413
-    # Announced size above 64 MiB: refused before the body is read (last – the
-    # server closes the connection)
-    r = await client.post("/api/firmware/upload", data=data,
-                          headers={**binary(client), "Content-Length": str(shelly.MAX_FW_SIZE + 1)})
-    assert r.status == 413
-
-
-async def test_http_downgrade_and_delete_need_acknowledgment(client, mgr, net):
-    await mgr.scan()
-    name, sha = store(mgr, "Plus1", "1.4.0")
-    r = await client.get(f"/api/devices/{B}/downgrades")
-    body = await r.json()
-    assert body["installed"] == "1.5.0" and [v["version"] for v in body["versions"]] == ["1.4.0"]
-    assert body["blocked"] is None
-    hdr = {"X-CSRF-Token": client.csrf}
-    r = await client.post(f"/api/devices/{B}/install", json={"sha256": sha, "confirm": True, "downgrade": True},
-                          headers=hdr)
-    assert r.status == 400
-    r = await client.post(f"/api/devices/{B}/install", json={"sha256": "1" * 64, "confirm": True,
-                          "downgrade": True, "acknowledged": True}, headers=hdr)
-    assert r.status == 409
-    r = await client.post(f"/api/firmware/{name}/delete", json={"confirm": True}, headers=hdr)
-    assert r.status == 400 and name in mgr.firmware
-    r = await client.post(f"/api/firmware/{name}/delete", json={"confirm": True, "acknowledged": True}, headers=hdr)
-    assert r.status == 200 and name not in mgr.firmware
-    provided = mgr.devices[A]["file"]
-    r = await client.post(f"/api/firmware/{provided}/delete", json={"confirm": True, "acknowledged": True},
-                          headers=hdr)
-    assert r.status == 409
-
-
-async def test_state_shows_the_downgrade_marker(mgr, net):
-    await mgr.scan()
-    mgr.devices[B]["downgrade"] = True
-    assert next(d for d in mgr.public_state()["devices"] if d["id"] == B)["downgrade"] is True
-
-
-async def test_upload_log_entries_survive_a_restart(mgr, net):
-    """3.0.0 final review: the log kind "upload" is kept when the log is loaded again."""
-    await mgr.scan()
-    data = firmware_zip()
-    staged = await mgr.stage_upload(chunks(data), "fw.zip", len(data), "alice")
-    mgr.confirm_upload(staged["token"], "Plus1", "1.2.0", None, "alice")
-    m = manager.Manager(dict(OPTIONS), session=None, token="t")
-    assert any(e["kind"] == "upload" and e["version"] == "1.2.0" for e in m.events.entries)
+    name = next(iter(mgr.firmware))
+    mgr.reserve_check("device", B)
+    with pytest.raises(ShellyError):
+        mgr.delete_firmware(name, user="u")
+    assert all(not f["deletable"] for f in mgr.firmware_list())
+    mgr.progress = None
+    mgr.activity.clear()

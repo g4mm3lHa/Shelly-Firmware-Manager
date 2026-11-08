@@ -94,7 +94,7 @@ class OtaError(ShellyError):
     """The device reported a failed update (Gen2+ event ota_error)."""
 
 
-class ChannelUnavailable(Exception):  # noqa: N818 – not an error of the device
+class ChannelUnavailable(Exception):  # not an error of the device, hence no "Error" suffix
     """The WebSocket could not send the update command (nothing reached the device)."""
 
 
@@ -610,7 +610,9 @@ async def read_settings(session, gen, origin, fw_type, auth=None, extended=False
         extra["ap"] = _flag((settings.get("wifi_ap") or {}).get("enabled"))
         extra["ble"] = UNSUPPORTED  # Gen1 devices have no Bluetooth switch
         if extended:
-            channels = [c for c in (settings.get("relays") or []) + (settings.get("lights") or []) if isinstance(c, dict)]
+            channels = [
+                c for c in (settings.get("relays") or []) + (settings.get("lights") or []) if isinstance(c, dict)
+            ]
             if any("schedule" in c for c in channels):
                 extra["schedules"] = any(c.get("schedule") is True and c.get("schedule_rules") for c in channels)
             else:
@@ -778,8 +780,10 @@ async def read_limited(resp, limit, message):
     return bytes(raw)
 
 
-async def _cloud_json(session, url, pins):
-    """JSON from the manufacturer's server; redirects only within shelly.cloud and HTTPS."""
+async def _cloud_get(session, url, pins, limit, too_large):
+    """Body of a GET on the manufacturer's server: HTTPS only, redirects only within
+    shelly.cloud (every hop checked again), certificate pinning, size limit.
+    Returns (body bytes, charset or None)."""
     for _ in range(4):
         check_download_url(url, https_only=True)
         async with _CloudRequest(session, url, pins, CLOUD_TIMEOUT) as resp:
@@ -787,14 +791,17 @@ async def _cloud_json(session, url, pins):
                 url = urljoin(url, resp.headers.get("Location", ""))
                 continue
             resp.raise_for_status()
-            raw = await read_limited(
-                resp, MAX_CLOUD_JSON, "Response from the manufacturer's server too large"
-            )
-            try:
-                return json.loads(raw.decode("utf-8", "replace"))
-            except ValueError as err:
-                raise ShellyError("Invalid response from the manufacturer's server") from err
+            return await read_limited(resp, limit, too_large), resp.charset
     raise ShellyError("Too many redirects from the manufacturer's server")
+
+
+async def _cloud_json(session, url, pins):
+    """JSON from the manufacturer's server (see _cloud_get)."""
+    raw, _ = await _cloud_get(session, url, pins, MAX_CLOUD_JSON, "Response from the manufacturer's server too large")
+    try:
+        return json.loads(raw.decode("utf-8", "replace"))
+    except ValueError as err:
+        raise ShellyError("Invalid response from the manufacturer's server") from err
 
 
 class _CloudRequest:
@@ -820,20 +827,11 @@ class _CloudRequest:
 
 
 async def fetch_cloud_text(session, url, pins, limit):
-    """Text page (e.g. changelog) from a shelly.cloud server: HTTPS only, redirects
-    only within shelly.cloud, certificate pinning, size limit. Sends no device data."""
-    for _ in range(4):
-        check_download_url(url, https_only=True)
-        async with _CloudRequest(session, url, pins, CLOUD_TIMEOUT) as resp:
-            if resp.status in (301, 302, 303, 307, 308):
-                url = urljoin(url, resp.headers.get("Location", ""))
-                continue
-            resp.raise_for_status()
-            raw = await read_limited(
-                resp, limit, f"Page larger than {limit // 1024 // 1024} MiB: {clip(url)}"
-            )
-            return raw.decode(resp.charset or "utf-8", "replace")
-    raise ShellyError("Too many redirects from the manufacturer's server")
+    """Text page (e.g. changelog) from a shelly.cloud server (see _cloud_get).
+    Sends no device data."""
+    too_large = f"Page larger than {limit // 1024 // 1024} MiB: {clip(url)}"
+    raw, charset = await _cloud_get(session, url, pins, limit, too_large)
+    return raw.decode(charset or "utf-8", "replace")
 
 
 async def fetch_offer(session, info, gen1_allowed, pins=None):
@@ -899,7 +897,8 @@ async def _store(resp, url, target_dir: Path):
                 if size > MAX_FW_SIZE:
                     raise ShellyError("Firmware larger than 64 MiB")
                 digest.update(chunk)
-                handle.write(chunk)
+                # In a worker thread: a slow disk (SD card) never blocks the event loop
+                await asyncio.to_thread(handle.write, chunk)
         if size < MIN_FW_SIZE:
             raise ShellyError("Firmware file implausibly small")
         name = digest.hexdigest() + ext

@@ -1,0 +1,18 @@
+#!/bin/sh
+# Workspace helper (not shipped): offline stand-in for "npx --yes esbuild@<version> ..."
+# as called by tools/build_ui.py. Runs a locally installed esbuild, but only if its
+# version is exactly the requested one, so the build stays reproducible.
+# Usage: PATH="$PWD/tools/dev/bin:$PATH" python3 tools/build_ui.py
+# ESBUILD_BIN overrides the esbuild binary.
+ESBUILD=${ESBUILD_BIN:-/opt/npm-tools/node_modules/esbuild/bin/esbuild}
+[ "$1" = "--yes" ] && shift
+case "$1" in
+  esbuild@*) want=${1#esbuild@}; shift ;;
+  *) echo "tools/dev/bin/npx: only 'npx --yes esbuild@<version>' is supported" >&2; exit 2 ;;
+esac
+have=$("$ESBUILD" --version)
+if [ "$have" != "$want" ]; then
+  echo "tools/dev/bin/npx: local esbuild is $have, build requires $want" >&2
+  exit 2
+fi
+exec "$ESBUILD" "$@"
