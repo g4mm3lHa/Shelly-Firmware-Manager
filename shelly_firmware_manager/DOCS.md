@@ -226,11 +226,13 @@ server interfaces are not officially guaranteed.
 - **From 3.0.0 release candidates:** if the old example address
   `http://192.168.178.50:8098` is still set, installations are blocked until you change
   it or confirm it with "This address is correct".
-- **From 3.0.0:** nothing to do. The activity log is converted once to its new storage
-  format at the first start.
-- **From 2.x or 1.x:** 3.0.1 no longer contains the conversion code of these versions.
-  Update to 3.0.0 first and start it once (it removes the former shared Shelly password
-  from the stored options and converts the table settings), then update to 3.0.1 – or
+- **From 3.0.0 or 3.0.1:** nothing to do. From 3.0.0 the activity log is converted once
+  to its new storage format at the first start. 3.1.0 adds a watchdog: check that the
+  **Watchdog** switch on the app page is on.
+- **From 2.x or 1.x:** since 3.0.1 the conversion code of these versions is no longer
+  included. Update to 3.0.0 first and start it once (it removes the former shared Shelly
+  password from the stored options and converts the table settings), then update to
+  the current version – or
   remove and reinstall the app. Backups made before the 3.0 upgrade still contain the
   old shared password.
 

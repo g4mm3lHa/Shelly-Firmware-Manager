@@ -1,5 +1,33 @@
 # Changelog
 
+## 3.1.0
+
+Release candidate rc1 (not released). Store integration, robustness and code quality; no
+new functions of the app itself.
+
+Changes in rc1
+- App store: the user documentation is shown in the Documentation tab of the app page
+  (`DOCS.md`), a short introduction in the Info tab (`README.md`). The README of the
+  repository keeps installation and development and links to it.
+- Watchdog: Home Assistant restarts the app if it stops unexpectedly (TCP check of the
+  download server port 8098; nothing is requested or logged). Turn on the Watchdog
+  switch on the app page if it is off.
+- AppArmor profile (hosts with AppArmor, e.g. Home Assistant OS): the app may only run
+  Python, read its program files, write its private storage (`/data`) and use the
+  network; no other programs, no special privileges.
+- Changelog pages are parsed in a worker thread: a large page no longer delays the UI
+  and the download server during a check.
+- Incomplete or malformed answers of a Shelly or of the manufacturer's server are
+  reported with a readable message (e.g. "Incomplete device information from the
+  Shelly") instead of a bare internal error text.
+- Code: type annotations for all modules, checked strictly (mypy); a few defensive
+  checks the types required (unexpected RPC result, `options.json` not an object).
+- Development (not part of the image): tool settings of ruff, mypy and pytest in
+  `pyproject.toml` (`tests/pytest.ini` removed), mypy step in `tools/dev/check.sh`;
+  Fix:
+  `check.sh ui|full` wrote the screenshots of the UI checks into the current folder
+  instead of a temporary one.
+
 ## 3.0.1
 
 Maintenance release: clean-up based on 3.0.0, no new functions.

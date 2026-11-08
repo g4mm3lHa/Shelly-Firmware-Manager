@@ -1,4 +1,4 @@
-# Code map (3.0.1)
+# Code map (3.1.0)
 
 Orientation for changes: where things are, what is stored, which test covers what.
 Names, not line numbers – search for the function name. All app modules carry type

@@ -45,7 +45,8 @@ def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "quick"
     if mode not in ("quick", "full"):
         raise SystemExit(__doc__)
-    shots = sys.argv[2] if len(sys.argv) > 2 else tempfile.mkdtemp(prefix="sfm-shots-")
+    # An empty argument (check.sh without a folder) also means: temporary folder
+    shots = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else tempfile.mkdtemp(prefix="sfm-shots-")
     demos = {**DEMOS, **(MOBILE_DEMO if mode == "full" else {})}
     procs = [
         subprocess.Popen([sys.executable, str(ROOT / "qa" / "demo.py"), str(APP), str(port), scenario],
