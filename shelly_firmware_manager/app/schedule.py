@@ -20,13 +20,14 @@ lookup). The schedule state is a small dict persisted in state.json:
 
 import logging
 import os
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
+from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 log = logging.getLogger("sfm.schedule")
 
 
-def local_zone():
+def local_zone() -> tuple[tzinfo, str]:
     """(tzinfo, name) of the Home Assistant time zone; UTC if TZ is missing/invalid."""
     name = os.environ.get("TZ", "").strip()
     if name:
@@ -39,7 +40,7 @@ def local_zone():
     return ZoneInfo("UTC"), "UTC"
 
 
-def instant(day, clock, tz):
+def instant(day: date, clock: str, tz: tzinfo) -> float:
     """Epoch seconds of the local clock time "HH:MM" on day.
 
     Repeated time (autumn): first occurrence (fold=0). Nonexistent time (spring
@@ -63,21 +64,23 @@ def instant(day, clock, tz):
     return float(high)
 
 
-def configure(state, days, clock, now, tz):
+def configure(
+    state: dict[str, Any] | None, days: int, clock: str, now: float, tz: tzinfo
+) -> tuple[dict[str, Any], bool]:
     """Schedule state for the configured interval/time.
 
     An unchanged configuration keeps the state (anchor and last attempt); a new
     or changed one is anchored at the next occurrence of the clock time and has
     no attempt yet. Returns (state, changed)."""
     unchanged = isinstance(state, dict) and state.get("days") == days and state.get("time") == clock
-    if unchanged and _date(state.get("anchor")):
+    if unchanged and state is not None and _date(state.get("anchor")):
         return state, False
     today = datetime.fromtimestamp(now, tz).date()
     anchor = today if instant(today, clock, tz) > now else today + timedelta(days=1)
     return {"days": days, "time": clock, "anchor": anchor.isoformat(), "last_date": None}, True
 
 
-def _date(text):
+def _date(text: object) -> date | None:
     """date from an ISO string, None if missing or invalid."""
     try:
         return date.fromisoformat(text) if isinstance(text, str) else None
@@ -85,12 +88,14 @@ def _date(text):
         return None
 
 
-def status(state, now, tz):
+def status(state: dict[str, Any], now: float, tz: tzinfo) -> tuple[date | None, float]:
     """(due date or None, epoch of the next run after the due one).
 
     The due date is the latest scheduled date whose instant has passed and that
     has not been attempted yet."""
-    anchor, days, clock = _date(state["anchor"]), int(state["days"]), state["time"]
+    anchor, days, clock = _date(state["anchor"]), int(state["days"]), str(state["time"])
+    if anchor is None:  # configure() always stores a valid anchor
+        raise ValueError("Schedule without a valid anchor date")
     today = datetime.fromtimestamp(now, tz).date()
     k = (today - anchor).days // days  # index of the last scheduled date <= today
     if k >= 0 and instant(anchor + timedelta(days=k * days), clock, tz) > now:
@@ -103,18 +108,18 @@ def status(state, now, tz):
     return due, instant(following, clock, tz)
 
 
-def seconds_until(state, now, tz):
+def seconds_until(state: dict[str, Any], now: float, tz: tzinfo) -> float:
     """Seconds until the next automatic check; 0 = due now."""
     due, following = status(state, now, tz)
     return 0 if due else max(0.0, following - now)
 
 
-def next_run(state, now, tz):
+def next_run(state: dict[str, Any], now: float, tz: tzinfo) -> float:
     """Epoch of the next automatic check (now if one is due) – for the UI."""
     due, following = status(state, now, tz)
     return now if due else following
 
 
-def iso_utc(ts):
+def iso_utc(ts: float) -> str:
     """ISO timestamp for log lines (UTC, seconds)."""
     return datetime.fromtimestamp(ts, UTC).isoformat(timespec="seconds")

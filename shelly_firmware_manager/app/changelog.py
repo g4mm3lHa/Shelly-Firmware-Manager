@@ -19,8 +19,13 @@ import json
 import logging
 import re
 import time
+from collections.abc import Collection, Iterable, Mapping
 from html.parser import HTMLParser
 from pathlib import Path
+from typing import Any
+
+import aiohttp
+from tls import CertificatePins
 
 from shelly import ShellyError, clip, fetch_cloud_text, parse_version
 
@@ -42,12 +47,12 @@ GEN1_ENTRY_RE = re.compile(r"^\*?\s*\[\s*([^\]]{1,80}?)\s*\]\s*(.*)$", re.DOTALL
 SPACE_RE = re.compile(r"\s+")
 
 
-def _clean(text):
+def _clean(text: str) -> str:
     """Collapse whitespace and drop zero-width characters of anchor links."""
     return SPACE_RE.sub(" ", text.replace("\u200b", "")).strip()
 
 
-def _entry(category, text, models=()):
+def _entry(category: str | None, text: str, models: Iterable[str] = ()) -> dict[str, Any]:
     """One normalised changelog entry."""
     return {
         "category": clip(category, 40) or None,
@@ -59,18 +64,18 @@ def _entry(category, text, models=()):
 class _Gen2Parser(HTMLParser):
     """Collects versions, categories and list items of the Gen2+ changelog."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Start outside the article; only content after the <h1> is read."""
         super().__init__(convert_charrefs=True)
-        self.versions = {}
+        self.versions: dict[str, dict[str, Any]] = {}
         self.active = False  # inside the changelog body
-        self.capture = None  # "h2" | "h3" while reading a heading
-        self.buffer = []
-        self.version = None  # current version or None (e.g. "Unreleased")
-        self.category = None
-        self.items = []  # stack of open <li>: [text parts, models]
+        self.capture: str | None = None  # "h2" | "h3" while reading a heading
+        self.buffer: list[str] = []
+        self.version: str | None = None  # current version or None (e.g. "Unreleased")
+        self.category: str | None = None
+        self.items: list[tuple[list[str], set[str]]] = []  # stack of open <li>: (text parts, models)
 
-    def handle_starttag(self, tag, attrs):
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         """Track headings, list items and device links."""
         if tag == "h1":
             self.active = True
@@ -79,13 +84,13 @@ class _Gen2Parser(HTMLParser):
         if tag in ("h2", "h3"):
             self.capture, self.buffer = tag, []
         elif tag == "li":
-            self.items.append([[], set()])
+            self.items.append(([], set()))
         elif tag == "a" and self.items:
             href = dict(attrs).get("href") or ""
             if "/Devices/" in href:  # entry refers to a specific device model
                 self.items[-1][1].add(href.rstrip("/").rsplit("/", 1)[-1])
 
-    def handle_endtag(self, tag):
+    def handle_endtag(self, tag: str) -> None:
         """Finish headings and list items."""
         if not self.active:
             return
@@ -97,7 +102,7 @@ class _Gen2Parser(HTMLParser):
                 match = HEADING_RE.match(text)
                 self.version = match.group(1) if match else None
                 self.category = None
-                if self.version and len(self.versions) < MAX_VERSIONS:
+                if match and self.version and len(self.versions) < MAX_VERSIONS:
                     self.versions.setdefault(self.version, {"date": match.group(2), "entries": []})
             else:
                 self.category = text
@@ -108,12 +113,12 @@ class _Gen2Parser(HTMLParser):
             if self.items:  # nested list: becomes part of the parent entry
                 self.items[-1][0].append(f" ({text})")
                 self.items[-1][1].update(models)
-            elif text and self.version in self.versions:
+            elif text and self.version is not None and self.version in self.versions:
                 entries = self.versions[self.version]["entries"]
                 if len(entries) < MAX_ENTRIES:
                     entries.append(_entry(self.category, text, models))
 
-    def handle_data(self, data):
+    def handle_data(self, data: str) -> None:
         """Text of the open heading or list item."""
         if self.capture:
             self.buffer.append(data)
@@ -124,16 +129,16 @@ class _Gen2Parser(HTMLParser):
 class _Gen1Parser(HTMLParser):
     """Reads the changelog table below <h2 id="changelog"> of the Gen1 docs."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Wait for the changelog heading, then read the first table."""
         super().__init__(convert_charrefs=True)
-        self.versions = {}
+        self.versions: dict[str, dict[str, Any]] = {}
         self.state = "search"  # search -> heading -> table -> done
-        self.cells = None  # cells of the current row
-        self.cell = None  # text parts of the current cell
-        self.version = None
+        self.cells: list[str] | None = None  # cells of the current row
+        self.cell: list[str] | None = None  # text parts of the current cell
+        self.version: str | None = None
 
-    def handle_starttag(self, tag, attrs):
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         """Find the heading, then track rows and cells of the table."""
         if self.state == "search" and tag == "h2" and dict(attrs).get("id") == "changelog":
             self.state = "heading"
@@ -144,11 +149,11 @@ class _Gen1Parser(HTMLParser):
         elif self.state == "table" and tag == "td" and self.cells is not None:
             self.cell = []
 
-    def handle_endtag(self, tag):
+    def handle_endtag(self, tag: str) -> None:
         """Turn finished rows into entries; stop after the table."""
         if self.state != "table":
             return
-        if tag == "td" and self.cell is not None:
+        if tag == "td" and self.cell is not None and self.cells is not None:
             self.cells.append(_clean("".join(self.cell)))
             self.cell = None
         elif tag == "tr" and self.cells:
@@ -157,7 +162,7 @@ class _Gen1Parser(HTMLParser):
         elif tag == "table":
             self.state = "done"
 
-    def _row(self, cells):
+    def _row(self, cells: list[str]) -> None:
         """Revision, date, description; an empty revision continues the previous one."""
         if len(cells) < 3:
             return
@@ -167,7 +172,7 @@ class _Gen1Parser(HTMLParser):
             self.version = match.group(1)
             if len(self.versions) < MAX_VERSIONS:
                 self.versions.setdefault(self.version, {"date": clip(date, 20) or None, "entries": []})
-        if not text or self.version not in self.versions:
+        if not text or self.version is None or self.version not in self.versions:
             return
         entry = GEN1_ENTRY_RE.match(text)
         scope, body = (entry.group(1), entry.group(2)) if entry else (None, text)
@@ -177,7 +182,7 @@ class _Gen1Parser(HTMLParser):
         if len(entries) < MAX_ENTRIES:
             entries.append(_entry(scope, body, models))
 
-    def handle_data(self, data):
+    def handle_data(self, data: str) -> None:
         """Text of the open cell."""
         if self.cell is not None:
             self.cell.append(data)
@@ -186,15 +191,15 @@ class _Gen1Parser(HTMLParser):
 _NO_CODE = re.compile(r"<(script|style)\b.*?</\1\s*>", re.S | re.I)
 
 
-def parse(gen, html):
+def parse(gen: int, html: str) -> dict[str, dict[str, Any]]:
     """Plain-text changelog {version: {"date", "entries"}} from the HTML page."""
-    parser = _Gen1Parser() if gen == 1 else _Gen2Parser()
+    parser: _Gen1Parser | _Gen2Parser = _Gen1Parser() if gen == 1 else _Gen2Parser()
     parser.feed(_NO_CODE.sub("", html))  # script/style content is not changelog text
     parser.close()
     return parser.versions
 
 
-def _model_key(text):
+def _model_key(text: object) -> str:
     """Comparable model name: 'ShellyPlus1PM', 'Plus 1PM' and 'Plus1PM' are equal."""
     key = re.sub(r"[^a-z0-9]", "", str(text).lower())
     return key.removeprefix("shelly")
@@ -203,10 +208,10 @@ def _model_key(text):
 class Changelogs:
     """Stored changelogs per generation, refreshed by the firmware check."""
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path) -> None:
         """Load stored changelogs; missing or broken file = none."""
         self.path = path
-        self.data = {}  # "1" | "2" -> {"fetched": ts, "versions": {...}}
+        self.data: dict[str, Any] = {}  # "1" | "2" -> {"fetched": ts, "versions": {...}}
         try:
             data = json.loads(path.read_text())
             self.data = data if isinstance(data, dict) else {}
@@ -215,7 +220,7 @@ class Changelogs:
         except (ValueError, OSError) as err:
             log.warning("Changelog file unreadable, ignoring it: %s", err)
 
-    def _is_fresh(self, gen, wanted, now):
+    def _is_fresh(self, gen: int, wanted: Collection[str | None] | None, now: int) -> bool:
         """True if the stored changelog of gen can be reused instead of a fetch.
 
         wanted: offered versions that should be listed. Complete and younger than
@@ -224,10 +229,10 @@ class Changelogs:
         stored = self.data.get(str(gen))
         if not stored or not isinstance(stored.get("fetched"), int):
             return False
-        age = now - stored["fetched"]
+        age = now - int(stored["fetched"])
         if age < 0:  # clock jumped back: do not trust the timestamp
             return False
-        known = set()
+        known: set[tuple[int, ...]] = set()
         for version in stored.get("versions", {}):
             try:
                 known.add(parse_version(version)[:3])
@@ -241,7 +246,13 @@ class Changelogs:
                 continue
         return age < (CACHE_MIN_AGE_S if missing else CACHE_MAX_AGE_S)
 
-    async def refresh(self, session, gens, pins, wanted=None):
+    async def refresh(
+        self,
+        session: aiohttp.ClientSession,
+        gens: Iterable[int],
+        pins: CertificatePins | None,
+        wanted: Mapping[int, Collection[str | None]] | None = None,
+    ) -> None:
         """Fetch and parse the changelog pages for the given generations (1 / 2).
 
         wanted maps a generation to the offered versions; a fresh stored changelog
@@ -273,7 +284,9 @@ class Changelogs:
                 temp.unlink(missing_ok=True)
                 log.warning("Changelog not saved: %s", err)
 
-    def between(self, gen, installed, target, model=None):
+    def between(
+        self, gen: int | None, installed: str, target: str, model: str | None = None
+    ) -> list[dict[str, Any]] | None:
         """All versions with installed < version <= target, newest first.
 
         Each entry is marked: security (category "Security" or security keywords),
@@ -287,14 +300,14 @@ class Changelogs:
         except ShellyError:
             return None
         own = _model_key(model) if model else None
-        result = []
+        result: list[dict[str, Any]] = []
         for version, info in stored.get("versions", {}).items():
             try:
                 if not low < parse_version(version) <= high:
                     continue
             except ShellyError:
                 continue
-            entries = []
+            entries: list[dict[str, Any]] = []
             for entry in info.get("entries", []):
                 models = entry.get("models") or []
                 entries.append(

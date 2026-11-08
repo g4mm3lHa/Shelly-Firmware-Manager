@@ -20,3 +20,11 @@ testpaths = ["tests"]
 # pytest-asyncio (or tools/dev/asyncio_shim.py offline): one event loop per test
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.mypy]
+# Static type check of the app modules (3.1.0): strict, against the bundled packages
+# (tools/dev/run.sh puts them on the path). The modules import each other by name.
+python_version = "3.12"
+strict = true
+files = ["shelly_firmware_manager/app"]
+mypy_path = "shelly_firmware_manager/app"

@@ -11,6 +11,7 @@ import os
 import signal
 import time
 from pathlib import Path
+from typing import Any
 
 import aiohttp
 import schedule
@@ -43,7 +44,7 @@ log = logging.getLogger("sfm")
 USER_AGENT = "Mozilla/5.0"
 
 
-async def start_site(app, port):
+async def start_site(app: web.Application, port: int) -> web.AppRunner:
     """Start an aiohttp application on all interfaces of the container."""
     # access_log=None: own, concise logging instead of an access log
     runner = web.AppRunner(app, access_log=None, shutdown_timeout=SHUTDOWN_TIMEOUT_S)
@@ -54,12 +55,15 @@ async def start_site(app, port):
     return runner
 
 
-def load_options():
+def load_options() -> dict[str, Any]:
     """Options written by the Supervisor (validated against config.yaml)."""
-    return json.loads(OPTIONS_FILE.read_text())
+    options = json.loads(OPTIONS_FILE.read_text())
+    if not isinstance(options, dict):
+        raise SystemExit(f"{OPTIONS_FILE} does not contain a JSON object")
+    return options
 
 
-async def main():
+async def main() -> None:
     """Load the options, start both servers and run the check schedule."""
     token = os.environ.get("SUPERVISOR_TOKEN")
     if not token:
@@ -102,7 +106,7 @@ async def main():
             loop.add_signal_handler(sig, stop.set)
         scheduler = asyncio.create_task(run_schedule(mgr))
         stopper = asyncio.create_task(stop.wait())
-        results = (None, None)
+        results: tuple[object, ...] = (None, None)
         try:
             await asyncio.wait({scheduler, stopper}, return_when=asyncio.FIRST_COMPLETED)
         finally:
@@ -119,7 +123,7 @@ async def main():
             raise results[0]
 
 
-async def run_schedule(mgr):
+async def run_schedule(mgr: Manager) -> None:
     """Run the automatic check schedule until cancelled."""
     await asyncio.sleep(STARTUP_DELAY_S)
     while True:

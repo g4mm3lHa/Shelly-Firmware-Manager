@@ -8,6 +8,7 @@ schema to give clear error messages.
 """
 
 import re
+from typing import Any
 from urllib.parse import urlsplit
 
 from tls import is_shelly_host, parse_fingerprint
@@ -38,7 +39,7 @@ GEN1_TYPE_RE = re.compile(r"^[A-Za-z0-9-]{1,32}$")
 MAX_LIST = 100
 
 
-def with_defaults(options):
+def with_defaults(options: dict[str, Any]) -> dict[str, Any]:
     """Known options from /data/options.json completed with defaults for new keys.
 
     Unknown or removed keys are dropped, so a legacy secret can never reach the
@@ -46,12 +47,12 @@ def with_defaults(options):
     return {**DEFAULTS, **{k: v for k, v in options.items() if k in KEYS}}
 
 
-def public_view(options):
+def public_view(options: dict[str, Any]) -> dict[str, Any]:
     """Options for the UI (v3 has no secret options any more)."""
     return with_defaults(options)
 
 
-def _validate(key, value):
+def _validate(key: str, value: Any) -> Any:
     """Validated value of one option; raises ValueError with a readable message."""
     if key in INT_RANGES:
         low, high = INT_RANGES[key]
@@ -94,7 +95,7 @@ def _validate(key, value):
     raise ValueError(f"Unknown option: {str(key)[:40]}")
 
 
-def merge(options, changes):
+def merge(options: dict[str, Any], changes: object) -> tuple[dict[str, Any], list[str]]:
     """New complete option set from the current options and the requested changes.
 
     Returns (new options, list of changed keys); absent keys keep their value. An
@@ -116,7 +117,7 @@ def merge(options, changes):
     return new, sorted(changed)
 
 
-def change_list(old, new, changed):
+def change_list(old: dict[str, Any], new: dict[str, Any], changed: list[str]) -> list[dict[str, str]]:
     """Activity-log view of changed options: [{"option", "old", "new"}].
 
     v3 has no secret options; historic entries of the removed shared password
@@ -124,7 +125,7 @@ def change_list(old, new, changed):
     return [{"option": key, "old": _display(old.get(key)), "new": _display(new.get(key))} for key in changed]
 
 
-def _display(value):
+def _display(value: Any) -> str:
     """Short readable form of an option value for the log (max. 200 characters)."""
     if isinstance(value, bool):
         text = "on" if value else "off"

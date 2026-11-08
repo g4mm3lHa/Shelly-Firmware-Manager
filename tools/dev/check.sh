@@ -1,7 +1,7 @@
 #!/bin/sh
 # Workspace helper (not shipped): all checks in the efficient order, fastest first;
 # stops at the first failing step. Usage (repository root):
-#   tools/dev/check.sh            lint + build check + all backend tests
+#   tools/dev/check.sh            lint + type check + build check + all backend tests
 #   tools/dev/check.sh ui         ... + UI quick matrix and feature suites
 #   tools/dev/check.sh full       ... + full UI matrix and mobile captures (final gate)
 #   tools/dev/check.sh build      rebuild app/static from ui-src first, then as default
@@ -24,6 +24,13 @@ fi
 step "ruff"
 # Rules per directory: pyproject.toml (app: full set, tests/tools/qa: F and B)
 ruff check shelly_firmware_manager/app tests tools qa
+step "mypy"
+# Strict type check of the app (pyproject.toml); needs mypy (not in the bundled wheels)
+if command -v mypy >/dev/null 2>&1; then
+  "$DEV/run.sh" mypy
+else
+  echo "SKIPPED: mypy not installed (pip install mypy) – required for a release"
+fi
 step "build check"; python3 tools/build_ui.py --check
 step "version"
 python3 - <<'PY'

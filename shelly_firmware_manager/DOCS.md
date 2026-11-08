@@ -213,6 +213,9 @@ The user interface loads nothing from the internet. No telemetry.
 - All Python packages are bundled and pinned by checksum; the base image is pinned.
   The app runs inside its own container (as root there) without access to your Home
   Assistant files.
+- An AppArmor profile (on hosts with AppArmor, e.g. Home Assistant OS) restricts the app
+  further: it may only run Python, read its program files, write its private storage and
+  use the network – no other programs, no special privileges.
 
 Remaining risks: communication with the Shellys is unencrypted; Gen1 firmware and
 uploaded files cannot be verified; Gen1 passwords are stored in plain text; Shelly's

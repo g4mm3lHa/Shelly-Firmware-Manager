@@ -20,6 +20,7 @@ the UI shows it while polling, nothing of it is persisted.
 
 import asyncio
 import contextlib
+import functools
 import hashlib
 import hmac
 import json
@@ -28,7 +29,9 @@ import re
 import secrets
 import time
 import zipfile
+from collections.abc import AsyncIterator, Callable, Iterable
 from pathlib import Path
+from typing import Any
 
 import aiohttp
 import app_options
@@ -37,9 +40,16 @@ import shelly
 from changelog import Changelogs
 from credentials import Credentials
 from events import EventLog, worst
-from shelly import UNSUPPORTED, AuthError, ShellyError, clip
+from shelly import UNSUPPORTED, AuthError, DeviceAuth, ShellyError, clip
+from tls import CertificatePins
 
 log = logging.getLogger("sfm.manager")
+
+# A device entry of state.json and a store entry of the firmware store: plain JSON
+# objects whose fields are listed in docs/CODEMAP.md (Stored data).
+Device = dict[str, Any]
+FirmwareMeta = dict[str, Any]
+OfferTasks = dict[tuple[int, str], "asyncio.Future[dict[str, str] | None]"]
 
 DATA_DIR = Path("/data")
 STATE_FILE = DATA_DIR / "state.json"
@@ -107,7 +117,7 @@ DOWNLOAD_BASE_MESSAGES = {
 }
 
 
-def severity_of(err):
+def severity_of(err: BaseException) -> str:
     """Log severity of a device error: authentication and internal errors are
     errors; unreachable devices, timeouts and temporary/missing data warnings."""
     if isinstance(err, AuthError) or not isinstance(err, (TimeoutError, ShellyError, aiohttp.ClientError, OSError)):
@@ -118,7 +128,14 @@ def severity_of(err):
 class Manager:
     """Holds the state of all Shellys and controls checks, storage and installation."""
 
-    def __init__(self, options, session: aiohttp.ClientSession, token: str, pins=None, version=""):
+    def __init__(
+        self,
+        options: dict[str, Any],
+        session: aiohttp.ClientSession,
+        token: str,
+        pins: CertificatePins | None = None,
+        version: str = "",
+    ) -> None:
         """Apply the options and load the stored state, passwords, changelogs and log."""
         options = app_options.with_defaults(options)
         self.options = options  # complete option set, needed to save changes
@@ -127,7 +144,7 @@ class Manager:
         self.tz, self.tz_name = schedule.local_zone()
         # Optional since rc6: no default, installations are refused while it is unset
         self.download_base = (options.get("download_base_url") or "").rstrip("/") or None
-        self.download_base_confirmed = None  # confirmed legacy example value (persisted)
+        self.download_base_confirmed: str | None = None  # confirmed legacy example value (persisted)
         self.restrict_downloads = bool(options["restrict_downloads_to_devices"])
         self.gen1_allowed = frozenset(options.get("gen1_allowed_types", []))
         self.gen1_enabled = bool(options["gen1_updates_enabled"])
@@ -137,21 +154,22 @@ class Manager:
         self.version = version  # app version (stored with every check)
         self.lock = asyncio.Lock()  # check (exclusive)
         self.install_slots = asyncio.Semaphore(int(options.get("max_parallel_installs", 5)))
-        self.installing = set()  # device IDs: running or waiting
-        self.last_scan = None
-        self.scanned_version = None  # app version of the last check
-        self.devices = {}  # HA device ID -> state
-        self.downloads = {}  # file name -> {"served": {ip: n}, "rejected": {ip, ...}}
-        self.firmware = {}  # file name -> metadata of the stored firmware
-        self.ui = {}  # table settings (sort order, hidden columns) for all users
-        self.activity = {}  # HA device ID -> ACTIVITY_* while a check runs
-        self.progress = None  # running check: {"kind", "total", "done", "errors", "phase"}
-        self.storage_error = None  # last failure writing state.json (shown in the UI)
-        self.schedule = None  # automatic check schedule (see schedule.py), persisted
-        self.reloading = set()  # device IDs whose Reload Device Info is running
-        self._provisions = {}  # (firmware ID, version) -> running provide task (single flight)
+        self.installing: set[str] = set()  # device IDs: running or waiting
+        self.last_scan: int | None = None
+        self.scanned_version: str | None = None  # app version of the last check
+        self.devices: dict[str, Device] = {}  # HA device ID -> state
+        self.downloads: dict[str, dict[str, Any]] = {}  # file name -> {"served": {ip: n}, "rejected": {ip, ...}}
+        self.firmware: dict[str, FirmwareMeta] = {}  # file name -> metadata of the stored firmware
+        self.ui: dict[str, Any] = {}  # table settings (sort order, hidden columns) for all users
+        self.activity: dict[str, str] = {}  # HA device ID -> ACTIVITY_* while a check runs
+        self.progress: dict[str, Any] | None = None  # running check: {"kind", "total", "done", "errors", "phase"}
+        self.storage_error: str | None = None  # last failure writing state.json (shown in the UI)
+        self.schedule: dict[str, Any] = {}  # automatic check schedule (see schedule.py), persisted
+        self.reloading: set[str] = set()  # device IDs whose Reload Device Info is running
+        # (firmware ID, version) -> running provide task (single flight)
+        self._provisions: dict[tuple[str, str], asyncio.Future[tuple[str, str, int]]] = {}
         self._downloads_running = 0  # for the progress phase of a parallel check
-        self._upload = None  # staged manual upload (see stage_upload), memory only
+        self._upload: dict[str, Any] | None = None  # staged manual upload (see stage_upload), memory only
         self._upload_lock = asyncio.Lock()  # one upload transfer at a time
         # Set whenever the schedule changes (check finished): wakes the scheduler in
         # main.py instead of letting it poll every minute.
@@ -170,7 +188,7 @@ class Manager:
 
     # ------------------------------------------------------------ Persistence
 
-    def _load(self):
+    def _load(self) -> None:
         """Load the state of the last run; missing or broken file = fresh start."""
         try:
             data = json.loads(STATE_FILE.read_text())
@@ -179,10 +197,10 @@ class Manager:
             self.devices = data.get("devices") or {}
             self.last_scan = data.get("last_scan")
             self.scanned_version = data.get("scanned_version")
-            self.firmware = data.get("firmware") if isinstance(data.get("firmware"), dict) else {}
+            self.firmware = data["firmware"] if isinstance(data.get("firmware"), dict) else {}
             if isinstance(data.get("ui"), dict) and data.get("ui_version") == UI_VERSION:
                 self.ui = data["ui"]
-            self.schedule = data.get("schedule") if isinstance(data.get("schedule"), dict) else None
+            self.schedule = data["schedule"] if isinstance(data.get("schedule"), dict) else {}
             confirmed = data.get("download_base_confirmed")
             self.download_base_confirmed = confirmed if isinstance(confirmed, str) else None
         except FileNotFoundError:
@@ -197,7 +215,7 @@ class Manager:
             dev.pop("downgrade", None)  # marker of a running downgrade (rc7), memory semantics
 
     @staticmethod
-    def _remove_partial_downloads():
+    def _remove_partial_downloads() -> None:
         """Delete temporary download files left behind by a crash or restart.
         They are never offered for installation (only <sha256>.<ext> names are)."""
         for path in FW_DIR.glob(PART_PREFIX + "*"):
@@ -205,7 +223,7 @@ class Manager:
                 path.unlink(missing_ok=True)
                 log.info("Removed incomplete download %s", path.name)
 
-    def save(self):
+    def save(self) -> bool:
         """Write the state atomically (temporary file first, then rename).
 
         A write error (e.g. full disk) keeps the previous state file intact, is
@@ -232,9 +250,9 @@ class Manager:
         self.storage_error = None
         return True
 
-    def set_ui(self, prefs):
+    def set_ui(self, prefs: dict[str, Any]) -> None:
         """Store table settings shared by all users. Raises ValueError on bad input."""
-        clean = {}
+        clean: dict[str, Any] = {}
         for table in UI_TABLES:
             entry = prefs.get(table)
             if entry is None:
@@ -252,7 +270,7 @@ class Manager:
                 and sort[1] in ("asc", "desc")
             )
             valid_lists = all(isinstance(x, list) and len(x) <= MAX_COLUMNS for x in (hidden, order))
-            if not valid_sort or not valid_lists:
+            if not valid_sort or not valid_lists or hidden is None or order is None:
                 raise ValueError(f"Invalid table settings for {table}")
             if not all(isinstance(c, str) and COLUMN_RE.match(c) for c in [*hidden, *order]):
                 raise ValueError(f"Invalid column name for {table}")
@@ -262,13 +280,23 @@ class Manager:
 
     # ------------------------------------------------------------ Firmware store
 
-    def _register_firmware(self, name, fw_type, gen, version, sha, size, https=None, source=SOURCE_DOWNLOAD,
-                           sha_checked=None):
+    def _register_firmware(
+        self,
+        name: str,
+        fw_type: str,
+        gen: int,
+        version: str,
+        sha: str,
+        size: int,
+        https: bool | None = None,
+        source: str = SOURCE_DOWNLOAD,
+        sha_checked: bool | None = None,
+    ) -> None:
         """Add a firmware to the store (basis for reuse and downgrades).
         https: whether the download was protected by TLS (Gen1: never; uploads: None).
         source: SOURCE_DOWNLOAD or SOURCE_UPLOAD; sha_checked (uploads only): whether
         the user supplied a SHA-256 that matched the file."""
-        meta = {
+        meta: FirmwareMeta = {
             "type": clip(fw_type, 64),
             "gen": gen,
             "version": clip(version, 64),
@@ -283,15 +311,15 @@ class Manager:
         self.firmware[name] = meta
 
     @staticmethod
-    def _source(meta):
+    def _source(meta: FirmwareMeta) -> str:
         """Origin of a store entry; entries before rc7 were always downloaded."""
         return SOURCE_UPLOAD if meta.get("source") == SOURCE_UPLOAD else SOURCE_DOWNLOAD
 
-    def _in_use(self):
+    def _in_use(self) -> set[str]:
         """Files a device currently holds as update or is installing (incl. downgrades)."""
         return {d["file"] for d in self.devices.values() if d.get("status") in PENDING and d.get("file")}
 
-    def cleanup_firmware(self):
+    def cleanup_firmware(self) -> None:
         """Housekeeping of the store – never deletes a registered firmware (rc7).
 
         Store entries whose file is missing are dropped; files on disk that are not
@@ -309,7 +337,7 @@ class Manager:
         in_use = self._in_use()
         self.downloads = {k: v for k, v in self.downloads.items() if k in in_use}
 
-    async def _stored_firmware(self, fw_type, version):
+    async def _stored_firmware(self, fw_type: str, version: str) -> tuple[str, FirmwareMeta] | None:
         """Already stored firmware for ID and version – after checksum verification.
         Only files downloaded from the manufacturer are reused for an offered
         update; an uploaded file is never provided as the manufacturer's offer."""
@@ -324,7 +352,7 @@ class Manager:
                 self.firmware.pop(name, None)
         return None
 
-    def _delete_lock(self, name):
+    def _delete_lock(self, name: str) -> str | None:
         """Reason why a stored firmware cannot be deleted now, else None (rc7 Q9)."""
         if self.checking:
             return "Locked during a check"
@@ -336,9 +364,9 @@ class Manager:
             return "Locked: provided as pending update"
         return None
 
-    def firmware_list(self):
+    def firmware_list(self) -> list[dict[str, Any]]:
         """Stored firmwares for the "Firmware" tab."""
-        users = {}  # file name -> devices it is provided for
+        users: dict[str, list[str]] = {}  # file name -> devices it is provided for
         for dev in self.devices.values():
             if dev.get("status") in PENDING and dev.get("file"):
                 users.setdefault(dev["file"], []).append(dev.get("name") or "?")
@@ -360,11 +388,13 @@ class Manager:
             )
         return result
 
-    def store_size(self):
+    def store_size(self) -> int:
         """Total size of all stored firmware files in bytes (information only)."""
         return sum(int(meta.get("size") or 0) for meta in self.firmware.values())
 
-    def delete_firmware(self, name, user="unknown", confirm=False, acknowledged=False):
+    def delete_firmware(
+        self, name: str, user: str = "unknown", confirm: object = False, acknowledged: object = False
+    ) -> None:
         """Delete a stored firmware – only manually, with a second confirmation
         (confirm and acknowledged, as for the device password; rc7 Q9).
 
@@ -393,7 +423,7 @@ class Manager:
 
     # ------------------------------------------------------------ Downgrade (rc7)
 
-    def downgrade_versions(self, device_id):
+    def downgrade_versions(self, device_id: str) -> list[dict[str, Any]]:
         """Stored stable versions of the device's firmware ID that are older than the
         installed one, newest first (rc7). Gen1: never (empty list).
 
@@ -406,7 +436,7 @@ class Manager:
             installed = shelly.parse_version(dev.get("version"))
         except ShellyError:
             return []
-        best = {}  # version -> (name, meta)
+        best: dict[str, tuple[str, FirmwareMeta]] = {}  # version -> (name, meta)
         for name, meta in self.firmware.items():
             if meta.get("type") != dev["type"] or (meta.get("gen") or 1) < 2:
                 continue
@@ -434,7 +464,7 @@ class Manager:
             for name, meta in ordered
         ]
 
-    def downgrade_match(self, device_id, sha):
+    def downgrade_match(self, device_id: str, sha: object) -> dict[str, Any] | None:
         """The offered downgrade entry with exactly this SHA-256, else None."""
         if not isinstance(sha, str):
             return None
@@ -442,7 +472,7 @@ class Manager:
             (v for v in self.downgrade_versions(device_id) if hmac.compare_digest(str(v["sha256"]), sha)), None
         )
 
-    def downgrade_blocker(self, device_id):
+    def downgrade_blocker(self, device_id: str) -> str | None:
         """Why no downgrade can be started for the device now, else None."""
         dev = self.devices[device_id]
         if (dev.get("gen") or 1) < 2:
@@ -461,13 +491,13 @@ class Manager:
 
     # ------------------------------------------------------------ Manual upload (rc7)
 
-    def _drop_upload(self):
+    def _drop_upload(self) -> None:
         """Forget the staged upload and remove its temporary file."""
         staged, self._upload = self._upload, None
         if staged:
             staged["path"].unlink(missing_ok=True)
 
-    def _staged(self, token):
+    def _staged(self, token: object) -> dict[str, Any]:
         """The staged upload for token (expired ones are dropped), else ShellyError."""
         staged = self._upload
         if staged and time.monotonic() - staged["created"] > UPLOAD_TTL_S:
@@ -477,20 +507,20 @@ class Manager:
             raise ShellyError("No pending upload – please upload the file again")
         return staged
 
-    def upload_types(self):
+    def upload_types(self) -> dict[str, int]:
         """Firmware IDs an upload can be assigned to: those of known Gen2+ devices."""
-        types = {}
+        types: dict[str, int] = {}
         for dev in self.devices.values():
             if (dev.get("gen") or 1) >= 2 and dev.get("type"):
                 types[dev["type"]] = max(types.get(dev["type"], 0), dev["gen"])
         return types
 
     @staticmethod
-    def _read_manifest(path):
+    def _read_manifest(path: Path) -> dict[str, str | None]:
         """Type/version hints from a manifest.json in a ZIP (top level or one folder
         deep). Only pre-fills the form – the user confirms or corrects both values.
         Returns {"type": str|None, "version": str|None}; never raises."""
-        found = {"type": None, "version": None}
+        found: dict[str, str | None] = {"type": None, "version": None}
         try:
             with zipfile.ZipFile(path) as archive:
                 member = next(
@@ -519,7 +549,9 @@ class Manager:
                 break
         return found
 
-    async def stage_upload(self, chunks, filename, length, user="unknown"):
+    async def stage_upload(
+        self, chunks: AsyncIterator[bytes], filename: str, length: int | None, user: str = "unknown"
+    ) -> dict[str, Any]:
         """Step 1 of a manual upload: store the file under a temporary name.
 
         chunks: async iterator of bytes (the request body, streamed – never held in
@@ -553,7 +585,9 @@ class Manager:
                     raise ValueError("Upload incomplete")
                 if ext == ".zip" and not await asyncio.to_thread(zipfile.is_zipfile, path):
                     raise ValueError("The .zip file is not a valid ZIP archive")
-                detected = await asyncio.to_thread(self._read_manifest, path) if ext == ".zip" else {}
+                detected: dict[str, str | None] = (
+                    await asyncio.to_thread(self._read_manifest, path) if ext == ".zip" else {}
+                )
             except BaseException:
                 path.unlink(missing_ok=True)
                 raise
@@ -579,11 +613,13 @@ class Manager:
             "duplicate": f"{stored.get('type')} {stored.get('version')}" if stored else None,
         }
 
-    def _by_sha(self, sha):
+    def _by_sha(self, sha: str) -> FirmwareMeta | None:
         """Store entry with this SHA-256 (any file extension), else None."""
         return next((m for m in self.firmware.values() if m.get("sha256") == sha), None)
 
-    def confirm_upload(self, token, fw_type, version, expected_sha=None, user="unknown"):
+    def confirm_upload(
+        self, token: object, fw_type: object, version: object, expected_sha: object = None, user: str = "unknown"
+    ) -> dict[str, Any]:
         """Step 2: register the staged file with the confirmed type and version.
 
         type: firmware ID of a known Gen2+ device; version: stable X.Y.Z; an optional
@@ -625,7 +661,7 @@ class Manager:
         self.save()
         return {"name": name, **self.firmware[name]}
 
-    def cancel_upload(self, token):
+    def cancel_upload(self, token: object) -> None:
         """Discard the staged upload (Cancel in the confirmation form)."""
         with contextlib.suppress(ShellyError):
             self._staged(token)
@@ -633,7 +669,7 @@ class Manager:
 
     # ------------------------------------------------------------ Home Assistant
 
-    async def _registry(self):
+    async def _registry(self) -> list[dict[str, Any]]:
         """Device registry via the Core WebSocket API (through the Supervisor proxy)."""
         ws_url = SUPERVISOR.replace("http", "ws", 1) + "/core/websocket"
         async with self.session.ws_connect(ws_url, timeout=aiohttp.ClientWSTimeout(ws_close=30)) as ws:
@@ -648,9 +684,10 @@ class Manager:
                 if msg.get("id") == 1:
                     if not msg.get("success"):
                         raise ShellyError(clip(msg.get("error")))
-                    return msg["result"]
+                    result = msg["result"]
+                    return result if isinstance(result, list) else []
 
-    async def notify(self, title, message, notification_id):
+    async def notify(self, title: str, message: str, notification_id: str) -> None:
         """Persistent notification in Home Assistant (errors are only logged)."""
         try:
             async with self.session.post(
@@ -663,7 +700,7 @@ class Manager:
         except (TimeoutError, aiohttp.ClientError) as err:
             log.warning("Notification failed: %s", err)
 
-    async def _supervisor_post(self, path, body):
+    async def _supervisor_post(self, path: str, body: dict[str, Any] | None) -> None:
         """POST to the Supervisor API (only /addons/self/* is used); errors -> ShellyError."""
         try:
             async with self.session.post(
@@ -683,11 +720,11 @@ class Manager:
 
     # ------------------------------------------------------------ App options
 
-    def options_view(self):
+    def options_view(self) -> dict[str, Any]:
         """App options for the Settings tab (secret only as set/not set)."""
         return app_options.public_view(self.options)
 
-    async def save_options(self, changes, user=None):
+    async def save_options(self, changes: object, user: str | None = None) -> list[str]:
         """Validate and save via the Supervisor; the caller restarts the app.
 
         The attempt is written to the activity log with the changed keys – values
@@ -715,7 +752,7 @@ class Manager:
     # ------------------------------------------------------------ Download base URL
 
     @property
-    def download_base_issue(self):
+    def download_base_issue(self) -> str | None:
         """Why installations are blocked by download_base_url (rc6, R1), else None.
 
         "missing": not set (optional option without default). "unconfirmed": still the
@@ -728,7 +765,7 @@ class Manager:
             return "unconfirmed"
         return None
 
-    def confirm_download_base(self, url, user=None):
+    def confirm_download_base(self, url: object, user: str | None = None) -> None:
         """Confirm that the former example value really is the address of Home
         Assistant. url must be the current value (no confirmation of a stale view).
         Stored in state.json; no option change, no restart. Logged."""
@@ -745,18 +782,18 @@ class Manager:
             user=user,
         )
 
-    async def restart_app(self):
+    async def restart_app(self) -> None:
         """Ask the Supervisor to restart this app so new options take effect."""
         await self._supervisor_post("/addons/self/restart", None)
 
     # ------------------------------------------------------------ Check
 
     @property
-    def checking(self):
+    def checking(self) -> bool:
         """True while a check runs or has been reserved by a request (see reserve_check)."""
         return self.lock.locked() or self.progress is not None
 
-    def reserve_check(self, kind="all", device_id=None):
+    def reserve_check(self, kind: str = "all", device_id: str | None = None) -> None:
         """Reserve the check slot synchronously, before the background task starts.
 
         Two quick requests (double tap, two browsers) can therefore never start two
@@ -769,6 +806,8 @@ class Manager:
         if self.reloading:
             raise ShellyError("Device info is being reloaded – please try again in a moment")
         if kind == "device":
+            if device_id is None:
+                raise ValueError("device_id required for a single-device check")
             self.progress = {
                 "kind": "device",
                 "device": self.devices[device_id].get("name"),
@@ -781,7 +820,7 @@ class Manager:
         else:
             self.progress = {"kind": "all", "total": 0, "done": 0, "errors": 0, "phase": "queued"}
 
-    def _reserved(self, kind, device_id=None):
+    def _reserved(self, kind: str, device_id: str | None = None) -> bool:
         """True if the slot was reserved for exactly this check and it has not started."""
         p = self.progress
         return (
@@ -793,7 +832,7 @@ class Manager:
         )
 
     @property
-    def busy(self):
+    def busy(self) -> str | None:
         """Text for the UI while a check or installations are running."""
         if self.checking:
             if self.progress and self.progress.get("kind") == "device":
@@ -803,14 +842,14 @@ class Manager:
             return f"Installations running: {len(self.installing)}"
         return None
 
-    def scan_due_in(self, now):
+    def scan_due_in(self, now: float) -> float:
         """Seconds until the next automatic check; 0 = due now (see schedule.py).
 
         Only the schedule counts: neither an app update, a manual check nor a
         Reload Device Info shifts it."""
         return schedule.seconds_until(self.schedule, now, self.tz)
 
-    async def scan(self, automatic=False, user=None):
+    async def scan(self, automatic: bool = False, user: str | None = None) -> bool:
         """Check all Shellys. Returns False if a check or installation is running.
         Automatic checks report newly found updates as a notification in HA and
         record their scheduled date when they start (one attempt per date).
@@ -826,11 +865,12 @@ class Manager:
                 self.schedule = {**self.schedule, "last_date": due.isoformat()}
         async with self.lock:
             started = time.monotonic()
-            failure, checked = None, []
-            self.progress["phase"] = "registry"
+            failure: str | None = None
+            checked: list[str] = []
+            self._progress()["phase"] = "registry"
             try:
                 checked = await self._scan_all()
-                self.progress["phase"] = "changelog"
+                self._progress()["phase"] = "changelog"
                 await self._refresh_changelogs()
             except Exception as err:  # report overall errors (e.g. registry), do not crash
                 log.exception("Check failed")
@@ -850,13 +890,21 @@ class Manager:
             await self._notify_new_updates()
         return True
 
-    def _log_check(self, checked, automatic, user, duration, failure, trigger=None):
+    def _log_check(
+        self,
+        checked: list[str],
+        automatic: bool,
+        user: str | None,
+        duration: float,
+        failure: str | None,
+        trigger: str | None = None,
+    ) -> None:
         """One log entry per check; findings = devices with an update, a warning or
         an error. trigger overrides the derived value ("device" for single-device checks).
         Every finding carries a severity; "error" holds the message of warnings
         and errors (key kept for historic entries). The entry gets the highest
         severity of its findings, an overall failure is an error."""
-        findings = []
+        findings: list[dict[str, Any]] = []
         for device_id in checked:
             dev = self.devices.get(device_id, {})
             if dev.get("status") == STATUS_ERROR:
@@ -897,32 +945,32 @@ class Manager:
             findings=findings,
         )
 
-    async def _refresh_changelogs(self):
+    async def _refresh_changelogs(self) -> None:
         """Fetch the changelog pages once per check – only if updates were found,
         only for the generations concerned, never with device data."""
         await self._refresh_changelogs_for(self.devices.values())
 
-    async def _refresh_changelogs_for(self, devices):
+    async def _refresh_changelogs_for(self, devices: Iterable[Device]) -> None:
         """Refresh the changelogs of the generations of devices with an update;
         the offered versions let a fresh stored changelog be reused."""
-        wanted = {}  # 1 | 2 -> offered versions
+        wanted: dict[int, set[str | None]] = {}  # 1 | 2 -> offered versions
         for d in devices:
             if d.get("status") in (STATUS_READY, STATUS_AVAILABLE):
                 wanted.setdefault(1 if d.get("gen") == 1 else 2, set()).add(d.get("offer_version"))
         if wanted:
             await self.changelogs.refresh(self.session, set(wanted), self.pins, wanted)
 
-    def changelog_for(self, device_id):
+    def changelog_for(self, device_id: str) -> list[dict[str, Any]] | None:
         """Changelog entries between the installed and the offered version (None: unknown)."""
         dev = self.devices[device_id]
         if not dev.get("offer_version") or not dev.get("version"):
             return None
         return self.changelogs.between(dev.get("gen"), dev["version"], dev["offer_version"], dev.get("type"))
 
-    async def _scan_all(self):
+    async def _scan_all(self) -> list[str]:
         """Check all Shelly main devices from the HA device registry.
         Returns the IDs of the checked devices."""
-        offers = {}  # (gen, firmware ID) -> shared offer task: one request per type
+        offers: OfferTasks = {}  # (gen, firmware ID) -> shared offer task: one request per type
         entries = self._shelly_entries(await self._registry())
         # Ignored devices count as registered (seen) but are not contacted
         seen = set(entries)
@@ -931,17 +979,18 @@ class Manager:
                 entry = entries.pop(device_id)
                 self.devices[device_id]["name"] = clip(entry.get("name_by_user") or entry.get("name") or device_id, 100)
         # Every device of this check is "waiting" until it is reached
-        self.progress.update(total=len(entries), phase="devices")
+        progress = self._progress()
+        progress.update(total=len(entries), phase="devices")
         self.activity.update(dict.fromkeys(entries, ACTIVITY_WAITING))
         slots = asyncio.Semaphore(CHECK_PARALLEL)
 
-        async def check(device_id, entry):
+        async def check(device_id: str, entry: dict[str, Any]) -> None:
             """Check one device within the parallel limit and count the result."""
             async with slots:
                 ok = await self._check_entry(device_id, entry, offers)
             if not ok:
-                self.progress["errors"] += 1
-            self.progress["done"] += 1
+                progress["errors"] += 1
+            progress["done"] += 1
 
         # TaskGroup: a cancelled check (app stop) cancels every device query
         async with asyncio.TaskGroup() as group:
@@ -953,12 +1002,12 @@ class Manager:
                 dev.update(status=STATUS_UNREGISTERED, message="")
         return sorted(entries)
 
-    def _shelly_entries(self, registry):
+    def _shelly_entries(self, registry: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         """Shelly main devices from the registry, ordered by name: {device ID: entry}.
 
         Sub-devices (channels of e.g. Pro 3EM or Strip) carry via_device_id; only the
         main device has firmware of its own – stale sub-device entries are removed."""
-        entries = {}
+        entries: dict[str, dict[str, Any]] = {}
         for entry in registry:
             is_shelly = any(i and i[0] == "shelly" for i in entry.get("identifiers", []))
             if not is_shelly or entry.get("disabled_by"):
@@ -968,14 +1017,15 @@ class Manager:
                 self.credentials.remove(entry["id"])
                 continue
             entries[entry["id"]] = entry
-        def label(i):
+
+        def label(i: str) -> str:
             """Sort key: the name shown in HA (user-given name first)."""
             return str(entries[i].get("name_by_user") or entries[i].get("name") or i).lower()
 
         order = sorted(entries, key=label)
         return {i: entries[i] for i in order}
 
-    async def _check_entry(self, device_id, entry, offers):
+    async def _check_entry(self, device_id: str, entry: dict[str, Any], offers: OfferTasks) -> bool:
         """Check one registry entry, keep its result on the device. True on success.
 
         last_check = last attempt, last_success = last successful check; a failed
@@ -998,7 +1048,7 @@ class Manager:
         finally:
             self.activity.pop(device_id, None)
 
-    async def check_device(self, device_id, user=None):
+    async def check_device(self, device_id: str, user: str | None = None) -> dict[str, Any]:
         """Check a single device without starting the full check.
 
         Same steps as the full check for this one device (device info, offer,
@@ -1014,19 +1064,20 @@ class Manager:
             dev = self.devices[device_id]
             started = time.monotonic()
             failure = None
+            progress = self._progress()
             try:
-                self.progress["phase"] = "registry"
+                progress["phase"] = "registry"
                 entry = self._shelly_entries(await self._registry()).get(device_id)
                 if entry is None:
                     dev.update(status=STATUS_UNREGISTERED, message="")
                     failure = "Device is no longer in the Home Assistant device registry"
                 else:
-                    self.progress["phase"] = "devices"
+                    progress["phase"] = "devices"
                     if not await self._check_entry(device_id, entry, {}):
-                        self.progress["errors"] = 1
-                    self.progress["done"] = 1
+                        progress["errors"] = 1
+                    progress["done"] = 1
                     if dev.get("status") in (STATUS_READY, STATUS_AVAILABLE):
-                        self.progress["phase"] = "changelog"
+                        progress["phase"] = "changelog"
                         await self._refresh_changelogs_for([dev])
             except Exception as err:  # registry failure etc.: report, do not crash
                 log.exception("Device check failed")
@@ -1041,7 +1092,9 @@ class Manager:
             )
         return {"status": dev.get("status"), "error": failure}
 
-    async def _scan_device(self, device_id, dev, configuration_url, offers):
+    async def _scan_device(
+        self, device_id: str, dev: Device, configuration_url: str | None, offers: OfferTasks
+    ) -> None:
         """Check one device and provide the new firmware if there is one."""
         origin = await shelly.resolve_device_origin(configuration_url)
         dev.update(origin=origin)
@@ -1096,7 +1149,7 @@ class Manager:
         task = self._provisions.get(fw_key)
         if task is None:
             task = self._provisions[fw_key] = asyncio.ensure_future(self._provide(device_id, dev, info, offer))
-            task.add_done_callback(lambda _t, k=fw_key: self._provisions.pop(k, None))
+            task.add_done_callback(functools.partial(self._provision_done, fw_key))
         name, sha, size = await task
         dev.update(
             status=STATUS_READY,
@@ -1109,14 +1162,20 @@ class Manager:
             message="Provided, not installed",
         )
 
-    async def _provide(self, device_id, dev, info, offer):
+    def _provision_done(self, fw_key: tuple[str, str], _task: "asyncio.Future[Any]") -> None:
+        """Forget a finished provide task (single flight per firmware ID and version)."""
+        self._provisions.pop(fw_key, None)
+
+    async def _provide(
+        self, device_id: str, dev: Device, info: dict[str, Any], offer: dict[str, str]
+    ) -> tuple[str, str, int]:
         """Stored firmware (after checksum verification) or a new download.
         Returns (file name, sha256, size)."""
         stored = await self._stored_firmware(info["type"], offer["version"])
         if stored:
             name, meta = stored
             log.info("%s: using stored firmware %s %s", dev["name"], info["type"], offer["version"])
-            return name, meta["sha256"], meta["size"]
+            return name, str(meta["sha256"]), int(meta["size"])
         self.activity[device_id] = ACTIVITY_DOWNLOADING
         self._downloads_running += 1
         if self.progress:
@@ -1136,14 +1195,14 @@ class Manager:
         return name, sha, size
 
     @staticmethod
-    def _apply_info(dev, info):
+    def _apply_info(dev: Device, info: dict[str, Any]) -> None:
         """Take over the identity read from the device; a changed version (e.g.
         update via the Shelly app) sets last_update."""
         if dev.get("version") and dev["version"] != info["version"]:
             dev["last_update"] = int(time.time())
         dev.update(**info)
 
-    async def _notify_new_updates(self):
+    async def _notify_new_updates(self) -> None:
         """One HA notification if an automatic check found versions not reported before.
         Lists all open updates so that a replaced notification loses nothing."""
         open_updates = [
@@ -1167,15 +1226,15 @@ class Manager:
 
     # ------------------------------------------------------------ Device settings
 
-    def _auth(self, device_id, dev):
+    def _auth(self, device_id: str, dev: Device) -> DeviceAuth | None:
         """Stored credentials of a device, else None (v3: no shared password)."""
         return self.credentials.auth_for(device_id, dev.get("gen") or 1)
 
-    def _auth_for(self, device_id):
+    def _auth_for(self, device_id: str) -> Callable[[int], DeviceAuth | None]:
         """Credentials lookup by generation, for requests that detect the generation."""
         return lambda gen: self.credentials.auth_for(device_id, gen)
 
-    async def _read_settings(self, device_id, dev, extended=False):
+    async def _read_settings(self, device_id: str, dev: Device, extended: bool = False) -> bool:
         """Read settings and feature states (see shelly.read_settings). True on success.
 
         A failure must not stop the firmware check: the old values stay, but
@@ -1194,7 +1253,7 @@ class Manager:
         dev.pop("settings_error", None)
         return True
 
-    def _settings_device(self, device_id):
+    def _settings_device(self, device_id: str) -> Device:
         """Device whose settings may be read/changed now (reachable, not installing)."""
         dev = self.devices[device_id]
         if device_id in self.installing or dev.get("status") == STATUS_INSTALLING:
@@ -1207,7 +1266,7 @@ class Manager:
             raise ShellyError("Device has not been checked successfully yet")
         return dev
 
-    async def refresh_settings(self, device_id):
+    async def refresh_settings(self, device_id: str) -> dict[str, Any]:
         """Read the current settings directly from the Shelly (before editing)."""
         dev = self._settings_device(device_id)
         settings = await shelly.read_settings(
@@ -1218,7 +1277,7 @@ class Manager:
         self.save()
         return settings
 
-    def set_ignored(self, device_id, ignored):
+    def set_ignored(self, device_id: str, ignored: object) -> None:
         """Ignore or resume a device. Purely local: nothing is sent to the device and
         no check is started (an ignored device keeps its last known state)."""
         if device_id not in self.devices:
@@ -1232,7 +1291,7 @@ class Manager:
             dev.pop("ignored", None)
         self.save()
 
-    async def reload_device(self, device_id):
+    async def reload_device(self, device_id: str) -> dict[str, str | None]:
         """Reload Device Info: identity, installed firmware and the settings/feature
         states the app shows – read from the device only.
 
@@ -1272,7 +1331,9 @@ class Manager:
             self.save()
         return {"warning": None if ok else f"Device status not readable: {dev['settings_error']['message']}"}
 
-    async def change_settings(self, device_id, changes, user="unknown"):
+    async def change_settings(
+        self, device_id: str, changes: dict[str, Any], user: str = "unknown"
+    ) -> tuple[dict[str, Any], bool, bool]:
         """Validate, send to the Shelly, read back. Returns (settings, restart_required, verified).
         verified is False if the read-back failed (the change is then unconfirmed).
         Every attempt that reaches the device is written to the activity log."""
@@ -1301,10 +1362,10 @@ class Manager:
         return {k: dev.get(k) for k in ("shelly_name", "ntp", "eco", "ap", "ble", "outputs")}, restart, verified
 
     @staticmethod
-    def _settings_diff(dev, clean):
+    def _settings_diff(dev: Device, clean: dict[str, Any]) -> list[dict[str, Any]]:
         """Old -> new values of a settings change, readable for the log."""
-        onoff = {True: "on", False: "off"}
-        diff = []
+        onoff: dict[object, str] = {True: "on", False: "off"}
+        diff: list[dict[str, Any]] = []
         if "name" in clean:
             diff.append({"setting": "Shelly name", "old": dev.get("shelly_name"), "new": clean["name"]})
         if "ntp" in clean:
@@ -1321,13 +1382,21 @@ class Manager:
             )
         return diff
 
-    async def restart_device(self, device_id):
+    async def restart_device(self, device_id: str) -> None:
         """Restart the Shelly (same restrictions as changing settings). Not logged."""
         dev = self._settings_device(device_id)
         await shelly.restart(self.session, dev["gen"], dev["origin"], self._auth(device_id, dev))
         log.info("%s: restart requested", dev.get("name"))
 
-    async def set_device_password(self, device_id, mode, password=None, confirm=False, acknowledged=False, user=None):
+    async def set_device_password(
+        self,
+        device_id: str,
+        mode: str,
+        password: str | None = None,
+        confirm: object = False,
+        acknowledged: object = False,
+        user: str | None = None,
+    ) -> dict[str, Any]:
         """Password dialog. Modes:
 
         - store:  the device is protected; test the entered password, then store it
@@ -1371,14 +1440,24 @@ class Manager:
         self.events.add("password", device=name, action=action, user=user)
         return result
 
-    async def _password_action(self, device_id, dev, mode, password, gen, origin, realm):
+    async def _password_action(
+        self,
+        device_id: str,
+        dev: Device,
+        mode: str,
+        password: str | None,
+        gen: int,
+        origin: str,
+        realm: str | None,
+    ) -> dict[str, Any]:
         """Device part of set_device_password (see there); raises on any failure."""
         protected = await shelly.protection_status(self.session, origin)
         dev["auth_enabled"] = protected
         current = self._auth(device_id, dev)
+        candidate = None
         if mode in ("store", "enable", "change"):
             candidate = self.credentials.candidate(gen, realm, password)
-        if mode == "store":
+        if mode == "store" and candidate is not None:
             if protected is False:
                 raise ShellyError("The device is not password protected – use 'Enable password protection' instead")
             if not await self._auth_works(dev, candidate):
@@ -1399,7 +1478,7 @@ class Manager:
         new = None if mode == "remove" else candidate
         try:
             await shelly.set_protection(self.session, gen, origin, realm, new, current)
-            answer = None
+            answer: BaseException | None = None
         except (TimeoutError, ShellyError, aiohttp.ClientError) as err:
             answer = err  # the change may still have been applied: verify below
         # Verification against the device itself
@@ -1413,7 +1492,7 @@ class Manager:
                 self.credentials.remove(device_id)
                 return {"protected": False}
             raise ShellyError(self._unverified("Password protection was not confirmed as removed", answer))
-        if protected is True and await self._auth_works(dev, new):
+        if protected is True and new is not None and await self._auth_works(dev, new):
             self.credentials.store(device_id, new)  # replaces the old credential only now
             return {"protected": True}
         if mode == "change" and await self._auth_works(dev, current):
@@ -1426,7 +1505,7 @@ class Manager:
             )
         )
 
-    async def _auth_works(self, dev, auth):
+    async def _auth_works(self, dev: Device, auth: DeviceAuth | None) -> bool:
         """True if an authenticated read succeeds with auth. Only meaningful while
         the device is protected – an unprotected device accepts anything."""
         try:
@@ -1436,20 +1515,20 @@ class Manager:
         return True
 
     @staticmethod
-    def _unverified(text, answer):
+    def _unverified(text: str, answer: BaseException | None) -> str:
         """Message for an unconfirmed password change, with the device's answer."""
         return f"{text} ({clip(answer, 120)})" if answer else text
 
     # ------------------------------------------------------------ Installation
 
-    def approval_matches(self, device_id, sha):
+    def approval_matches(self, device_id: str, sha: str) -> bool:
         """An approval is only valid while exactly this file (SHA-256) is provided."""
         dev = self.devices.get(device_id) or {}
         if dev.get("gen") == 1 and not self.gen1_enabled:
             return False  # Gen1 updates disabled in the settings
         return dev.get("status") == STATUS_READY and hmac.compare_digest(str(dev.get("sha256")), sha)
 
-    async def install(self, device_id, sha, approved_by, downgrade=False):
+    async def install(self, device_id: str, sha: str, approved_by: str, downgrade: bool = False) -> bool:
         """Install an approved update. True only if the target version is confirmed.
 
         Several installations run in parallel, at most max_parallel_installs at a
@@ -1467,6 +1546,7 @@ class Manager:
             or device_id in self.reloading
         ):
             return False
+        target = None
         if downgrade:
             target = self.downgrade_match(device_id, sha) if device_id in self.devices else None
             if target is None or self.downgrade_blocker(device_id):
@@ -1475,7 +1555,7 @@ class Manager:
             return False
         dev = self.devices[device_id]
         self.installing.add(device_id)  # no await before this: no double starts possible
-        if downgrade:
+        if target is not None:
             # The device now holds the older file: the download server serves it to
             # this device only while the installation runs (status installing). The
             # update provided before (if any) is provided again at the next check.
@@ -1495,7 +1575,7 @@ class Manager:
             "%s %s → %s approved by %s",
             "Downgrade" if downgrade else "Installation", dev["name"], dev["pending_version"], approved_by,
         )
-        entry = None  # log context, set once the installation actually starts
+        entry: dict[str, Any] | None = None  # log context, set once the installation actually starts
         try:
             async with self.install_slots:
                 dev["message"] = "Downgrade started" if downgrade else "Installation started"
@@ -1527,7 +1607,7 @@ class Manager:
             self.save()
 
     @staticmethod
-    def _after_downgrade(dev):
+    def _after_downgrade(dev: Device) -> None:
         """After a confirmed downgrade: a newer version known from the last check is
         shown as available again (it is provided at the next check)."""
         offer = dev.get("offer_version")
@@ -1543,7 +1623,7 @@ class Manager:
         else:
             dev["message"] = f"Downgraded to {dev.get('version')}"
 
-    async def _install(self, device_id, dev, sha):
+    async def _install(self, device_id: str, dev: Device, sha: str) -> tuple[bool, str | None]:
         """Actual installation: pre-check, update command, wait for the target version.
         Returns (confirmed, diagnosis or None)."""
         # 1. The approval is valid only for exactly this file and this device state
@@ -1559,7 +1639,7 @@ class Manager:
         # (progress, error) arrive; plain HTTP as fallback if the WebSocket is unusable.
         url = f"{self.download_base}/{dev['file']}"
         self._reset_download(dev)
-        ota = {"error": None, "failed": asyncio.Event()}
+        ota: dict[str, Any] = {"error": None, "failed": asyncio.Event()}
         reader = await self._update_over_websocket(dev, url, auth, ota) if dev["gen"] >= 2 else None
         if reader is None:
             await shelly.trigger_update(self.session, dev["gen"], dev["origin"], url, auth)
@@ -1573,7 +1653,7 @@ class Manager:
                 await asyncio.gather(reader, return_exceptions=True)
             dev.pop("ota_progress", None)
 
-    async def _await_target_version(self, device_id, dev, ota):
+    async def _await_target_version(self, device_id: str, dev: Device, ota: dict[str, Any]) -> tuple[bool, str | None]:
         """3. Report success only when the device reports exactly the target version
         (parsed version number; Gen1 the vX.Y.Z part): wait 30 s, then check every
         10 s until the Shelly is reachable again. A different version (also a newer
@@ -1627,7 +1707,9 @@ class Manager:
         dev.update(status=STATUS_UNCLEAR, message=f"Target version not confirmed. {diagnosis}")
         return False, diagnosis
 
-    async def _update_over_websocket(self, dev, url, auth, ota):
+    async def _update_over_websocket(
+        self, dev: Device, url: str, auth: DeviceAuth | None, ota: dict[str, Any]
+    ) -> asyncio.Task[None] | None:
         """Gen2+: open the device WebSocket and send Shelly.Update over it.
 
         Returns the task that reads the device's OTA events, or None if the
@@ -1656,7 +1738,7 @@ class Manager:
             log.warning("%s: no answer to the update command – waiting for the device", dev["name"])
         return asyncio.create_task(self._read_ota_events(dev, channel, ota))
 
-    async def _read_ota_events(self, dev, channel, ota):
+    async def _read_ota_events(self, dev: Device, channel: shelly.OtaChannel, ota: dict[str, Any]) -> None:
         """Follow the OTA events of one installation until the device restarts:
         progress and state go to the device row, ota_error ends the installation."""
         try:
@@ -1680,7 +1762,7 @@ class Manager:
         finally:
             await channel.__aexit__(None, None, None)
 
-    async def _pause(self, ota, seconds):
+    async def _pause(self, ota: dict[str, Any], seconds: float) -> None:
         """Sleep while waiting for the device; ends at once on a Gen2+ ota_error."""
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(ota["failed"].wait(), seconds)
@@ -1693,7 +1775,7 @@ class Manager:
 
     # ------------------------------------------------------------ Download server
 
-    def may_download(self, name, client_ip):
+    def may_download(self, name: str, client_ip: str) -> bool:
         """May client_ip download the file name? Only provided files, optionally only to Shellys.
         Rejected attempts on provided files are recorded for the installation diagnosis;
         served downloads are counted by record_download (GET only, rc6 R6)."""
@@ -1708,7 +1790,7 @@ class Manager:
             record["rejected"].add(client_ip)
         return allowed
 
-    def record_download(self, name, client_ip):
+    def record_download(self, name: str, client_ip: str) -> None:
         """Count a GET that starts the transfer of a provided file, per client
         address (rc6 R4: parallel installations of one firmware share the file)."""
         record = self.downloads.get(name)
@@ -1718,26 +1800,26 @@ class Manager:
         if client_ip in served or len(served) < MAX_SERVED_IPS:
             served[client_ip] = served.get(client_ip, 0) + 1
 
-    def _reset_download(self, dev):
+    def _reset_download(self, dev: Device) -> None:
         """Forget earlier downloads of this device only (installation start)."""
-        record = self.downloads.get(dev.get("file"))
+        record = self.downloads.get(str(dev.get("file")))
         if record is not None:
             record["served"].pop(shelly.origin_ip(dev.get("origin", "")), None)
 
-    def _downloaded(self, dev):
+    def _downloaded(self, dev: Device) -> bool:
         """True if this device has started downloading its file. A request from an
         address that belongs to no known device (Docker without the sender IP, see
         restrict_downloads_to_devices) cannot be attributed and counts for every
         device of that file, as before rc6."""
-        served = (self.downloads.get(dev.get("file")) or {}).get("served") or {}
+        served = (self.downloads.get(str(dev.get("file"))) or {}).get("served") or {}
         if served.get(shelly.origin_ip(dev.get("origin", ""))):
             return True
         known = {shelly.origin_ip(d["origin"]) for d in self.devices.values() if d.get("origin")}
         return any(count and address not in known for address, count in served.items())
 
-    def _install_diagnosis(self, dev):
+    def _install_diagnosis(self, dev: Device) -> str:
         """Explains why the target version was not reached."""
-        record = self.downloads.get(dev.get("file"), {})
+        record = self.downloads.get(str(dev.get("file")), {})
         if self._downloaded(dev):
             return (
                 "The Shelly downloaded the firmware but still reports "
@@ -1757,7 +1839,13 @@ class Manager:
 
     # ------------------------------------------------------------ UI
 
-    def public_state(self):
+    def _progress(self) -> dict[str, Any]:
+        """Progress of the running check; set by reserve_check before every check."""
+        if self.progress is None:
+            raise ShellyError("No check reserved")
+        return self.progress
+
+    def public_state(self) -> dict[str, Any]:
         """Only fields the UI needs: no credentials, builds or download diagnosis.
 
         The device's private IP address and its web interface URL are included on
@@ -1792,7 +1880,7 @@ class Manager:
             "ota_progress",
             "downgrade",
         )
-        devices = []
+        devices: list[dict[str, Any]] = []
         for key, dev in self.devices.items():
             origin = dev.get("origin")  # checked by resolve_device_origin: private IP
             devices.append(
@@ -1824,7 +1912,7 @@ class Manager:
             "download_base": {
                 "url": self.download_base,
                 "issue": self.download_base_issue,
-                "message": DOWNLOAD_BASE_MESSAGES.get(self.download_base_issue),
+                "message": DOWNLOAD_BASE_MESSAGES.get(self.download_base_issue or ""),
             },
             "ui": self.ui,
         }

@@ -24,16 +24,21 @@ import json
 import logging
 import re
 import secrets
+from collections.abc import Awaitable, Coroutine
 from pathlib import Path
+from typing import Any, TypeVar
 
 import aiohttp
 from aiohttp import web
+from aiohttp.typedefs import Handler
 from download_server import strip_server_header
 from events import user_from
 from manager import DOWNLOAD_BASE_MESSAGES, FW_DIR, Manager
 from shelly import FW_NAME_RE, MAX_FW_SIZE, ShellyError
 
 log = logging.getLogger("sfm.ui")
+
+T = TypeVar("T")
 
 INGRESS_PROXY_IP = "172.30.32.2"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -58,7 +63,7 @@ SECURITY_HEADERS = {
 STATIC_CACHE = "private, max-age=31536000, immutable"
 
 
-def asset_version():
+def asset_version() -> str:
     """Short content hash of app.js and style.css – part of their URLs in index.html."""
     digest = hashlib.sha256()
     for name in ("app.js", "style.css"):
@@ -66,22 +71,22 @@ def asset_version():
     return digest.hexdigest()[:16]
 
 
-def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
+def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Application:
     """aiohttp application with the UI page, static files and the JSON API."""
     csrf_token = secrets.token_hex(32)  # new on every app start
     version = asset_version()
     index_html = (
         (STATIC_DIR / "index.html").read_text().replace("__CSRF__", csrf_token).replace("__ASSET_VERSION__", version)
     )
-    tasks = set()  # keep references so tasks are not garbage collected
+    tasks: set[asyncio.Task[Any]] = set()  # keep references so tasks are not garbage collected
 
-    def background(coro):
+    def background(coro: Coroutine[Any, Any, Any]) -> None:
         """Run a coroutine detached from the request (scan, installation, restart)."""
         task = asyncio.create_task(coro)
         tasks.add(task)
         task.add_done_callback(tasks.discard)
 
-    async def cancel_background(_app):
+    async def cancel_background(_app: web.Application) -> None:
         """On shutdown: cancel running checks/installations so they clean up
         (no device stays "checking"; an interrupted installation is reported as
         unconfirmed after the restart)."""
@@ -90,7 +95,7 @@ def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
         await asyncio.gather(*tasks, return_exceptions=True)
 
     @web.middleware
-    async def security(request, handler):
+    async def security(request: web.Request, handler: Handler) -> web.StreamResponse:
         """Ingress-only access, CSRF + JSON for writes, security headers on every answer."""
         if request.remote != ingress_ip:
             return web.Response(status=403, text="Only reachable via Home Assistant Ingress")
@@ -110,14 +115,14 @@ def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
             response.headers["Cache-Control"] = STATIC_CACHE
         return response
 
-    def device_id_from(request):
+    def device_id_from(request: web.Request) -> str:
         """Validated HA device ID from the URL; unknown IDs -> 404."""
         device_id = request.match_info["id"]
         if not DEVICE_ID_RE.match(device_id) or device_id not in mgr.devices:
             raise web.HTTPNotFound(text="Unknown device")
         return device_id
 
-    async def json_body(request):
+    async def json_body(request: web.Request) -> dict[str, Any]:
         """Request body as JSON object; anything else -> 400."""
         try:
             body = await request.json()
@@ -127,7 +132,7 @@ def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
             raise web.HTTPBadRequest(text="JSON object expected")
         return body
 
-    async def guarded(coro):
+    async def guarded(coro: Awaitable[T]) -> T:
         """Run a request to a Shelly/the Supervisor and translate errors into HTTP answers."""
         try:
             return await coro
@@ -142,11 +147,11 @@ def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
 
     # ---------------------------------------------------------------- Routes
 
-    async def page(_request):
+    async def page(_request: web.Request) -> web.StreamResponse:
         """The single-page UI with the CSRF token embedded."""
         return web.Response(text=index_html, content_type="text/html")
 
-    async def state(request):
+    async def state(request: web.Request) -> web.StreamResponse:
         """Device list and status (no credentials, no internal addresses).
 
         Conditional: the ETag is a hash of the body; a matching If-None-Match gets an
@@ -157,7 +162,7 @@ def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
             return web.Response(status=304, headers={"ETag": etag})
         return web.Response(text=body, content_type="application/json", headers={"ETag": etag})
 
-    async def scan(request):
+    async def scan(request: web.Request) -> web.StreamResponse:
         """Start a manual check in the background."""
         try:
             mgr.reserve_check("all")  # synchronous: a second request gets 409
@@ -166,7 +171,7 @@ def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
         background(mgr.scan(user=user_from(request.headers)))
         return web.json_response({"started": True})
 
-    async def check_device(request):
+    async def check_device(request: web.Request) -> web.StreamResponse:
         """Start the check of a single device in the background (no installation)."""
         device_id = device_id_from(request)
         await json_body(request)  # no parameters, but the JSON/CSRF rules apply
@@ -175,7 +180,7 @@ def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
         except ShellyError as err:
             raise web.HTTPConflict(text=str(err)) from None
 
-        async def run():
+        async def run() -> None:
             """Single-device check; failures are already logged by the manager."""
             with contextlib.suppress(ShellyError, KeyError):
                 await mgr.check_device(device_id, user=user_from(request.headers))
@@ -183,7 +188,7 @@ def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
         background(run())
         return web.json_response({"started": True})
 
-    async def set_ui(request):
+    async def set_ui(request: web.Request) -> web.StreamResponse:
         """Store the shared table settings (sort order, hidden columns)."""
         try:
             mgr.set_ui(await json_body(request))
@@ -191,7 +196,7 @@ def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
             raise web.HTTPBadRequest(text=str(err)) from None
         return web.json_response({"ok": True})
 
-    async def install(request):
+    async def install(request: web.Request) -> web.StreamResponse:
         """Start an approved installation, bound to the SHA-256 shown to the user.
 
         {"downgrade": true} (rc7, Gen2+): install the stored older version with that
@@ -222,7 +227,7 @@ def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
         background(mgr.install(device_id, sha, approved_by=user_from(request.headers)))
         return web.json_response({"started": True})
 
-    async def downgrades(request):
+    async def downgrades(request: web.Request) -> web.StreamResponse:
         """Stored older stable versions for a downgrade (rc7; Gen1: none)."""
         device_id = device_id_from(request)
         dev = mgr.devices[device_id]
@@ -235,17 +240,17 @@ def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
             }
         )
 
-    async def changelog(request):
+    async def changelog(request: web.Request) -> web.StreamResponse:
         """Changelog between installed and offered version (plain text entries)."""
         entries = mgr.changelog_for(device_id_from(request))
         return web.json_response({"available": entries is not None, "versions": entries or []})
 
-    async def settings_refresh(request):
+    async def settings_refresh(request: web.Request) -> web.StreamResponse:
         """Read the live settings from the Shelly before editing."""
         device_id = device_id_from(request)
         return web.json_response(await guarded(mgr.refresh_settings(device_id)))
 
-    async def settings_change(request):
+    async def settings_change(request: web.Request) -> web.StreamResponse:
         """Write validated settings to the Shelly (logged with the HA user)."""
         device_id = device_id_from(request)
         body = await json_body(request)
@@ -253,13 +258,13 @@ def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
         settings, restart, verified = await guarded(mgr.change_settings(device_id, body, user))
         return web.json_response({**settings, "restart_required": restart, "verified": verified})
 
-    async def restart(request):
+    async def restart(request: web.Request) -> web.StreamResponse:
         """Restart the Shelly."""
         device_id = device_id_from(request)
         await guarded(mgr.restart_device(device_id))
         return web.json_response({"started": True})
 
-    async def device_password(request):
+    async def device_password(request: web.Request) -> web.StreamResponse:
         """Password dialog actions (mode: store | enable | change | remove | forget).
 
         The confirmation flags are checked again by the manager; the password is
@@ -284,7 +289,7 @@ def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
             {"protected": result.get("protected"), "password_set": mgr.credentials.has_device_password(device_id)}
         )
 
-    async def ignore(request):
+    async def ignore(request: web.Request) -> web.StreamResponse:
         """Ignore or resume a device (local only, no device request)."""
         device_id = device_id_from(request)
         ignored = (await json_body(request)).get("ignored")
@@ -294,7 +299,7 @@ def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
             raise web.HTTPBadRequest(text=str(err)) from None
         return web.json_response({"ignored": bool(mgr.devices[device_id].get("ignored"))})
 
-    async def reload_device(request):
+    async def reload_device(request: web.Request) -> web.StreamResponse:
         """Reload Device Info: re-read identity, firmware and status from the device
         only (no manufacturer request). Answers {"warning": text or null}."""
         device_id = device_id_from(request)
@@ -303,18 +308,18 @@ def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
 
     # ---------------------------------------------------------------- Firmware
 
-    def firmware_name_from(request):
+    def firmware_name_from(request: web.Request) -> str:
         """Validated firmware file name from the URL; unknown names -> 404."""
         name = request.match_info["name"]
         if not FW_NAME_RE.match(name) or name not in mgr.firmware:
             raise web.HTTPNotFound(text="Unknown firmware")
         return name
 
-    async def firmware_list(_request):
+    async def firmware_list(_request: web.Request) -> web.StreamResponse:
         """Stored firmware files with metadata and the total size of the store."""
         return web.json_response({"firmware": mgr.firmware_list(), "total_size": mgr.store_size()})
 
-    async def firmware_download(request):
+    async def firmware_download(request: web.Request) -> web.StreamResponse:
         """Stored firmware file as download with a descriptive file name."""
         name = firmware_name_from(request)
         path = FW_DIR / name
@@ -331,7 +336,7 @@ def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
             },
         )
 
-    async def firmware_delete(request):
+    async def firmware_delete(request: web.Request) -> web.StreamResponse:
         """Delete a stored firmware (logged with the HA user). Needs the second
         confirmation: {"confirm": true, "acknowledged": true} (rc7)."""
         name = firmware_name_from(request)
@@ -346,7 +351,7 @@ def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
             raise web.HTTPConflict(text=str(err)) from None
         return web.json_response({"ok": True})
 
-    async def firmware_upload(request):
+    async def firmware_upload(request: web.Request) -> web.StreamResponse:
         """Step 1 of a manual upload (rc7): the raw file as body, its name in the
         X-Filename header. Needs a Content-Length of at most 64 MiB; the body is
         streamed to disk and never read into memory as a whole."""
@@ -363,7 +368,7 @@ def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
         )
         return web.json_response(result)
 
-    async def firmware_upload_confirm(request):
+    async def firmware_upload_confirm(request: web.Request) -> web.StreamResponse:
         """Step 2: register the staged upload with type, version and an optional SHA-256."""
         body = await json_body(request)
         try:
@@ -376,27 +381,27 @@ def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
             raise web.HTTPConflict(text=str(err)) from None
         return web.json_response({"stored": entry["name"], "type": entry["type"], "version": entry["version"]})
 
-    async def firmware_upload_cancel(request):
+    async def firmware_upload_cancel(request: web.Request) -> web.StreamResponse:
         """Discard the staged upload."""
         mgr.cancel_upload((await json_body(request)).get("token"))
         return web.json_response({"ok": True})
 
     # ---------------------------------------------------------------- Logs & app settings
 
-    async def logs(_request):
+    async def logs(_request: web.Request) -> web.StreamResponse:
         """Activity log, newest first."""
         return web.json_response({"entries": mgr.events.list()})
 
-    async def options_get(_request):
+    async def options_get(_request: web.Request) -> web.StreamResponse:
         """App options (v3 has no secret options)."""
         return web.json_response(mgr.options_view())
 
-    async def options_save(request):
+    async def options_save(request: web.Request) -> web.StreamResponse:
         """Save changed app options via the Supervisor, then restart the app."""
         changed = await guarded(mgr.save_options(await json_body(request), user_from(request.headers)))
         if changed:
 
-            async def restart_later():
+            async def restart_later() -> None:
                 """Restart after the answer has been sent; failures are logged."""
                 await asyncio.sleep(RESTART_DELAY_S)
                 try:
@@ -407,7 +412,7 @@ def build_ui_app(mgr: Manager, ingress_ip=INGRESS_PROXY_IP):
             background(restart_later())
         return web.json_response({"changed": changed, "restarting": bool(changed)})
 
-    async def confirm_download_base(request):
+    async def confirm_download_base(request: web.Request) -> web.StreamResponse:
         """Confirm that the former example download URL really is the address of Home
         Assistant (body {"url": <current value>}); stored in the state, no restart."""
         url = (await json_body(request)).get("url")

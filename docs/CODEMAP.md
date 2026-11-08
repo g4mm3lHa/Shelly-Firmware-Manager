@@ -1,7 +1,9 @@
 # Code map (3.0.1)
 
 Orientation for changes: where things are, what is stored, which test covers what.
-Names, not line numbers – search for the function name. Keep this file in sync when
+Names, not line numbers – search for the function name. All app modules carry type
+annotations (checked with `mypy --strict`); device and store entries are plain JSON
+objects (`manager.Device`, `manager.FirmwareMeta`). Keep this file in sync when
 modules, stored fields, routes or test files change.
 
 ## Runtime flow
@@ -146,5 +148,10 @@ paths in tmp), `mgr`, `client` (UI test client with CSRF token).
 | `ui_features.py` | 8801, 8803 legacy, 8804 missing, 8805 rc7 | download URL hints/notice, downgrade, upload, delete |
 | `mobile_capture.py` | 8711 idle | screenshots + overflow, full only |
 
-`tools/dev/check.sh [tests|ui|full|build]` runs everything in order: ruff → build
-check → version match → pytest → UI. Rules of ruff and pytest: `pyproject.toml`.
+`tools/dev/check.sh [tests|ui|full|build]` runs everything in order: ruff → mypy (strict,
+app modules) → build check → version match → pytest → UI. Rules of ruff, mypy and pytest:
+`pyproject.toml`.
+
+App definition besides `config.yaml`: `apparmor.txt` (AppArmor profile: Python, read-only
+image, writable `/data`, network), `README.md` / `DOCS.md` (Info and Documentation tab of
+the app store), `translations/en.yaml`.

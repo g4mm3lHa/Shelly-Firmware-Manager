@@ -20,7 +20,9 @@ Historic entries without it are never rewritten; readers derive it from "ok".
 import json
 import logging
 import time
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from shelly import clip
 
@@ -31,12 +33,12 @@ SEVERITIES = ("success", "warning", "error")  # ordered from lowest to highest
 COMPACT_SLACK = 200  # dropped lines tolerated in the file before it is rewritten
 
 
-def worst(*severities):
+def worst(*severities: str) -> str:
     """Highest of the given severities (aggregation for one log entry)."""
     return max(severities, key=SEVERITIES.index, default="success")
 
 
-def _line(entry):
+def _line(entry: dict[str, Any]) -> str:
     """One entry as a JSON line (compact, ASCII-safe)."""
     return json.dumps(entry, separators=(",", ":")) + "\n"
 
@@ -44,12 +46,12 @@ def _line(entry):
 class EventLog:
     """Append-only list of log entries with time and size based retention."""
 
-    def __init__(self, path: Path, retention_days=90, max_entries=1000):
+    def __init__(self, path: Path, retention_days: int = 90, max_entries: int = 1000) -> None:
         """Load stored entries; missing or broken file = empty log."""
         self.path = path
         self.retention_s = int(retention_days) * 86400
         self.max_entries = int(max_entries)
-        self.entries = []
+        self.entries: list[dict[str, Any]] = []
         self._lines = 0  # lines in the file (kept and already dropped entries)
         rewrite = False
         try:
@@ -61,11 +63,11 @@ class EventLog:
             text, rewrite = "", True
         if text.lstrip().startswith("["):  # JSON array of 3.0.0: convert once
             try:
-                data = json.loads(text)
+                data: Any = json.loads(text)
             except ValueError as err:
                 log.warning("Log file unreadable, starting a new one: %s", err)
                 data = []
-            rows = data if isinstance(data, list) else []
+            rows: list[Any] = data if isinstance(data, list) else []
             rewrite = True
         else:
             rows = []
@@ -79,13 +81,13 @@ class EventLog:
         if self._prune() or rewrite or len(self.entries) != self._lines:
             self._compact()
 
-    def add(self, kind, ok=True, severity=None, **fields):
+    def add(self, kind: str, ok: bool = True, severity: str | None = None, **fields: Any) -> dict[str, Any]:
         """Append an entry (kind from KINDS) and persist it at once (one line).
 
         severity defaults to "success"/"error" from ok; "ok" is kept for the
         legacy readers and is False only for errors."""
         severity = severity if severity in SEVERITIES else ("success" if ok else "error")
-        entry = {"ts": int(time.time()), "kind": kind, "ok": severity != "error", "severity": severity}
+        entry: dict[str, Any] = {"ts": int(time.time()), "kind": kind, "ok": severity != "error", "severity": severity}
         entry.update({k: v for k, v in fields.items() if v is not None})
         self.entries.append(entry)
         self._prune()
@@ -100,18 +102,18 @@ class EventLog:
             log.warning("Log could not be written: %s", err)
         return entry
 
-    def list(self):
+    def list(self) -> list[dict[str, Any]]:
         """All entries, newest first (the UI groups them by day)."""
         return self.entries[::-1]
 
-    def _prune(self):
+    def _prune(self) -> bool:
         """Apply the retention rules; True if something was removed."""
         before = len(self.entries)
         limit = time.time() - self.retention_s
         self.entries = [e for e in self.entries if e.get("ts", 0) >= limit][-self.max_entries :]
         return len(self.entries) != before
 
-    def _compact(self):
+    def _compact(self) -> None:
         """Rewrite the file with the kept entries (temporary file, then rename)."""
         temp = self.path.with_suffix(".tmp")
         try:
@@ -124,7 +126,7 @@ class EventLog:
         self._lines = len(self.entries)
 
 
-def user_from(headers):
+def user_from(headers: Mapping[str, str]) -> str:
     """Name of the logged-in HA user from the Ingress headers (display name first).
     Control characters are removed; the value is limited to 64 characters."""
     name = headers.get("X-Remote-User-Display-Name") or headers.get("X-Remote-User-Name") or "unknown"

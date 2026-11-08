@@ -30,12 +30,15 @@ import json
 import re
 import secrets
 import socket
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import TracebackType
+from typing import Any, Literal
 from urllib.parse import quote, urljoin, urlsplit
 
 import aiohttp
-from tls import explain_tls_error
+from tls import CertificatePins, explain_tls_error
 from yarl import URL
 
 MAX_FW_SIZE = 64 * 1024 * 1024  # upper limit for a firmware file
@@ -103,12 +106,12 @@ UNSUPPORTED = "unsupported"  # the device/firmware does not offer the feature
 # None = unknown (not read yet, or the last read failed) – never shown as "off"
 
 
-def clip(value, limit=200):
+def clip(value: object, limit: int = 200) -> str:
     """Limit external values before they are stored or displayed."""
     return str(value if value is not None else "")[:limit]
 
 
-def parse_version(text):
+def parse_version(text: object) -> tuple[int, int, int, int, int]:
     """Comparable tuple from Shelly version strings.
 
     Gen1: '20230913-112003/v1.14.0-gcb84623', Gen2+: '1.4.4' or '1.5.0-beta2'.
@@ -125,7 +128,7 @@ def parse_version(text):
 # --------------------------------------------------------------------------- Devices
 
 
-def is_lan_address(ip):
+def is_lan_address(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     """True for addresses of a private network (no loopback, link-local, multicast …).
 
     is_private alone is not enough: Python also counts loopback/link-local as private.
@@ -135,7 +138,7 @@ def is_lan_address(ip):
     )
 
 
-async def resolve_device_origin(configuration_url):
+async def resolve_device_origin(configuration_url: str | None) -> str:
     """Returns 'http://<private-ip>:<port>' from the integration's configuration_url."""
     parts = urlsplit(configuration_url or "")
     if parts.scheme != "http" or not parts.hostname or parts.username or parts.password:
@@ -144,7 +147,7 @@ async def resolve_device_origin(configuration_url):
 
     loop = asyncio.get_running_loop()
     infos = await loop.getaddrinfo(parts.hostname, port, type=socket.SOCK_STREAM)
-    addresses = sorted({info[4][0].split("%")[0] for info in infos})
+    addresses = sorted({str(info[4][0]).split("%")[0] for info in infos})
     for address in addresses:
         if not is_lan_address(ipaddress.ip_address(address)):
             raise ShellyError(f"Device address {address} is not in a private network")
@@ -154,7 +157,7 @@ async def resolve_device_origin(configuration_url):
     return f"http://{host}:{port}"
 
 
-def origin_ip(origin):
+def origin_ip(origin: str) -> str | None:
     """IP address from an origin created by resolve_device_origin."""
     return urlsplit(origin).hostname
 
@@ -162,12 +165,12 @@ def origin_ip(origin):
 # --------------------------------------------------------------------------- Authentication
 
 
-def _sha256(text):
+def _sha256(text: str) -> str:
     """Hex SHA-256 of a UTF-8 string (Digest Auth building block)."""
     return hashlib.sha256(text.encode()).hexdigest()
 
 
-def gen2_ha1(realm, password):
+def gen2_ha1(realm: str, password: str) -> str:
     """HA1 of the Gen2+ Digest Auth: SHA-256('admin:<device id>:<password>')."""
     return _sha256(f"{AUTH_USER}:{realm}:{password}")
 
@@ -186,7 +189,7 @@ class DeviceAuth:
     ha1: str | None = field(default=None, repr=False)
     realm: str | None = None
 
-    def authorization(self, challenge, method, uri):
+    def authorization(self, challenge: str, method: str, uri: str) -> str:
         """Authorization header answering the device's WWW-Authenticate challenge."""
         scheme, _, params = challenge.partition(" ")
         if self.gen == 1:
@@ -214,7 +217,7 @@ class DeviceAuth:
             f'algorithm=SHA-256, qop=auth, nc={nc}, cnonce="{cnonce}", response="{response}"'
         )
 
-    def ws_auth(self, challenge):
+    def ws_auth(self, challenge: object) -> dict[str, Any]:
         """"auth" object for Gen2+ RPC over WebSocket, answering a 401 challenge.
 
         Official Gen2 docs: the challenge is the JSON in error.message (auth_type
@@ -248,7 +251,14 @@ class DeviceAuth:
         }
 
 
-async def _call(session, origin, path, auth, params=None, body=None):
+async def _call(
+    session: aiohttp.ClientSession,
+    origin: str,
+    path: str,
+    auth: DeviceAuth | None,
+    params: dict[str, str] | None = None,
+    body: dict[str, Any] | None = None,
+) -> tuple[int, Any]:
     """One request to a device; answers an authentication challenge once.
 
     Returns (HTTP status, parsed JSON or None). Redirects are forbidden (they
@@ -258,7 +268,7 @@ async def _call(session, origin, path, auth, params=None, body=None):
     if params:
         url = url.with_query(params)
     method = "GET" if body is None else "POST"
-    headers = None
+    headers: dict[str, str] | None = None
     for attempt in range(2):
         async with session.request(
             method,
@@ -289,7 +299,13 @@ async def _call(session, origin, path, auth, params=None, body=None):
     raise ShellyError("Authentication with the Shelly failed")  # not reached
 
 
-async def _device_json(session, origin, path, auth=None, params=None):
+async def _device_json(
+    session: aiohttp.ClientSession,
+    origin: str,
+    path: str,
+    auth: DeviceAuth | None = None,
+    params: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """GET on the device; HTTP errors and invalid JSON become a ShellyError."""
     status, data = await _call(session, origin, path, auth, params=params)
     if status == 404:
@@ -301,7 +317,13 @@ async def _device_json(session, origin, path, auth=None, params=None):
     return data
 
 
-async def _rpc(session, origin, method, params=None, auth=None):
+async def _rpc(
+    session: aiohttp.ClientSession,
+    origin: str,
+    method: str,
+    params: dict[str, Any] | None = None,
+    auth: DeviceAuth | None = None,
+) -> dict[str, Any]:
     """Gen2+ JSON-RPC call; device errors become a ShellyError with the device's message."""
     body = {"id": 1, "method": method, "params": params or {}}
     status, result = await _call(session, origin, "/rpc", auth, body=body)
@@ -314,10 +336,16 @@ async def _rpc(session, origin, method, params=None, auth=None):
         raise ShellyError(f"Shelly rejected the request (HTTP {status})")
     if not isinstance(result, dict):
         raise ShellyError("Invalid response from the device")
-    return result.get("result") or {}
+    answer = result.get("result")
+    return answer if isinstance(answer, dict) else {}
 
 
-async def device_info(session, origin, auth_for=None, on_identity=None):
+async def device_info(
+    session: aiohttp.ClientSession,
+    origin: str,
+    auth_for: Callable[[int], DeviceAuth | None] | None = None,
+    on_identity: Callable[[int, str | None], object] | None = None,
+) -> dict[str, Any]:
     """Uniform device information for Gen1 and Gen2+.
 
     auth_for(gen) returns the credentials once the generation is known (/shelly
@@ -346,7 +374,7 @@ async def device_info(session, origin, auth_for=None, on_identity=None):
         raise ShellyError("Incomplete device information from the Shelly") from None
 
 
-def _int_field(data, key, default):
+def _int_field(data: dict[str, Any], key: str, default: int) -> int:
     """Integer field of a device or manufacturer answer; ShellyError if it is no number."""
     value = data.get(key) or default
     if isinstance(value, bool) or not isinstance(value, (int, str)):
@@ -357,7 +385,7 @@ def _int_field(data, key, default):
         raise ShellyError(f"Invalid value for {key!r} in the answer") from None
 
 
-def _identity(info, gen, protected):
+def _identity(info: dict[str, Any], gen: int, protected: bool | None) -> dict[str, Any]:
     """Uniform identity fields from a /shelly or Shelly.GetDeviceInfo answer
     (raises KeyError/TypeError/ValueError if a required field is missing)."""
     if gen >= 2:
@@ -383,7 +411,9 @@ def _identity(info, gen, protected):
     }
 
 
-async def trigger_update(session, gen, origin, firmware_url, auth=None):
+async def trigger_update(
+    session: aiohttp.ClientSession, gen: int, origin: str, firmware_url: str, auth: DeviceAuth | None = None
+) -> None:
     """Tells the device to load the firmware from firmware_url."""
     if gen == 1:
         await _device_json(session, origin, "/ota", auth, {"url": firmware_url})
@@ -391,7 +421,7 @@ async def trigger_update(session, gen, origin, firmware_url, auth=None):
         await _rpc(session, origin, "Shelly.Update", {"url": firmware_url}, auth)
 
 
-async def _refuse_redirect(_session, _context, _params):
+async def _refuse_redirect(_session: object, _context: object, _params: object) -> None:
     """aiohttp trace hook: a redirect would lead away from the device – refuse it."""
     raise ShellyError("The Shelly answered the WebSocket request with a redirect")
 
@@ -416,7 +446,7 @@ class OtaChannel:
     Connection errors raise from __aenter__; the caller may then fall back to HTTP.
     """
 
-    def __init__(self, origin, auth=None, headers=None):
+    def __init__(self, origin: str, auth: DeviceAuth | None = None, headers: Any = None) -> None:
         """Prepare the channel; nothing is sent before 'async with'."""
         if not origin.startswith("http://"):
             raise ShellyError("Invalid device address")
@@ -424,11 +454,11 @@ class OtaChannel:
         self.auth = auth
         self.headers = headers
         self.src = f"sfm-{secrets.token_hex(4)}"
-        self.session = None
-        self.ws = None
-        self._early = []  # OTA events received while waiting for the command answer
+        self.session: aiohttp.ClientSession | None = None
+        self.ws: aiohttp.ClientWebSocketResponse | None = None
+        self._early: list[dict[str, Any]] = []  # OTA events received while waiting for the command answer
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "OtaChannel":
         """Open the WebSocket (own short-lived session: redirects are refused)."""
         trace = aiohttp.TraceConfig()
         trace.on_request_redirect.append(_refuse_redirect)
@@ -444,21 +474,25 @@ class OtaChannel:
             raise
         return self
 
-    async def __aexit__(self, *exc):
+    async def __aexit__(
+        self, _type: type[BaseException] | None, _exc: BaseException | None, _tb: TracebackType | None
+    ) -> None:
         """Close the WebSocket and its session."""
         try:
             if self.ws is not None:
                 await self.ws.close()
         finally:
-            await self.session.close()
+            if self.session is not None:
+                await self.session.close()
 
-    async def update(self, firmware_url):
+    async def update(self, firmware_url: str) -> Literal[True] | None:
         """Send Shelly.Update. True if the device accepted it, None if no answer
         arrived in time (the update may still run – never send it twice).
         Raises AuthError/ShellyError if the device refused it."""
         params = {"url": firmware_url}
+        ws = self._socket()
         try:
-            await self.ws.send_json({"id": 1, "src": self.src, "method": "Shelly.Update", "params": params})
+            await ws.send_json({"id": 1, "src": self.src, "method": "Shelly.Update", "params": params})
         except (aiohttp.ClientError, OSError, RuntimeError) as err:  # closed before sending
             raise ChannelUnavailable(type(err).__name__) from None
         answer = await self._answer(1)
@@ -472,9 +506,9 @@ class OtaChannel:
                 challenge = json.loads(str(error.get("message") or ""))
             except ValueError:
                 raise ShellyError("Invalid authentication request from the Shelly") from None
-            frame = {"id": 2, "src": self.src, "method": "Shelly.Update", "params": params}
+            frame: dict[str, Any] = {"id": 2, "src": self.src, "method": "Shelly.Update", "params": params}
             frame["auth"] = self.auth.ws_auth(challenge)
-            await self.ws.send_json(frame)
+            await ws.send_json(frame)
             answer = await self._answer(2)
             if answer is None:
                 return None
@@ -485,7 +519,13 @@ class OtaChannel:
             raise ShellyError(f"Device reports: {clip(error)}")
         return True
 
-    async def _answer(self, frame_id):
+    def _socket(self) -> aiohttp.ClientWebSocketResponse:
+        """The open WebSocket; only valid inside 'async with'."""
+        if self.ws is None:
+            raise ChannelUnavailable("not connected")
+        return self.ws
+
+    async def _answer(self, frame_id: int) -> dict[str, Any] | None:
         """Answer frame with frame_id; OTA events arriving meanwhile are kept.
         None if no answer arrives within OTA_WS_ANSWER_S or the connection ends."""
         loop = asyncio.get_running_loop()
@@ -502,10 +542,10 @@ class OtaChannel:
             self._early.extend(_ota_events(frame))
         return None
 
-    async def _receive(self, wait=None):
+    async def _receive(self, wait: float | None = None) -> dict[str, Any] | None:
         """Next JSON object frame; None when the connection is closed."""
         while True:
-            msg = await self.ws.receive(timeout=wait)
+            msg = await self._socket().receive(timeout=wait)
             if msg.type != aiohttp.WSMsgType.TEXT:
                 if msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSING, aiohttp.WSMsgType.CLOSED,
                                 aiohttp.WSMsgType.ERROR):
@@ -518,7 +558,7 @@ class OtaChannel:
             if isinstance(frame, dict):
                 return frame
 
-    async def events(self):
+    async def events(self) -> AsyncIterator[dict[str, Any]]:
         """OTA events of the device until the connection ends (device restart)."""
         while self._early:
             yield self._early.pop(0)
@@ -527,12 +567,12 @@ class OtaChannel:
                 yield event
 
 
-def _ota_events(frame):
+def _ota_events(frame: dict[str, Any]) -> list[dict[str, Any]]:
     """OTA events of the sys component in a NotifyEvent frame, reduced to
     {"event", "msg", "progress"} (progress: 0–100 or None)."""
     params = frame.get("params") if frame.get("method") == "NotifyEvent" else None
     events = params.get("events") if isinstance(params, dict) else None
-    result = []
+    result: list[dict[str, Any]] = []
     for event in events if isinstance(events, list) else []:
         if not isinstance(event, dict) or event.get("component") != "sys" or event.get("event") not in OTA_EVENTS:
             continue
@@ -548,23 +588,26 @@ def _ota_events(frame):
 # --------------------------------------------------------------------------- Device settings
 
 
-def _output(key, name, state, options):
+def _output(key: str, name: object, state: object, options: Iterable[str]) -> dict[str, Any]:
     """One output for the power-on dialog. The current value is always selectable."""
-    state = clip(state, 32)
+    text = clip(state, 32)
+    options = list(options)
     return {
         "key": key,
         "name": clip(name, 64) or key,
-        "aop": state,
-        "options": list(options) + ([state] if state and state not in options else []),
+        "aop": text,
+        "options": options + ([text] if text and text not in options else []),
     }
 
 
-def _flag(value):
+def _flag(value: object) -> bool | str:
     """A reported on/off switch, else UNSUPPORTED (the device lacks the field)."""
     return value if isinstance(value, bool) else UNSUPPORTED
 
 
-async def _list_active(read, key, active):
+async def _list_active(
+    read: Callable[[], Awaitable[dict[str, Any]]], key: str, active: Callable[[dict[str, Any]], bool]
+) -> bool | str | None:
     """True/False whether a device list has an active entry; UNSUPPORTED if the
     device lacks the endpoint; None (unknown) on any other failure – a timeout or
     an authentication error is never taken for "unsupported"."""
@@ -582,7 +625,14 @@ async def _list_active(read, key, active):
     return any(isinstance(e, dict) and active(e) for e in entries)
 
 
-async def read_settings(session, gen, origin, fw_type, auth=None, extended=False):
+async def read_settings(
+    session: aiohttp.ClientSession,
+    gen: int,
+    origin: str,
+    fw_type: str | None,
+    auth: DeviceAuth | None = None,
+    extended: bool = False,
+) -> dict[str, Any]:
     """Shelly name, NTP server, eco mode, AP and Bluetooth switch and power-on action
     of all outputs – one request (Gen2+ Shelly.GetConfig, Gen1 /settings).
 
@@ -591,8 +641,8 @@ async def read_settings(session, gen, origin, fw_type, auth=None, extended=False
     Gen2+ needs Webhook.List and Schedule.List (no batch RPC exists), Gen1 needs
     /settings/actions; schedules of Gen1 are part of /settings. Only the boolean
     "has an active entry" is kept – never URLs, calls or scripts."""
-    outputs = []
-    extra = {}
+    outputs: list[dict[str, Any]] = []
+    extra: dict[str, Any] = {}
     if gen >= 2:
         config = await _rpc(session, origin, "Shelly.GetConfig", auth=auth)
         system = config.get("sys") or {}
@@ -664,9 +714,9 @@ async def read_settings(session, gen, origin, fw_type, auth=None, extended=False
     }
 
 
-def validate_settings(changes, outputs):
+def validate_settings(changes: dict[str, Any], outputs: list[dict[str, Any]]) -> dict[str, Any]:
     """Checks requested changes; returns them cleaned or raises ValueError."""
-    clean = {}
+    clean: dict[str, Any] = {}
     if "name" in changes:
         name = changes["name"]
         if not isinstance(name, str) or not NAME_RE.match(name):
@@ -696,11 +746,13 @@ def validate_settings(changes, outputs):
     return clean
 
 
-async def write_settings(session, gen, origin, changes, auth=None):
+async def write_settings(
+    session: aiohttp.ClientSession, gen: int, origin: str, changes: dict[str, Any], auth: DeviceAuth | None = None
+) -> bool:
     """Sends validated changes to the device. Returns True if it requests a restart."""
     restart = False
     if gen >= 2:
-        system = {}
+        system: dict[str, Any] = {}
         device = {k: changes[c] for c, k in (("name", "name"), ("eco", "eco_mode")) if c in changes}
         if device:
             system["device"] = device
@@ -717,23 +769,23 @@ async def write_settings(session, gen, origin, changes, auth=None):
             restart |= bool(result.get("restart_required"))
         for key, value in changes.get("aop", {}).items():
             kind, _, index = key.partition(":")
-            params = {"id": int(index), "config": {"initial_state": value}}
-            result = await _rpc(session, origin, f"{GEN2_OUTPUTS[kind][0]}.SetConfig", params, auth)
+            output = {"id": int(index), "config": {"initial_state": value}}
+            result = await _rpc(session, origin, f"{GEN2_OUTPUTS[kind][0]}.SetConfig", output, auth)
             restart |= bool(result.get("restart_required"))
         return restart
 
     # Gen1: settings are changed via GET with query parameters
     if "ap" in changes or "ble" in changes:
         raise ValueError(GEN1_AP_NOTE if "ap" in changes else "Gen1 devices have no Bluetooth switch")
-    params = {}
+    query: dict[str, str] = {}
     if "name" in changes:
-        params["name"] = changes["name"]
+        query["name"] = changes["name"]
     if "ntp" in changes:
-        params["sntp_server"] = changes["ntp"]
+        query["sntp_server"] = changes["ntp"]
     if "eco" in changes:
-        params["eco_mode_enabled"] = "true" if changes["eco"] else "false"
-    if params:
-        await _device_json(session, origin, "/settings", auth, params)
+        query["eco_mode_enabled"] = "true" if changes["eco"] else "false"
+    if query:
+        await _device_json(session, origin, "/settings", auth, query)
     for key, value in changes.get("aop", {}).items():
         kind, _, index = key.partition(":")
         if kind not in GEN1_OUTPUT_KINDS or not index.isdigit():
@@ -748,7 +800,7 @@ GEN1_AP_NOTE = (
 )
 
 
-async def protection_status(session, origin):
+async def protection_status(session: aiohttp.ClientSession, origin: str) -> bool | None:
     """Password protection as reported by /shelly (no authentication needed):
     True/False, None if the device does not report it."""
     info = await _device_json(session, origin, "/shelly")
@@ -756,7 +808,14 @@ async def protection_status(session, origin):
     return value if isinstance(value, bool) else None
 
 
-async def set_protection(session, gen, origin, realm, new_auth, auth=None):
+async def set_protection(
+    session: aiohttp.ClientSession,
+    gen: int,
+    origin: str,
+    realm: str | None,
+    new_auth: DeviceAuth | None,
+    auth: DeviceAuth | None = None,
+) -> None:
     """Enable/change (new_auth = DeviceAuth of the new password) or disable
     (new_auth None) the device's password protection.
 
@@ -771,15 +830,15 @@ async def set_protection(session, gen, origin, realm, new_auth, auth=None):
             params = {"user": AUTH_USER, "realm": realm, "ha1": new_auth.ha1 if new_auth else None}
             await _rpc(session, origin, "Shelly.SetAuth", params, auth)
         elif new_auth:
-            params = {"enabled": "1", "username": AUTH_USER, "password": new_auth.password}
-            await _device_json(session, origin, "/settings/login", auth, params)
+            login = {"enabled": "1", "username": AUTH_USER, "password": new_auth.password or ""}
+            await _device_json(session, origin, "/settings/login", auth, login)
         else:
             await _device_json(session, origin, "/settings/login", auth, {"enabled": "0"})
     except aiohttp.ClientError as err:
         raise ShellyError(f"Device not reachable ({type(err).__name__})") from None
 
 
-async def restart(session, gen, origin, auth=None):
+async def restart(session: aiohttp.ClientSession, gen: int, origin: str, auth: DeviceAuth | None = None) -> None:
     """Restarts the device (Gen2+ Shelly.Reboot, Gen1 /reboot)."""
     if gen >= 2:
         await _rpc(session, origin, "Shelly.Reboot", auth=auth)
@@ -790,7 +849,7 @@ async def restart(session, gen, origin, auth=None):
 # --------------------------------------------------------------------------- Manufacturer
 
 
-async def read_limited(resp, limit, message):
+async def read_limited(resp: aiohttp.ClientResponse, limit: int, message: str) -> bytes:
     """Complete response body, aborting as soon as it exceeds limit bytes."""
     raw = bytearray()
     async for chunk in resp.content.iter_chunked(64 * 1024):
@@ -800,7 +859,9 @@ async def read_limited(resp, limit, message):
     return bytes(raw)
 
 
-async def _cloud_get(session, url, pins, limit, too_large):
+async def _cloud_get(
+    session: aiohttp.ClientSession, url: str, pins: CertificatePins | None, limit: int, too_large: str
+) -> tuple[bytes, str | None]:
     """Body of a GET on the manufacturer's server: HTTPS only, redirects only within
     shelly.cloud (every hop checked again), certificate pinning, size limit.
     Returns (body bytes, charset or None)."""
@@ -815,7 +876,7 @@ async def _cloud_get(session, url, pins, limit, too_large):
     raise ShellyError("Too many redirects from the manufacturer's server")
 
 
-async def _cloud_json(session, url, pins):
+async def _cloud_json(session: aiohttp.ClientSession, url: str, pins: CertificatePins | None) -> Any:
     """JSON from the manufacturer's server (see _cloud_get)."""
     raw, _ = await _cloud_get(session, url, pins, MAX_CLOUD_JSON, "Response from the manufacturer's server too large")
     try:
@@ -828,25 +889,31 @@ class _CloudRequest:
     """session.get() for manufacturer servers: applies certificate pinning and
     translates TLS errors into a readable message including the fingerprint."""
 
-    def __init__(self, session, url, pins, timeout):
+    def __init__(
+        self, session: aiohttp.ClientSession, url: str, pins: CertificatePins | None, timeout: aiohttp.ClientTimeout
+    ) -> None:
         """Prepare the request; nothing is sent before 'async with'."""
         self.url = url
-        ssl_param = pins.ssl_for(url) if pins else True
+        ssl_param: aiohttp.Fingerprint | bool = pins.ssl_for(url) if pins else True
         self.request = session.get(url, ssl=ssl_param, allow_redirects=False, timeout=timeout)
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> aiohttp.ClientResponse:
         """Send the request and return the response (TLS errors explained)."""
         try:
             return await self.request.__aenter__()
         except (aiohttp.ClientConnectorCertificateError, aiohttp.ServerFingerprintMismatch) as err:
             raise ShellyError(await explain_tls_error(self.url, err)) from None
 
-    async def __aexit__(self, *exc):
+    async def __aexit__(
+        self, exc_type: type[BaseException] | None, exc: BaseException | None, tb: TracebackType | None
+    ) -> None:
         """Release the connection."""
-        return await self.request.__aexit__(*exc)
+        await self.request.__aexit__(exc_type, exc, tb)
 
 
-async def fetch_cloud_text(session, url, pins, limit):
+async def fetch_cloud_text(
+    session: aiohttp.ClientSession, url: str, pins: CertificatePins | None, limit: int
+) -> str:
     """Text page (e.g. changelog) from a shelly.cloud server (see _cloud_get).
     Sends no device data."""
     too_large = f"Page larger than {limit // 1024 // 1024} MiB: {clip(url)}"
@@ -854,7 +921,12 @@ async def fetch_cloud_text(session, url, pins, limit):
     return raw.decode(charset or "utf-8", "replace")
 
 
-async def fetch_offer(session, info, gen1_allowed, pins=None):
+async def fetch_offer(
+    session: aiohttp.ClientSession,
+    info: dict[str, Any],
+    gen1_allowed: Iterable[str],
+    pins: CertificatePins | None = None,
+) -> dict[str, str] | None:
     """Stable firmware offer {'version', 'url'} or None."""
     if info["gen"] >= 2:
         meta = await _cloud_json(session, GEN2_META_URL.format(app=quote(info["type"], safe="")), pins)
@@ -876,7 +948,7 @@ async def fetch_offer(session, info, gen1_allowed, pins=None):
     return {"version": clip(entry.get("version"), 128), "url": str(entry["url"])}
 
 
-def check_download_url(url, https_only=False):
+def check_download_url(url: str, https_only: bool = False) -> None:
     """Allow only the manufacturer's servers (shelly.cloud) for metadata and firmware."""
     parts = urlsplit(url)
     host = (parts.hostname or "").lower()
@@ -886,7 +958,13 @@ def check_download_url(url, https_only=False):
         raise ShellyError(f"Download source not allowed: {clip(url)}")
 
 
-async def download_firmware(session, url, target_dir: Path, pins=None, https_only=False):
+async def download_firmware(
+    session: aiohttp.ClientSession,
+    url: str,
+    target_dir: Path,
+    pins: CertificatePins | None = None,
+    https_only: bool = False,
+) -> tuple[str, str, int, bool]:
     """Downloads the firmware to target_dir. Returns (file name, sha256, size, https).
 
     https_only: required for Gen2+ (every hop must be HTTPS). https in the result
@@ -904,7 +982,7 @@ async def download_firmware(session, url, target_dir: Path, pins=None, https_onl
     raise ShellyError("Too many redirects during download")
 
 
-async def _store(resp, url, target_dir: Path):
+async def _store(resp: aiohttp.ClientResponse, url: str, target_dir: Path) -> tuple[str, str, int]:
     """Stores the response size-limited and atomically as <sha256>.<ext>."""
     ext = Path(urlsplit(url).path).suffix.lower()
     ext = ext if ext in FW_EXTENSIONS else ".bin"
@@ -928,7 +1006,7 @@ async def _store(resp, url, target_dir: Path):
         temp.unlink(missing_ok=True)
 
 
-def file_sha256(target_dir: Path, name):
+def file_sha256(target_dir: Path, name: str) -> str:
     """Checksum of a stored file; rejects foreign file names."""
     if not FW_NAME_RE.match(name or ""):
         raise ShellyError("Invalid firmware file name")
