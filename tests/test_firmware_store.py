@@ -155,8 +155,6 @@ async def test_downgrade_installs_the_selected_version(mgr, net, monkeypatch, qu
     dev = mgr.devices[A]
     assert served == [True] and dev["version"] == "1.3.0"
     assert dev["status"] == manager_core.STATUS_AVAILABLE and "a newer version is provided again" in dev["message"]
-    # A downgrade is never followed by the check after installations
-    assert all(e.get("trigger") != "install" for e in mgr.events.entries if e["kind"] == "check")
     assert "downgrade" not in dev and mgr.notified[-1][0] == "Shelly downgraded: Kitchen"
     events = [e for e in mgr.events.entries if e["kind"] == "install"]
     assert [e["event"] for e in events] == ["started", "confirmed"]

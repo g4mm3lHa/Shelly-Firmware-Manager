@@ -47,6 +47,22 @@ async def test_single_check_keeps_last_scan_and_logs(mgr, net):
     assert entry["trigger"] == "device" and entry["devices"] == 1 and entry["user"] == "alice"
 
 
+async def test_downloads_and_checks_name_the_user(mgr, net):
+    """A download is logged with the user of the check that fetched it; scheduled
+    checks and their downloads name "Schedule"."""
+    assert await mgr.scan(user="alice")
+    [download] = [e for e in mgr.events.entries if e["kind"] == "download"]
+    [check] = [e for e in mgr.events.entries if e["kind"] == "check"]
+    assert download["user"] == check["user"] == "alice" and mgr._check_user is None
+    mgr.devices.clear()
+    for name in list(mgr.firmware):
+        (data_paths.FW_DIR / name).unlink()
+    mgr.firmware.clear()
+    assert await mgr.scan(automatic=True)
+    download, check = ([e for e in mgr.events.entries if e["kind"] == kind][-1] for kind in ("download", "check"))
+    assert download["user"] == check["user"] == manager_checks.SCHEDULE_USER == "Schedule"
+
+
 async def test_single_check_downloads_missing_firmware(mgr, net):
     """Missing firmware is downloaded like in the full check; stored firmware is reused."""
     mgr.devices[A] = {"name": "Kitchen"}

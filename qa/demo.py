@@ -94,10 +94,15 @@ m.events.add("check", trigger="install", devices=2, duration=2.4, updates=2, war
              findings=[{"device": "Kitchen light", "version": "1.4.0", "offer": "1.5.0", "source": "store", "severity": "success"},
                        {"device": "Hall", "version": "1.4.0", "offer": "1.5.0", "source": "upload", "severity": "success"}])
 m.events.add("password", device="Kitchen light", action="enabled", user="demo")
+# Downloads carry the user of their check; scheduled checks name "Schedule"
+m.events.add("download", type="Plus1", version="1.5.0", size=len(content), sha256=sha, https=True, user="Schedule")
+m.events.add("check", trigger="scheduled", devices=25, duration=38.0, result="ok", findings=[], user="Schedule")
 m.devices[f"{4:032x}"]["settings_error"] = {"message": "Device not reachable", "severity": "warning"}
 # A device with a confirmed installation stays in the updates card as "Updated";
 # password protection with (green lock) and without (yellow lock) a password stored in the app
 m.devices[f"{6:032x}"]["updated"] = True
+# An unconfirmed installation also stays in the updates card (status "Unconfirmed", no checkbox)
+m.devices[f"{5:032x}"]["updated"] = True
 m.credentials.entries[f"{1:032x}"] = {"gen": 2, "realm": "shelly-1", "ha1": "0" * 64}
 # three consecutive log entries of one device (grouped by a side bar) and a check with mixed findings
 m.events.add("setting", device="Pool pump", changes=[{"setting": "Eco mode", "old": "on", "new": "off"}], user="demo")

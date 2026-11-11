@@ -60,7 +60,8 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 - Devices with updates are listed on top, then all other devices, ignored devices at
   the end. Search, filters (Updates, Errors, Up to date, Ignored) and a column chooser
   help with larger installations. A device you just updated stays on top as "Updated"
-  until you check it again or the next full check runs.
+  (or "Unconfirmed" if the target version was not confirmed) until you check it again
+  or the next full check runs.
 - The action icons show and change power-on action, eco mode, password protection,
   access point, Bluetooth, actions and schedules, and restart the device. A "?" means
   the value is currently unknown. Colours: power-on action green = every output
@@ -80,7 +81,7 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 | Ready | Firmware provided (from the firmware store or downloaded), waiting for your approval – "Install" next to the status opens the installation dialog |
 | Updated | The installation was confirmed; shown until the next check of the device |
 | Queued / Installing | Installation waiting for a free slot / running (with progress for Gen2+) |
-| Unconfirmed | The installation ran, but the target version was not confirmed (see the details) |
+| Unconfirmed | The installation ran, but the target version was not confirmed (see the details); stays on top until the next check of the device |
 | Error | Check, download or installation failed |
 | Skipped | Gen1 device while Gen1 updates are disabled |
 | Unregistered | Device is no longer in the Home Assistant device registry |
@@ -121,10 +122,9 @@ version (at most 3 minutes). If that does not happen, the status becomes "Unconf
 with a diagnosis – see [Troubleshooting](#troubleshooting). Scheduled checks create a
 Home Assistant notification when they find new updates.
 
-After a confirmed installation the installed devices are checked again automatically
-(once all running installations have ended), so the next stored version – or the offer
-of the Shelly server – is provided right away. This check appears in the log as
-"After-installation check". It does not run after a downgrade or a failed installation.
+No check runs after an installation. The next stored version – or the offer of the
+Shelly server – is provided when you check the device again (row menu ⋮ → Check for
+updates) or at the next full check.
 
 ### Downgrade (Gen2+)
 
@@ -162,7 +162,9 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
 
 The activity log records checks, downloads, uploads, installations and downgrades,
 deleted firmware, setting and password changes on devices and changes of the app
-settings – each with time, user and result (success, warning, error). Filters and a
+settings – each with time, user and result (success, warning, error). A download names
+the user of the check that fetched it; scheduled checks and their downloads name
+"Schedule". Filters and a
 device search help to find entries. Passwords never appear in the log. Consecutive
 entries of the same device are marked by a bar at the side.
 

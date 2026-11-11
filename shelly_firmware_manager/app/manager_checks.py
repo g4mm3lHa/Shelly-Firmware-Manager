@@ -7,8 +7,7 @@ single-device check is still possible).
 The firmware store comes first: a check provides the next higher stored version of the
 device's firmware ID (downloads and uploads); the manufacturer's server is only asked
 for devices without such a file, once per firmware ID (Gen1: once for all types). A
-confirmed installation is followed by a check of the installed devices, so the next
-stored version is provided without waiting. A check never installs anything.
+check never installs anything, and no check follows an installation.
 """
 
 import asyncio
@@ -52,23 +51,19 @@ OFFER_MESSAGES = {
     OFFER_UPLOAD: "Provided from the firmware store (uploaded file), not installed",
 }
 
+# User of scheduled checks and their downloads in the activity log
+SCHEDULE_USER = "Schedule"
+
 # Parallel device queries of one full check. Each Shelly is a small embedded HTTP
 # server that is only asked by one request at a time; 4 devices in parallel cut
 # the check time of larger installations by roughly a factor of 4 while keeping
 # Wi-Fi and Home Assistant load low. Internal constant, not a setting.
 CHECK_PARALLEL = 4
 
-# Check after confirmed installations: it needs the check slot, which a
-# Reload Device Info or a check started in the same moment may hold for a few seconds
-FOLLOWUP_ATTEMPTS = 6
-
-FOLLOWUP_RETRY_S = 5
-
-
 class Checks(DeviceSettings):
-    """Full check, single-device check and the check after installations."""
+    """Full check and single-device check."""
 
-    # ------------------------------------------ Full check, single-device check, check after installations
+    # ------------------------------------------ Full check, single-device check
 
     def scan_due_in(self, now: float) -> float:
         """Seconds until the next automatic check; 0 = due now (see schedule.py).
@@ -81,7 +76,8 @@ class Checks(DeviceSettings):
         """Check all Shellys. Returns False if a check or installation is running.
         Automatic checks report newly found updates as a notification in HA and
         record their scheduled date when they start (one attempt per date).
-        Every check is written to the activity log (user only for manual checks)."""
+        Every check is written to the activity log with the user, "Schedule" for
+        automatic checks; its firmware downloads carry the same user."""
         if not self._reserved("all"):
             try:
                 self.reserve_check("all")
@@ -95,6 +91,7 @@ class Checks(DeviceSettings):
             started = time.monotonic()
             failure: str | None = None
             checked: list[str] = []
+            self._check_user = SCHEDULE_USER if automatic else user or "unknown"
             self._progress()["phase"] = "registry"
             try:
                 checked = await self._scan_all()
@@ -131,6 +128,7 @@ class Checks(DeviceSettings):
         async with self.lock:
             dev = self.devices[device_id]
             dev.pop("updated", None)  # Checked again by the user, no longer "just updated"
+            self._check_user = user or "unknown"
             started = time.monotonic()
             failure = None
             progress = self._progress()
@@ -159,55 +157,6 @@ class Checks(DeviceSettings):
                 [device_id], False, user, time.monotonic() - started, failure, trigger="device"
             )
         return {"status": dev.get("status"), "error": failure}
-
-    async def _check_after_installs(self) -> None:
-        """Check the devices whose installation was confirmed, so that the
-        next stored version – or the manufacturer's offer – is provided at once.
-
-        Runs when the last running installation has ended (a check cannot start
-        earlier): one check for all devices installed in the meantime, with the same
-        steps as any other check and its own log entry. Never after a downgrade or
-        an unconfirmed installation. The time of the last full check (last_scan)
-        and the schedule stay unchanged."""
-        for _ in range(FOLLOWUP_ATTEMPTS):
-            if self.installing or not self._followup:
-                return  # the installation ending last starts the check / nothing to do
-            try:
-                self.reserve_check("followup")
-                break
-            except ShellyError:  # the slot is held for a moment (e.g. Reload Device Info)
-                await asyncio.sleep(FOLLOWUP_RETRY_S)
-        else:
-            log.info("Check after installation skipped: the check slot stayed busy")
-            self._followup.clear()
-            return
-        wanted, self._followup = sorted(self._followup), set()
-        async with self.lock:
-            started = time.monotonic()
-            failure: str | None = None
-            checked: list[str] = []
-            progress = self._progress()
-            try:
-                progress["phase"] = "registry"
-                registry = self._shelly_entries(await self._registry())
-                entries = {i: registry[i] for i in wanted if i in registry and i in self.devices}
-                for device_id in wanted:
-                    if device_id in self.devices and device_id not in registry:
-                        self.devices[device_id].update(status=STATUS_UNREGISTERED, message="")
-                progress.update(total=len(entries), phase="devices")
-                self.activity.update(dict.fromkeys(entries, ACTIVITY_WAITING))
-                await self._check_entries(entries, {})
-                checked = sorted(entries)
-                progress["phase"] = "changelog"
-                await self._store_changelogs([self.devices[i] for i in checked])
-            except Exception as err:  # registry failure etc.: report, do not crash
-                log.exception("Check after installation failed")
-                failure = error_text(err, 500) or type(err).__name__
-            finally:
-                self._end_check()
-                self.cleanup_firmware()
-                self.save()
-            self._log_check(checked, False, None, time.monotonic() - started, failure, trigger="install")
 
     async def _scan_all(self) -> list[str]:
         """Check all Shelly main devices from the HA device registry.
@@ -443,7 +392,10 @@ class Checks(DeviceSettings):
                 self.activity[device_id] = ACTIVITY_CHECKING
         self._register_firmware(name, info["type"], info["gen"], offer["version"], sha, size, https)
         self._fresh[name] = clip(offer["url"], 500)  # later devices of this check: same offer
-        self.events.add("download", type=info["type"], version=offer["version"], size=size, sha256=sha, https=https)
+        self.events.add(
+            "download", type=info["type"], version=offer["version"], size=size, sha256=sha, https=https,
+            user=self._check_user,
+        )
         return name, sha, size
 
     # -------------------------------------------------------------- Results: log, changelogs, notification
@@ -459,7 +411,7 @@ class Checks(DeviceSettings):
     ) -> None:
         """One log entry per check; findings = devices with an update, a warning or
         an error. trigger overrides the derived value ("device" for single-device
-        checks, "install" for the check after installations, which has no user).
+        checks). Automatic checks name SCHEDULE_USER as user.
         An update finding names its source (OFFER_*: manufacturer, store or upload).
         Every finding carries a severity; "error" holds the message of warnings
         and errors (key kept for historic entries). The entry gets the highest
@@ -496,7 +448,7 @@ class Checks(DeviceSettings):
             "check",
             severity=worst("error" if failure else "success", *(f["severity"] for f in findings)),
             trigger=trigger or ("scheduled" if automatic else "manual"),
-            user=None if automatic or trigger == "install" else user or "unknown",
+            user=SCHEDULE_USER if automatic else user or "unknown",
             devices=len(checked),
             duration=round(duration, 1),
             result=failure or f"{updates} update(s), {counts['warning']} warning(s), {counts['error']} error(s)",

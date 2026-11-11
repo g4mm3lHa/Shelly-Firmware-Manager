@@ -52,12 +52,10 @@ class Installs(Checks):
         return dev.get("status") == STATUS_READY and hmac.compare_digest(str(dev.get("sha256")), sha)
 
     async def install(self, device_id: str, sha: str, approved_by: str, downgrade: bool = False) -> bool:
-        """Install an approved update or downgrade (see _install_approved), then check
-        the installed devices once no installation is running anymore (see
-        _check_after_installs). True only if the target version is confirmed."""
-        ok = await self._install_approved(device_id, sha, approved_by, downgrade)
-        await self._check_after_installs()
-        return ok
+        """Install an approved update or downgrade (see _install_approved). True only
+        if the target version is confirmed. No check follows: the device keeps its
+        result until the next full check or a single check of the device."""
+        return await self._install_approved(device_id, sha, approved_by, downgrade)
 
     async def _install_approved(
         self, device_id: str, sha: str, approved_by: str, downgrade: bool = False
@@ -127,10 +125,9 @@ class Installs(Checks):
                 ok, diagnosis = await self._install(device_id, dev, sha)
                 if ok and downgrade:
                     self._after_downgrade(dev)
-                elif ok:
-                    self._followup.add(device_id)  # checked when the installations ended
-                    # Stays in the "Updates available" group until the next full
-                    # check or a single-device check of this device
+                elif ok or dev.get("status") == STATUS_UNCLEAR:
+                    # Confirmed or unconfirmed update: stays in the "Updates available"
+                    # group until the next full check or a single check of this device
                     dev["updated"] = True
                 event = "confirmed" if ok else "unconfirmed"
                 self.events.add("install", ok=ok, event=event, detail=diagnosis, **entry)

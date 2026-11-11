@@ -11,9 +11,11 @@ import {load, queued, render} from "./main.js";
 const STATUS_LABELS = {"up-to-date": "Up-To-Date", available: "Available", ready: "Ready", queued: "Queued",
   installing: "Installing", unconfirmed: "Unconfirmed", error: "Error", unregistered: "Unregistered", skipped: "Skipped",
   updated: "Updated"};
-// A device with a confirmed installation is shown as "Updated" (and stays in the
-// "Updates available" card) until the next full check or a single check of this device
-const justUpdated = d => !!d.updated && d.status === "up-to-date";
+// A device with a confirmed or unconfirmed installation stays in the "Updates
+// available" card (without checkbox) until the next full check or a single check of
+// this device; a confirmed one is shown as "Updated", an unconfirmed one keeps its status
+const installedRecently = d => !!d.updated && ["up-to-date", "unconfirmed"].includes(d.status);
+const justUpdated = d => installedRecently(d) && d.status === "up-to-date";
 const shownStatus = d => d.installing && d.status === "ready" ? "queued" : justUpdated(d) ? "updated" : d.status;
 const hasUpdate = d => ["available", "ready", "installing"].includes(d.status);
 // Ignored devices are not installable until they are resumed; nothing is installable
@@ -203,7 +205,7 @@ const shortVersion = (d, v) => { const m = d.gen === 1 && GEN1_VERSION_RE.exec(v
 // Each column: label, cell renderer (returns nodes), sort value, fixed = always shown
 const COLUMNS = {
   select: {label: "", fixed: true, cell: d => {
-    if (justUpdated(d)) {   // no selection, but the row keeps the indentation of a checkbox
+    if (installedRecently(d)) {   // no selection, but the row keeps the indentation of a checkbox
       const gap = el("input"); gap.type = "checkbox"; gap.disabled = true; gap.className = "ghost"; gap.setAttribute("aria-hidden", "true"); gap.tabIndex = -1;
       return [gap];
     }
@@ -347,7 +349,7 @@ export function renderDevices() {
   const rows = found.filter(FILTERS[ui.devFilter][1]);
   // Ignored devices form their own group, always last (known update stays visible there)
   const ignored = rows.filter(d => d.ignored), active = rows.filter(d => !d.ignored);
-  const updates = active.filter(d => hasUpdate(d) || shownStatus(d) === "queued" || justUpdated(d)), others = active.filter(d => !updates.includes(d));
+  const updates = active.filter(d => hasUpdate(d) || shownStatus(d) === "queued" || installedRecently(d)), others = active.filter(d => !updates.includes(d));
   const cards = [];
   if (updates.length) {
     const sel = updates.filter(d => ok.has(d.id));

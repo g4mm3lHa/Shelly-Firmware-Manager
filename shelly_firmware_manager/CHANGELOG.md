@@ -2,9 +2,25 @@
 
 ## 3.1.1
 
-Release candidate rc2 (not released). Contains everything of 3.1.0 (which was never
+Release candidate rc3 (not released). Contains everything of 3.1.0 (which was never
 released) plus the changes below: clearer states in the device list, log entries can be
 deleted, shorter waiting time after an installation. rc2: internal restructuring only.
+rc3: findings of the live test of rc2.
+
+Changes in rc3
+- No check after installations anymore: the automatic check of the installed devices
+  (3.1.0, "After-installation check") is removed. An error of the Shelly server in that
+  check could later show "Error" on a device whose installation had succeeded. A device
+  keeps the result of its installation until it is checked again (single check or full
+  check); the next stored version or the server's offer is provided at that check.
+  Older "After-installation check" entries stay in the log.
+- Devices: a device whose installation was not confirmed ("Unconfirmed") also stays in
+  the "Updates available" card (no checkbox) until the device is checked again.
+- Phone tiles: the red "Install" button has the size of the status label "Ready" next
+  to it.
+- Logs: downloads name the user of the check that fetched them; scheduled checks and
+  their downloads name "Schedule" (new entries only; before: no user).
+- Logs: the user name and the delete icon of an entry are on one line.
 
 Changes in rc2
 - No change of behaviour, no new function: the code was restructured for easier
@@ -29,7 +45,8 @@ Changes in rc1
 - Devices: a device whose installation was confirmed stays in the "Updates available"
   card with the status "Updated" (no checkbox). The automatic check after the
   installation leaves it there; a check of this device or the next full check (manual
-  or scheduled) moves it to the other devices.
+  or scheduled) moves it to the other devices. (rc3: the check after installations is
+  removed.)
 - Action icons with clearer states:
   - Power-on action: green if every output restores its last state, red if an output
     has another value, "?" if the settings could not be read. The tooltip names the
@@ -111,7 +128,8 @@ Changes in rc2
   all of them), so the next stored version or the server's offer is provided at once.
   Not after a downgrade, an unconfirmed or a failed installation. Logged as
   "After-installation check"; the time of the last full check and the schedule are not
-  changed. Changed decision: until rc1 no check ran after an update.
+  changed. Changed decision: until rc1 no check ran after an update. (Removed again in
+  3.1.1-rc3.)
 - Source of an update is shown: status message ("Provided from the firmware store, not
   installed", with "(uploaded file)" for uploads), status details, installation dialog
   (with the upload warning) and the findings of a check in the log.

@@ -3,14 +3,12 @@ download diagnosis per device, check after confirmed installations.
 
 All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test servers."""
 
-import asyncio
 import hashlib
 import json
 import time
 
 import data_paths
 import download_server
-import manager_checks
 import manager_core
 import manager_installs
 import pytest
@@ -301,7 +299,7 @@ async def test_only_get_counts_as_served(mgr, monkeypatch):
     assert mgr.downloads[name]["served"] == {"127.0.0.1": 1}
 
 
-# ---------------------------------------------------------------- Check after installations
+# ---------------------------------------------------------------- No check after installations
 
 
 @pytest.fixture
@@ -320,105 +318,55 @@ def updating(mgr, net, monkeypatch, quick_install):
     return result
 
 
-def checks(mgr, trigger="install"):
-    """Log entries of checks with this trigger."""
-    return [e for e in mgr.events.entries if e["kind"] == "check" and e["trigger"] == trigger]
-
-
-async def test_confirmed_installation_is_followed_by_a_check(mgr, net, updating):
-    """The installed device is checked at once: the next stored version is provided
-    without waiting for the next check; logged as its own check without a user."""
+async def test_no_check_follows_an_installation(mgr, net, updating):
+    """A confirmed installation is not followed by a check: no server request, no
+    check log entry; the next stored version is provided at the next check."""
     store(mgr, "Plus1", "1.5.0")
     store(mgr, "Plus1", "1.6.0")
     await mgr.scan()
     mgr.last_scan -= 5
-    before, other = mgr.last_scan, dict(mgr.devices[C])
-    assert mgr.devices[A]["pending_version"] == "1.5.0"
+    before, checks, calls = mgr.last_scan, len(mgr.events.entries), net.offer_calls
     assert await mgr.install(A, mgr.devices[A]["sha256"], "alice") is True
     dev = mgr.devices[A]
-    assert dev["version"] == "1.5.0" and dev["status"] == manager_core.STATUS_READY
-    assert dev["pending_version"] == "1.6.0" and dev["offer_source"] == "store"
-    [entry] = checks(mgr)
-    assert entry["devices"] == 1 and "user" not in entry and entry["findings"][0]["offer"] == "1.6.0"
-    assert mgr.last_scan == before and mgr.devices[C] == other  # no full check, others untouched
-    assert net.offer_calls == 0 and not mgr.checking and mgr._followup == set()
-    assert [e["event"] for e in mgr.events.entries if e["kind"] == "install"] == ["started", "confirmed"]
-
-
-async def test_check_after_the_last_stored_version_asks_the_server(mgr, net, updating):
-    """Nothing newer stored anymore: the check after the installation asks the
-    manufacturer's server once, so "up to date" is a checked statement."""
-    await mgr.scan()  # A: 1.5.0 downloaded from the server
-    calls = net.offer_calls
-    assert await mgr.install(A, mgr.devices[A]["sha256"], "alice") is True
-    assert mgr.devices[A]["status"] == manager_core.STATUS_CURRENT and mgr.devices[A]["offer_source"] is None
-    assert net.offer_calls == calls + 1 and len(checks(mgr)) == 1
-
-
-async def test_parallel_installations_share_one_check(mgr, net, updating):
-    """The check starts when the last running installation has ended and covers
-    all devices installed in the meantime; one server request per firmware ID."""
-    await mgr.scan()
-    calls = net.offer_calls
-    results = await asyncio.gather(
-        mgr.install(A, mgr.devices[A]["sha256"], "alice"), mgr.install(C, mgr.devices[C]["sha256"], "alice")
-    )
-    assert results == [True, True]
-    [entry] = checks(mgr)
-    assert entry["devices"] == 2 and net.offer_calls == calls + 1
-    assert mgr.devices[A]["status"] == mgr.devices[C]["status"] == manager_core.STATUS_CURRENT
-
-
-async def test_no_check_after_an_unconfirmed_or_refused_installation(mgr, net, updating):
-    await mgr.scan()
-    updating["accept"] = False  # the Shelly keeps its version
-    assert await mgr.install(A, mgr.devices[A]["sha256"], "alice") is False
-    assert mgr.devices[A]["status"] == manager_core.STATUS_UNCLEAR
-    assert await mgr.install(B, "0" * 64, "alice") is False  # nothing provided for B
-    assert checks(mgr) == [] and mgr._followup == set()
-
-
-async def test_check_after_installation_gives_up_if_the_slot_stays_busy(mgr, net, monkeypatch):
-    """A Reload Device Info holding the slot delays the check; if the slot stays
-    busy it is skipped (the next regular check covers the device)."""
-    monkeypatch.setattr(manager_checks, "FOLLOWUP_RETRY_S", 0.01)
-    await mgr.scan()
-    mgr._followup = {A}
-    mgr.reloading.add(B)
-    asyncio.get_running_loop().call_later(0.015, mgr.reloading.discard, B)
-    await mgr._check_after_installs()
-    assert len(checks(mgr)) == 1 and mgr._followup == set()
-    mgr._followup = {A}
-    mgr.reloading.add(B)
-    await mgr._check_after_installs()
-    assert len(checks(mgr)) == 1 and mgr._followup == set() and not mgr.checking
+    assert dev["version"] == "1.5.0" and dev["status"] == manager_core.STATUS_CURRENT and dev["updated"] is True
+    assert mgr.last_scan == before and net.offer_calls == calls and not mgr.checking
+    assert [e["kind"] for e in mgr.events.entries[checks:]] == ["install", "install"]
+    await mgr.check_device(A)
+    assert mgr.devices[A]["pending_version"] == "1.6.0" and mgr.devices[A]["offer_source"] == "store"
 
 
 # ---------------------------------------------------------------- "Updated" mark and texts
 
 
 async def test_updated_mark_stays_until_the_next_user_check(mgr, net, updating):
-    """A confirmed installation marks the device as just updated: the automatic check
-    after the installation keeps the mark, a single check of the device or a full
-    check ends it."""
+    """A confirmed installation marks the device as just updated: a single check of
+    the device or a full check ends it."""
     await mgr.scan()
     assert await mgr.install(A, mgr.devices[A]["sha256"], "alice") is True
     assert await mgr.install(C, mgr.devices[C]["sha256"], "alice") is True
     state = {d["id"]: d for d in mgr.public_state()["devices"]}
     assert state[A]["updated"] is True and state[A]["status"] == manager_core.STATUS_CURRENT and not state[B]["updated"]
-    assert len(checks(mgr)) == 2  # the checks after the installations kept the mark
     await mgr.check_device(A)
     assert "updated" not in mgr.devices[A] and mgr.devices[C]["updated"] is True
     await mgr.scan()
     assert "updated" not in mgr.devices[C]
 
 
-async def test_no_updated_mark_after_downgrade_or_unconfirmed_installation(mgr, net, updating):
+async def test_unconfirmed_installation_keeps_the_mark(mgr, net, updating):
+    """An unconfirmed installation stays in "Updates available" (status unconfirmed)
+    until the next check of the device; a refused one (nothing provided) does not."""
     await mgr.scan()
-    updating["accept"] = False
+    updating["accept"] = False  # the Shelly keeps its version
     assert await mgr.install(A, mgr.devices[A]["sha256"], "alice") is False
-    assert "updated" not in mgr.devices[A]
-    updating["accept"] = True
+    assert mgr.devices[A]["status"] == manager_core.STATUS_UNCLEAR and mgr.devices[A]["updated"] is True
+    assert await mgr.install(B, "0" * 64, "alice") is False  # nothing provided for B
+    assert "updated" not in mgr.devices[B]
+    await mgr.check_device(A)
+    assert "updated" not in mgr.devices[A] and mgr.devices[A]["status"] == manager_core.STATUS_READY
+
+
+async def test_no_updated_mark_after_downgrade(mgr, net, updating):
+    await mgr.scan()
     _, older = store(mgr, "Plus1", "1.3.0")
     assert await mgr.install(B, older, "alice", downgrade=True) is True
     assert "updated" not in mgr.devices[B] and mgr.devices[B]["version"] == "1.3.0"

@@ -172,6 +172,15 @@ def _device_list(c):
     updated = card.locator("tr", has_text="Bedroom shutter")
     check(f"{case}: updated device stays in the updates card", updated.count() == 1
           and updated.locator(".pill").first.inner_text() == "Updated" and updated.locator("input.ghost").count() == 1)
+    unconfirmed = card.locator("tr", has_text="Office desk")
+    check(f"{case}: unconfirmed installation stays in the updates card", unconfirmed.count() == 1
+          and unconfirmed.locator(".pill").first.inner_text() == "Unconfirmed" and unconfirmed.locator("input.ghost").count() == 1)
+    if width < 700:   # phone tiles: Install button as large as the status pill next to it
+        sizes = f.evaluate("""() => { const b = document.querySelector('#dev-cards .status-cell button.install');
+          const p = b.parentElement.querySelector('.pill'); const r = e => e.getBoundingClientRect();
+          return {button: r(b).height, pill: r(p).height, dy: Math.abs(r(b).top - r(p).top)}; }""")
+        check(f"{case}: Install button as high as the status pill", abs(sizes["button"] - sizes["pill"]) < 1 and sizes["dy"] < 1,
+              str(sizes))
     check(f"{case}: no overflow (devices)", f.evaluate(OVERFLOW_JS) <= 0)
     page.screenshot(path=out / f"{case}-devices.png")
     install.first.click()
@@ -350,6 +359,13 @@ def _logs(c):
     check(f"{case}: three consecutive entries of one device grouped", f.locator("#log-list .grp").count() == 3
           and f.locator("#log-list .grp-first").count() == 1 and f.locator("#log-list .grp-last").count() == 1)
     check(f"{case}: delete icon per entry", f.locator("#log-list .log-del").count() == total, str(total))
+    if c.width > 700:   # desktop rows: user name and delete icon on one line
+        offsets = f.evaluate("""() => [...document.querySelectorAll('#log-list .log')].filter(r => r.querySelector('.user').textContent)
+          .map(r => { const m = e => { const b = e.getBoundingClientRect(); return b.top + b.height / 2; };
+            const icon = r.querySelector('.log-del svg'); return Math.abs(m(r.querySelector('.user')) - m(icon)); })""")
+        check(f"{case}: user name and delete icon on one line", offsets and max(offsets) < 1.5, str(offsets[:5]))
+    scheduled = f.locator("#log-list .log, #log-list .log-m", has_text="Firmware downloaded").first
+    check(f"{case}: download names the user of its check", "Schedule" in scheduled.inner_text() if c.width > 700 else True)
     f.locator("#log-list summary", has_text="30.7 s").first.click()
     colours = f.evaluate("""() => { const ul = [...document.querySelectorAll('#log-list ul')].find(u => u.textContent.includes('Sauna'));
       return [...ul.children].map(li => li.className); }""")

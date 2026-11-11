@@ -22,6 +22,7 @@ const PASSWORD_ACTIONS = {stored: "password stored", enabled: "password protecti
 /** Label of an app option for the log (key if unknown). */
 const optionLabel = key => (OPTION_FIELDS.find(f => f[0] === key) || [key, key])[1];
 const INSTALL_EVENTS = {started: "started", confirmed: "confirmed", unconfirmed: "not confirmed", failed: "failed"};
+// "install": check after installations, only in entries of 3.1.0-rc2 to 3.1.1-rc2
 const TRIGGER_LABELS = {manual: "Manual", scheduled: "Scheduled", device: "Single-device", install: "After-installation"};
 const arrow = (a, b) => `${a ?? "–"} → ${b ?? "–"}`;
 

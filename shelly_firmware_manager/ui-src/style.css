@@ -213,7 +213,7 @@ button.pill{cursor:pointer}
 .okc{color:color-mix(in srgb,var(--success-color) 60%,var(--primary-text-color))}
 .log details summary{cursor:pointer}
 .log ul{margin:4px 0 0;padding-left:18px}
-.log .user{color:var(--secondary-text-color);font-size:.85em;white-space:nowrap}
+.log .user{color:var(--secondary-text-color);font-size:.85em;white-space:nowrap;line-height:20px}   /* centred with the delete icon */
 .log-body{display:grid;grid-template-columns:auto 1fr;gap:0 8px;align-items:start;min-width:0}
 .log-body>.tag{margin-top:1px}
 /* Mobile log tile (rendered instead of .log on narrow screens) */
@@ -285,6 +285,7 @@ dialog table th,dialog table td{padding:6px 8px}
   #cols{display:none}   /* fixed card layout: no column chooser */
   button,.chip,input[type=search],select{min-height:44px}
   button.pill{min-height:32px}   /* status details are also in the ⋮ menu */
+  button.install{min-height:32px;padding:2px 10px;border-radius:12px;font-size:.85em;font-weight:500}   /* same size as the status pill */
   button.icon{min-width:44px;min-height:44px}
   thead{display:none}
   table,tbody{display:block}

@@ -43,8 +43,8 @@ there, e.g. `manager_installs.INSTALL_WAIT_S`).
 | 1 `manager_core.py` | `ManagerCore` | state and `__init__`; persistence `_load`, `save` (atomic), `set_ui`, `_remove_partial_downloads`; Home Assistant `_registry`, `notify`, `_supervisor_post`; options `options_view`, `save_options`, `restart_app`, `download_base_issue`, `confirm_download_base`; check slot `checking`, `reserve_check` (synchronous), `_reserved`, `busy`, `_progress`, `_end_check`; credentials `_auth`, `_auth_for`. Constants: `STATUS_*`, `ACTIVITY_*`, `SOURCE_*`, `DOWNLOAD_BASE_MESSAGES`, `severity_of` |
 | 2 `manager_store.py` | `FirmwareStore` | `_register_firmware`, `cleanup_firmware` (housekeeping only), `_intact` (SHA-256 verified once per file and check), `_stored_firmware`, `_store_offer` (next higher stored version, downloads and uploads), `firmware_list`, `firmware_changelog`, `store_size`, `delete_firmware` (`_delete_lock`); downgrade `downgrade_versions/match/blocker`, `_downgrade_candidates`, `_downgrade_count`; upload `stage_upload` → `confirm_upload` / `cancel_upload`, `_read_manifest`, `upload_types` |
 | 3 `manager_devices.py` | `DeviceSettings` | `_apply_info`, `_read_settings`, `_settings_device` (guards), `refresh_settings`, `reload_device`, `set_ignored`, `change_settings`, `restart_device`, `set_device_password` → `_password_action` (verify on the device) |
-| 4 `manager_checks.py` | `Checks` | `scan` / `check_device` / `_check_after_installs` (`FOLLOWUP_*`) → `_scan_all` → `_check_entries` (TaskGroup, `CHECK_PARALLEL`) → `_check_entry` → `_scan_device`: store first (`_store_offer`), else `_manufacturer_offer` (shared request per firmware ID, Gen1 one list: `GEN1_OFFERS`) and `_provide` per (type, version) (single flight) → `_stored_firmware` or `shelly.download_firmware`; `OFFER_*` (source of the provided update); `_log_check`, `_store_changelogs` / `_attach_changelogs`, `changelog_for`, `_notify_new_updates`, `scan_due_in` |
-| 5 `manager_installs.py` | `Installs` | `approval_matches`, `install` → `_install_approved` (slots, log) → `_install` (pre-check, WebSocket `_update_over_websocket` or HTTP `trigger_update`) → `_await_target_version` (`INSTALL_*` timings, `_pause` ends on `ota_error`), `_after_downgrade`, then `_check_after_installs`; download server support `may_download`, `record_download`, `_downloaded`, `_reset_download`, `_install_diagnosis` |
+| 4 `manager_checks.py` | `Checks` | `scan` / `check_device` (`_check_user`: user of the check and its downloads, `SCHEDULE_USER`) → `_scan_all` → `_check_entries` (TaskGroup, `CHECK_PARALLEL`) → `_check_entry` → `_scan_device`: store first (`_store_offer`), else `_manufacturer_offer` (shared request per firmware ID, Gen1 one list: `GEN1_OFFERS`) and `_provide` per (type, version) (single flight) → `_stored_firmware` or `shelly.download_firmware`; `OFFER_*` (source of the provided update); `_log_check`, `_store_changelogs` / `_attach_changelogs`, `changelog_for`, `_notify_new_updates`, `scan_due_in` |
+| 5 `manager_installs.py` | `Installs` | `approval_matches`, `install` → `_install_approved` (slots, log) → `_install` (pre-check, WebSocket `_update_over_websocket` or HTTP `trigger_update`) → `_await_target_version` (`INSTALL_*` timings, `_pause` ends on `ota_error`), `_after_downgrade` (no check follows an installation); download server support `may_download`, `record_download`, `_downloaded`, `_reset_download`, `_install_diagnosis` |
 | 6 `manager.py` | `Manager` | `public_state` (only listed fields; per device `downgrades`) |
 
 ## Stored data (`/data`, private to the app)
@@ -67,10 +67,10 @@ Device entry (`state.devices[<HA device id>]`): identity `name`, `shelly_name`,
 (`manufacturer|store|upload`); settings `ntp`,
 `eco`, `ap`, `ble`, `outputs`, `actions`, `schedules`, `auth_enabled`,
 `settings_error`; flags `ignored`; runtime only (not trusted after a restart)
-`ota_progress`, `downgrade`; `updated` (confirmed installation, until the next full
+`ota_progress`, `downgrade`; `updated` (confirmed or unconfirmed installation, until the next full
 check or single check of the device). Memory only: `Manager.activity`, `progress`,
-`installing`, `reloading`, `downloads`, `_upload`, `_followup` (devices to check
-after their installation), `_verifying` / `_fresh` (running check only).
+`installing`, `reloading`, `downloads`, `_upload`, `_check_user` / `_verifying` /
+`_fresh` (running check only).
 
 Firmware entry (`state.firmware[<file name>]`): `type`, `gen`, `version`, `sha256`,
 `size`, `downloaded`, `https` (downloads), `source` (`download|upload`),
@@ -132,8 +132,8 @@ by hand. A module exports only what another module imports.
 
 | File | Covers |
 |---|---|
-| `test_check.py` | full/single check, reservation, progress, single flight, cancellation, ignored, Reload Device Info, log severity, firmware store first, Gen1 list, changelog kept with the firmware, manufacturer server access |
-| `test_install.py` | target version verification, OTA WebSocket channel, HTTP fallback, download diagnosis, check after installations, "Updated" mark |
+| `test_check.py` | full/single check, reservation, progress, single flight, cancellation, ignored, Reload Device Info, log severity, firmware store first, Gen1 list, changelog kept with the firmware, manufacturer server access, user of checks and downloads |
+| `test_install.py` | target version verification, OTA WebSocket channel, HTTP fallback, download diagnosis, no check after installations, "Updated" mark (also unconfirmed) |
 | `test_firmware_store.py` | store housekeeping, delete, downgrade, upload |
 | `test_device_settings.py` | device identity (incomplete answers), settings/capabilities, AP/BLE, password workflow, no secrets |
 | `test_schedule.py` | schedule, DST, catch-up, deferral |

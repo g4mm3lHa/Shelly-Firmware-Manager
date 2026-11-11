@@ -97,8 +97,9 @@ def run_case(pw, width, scheme, embedded, base=IDLE, tag="idle"):
     check(page, f"{case}: all 4 tabs inside viewport", all(t["right"] <= width and t["left"] >= 0 for t in tabs), str(tabs))
     if width <= 700:
         small = f.evaluate(TARGETS_JS)
-        small = [x for x in small if x["t"] not in PILL_TEXTS]
-        check(page, f"{case}: touch targets >= 44 px (status pills >= 32)", not small, json.dumps(small[:8]))
+        # status pills and the Install button next to them (same size): >= 32 px
+        small = [x for x in small if x["h"] < 32 or (x["t"] not in PILL_TEXTS and not x["t"].startswith("Install update on"))]
+        check(page, f"{case}: touch targets >= 44 px (status pills, Install >= 32)", not small, json.dumps(small[:8]))
         h1 = f.evaluate("() => getComputedStyle(document.querySelector('h1')).display")
         check(page, f"{case}: h1 {'hidden' if embedded else 'shown'}", (h1 == "none") == embedded, h1)
         cols = f.evaluate("() => getComputedStyle(document.getElementById('cols')).display")

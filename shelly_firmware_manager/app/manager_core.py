@@ -10,8 +10,8 @@ provide; the complete object is manager.Manager.
 State lives in /data/state.json, firmware in /data/firmware, device passwords in
 /data/credentials.json, changelogs in /data/changelog.json and the activity log in
 /data/events.json (all private to the app, paths in data_paths).
-Checks – the full check, the single-device check and the check after installations –
-run exclusively (asyncio.Lock) and are reserved synchronously before they start
+Checks – the full check and the single-device check – run exclusively (asyncio.Lock)
+and are reserved synchronously before they start
 (reserve_check); checks and installations exclude each other.
 
 Progress of a running check is kept in memory only (self.progress, self.activity):
@@ -154,8 +154,9 @@ class ManagerCore:
         self._verifying: dict[str, asyncio.Future[bool]] = {}
         # file name -> manufacturer URL of a firmware downloaded by this check
         self._fresh: dict[str, str] = {}
-        # Devices with a confirmed installation, checked once no installation runs
-        self._followup: set[str] = set()
+        # User shown in the log for the downloads of this check ("Schedule" for
+        # scheduled checks)
+        self._check_user: str | None = None
         self._upload: dict[str, Any] | None = None  # staged manual upload (see stage_upload), memory only
         self._upload_lock = asyncio.Lock()  # one upload transfer at a time
         # Set whenever the schedule changes (check finished): wakes the scheduler in
@@ -411,7 +412,7 @@ class ManagerCore:
                 "phase": "queued",
             }
             self.activity[device_id] = ACTIVITY_WAITING
-        else:  # "all" or "followup" (check after installations)
+        else:  # "all"
             self.progress = {"kind": kind, "total": 0, "done": 0, "errors": 0, "phase": "queued"}
 
     def _reserved(self, kind: str, device_id: str | None = None) -> bool:
@@ -448,6 +449,7 @@ class ManagerCore:
         self.progress = None
         self._verifying.clear()
         self._fresh.clear()
+        self._check_user = None
 
     # ---------------------------------------------------------------------------------- Device credentials
 
