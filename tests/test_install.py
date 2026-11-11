@@ -1,5 +1,5 @@
 """Installation: target version verification, Gen2+ OTA WebSocket, HTTP fallback,
-download diagnosis per device.
+download diagnosis per device, check after confirmed installations.
 
 All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test servers."""
 
@@ -7,29 +7,28 @@ import hashlib
 import json
 import time
 
+import data_paths
 import download_server
-import manager
+import manager_core
+import manager_installs
 import pytest
 import shelly
 from aiohttp import WSMsgType, web
 from aiohttp.test_utils import TestClient, TestServer
-
-from conftest import A, B
+from conftest import A, B, C
+from helpers import store
 
 
 def test_install_timing_constants():
-    """Polling unchanged (30 s, every 10 s, max. 5 min); early abort after 3 min."""
-    assert (manager.INSTALL_FIRST_CHECK_S, manager.INSTALL_POLL_S) == (30, 10)
-    assert (manager.INSTALL_NO_DOWNLOAD_S, manager.INSTALL_WAIT_S) == (180, 300)
+    """Polling unchanged (30 s, every 10 s); 3.1.1: early abort after 2 min, max. 3 min."""
+    assert (manager_installs.INSTALL_FIRST_CHECK_S, manager_installs.INSTALL_POLL_S) == (30, 10)
+    assert (manager_installs.INSTALL_NO_DOWNLOAD_S, manager_installs.INSTALL_WAIT_S) == (120, 180)
 
 
 @pytest.fixture
-def run_install(mgr, monkeypatch):
+def run_install(mgr, monkeypatch, quick_install):
     """Run Manager._install against a device answering with the given versions."""
-    monkeypatch.setattr(manager, "INSTALL_FIRST_CHECK_S", 0)
-    monkeypatch.setattr(manager, "INSTALL_POLL_S", 0.01)
-    monkeypatch.setattr(manager, "INSTALL_NO_DOWNLOAD_S", 0.08)
-    monkeypatch.setattr(manager, "INSTALL_WAIT_S", 0.3)
+    monkeypatch.setattr(manager_installs, "INSTALL_NO_DOWNLOAD_S", 0.08)  # clearly before the upper limit
 
     async def run(old, target, answers, gen=2, served=False):
         dev = {"name": "Kitchen", "gen": gen, "origin": "http://192.168.1.10", "mac": "AA", "file": "x.zip",
@@ -61,7 +60,7 @@ def run_install(mgr, monkeypatch):
 
 async def test_exact_target_version_is_success(run_install):
     ok, diagnosis, dev, _ = await run_install("1.4.0", "1.5.0", ["1.4.0", "1.5.0"], served=True)
-    assert ok and diagnosis is None and dev["status"] == manager.STATUS_CURRENT
+    assert ok and diagnosis is None and dev["status"] == manager_core.STATUS_CURRENT
 
 
 async def test_gen1_compares_the_version_number(run_install):
@@ -73,7 +72,7 @@ async def test_gen1_compares_the_version_number(run_install):
 async def test_newer_version_is_unconfirmed_with_hint(run_install):
     """A newer version than the target is no longer reported as success."""
     ok, diagnosis, dev, polls = await run_install("1.4.0", "1.5.0", ["1.6.0"])
-    assert not ok and dev["status"] == manager.STATUS_UNCLEAR
+    assert not ok and dev["status"] == manager_core.STATUS_UNCLEAR
     assert "1.6.0" in diagnosis and "1.5.0" in diagnosis
     assert polls > 10  # no early abort: waits until the upper limit
 
@@ -104,7 +103,7 @@ class FakeShelly:
         return {"auth_type": "digest", "nonce": "AAAA-nonce", "realm": self.realm, "algorithm": "SHA-256"}
 
     def valid(self, auth):
-        sha = lambda s: hashlib.sha256(s.encode()).hexdigest()  # noqa: E731
+        sha = lambda s: hashlib.sha256(s.encode()).hexdigest()
         ha1 = sha(f"admin:{self.realm}:{self.password}")
         expected = sha(f"{ha1}:{auth['nonce']}:{auth['nc']}:{auth['cnonce']}:auth:{sha('dummy_method:dummy_uri')}")
         return auth.get("response") == expected and auth.get("nc") == "00000001" and isinstance(auth.get("cnonce"), int)
@@ -195,18 +194,19 @@ async def test_channel_refuses_redirects():
 def install_device(m, gen=2):
     """A ready device A for Manager._install."""
     dev = {"name": "Kitchen", "gen": gen, "origin": "http://192.168.1.10", "mac": "AA", "file": "x.zip",
-           "version": "1.4.0", "pending_version": "1.5.0", "pending_build": "b-old", "status": manager.STATUS_READY}
+           "version": "1.4.0", "pending_version": "1.5.0", "pending_build": "b-old", "status": manager_core.STATUS_READY}
     m.devices[A] = dev
     return dev
 
 
 @pytest.fixture
-def fast_install(monkeypatch):
-    """Short install timings and a device that answers with fixed versions."""
-    monkeypatch.setattr(manager, "INSTALL_FIRST_CHECK_S", 0.05)
-    monkeypatch.setattr(manager, "INSTALL_POLL_S", 0.05)
-    monkeypatch.setattr(manager, "INSTALL_NO_DOWNLOAD_S", 5)
-    monkeypatch.setattr(manager, "INSTALL_WAIT_S", 10)
+def ota_install(monkeypatch):
+    """Installs with the device WebSocket: polling slow enough for the OTA events to
+    arrive (50 ms), generous limits, and a device that keeps reporting the old version."""
+    monkeypatch.setattr(manager_installs, "INSTALL_FIRST_CHECK_S", 0.05)
+    monkeypatch.setattr(manager_installs, "INSTALL_POLL_S", 0.05)
+    monkeypatch.setattr(manager_installs, "INSTALL_NO_DOWNLOAD_S", 5)
+    monkeypatch.setattr(manager_installs, "INSTALL_WAIT_S", 10)
     monkeypatch.setattr(shelly, "file_sha256", lambda *_a: "s")
     calls = {"http": 0}
 
@@ -221,7 +221,7 @@ def fast_install(monkeypatch):
     return calls
 
 
-async def test_ota_error_ends_installation_at_once(mgr, fast_install, monkeypatch):
+async def test_ota_error_ends_installation_at_once(mgr, ota_install, monkeypatch):
     events = [{"event": "ota_progress", "msg": "", "progress_percent": 10},
               {"event": "ota_error", "msg": "Connection error: -14"}]
     async with FakeShelly(events=events) as fake:
@@ -231,21 +231,21 @@ async def test_ota_error_ends_installation_at_once(mgr, fast_install, monkeypatc
         with pytest.raises(shelly.OtaError, match="Connection error: -14"):
             await mgr._install(A, dev, "s")
         assert time.monotonic() - started < 2  # not the 3-minute early stop
-    assert fast_install["http"] == 0 and "ota_progress" not in dev
+    assert ota_install["http"] == 0 and "ota_progress" not in dev
 
 
-async def test_ota_error_marks_install_failed(mgr, fast_install, monkeypatch):
+async def test_ota_error_marks_install_failed(mgr, ota_install, monkeypatch):
     async with FakeShelly(events=[{"event": "ota_error", "msg": "Bad url"}]) as fake:
         monkeypatch.setattr(shelly, "OtaChannel", lambda _origin, *a: REAL_CHANNEL(fake.origin, *a))
         dev = install_device(mgr)
         dev["sha256"] = "s"
         monkeypatch.setattr(mgr, "approval_matches", lambda *_a: True)
         assert await mgr.install(A, "s", "u") is False
-    assert dev["status"] == manager.STATUS_ERROR and "Bad url" in dev["message"]
+    assert dev["status"] == manager_core.STATUS_ERROR and "Bad url" in dev["message"]
     assert mgr.events.entries[-1]["event"] == "failed"
 
 
-async def test_progress_is_shown_and_success_confirmed(mgr, fast_install, monkeypatch):
+async def test_progress_is_shown_and_success_confirmed(mgr, ota_install, monkeypatch):
     events = [{"event": "ota_progress", "msg": "", "progress_percent": 55}]
     async with FakeShelly(events=events) as fake:
         monkeypatch.setattr(shelly, "OtaChannel", lambda _origin, *a: REAL_CHANNEL(fake.origin, *a))
@@ -260,22 +260,22 @@ async def test_progress_is_shown_and_success_confirmed(mgr, fast_install, monkey
         monkeypatch.setattr(shelly, "device_info", device_info)
         assert await mgr._install(A, dev, "s") == (True, None)
     assert (55, "The Shelly is downloading the firmware: 55 %") in seen
-    assert dev["status"] == manager.STATUS_CURRENT and "ota_progress" not in dev
+    assert dev["status"] == manager_core.STATUS_CURRENT and "ota_progress" not in dev
 
 
-async def test_no_websocket_falls_back_to_http(mgr, fast_install, monkeypatch):
+async def test_no_websocket_falls_back_to_http(mgr, ota_install, monkeypatch):
     """conftest: no device WebSocket -> the update command goes over HTTP; Gen1 always HTTP."""
     for gen in (2, 1):
         dev = install_device(mgr, gen=gen)
-        monkeypatch.setattr(manager, "INSTALL_NO_DOWNLOAD_S", 0.1)
+        monkeypatch.setattr(manager_installs, "INSTALL_NO_DOWNLOAD_S", 0.1)
         ok, diagnosis = await mgr._install(A, dev, "s")
         assert not ok and "never requested" in diagnosis
-    assert fast_install["http"] == 2
+    assert ota_install["http"] == 2
 
 
 async def test_download_diagnosis_per_device(mgr):
     for key, ip in ((A, "192.168.1.10"), (B, "192.168.1.11")):
-        mgr.devices[key] = {"status": manager.STATUS_READY, "file": "x.zip", "origin": f"http://{ip}"}
+        mgr.devices[key] = {"status": manager_core.STATUS_READY, "file": "x.zip", "origin": f"http://{ip}"}
     assert mgr.may_download("x.zip", "192.168.1.10")
     mgr.record_download("x.zip", "192.168.1.10")
     assert mgr._downloaded(mgr.devices[A]) and not mgr._downloaded(mgr.devices[B])
@@ -288,13 +288,94 @@ async def test_download_diagnosis_per_device(mgr):
 async def test_only_get_counts_as_served(mgr, monkeypatch):
     content = b"x" * 2048
     name = hashlib.sha256(content).hexdigest() + ".zip"
-    manager.FW_DIR.mkdir(parents=True, exist_ok=True)
-    (manager.FW_DIR / name).write_bytes(content)
-    monkeypatch.setattr(download_server, "FW_DIR", manager.FW_DIR)  # bound at import
-    mgr.devices[A] = {"status": manager.STATUS_READY, "file": name, "origin": "http://127.0.0.1"}
+    data_paths.FW_DIR.mkdir(parents=True, exist_ok=True)
+    (data_paths.FW_DIR / name).write_bytes(content)
+    mgr.devices[A] = {"status": manager_core.STATUS_READY, "file": name, "origin": "http://127.0.0.1"}
     async with TestClient(TestServer(download_server.build_download_app(mgr))) as client:
         assert (await client.head(f"/{name}")).status == 200
         assert not mgr._downloaded(mgr.devices[A])
         r = await client.get(f"/{name}")
         assert r.status == 200 and await r.read() == content
     assert mgr.downloads[name]["served"] == {"127.0.0.1": 1}
+
+
+# ---------------------------------------------------------------- No check after installations
+
+
+@pytest.fixture
+def updating(mgr, net, monkeypatch, quick_install):
+    """End-to-end installs against FakeNet: the update command "installs" the version
+    of the served store file on the fake device; short timings."""
+    result = {"accept": True}
+
+    async def trigger(_session, _gen, origin, url, _auth=None):
+        if result["accept"]:
+            device = net.by_origin(origin)
+            version = mgr.firmware[url.rsplit("/", 1)[-1]]["version"]
+            net.devices[device] = (*net.devices[device][:2], version, version)
+
+    monkeypatch.setattr(shelly, "trigger_update", trigger)
+    return result
+
+
+async def test_no_check_follows_an_installation(mgr, net, updating):
+    """A confirmed installation is not followed by a check: no server request, no
+    check log entry; the next stored version is provided at the next check."""
+    store(mgr, "Plus1", "1.5.0")
+    store(mgr, "Plus1", "1.6.0")
+    await mgr.scan()
+    mgr.last_scan -= 5
+    before, checks, calls = mgr.last_scan, len(mgr.events.entries), net.offer_calls
+    assert await mgr.install(A, mgr.devices[A]["sha256"], "alice") is True
+    dev = mgr.devices[A]
+    assert dev["version"] == "1.5.0" and dev["status"] == manager_core.STATUS_CURRENT and dev["updated"] is True
+    assert mgr.last_scan == before and net.offer_calls == calls and not mgr.checking
+    assert [e["kind"] for e in mgr.events.entries[checks:]] == ["install", "install"]
+    await mgr.check_device(A)
+    assert mgr.devices[A]["pending_version"] == "1.6.0" and mgr.devices[A]["offer_source"] == "store"
+
+
+# ---------------------------------------------------------------- "Updated" mark and texts
+
+
+async def test_updated_mark_stays_until_the_next_user_check(mgr, net, updating):
+    """A confirmed installation marks the device as just updated: a single check of
+    the device or a full check ends it."""
+    await mgr.scan()
+    assert await mgr.install(A, mgr.devices[A]["sha256"], "alice") is True
+    assert await mgr.install(C, mgr.devices[C]["sha256"], "alice") is True
+    state = {d["id"]: d for d in mgr.public_state()["devices"]}
+    assert state[A]["updated"] is True and state[A]["status"] == manager_core.STATUS_CURRENT and not state[B]["updated"]
+    await mgr.check_device(A)
+    assert "updated" not in mgr.devices[A] and mgr.devices[C]["updated"] is True
+    await mgr.scan()
+    assert "updated" not in mgr.devices[C]
+
+
+async def test_unconfirmed_installation_keeps_the_mark(mgr, net, updating):
+    """An unconfirmed installation stays in "Updates available" (status unconfirmed)
+    until the next check of the device; a refused one (nothing provided) does not."""
+    await mgr.scan()
+    updating["accept"] = False  # the Shelly keeps its version
+    assert await mgr.install(A, mgr.devices[A]["sha256"], "alice") is False
+    assert mgr.devices[A]["status"] == manager_core.STATUS_UNCLEAR and mgr.devices[A]["updated"] is True
+    assert await mgr.install(B, "0" * 64, "alice") is False  # nothing provided for B
+    assert "updated" not in mgr.devices[B]
+    await mgr.check_device(A)
+    assert "updated" not in mgr.devices[A] and mgr.devices[A]["status"] == manager_core.STATUS_READY
+
+
+async def test_no_updated_mark_after_downgrade(mgr, net, updating):
+    await mgr.scan()
+    _, older = store(mgr, "Plus1", "1.3.0")
+    assert await mgr.install(B, older, "alice", downgrade=True) is True
+    assert "updated" not in mgr.devices[B] and mgr.devices[B]["version"] == "1.3.0"
+
+
+def test_diagnosis_after_a_download_recommends_websocket_debugging(mgr):
+    """The hint for a Shelly that fetched the file but kept its version."""
+    dev = {"file": "x.zip", "version": "2.0.3", "origin": "http://192.168.1.10"}
+    mgr.downloads["x.zip"] = {"served": {"192.168.1.10": 1}, "rejected": set()}
+    text = mgr._install_diagnosis(dev)
+    assert text.endswith("check the device log or the Shelly's web interface and try again with enabled websocket debugging")
+    assert "still reports 2.0.3" in text

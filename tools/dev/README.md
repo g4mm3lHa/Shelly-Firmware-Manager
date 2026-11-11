@@ -4,7 +4,7 @@ Only `shelly_firmware_manager/` is built into the image; nothing here is shipped
 
 | File | Purpose |
 |---|---|
-| `check.sh [tests\|ui\|full\|build]` | all checks in the efficient order: ruff → build check → version match (config.yaml = main.py) → pytest → UI (`ui`: quick, `full`: final gate); `build` rebuilds `app/static` first |
+| `check.sh [tests\|ui\|full\|build]` | all checks in the efficient order: ruff → mypy (if installed; required for a release) → build check → version match (config.yaml = main.py) → pytest → UI (`ui`: quick, `full`: final gate); `build` rebuilds `app/static` first |
 | `run.sh <cmd>` | runs a command with the pinned dependencies from the bundled wheels (extracted once to `.devdeps/`, pure-Python mode, no install) |
 | `asyncio_shim.py` | stand-in for pytest-asyncio's auto mode where it is not installed (`-p asyncio_shim`, used by `check.sh` automatically) |
 | `bin/npx` | offline stand-in for `npx --yes esbuild@0.28.2`: runs a local esbuild of exactly that version (`ESBUILD_BIN` overrides the path) |

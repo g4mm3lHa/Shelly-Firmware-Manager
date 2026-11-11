@@ -1,4 +1,4 @@
-"""Start the demo servers, run the UI checks, stop the demos – one command (3.0.1).
+"""Start the demo servers, run the UI checks, stop the demos – one command.
 
 Usage (repository root): python qa/run_ui.py [quick|full] [shots-dir]
   quick (default, per UI change): ui_test.py quick matrix + ui_features.py
@@ -45,7 +45,7 @@ def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "quick"
     if mode not in ("quick", "full"):
         raise SystemExit(__doc__)
-    # An empty argument (e.g. from a shell wrapper) must not mean the current directory
+    # An empty argument (e.g. from a shell wrapper) also means: temporary folder, never the current directory
     shots = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else tempfile.mkdtemp(prefix="sfm-shots-")
     demos = {**DEMOS, **(MOBILE_DEMO if mode == "full" else {})}
     procs = [

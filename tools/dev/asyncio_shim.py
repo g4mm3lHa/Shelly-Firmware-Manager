@@ -2,7 +2,7 @@
 
 Used only where pytest-asyncio is not installed and cannot be installed (offline
 workspace). Runs every async test and async fixture on one fresh event loop per
-test, as tests/pytest.ini asks for (asyncio_mode = auto, function-scoped loop).
+test, as pyproject.toml asks for (asyncio_mode = auto, function-scoped loop).
 Loaded with -p asyncio_shim (tools/dev/run.sh puts tools/dev/ on PYTHONPATH)."""
 
 import asyncio

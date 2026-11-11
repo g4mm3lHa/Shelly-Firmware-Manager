@@ -11,8 +11,10 @@ Deliberately minimal:
 
 import logging
 
+import data_paths
 from aiohttp import web
-from manager import FW_DIR, Manager
+from aiohttp.typedefs import Handler
+from manager import Manager
 from shelly import FW_NAME_RE
 
 log = logging.getLogger("sfm.download")
@@ -24,36 +26,36 @@ HEADERS = {
 }
 
 
-async def strip_server_header(_request, response):
+async def strip_server_header(_request: web.Request, response: web.StreamResponse) -> None:
     """aiohttp adds the Server header only when sending – remove it here."""
     response.headers.pop("Server", None)
 
 
-def build_download_app(mgr: Manager):
+def build_download_app(mgr: Manager) -> web.Application:
     """aiohttp application of the download server (one read-only route)."""
 
-    async def firmware(request):
+    async def firmware(request: web.Request) -> web.StreamResponse:
         """Serve a provided firmware file to the Shelly it is meant for."""
         name = request.match_info["name"]
         client = request.remote or "?"
         if not FW_NAME_RE.match(name) or not mgr.may_download(name, client):
             log.warning("Download rejected: %s from %s", name[:80], client)
-            raise web.HTTPNotFound()
-        path = FW_DIR / name
+            raise web.HTTPNotFound
+        path = data_paths.FW_DIR / name
         if not path.is_file() or path.is_symlink():
-            raise web.HTTPNotFound()
+            raise web.HTTPNotFound
         headers = {  # security headers are set by harden()
             "Content-Type": "application/octet-stream",
             "Content-Disposition": f'attachment; filename="{name}"',
         }
-        if request.method != "GET":  # HEAD: no transfer, not counted (rc6 R6)
+        if request.method != "GET":  # HEAD: no transfer, not counted
             return web.FileResponse(path, headers=headers)
         mgr.record_download(name, client)  # the transfer starts now (diagnosis per device)
         log.info("Download %s to %s", name, client)
         return web.FileResponse(path, headers=headers)
 
     @web.middleware
-    async def harden(request, handler):
+    async def harden(request: web.Request, handler: Handler) -> web.StreamResponse:
         """Security headers for every response, errors included."""
         try:
             response = await handler(request)

@@ -11,6 +11,7 @@ import os
 import signal
 import time
 from pathlib import Path
+from typing import Any
 
 import aiohttp
 import schedule
@@ -20,7 +21,7 @@ from manager import Manager
 from tls import CertificatePins
 from web_ui import build_ui_app
 
-VERSION = "3.0.1"  # must match config.yaml
+VERSION = "3.1.1-rc3"  # must match config.yaml
 
 OPTIONS_FILE = Path("/data/options.json")
 UI_PORT = 8099  # Ingress (internal)
@@ -43,7 +44,7 @@ log = logging.getLogger("sfm")
 USER_AGENT = "Mozilla/5.0"
 
 
-async def start_site(app, port):
+async def start_site(app: web.Application, port: int) -> web.AppRunner:
     """Start an aiohttp application on all interfaces of the container."""
     # access_log=None: own, concise logging instead of an access log
     runner = web.AppRunner(app, access_log=None, shutdown_timeout=SHUTDOWN_TIMEOUT_S)
@@ -54,12 +55,15 @@ async def start_site(app, port):
     return runner
 
 
-def load_options():
+def load_options() -> dict[str, Any]:
     """Options written by the Supervisor (validated against config.yaml)."""
-    return json.loads(OPTIONS_FILE.read_text())
+    options = json.loads(OPTIONS_FILE.read_text())
+    if not isinstance(options, dict):
+        raise SystemExit(f"{OPTIONS_FILE} does not contain a JSON object")
+    return options
 
 
-async def main():
+async def main() -> None:
     """Load the options, start both servers and run the check schedule."""
     token = os.environ.get("SUPERVISOR_TOKEN")
     if not token:
@@ -73,7 +77,7 @@ async def main():
         raise SystemExit(f"Configuration error: {err}") from None
 
     async with aiohttp.ClientSession(headers={"User-Agent": USER_AGENT}, trust_env=False) as session:
-        mgr = Manager(options, session, token, pins, version=VERSION)
+        mgr = Manager(options, session, token, pins)
         runners = [
             await start_site(build_ui_app(mgr), UI_PORT),
             await start_site(build_download_app(mgr), DOWNLOAD_PORT),
@@ -102,7 +106,7 @@ async def main():
             loop.add_signal_handler(sig, stop.set)
         scheduler = asyncio.create_task(run_schedule(mgr))
         stopper = asyncio.create_task(stop.wait())
-        results = (None, None)
+        results: tuple[object, ...] = (None, None)
         try:
             await asyncio.wait({scheduler, stopper}, return_when=asyncio.FIRST_COMPLETED)
         finally:
@@ -110,7 +114,7 @@ async def main():
             for task in (scheduler, stopper):
                 task.cancel()
             results = await asyncio.gather(scheduler, stopper, return_exceptions=True)
-            # Both servers in parallel (rc6 R5): the stop needs at most one
+            # Both servers in parallel: the stop needs at most one
             # SHUTDOWN_TIMEOUT_S, not one per server – well inside the 10 s of the Supervisor
             await asyncio.gather(*(runner.cleanup() for runner in runners))
             log.info("Stopped")
@@ -119,7 +123,7 @@ async def main():
             raise results[0]
 
 
-async def run_schedule(mgr):
+async def run_schedule(mgr: Manager) -> None:
     """Run the automatic check schedule until cancelled."""
     await asyncio.sleep(STARTUP_DELAY_S)
     while True:

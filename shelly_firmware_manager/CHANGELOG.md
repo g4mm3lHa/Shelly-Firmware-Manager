@@ -1,5 +1,179 @@
 # Changelog
 
+## 3.1.1
+
+Release candidate rc3 (not released). Contains everything of 3.1.0 (which was never
+released) plus the changes below: clearer states in the device list, log entries can be
+deleted, shorter waiting time after an installation. rc2: internal restructuring only.
+rc3: findings of the live test of rc2.
+
+Changes in rc3
+- No check after installations anymore: the automatic check of the installed devices
+  (3.1.0, "After-installation check") is removed. An error of the Shelly server in that
+  check could later show "Error" on a device whose installation had succeeded. A device
+  keeps the result of its installation until it is checked again (single check or full
+  check); the next stored version or the server's offer is provided at that check.
+  Older "After-installation check" entries stay in the log.
+- Devices: a device whose installation was not confirmed ("Unconfirmed") also stays in
+  the "Updates available" card (no checkbox) until the device is checked again.
+- Phone tiles: the red "Install" button has the size of the status label "Ready" next
+  to it.
+- Logs: downloads name the user of the check that fetched them; scheduled checks and
+  their downloads name "Schedule" (new entries only; before: no user).
+- Logs: the user name and the delete icon of an entry are on one line.
+
+Changes in rc2
+- No change of behaviour, no new function: the code was restructured for easier
+  maintenance.
+  - Backend: the former `manager.py` (about 2200 lines, one class) is split into six
+    modules, one layer each (`manager_core`, `manager_store`, `manager_devices`,
+    `manager_checks`, `manager_installs`, `manager`); the paths of the app's storage
+    are in `data_paths`. The class `Manager` and all its methods are unchanged.
+  - UI: the former `ui-src/app.js` is split into eight ES modules in `ui-src/js/`
+    (core, devices, install, device-settings, firmware, logs, app-settings, main);
+    `tools/build_ui.py` bundles them into the one shipped `app/static/app.js`.
+  - Development (not part of the image): extended lint rules in `pyproject.toml`
+    (comprehensions, performance, returns, pathlib, refurb, unused arguments, logging,
+    print statements, ruff's own rules) with the few findings fixed; the installation
+    timings of the tests come from one fixture; the UI feature checks of the Firmware
+    suite are split into one helper per area.
+
+Changes in rc1
+- Devices: red "Install" button next to the status "Ready" (also on phones). It opens
+  the usual installation dialog and is greyed out with the reason while an installation
+  is not possible. The "Install" buttons of the Firmware tab are red as well.
+- Devices: a device whose installation was confirmed stays in the "Updates available"
+  card with the status "Updated" (no checkbox). The automatic check after the
+  installation leaves it there; a check of this device or the next full check (manual
+  or scheduled) moves it to the other devices. (rc3: the check after installations is
+  removed.)
+- Action icons with clearer states:
+  - Power-on action: green if every output restores its last state, red if an output
+    has another value, "?" if the settings could not be read. The tooltip names the
+    value of every output.
+  - Password protection: green if the device is protected and its password is stored
+    in the app, yellow if it is protected but the password is not stored (the app
+    cannot read or update the device then), grey if it is not protected.
+  - Access point: red while the access point is on.
+- Row menu: "Downgrade" is greyed out while no older version is stored for the device
+  or something blocks it (check, installation, missing download base URL); the former
+  dialog "No stored version …" no longer appears.
+- Logs: every entry has a delete icon (one confirmation), and "Delete all logs" clears
+  the whole log (one confirmation, regardless of the filter). After clearing, one entry
+  remains that names who cleared the log; single deletions are written to the app log
+  of Home Assistant only. Entries of older versions get an internal ID at the first
+  start (the log file is rewritten once).
+- Logs: directly consecutive entries of the same device are marked as a group by a bar
+  at the side. The lines of a check are coloured by their own result (update green,
+  warning yellow, error red) also inside a check that failed as a whole, and the
+  Success / Warning / Error labels have one size.
+- Installation: the app waits at most 3 minutes for the target version (before: 5) and
+  gives up after 2 minutes (before: 3) if the Shelly is reachable, still reports the
+  old version and never requested the firmware.
+- Messages (new entries only): HTTP errors of the Shelly servers no longer contain the
+  words "message=" and "url=" (`408, 'Request Timeout', 'https://…'`); the hint for a
+  Shelly that downloaded the firmware but kept its version adds "and try again with
+  enabled websocket debugging".
+- Firmware tab: the changelog, download and delete icons of a version are on one line
+  (the download icon was shifted); on phones they are in the head of the version tile.
+- Phones: the IP address in a device tile ends in line with the ⋮ menu.
+- API: `POST /api/logs/{id}/delete`, `POST /api/logs/clear`; `/api/state` has
+  `updated` and `downgrades` per device; log entries carry `id`.
+- Clean-up (no change of behaviour): the unused field `scanned_version` is no longer
+  written to `state.json` (older files are read as before); unused style rules and an
+  unused parameter removed; version and ticket marks removed from code comments (the
+  history is in this changelog). Development: screenshots of earlier versions removed
+  from the repository (`qa/screenshots/` keeps the current version only; older ones
+  remain in the git history).
+
+## 3.1.0
+
+Never released (release candidates rc1 to rc3 only); all its changes are part of 3.1.1.
+rc1: store integration, robustness and code quality. rc2: the firmware store comes
+first in every check, fewer requests to the Shelly servers, Install button in the
+Firmware tab. rc3: changelog in the Firmware tab.
+
+Changes in rc3
+- Firmware tab: changelog icon in every version row. It opens a dialog with the
+  changelog kept with this stored firmware (security entries and entries for the
+  firmware's model are highlighted, as in the installation dialog). Nothing is
+  requested from Shelly for it. The icon is disabled while no changelog is stored –
+  a changelog is stored by a check that provides the file to a device, or when a
+  changelog page is fetched for another version of the same generation.
+  API: `GET /api/firmware` has the flag `changelog` per file, the text comes from
+  `GET /api/firmware/{name}/changelog`.
+
+Changes in rc2
+- Checks – firmware store first: before the Shelly update server is asked for a
+  device, the app looks for a newer stable version of the device's firmware ID in its
+  firmware store. One stored newer version is provided; of several, the next higher
+  one to the installed version. Only without a newer stored version the server is
+  asked, as before. Applies to the full check, the single-device check and the
+  schedule, for all generations (Gen1: allowed types only, as before).
+  - Downloaded **and uploaded** files count (changed decision: until rc1 an upload was
+    never provided as an update). Of two files with the same version the download is
+    preferred. Every file is verified by its SHA-256 before it is provided; a damaged
+    file is dropped from the store and the next one is taken.
+  - A device that is already "Ready" gets the stored version at the next check if it is
+    closer to the installed one; the approval of the former file is void.
+  - Consequences: devices are updated step by step through the stored versions, and a
+    newer version on the Shelly server is found only once a device has reached the
+    newest stored version. To skip a version, delete its file in the Firmware tab.
+- Fewer requests to the Shelly servers: no request for a firmware ID whose devices all
+  get a stored version; the Gen1 firmware list is requested once per check for all
+  Gen1 types (before: once per type); still one request and one download per firmware
+  ID for any number of devices.
+- Check after installations: after a confirmed installation the installed devices are
+  checked automatically as soon as no installation is running anymore (one check for
+  all of them), so the next stored version or the server's offer is provided at once.
+  Not after a downgrade, an unconfirmed or a failed installation. Logged as
+  "After-installation check"; the time of the last full check and the schedule are not
+  changed. Changed decision: until rc1 no check ran after an update. (Removed again in
+  3.1.1-rc3.)
+- Source of an update is shown: status message ("Provided from the firmware store, not
+  installed", with "(uploaded file)" for uploads), status details, installation dialog
+  (with the upload warning) and the findings of a check in the log.
+- Changelogs are kept with the stored firmware: the changelog of a provided version is
+  stored with its file and never requested again. A changelog page is requested only
+  if a provided firmware has none yet (at most once per check and generation, and not
+  again within an hour if the page does not list the version); a fetched page also
+  fills the other stored versions. The daily refresh of the pages is gone, so later
+  corrections by Shelly to a stored changelog are not picked up. Versions between the
+  installed and the offered one are shown as far as the last fetched page lists them.
+- Firmware tab: "Install" button behind every device a firmware is provided for. It
+  opens the usual installation dialog and is disabled under the same conditions as
+  "Install update" (check running, device ignored or installing, download base URL
+  missing). The API field `used_by` of `GET /api/firmware` is replaced by `devices`
+  (`id`, `name`).
+- After a downgrade the status message says "a newer version is provided again at the
+  next check" (the next check may provide a stored version in between).
+- Code: `shelly.fetch_offer` (Gen2+) and `shelly.fetch_gen1_offers`/`gen1_offer`
+  replace the former combined function; new device field `offer_source`, new store
+  field `changelog`. No conversion needed: missing fields are filled by the next check.
+
+Changes in rc1
+- App store: the user documentation is shown in the Documentation tab of the app page
+  (`DOCS.md`), a short introduction in the Info tab (`README.md`). The README of the
+  repository keeps installation and development and links to it.
+- Watchdog: Home Assistant restarts the app if it stops unexpectedly (TCP check of the
+  download server port 8098; nothing is requested or logged). Turn on the Watchdog
+  switch on the app page if it is off.
+- AppArmor profile (hosts with AppArmor, e.g. Home Assistant OS): the app may only run
+  Python, read its program files, write its private storage (`/data`) and use the
+  network; no other programs, no special privileges.
+- Changelog pages are parsed in a worker thread: a large page no longer delays the UI
+  and the download server during a check.
+- Incomplete or malformed answers of a Shelly or of the manufacturer's server are
+  reported with a readable message (e.g. "Incomplete device information from the
+  Shelly") instead of a bare internal error text.
+- Code: type annotations for all modules, checked strictly (mypy); a few defensive
+  checks the types required (unexpected RPC result, `options.json` not an object).
+- Development (not part of the image): tool settings of ruff, mypy and pytest in
+  `pyproject.toml` (`tests/pytest.ini` removed), mypy step in `tools/dev/check.sh`;
+  Fix:
+  `check.sh ui|full` wrote the screenshots of the UI checks into the current folder
+  instead of a temporary one.
+
 ## 3.0.1
 
 Maintenance release: clean-up based on 3.0.0, no new functions.

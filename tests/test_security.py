@@ -5,7 +5,6 @@ settings view. Download server: only provided files, sandbox CSP, no other paths
 Server banner, no request bodies. No network: test servers on 127.0.0.1 only."""
 
 import download_server
-import manager
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
@@ -39,7 +38,6 @@ async def test_settings_view_has_no_secrets(client):
 @pytest.fixture
 async def dl(mgr, monkeypatch):
     """Test client of the download server (serving files see test_install)."""
-    monkeypatch.setattr(download_server, "FW_DIR", manager.FW_DIR)  # bound at import
     async with TestClient(TestServer(download_server.build_download_app(mgr))) as c:
         yield c
 

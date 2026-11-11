@@ -62,7 +62,8 @@ TARGETS_JS = """() => [...document.querySelectorAll('#view-devices button, #view
   .filter(b => b.offsetParent !== null).map(b => { const r = b.getBoundingClientRect();
   return {t: (b.getAttribute('aria-label') || b.textContent || b.id).trim().slice(0, 30), w: Math.round(r.width), h: Math.round(r.height)}; })
   .filter(x => x.h < 44 || x.w < 44)"""
-PILL_TEXTS = {"Up-To-Date", "Available", "Ready", "Queued", "Installing", "Unconfirmed", "Error", "Unregistered", "Skipped"}
+PILL_TEXTS = {"Up-To-Date", "Available", "Ready", "Queued", "Installing", "Unconfirmed", "Error", "Unregistered", "Skipped",
+              "Updated"}
 TABS_JS = """() => [...document.querySelectorAll('.tab')].map(t => { const r = t.getBoundingClientRect();
   return {id: t.id, left: Math.round(r.left), right: Math.round(r.right), w: Math.round(r.width)}; })"""
 
@@ -96,8 +97,9 @@ def run_case(pw, width, scheme, embedded, base=IDLE, tag="idle"):
     check(page, f"{case}: all 4 tabs inside viewport", all(t["right"] <= width and t["left"] >= 0 for t in tabs), str(tabs))
     if width <= 700:
         small = f.evaluate(TARGETS_JS)
-        small = [x for x in small if x["t"] not in PILL_TEXTS]
-        check(page, f"{case}: touch targets >= 44 px (status pills >= 32)", not small, json.dumps(small[:8]))
+        # status pills and the Install button next to them (same size): >= 32 px
+        small = [x for x in small if x["h"] < 32 or (x["t"] not in PILL_TEXTS and not x["t"].startswith("Install update on"))]
+        check(page, f"{case}: touch targets >= 44 px (status pills, Install >= 32)", not small, json.dumps(small[:8]))
         h1 = f.evaluate("() => getComputedStyle(document.querySelector('h1')).display")
         check(page, f"{case}: h1 {'hidden' if embedded else 'shown'}", (h1 == "none") == embedded, h1)
         cols = f.evaluate("() => getComputedStyle(document.getElementById('cols')).display")
@@ -114,7 +116,7 @@ def run_case(pw, width, scheme, embedded, base=IDLE, tag="idle"):
         det = f.evaluate("() => [...document.querySelectorAll('.c-details')].every(e => getComputedStyle(e).display === 'none')")
         check(page, f"{case}: details column hidden on desktop", det)
         head = f.evaluate("() => [...document.querySelectorAll('thead th')].filter(t => getComputedStyle(t).display !== 'none').map(t => t.textContent)")
-        check(page, f"{case}: desktop columns", head[1:7] == ["Device", "IP", "Gen", "Firmware", "Status", "Action"], str(head))  # v3 default (rc3: AOP is an icon in Action)
+        check(page, f"{case}: desktop columns", head[1:7] == ["Device", "IP", "Gen", "Firmware", "Status", "Action"], str(head))  # default columns (the power-on action is an icon in Action)
     # Pill contrast (WCAG AA 4.5:1 for small text)
     worst = []
     for p in f.evaluate(PILL_JS):

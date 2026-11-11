@@ -7,10 +7,10 @@ import json
 import os
 import signal
 
+import data_paths
 import main
 import manager
 import pytest
-
 from conftest import OPTIONS
 
 
@@ -69,9 +69,9 @@ async def test_sigterm_cancels_running_check_and_saves_state(app_env, monkeypatc
         pytest.fail("The automatic check did not start")
     await _send_sigterm()
     assert await asyncio.wait_for(task, 5) is None
-    state = json.loads(manager.STATE_FILE.read_text())
+    state = json.loads(data_paths.STATE_FILE.read_text())
     assert state["last_scan"]  # written by the check's finally block
-    assert "activity" not in manager.STATE_FILE.read_text()
+    assert "activity" not in data_paths.STATE_FILE.read_text()
 
 
 class CountingEvent(asyncio.Event):
@@ -102,7 +102,7 @@ async def test_scheduler_error_is_still_reported(app_env, monkeypatch):
         await asyncio.wait_for(main.main(), 5)
 
 
-async def test_servers_are_stopped_in_parallel(app_env, monkeypatch):  # noqa: F811
+async def test_servers_are_stopped_in_parallel(app_env, monkeypatch):
     from aiohttp import web as aioweb
 
     running, overlap = 0, []

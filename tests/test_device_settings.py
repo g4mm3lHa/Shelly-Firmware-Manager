@@ -5,12 +5,11 @@ All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test 
 import asyncio
 import json
 
-import manager
+import data_paths
 import pytest
 import shelly
-from shelly import ShellyError
-
 from conftest import A, B, C
+from shelly import ShellyError
 
 
 async def test_settings_refused_while_device_checked(mgr, net):
@@ -92,6 +91,25 @@ async def test_gen2_identity_from_shelly_endpoint(device_api):
     answers["/shelly"] = {"id": "shellyplus1-a", "mac": "aa", "model": "SNSW", "gen": 2, "fw_id": "b", "ver": "1.4.4", "app": "Plus1", "auth_en": True}
     info = await shelly.device_info(None, "http://1.2.3.4")
     assert [c[0] for c in calls] == ["/shelly"] and info["auth_enabled"] is True and info["type"] == "Plus1"
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        {"gen": 2, "id": "x", "ver": "1.4.4", "fw_id": "b"},  # Gen2+ without "app"
+        {"type": "SHSW-1", "mac": "aa"},  # Gen1 without "fw"
+        {"gen": "two"},  # no number
+        {"gen": {"x": 1}},  # wrong type
+    ],
+)
+async def test_incomplete_identity_is_a_readable_device_error(device_api, answer):
+    """A missing or wrongly typed field becomes a ShellyError with a readable
+    message instead of a bare KeyError/ValueError text such as "'fw'"."""
+    calls, answers = device_api
+    answers["/shelly"] = answer
+    answers["/rpc/Shelly.GetDeviceInfo"] = answer
+    with pytest.raises(ShellyError, match="device information|Invalid value"):
+        await shelly.device_info(None, "http://1.2.3.4")
 
 
 async def test_gen1_password_errors_never_contain_the_url(monkeypatch):
@@ -189,7 +207,7 @@ async def test_secrets_never_in_state_or_logs(mgr, device):
     """Neither password nor HA1 appear in the log, state file or public state."""
     await mgr.set_device_password(A, "enable", "Very-Secret-1", confirm=True, acknowledged=True)
     ha1 = mgr.credentials.entries[A]["ha1"]
-    blobs = [json.dumps(mgr.events.entries), manager.STATE_FILE.read_text(), json.dumps(mgr.public_state())]
+    blobs = [json.dumps(mgr.events.entries), data_paths.STATE_FILE.read_text(), json.dumps(mgr.public_state())]
     assert not any("Very-Secret-1" in b or ha1 in b for b in blobs)
 
 

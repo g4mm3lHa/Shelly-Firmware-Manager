@@ -7,10 +7,11 @@ import json
 import re
 import zipfile
 
+import data_paths
 import manager
+import manager_core
 import web_ui
 from aiohttp.test_utils import TestClient, TestServer
-
 from conftest import OPTIONS
 
 
@@ -56,11 +57,11 @@ def firmware_zip(manifest=None, size=5000):
     return buf.getvalue()
 
 
-def store(mgr, fw_type, version, gen=2, source=manager.SOURCE_DOWNLOAD, content=None):
+def store(mgr, fw_type, version, gen=2, source=manager_core.SOURCE_DOWNLOAD, content=None):
     """Put a firmware file into the store (as a check or an upload would)."""
     data = content or (f"{fw_type}-{version}-".encode() * 2000)
     sha = hashlib.sha256(data).hexdigest()
     name = f"{sha}.zip"
-    (manager.FW_DIR / name).write_bytes(data)
+    (data_paths.FW_DIR / name).write_bytes(data)
     mgr._register_firmware(name, fw_type, gen, version, sha, len(data), True, source=source)
     return name, sha

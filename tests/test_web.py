@@ -9,8 +9,7 @@ import re
 import shelly
 import web_ui
 from aiohttp.test_utils import TestClient, TestServer
-
-from conftest import A, B
+from conftest import A, B, C
 from helpers import binary, firmware_zip, store
 
 
@@ -183,6 +182,19 @@ async def test_http_upload_flow(client, mgr, net):
     assert r.status == 200 and (await r.json())["version"] == "1.3.0"
     listing = await (await client.get("/api/firmware")).json()
     assert listing["total_size"] == mgr.store_size() and len(listing["firmware"]) == 2
+    # Devices a file is provided for, with their IDs (Install button of the Firmware tab)
+    provided = next(f for f in listing["firmware"] if f["version"] == "1.5.0")
+    assert {d["id"] for d in provided["devices"]} == {A, C} and all(d["name"] for d in provided["devices"])
+    state = await (await client.get("/api/state")).json()
+    assert next(d for d in state["devices"] if d["id"] == A)["offer_source"] == "manufacturer"
+    # Changelog of a stored firmware for the Firmware tab (flag in the list, text on demand)
+    assert provided["changelog"] is False
+    r = await client.get(f"/api/firmware/{provided['name']}/changelog")
+    assert r.status == 200 and await r.json() == {"available": False, "versions": []}
+    mgr.firmware[provided["name"]]["changelog"] = {"date": None, "entries": [{"category": None, "text": "Fix", "models": []}]}
+    data = await (await client.get(f"/api/firmware/{provided['name']}/changelog")).json()
+    assert data["available"] and data["versions"][0]["version"] == "1.5.0" and data["versions"][0]["entries"][0]["text"] == "Fix"
+    assert (await client.get(f"/api/firmware/{'0' * 64}.zip/changelog")).status == 404
 
 
 async def test_http_upload_guards(client, mgr, net):
@@ -226,6 +238,40 @@ async def test_http_downgrade_and_delete_need_acknowledgment(client, mgr, net):
     r = await client.post(f"/api/firmware/{provided}/delete", json={"confirm": True, "acknowledged": True},
                           headers=hdr)
     assert r.status == 409
+
+
+async def test_log_entries_can_be_deleted_over_http(client, mgr, net):
+    """Delete one entry / all entries – confirmation and CSRF token required."""
+    await mgr.scan()
+    await mgr.check_device(A)
+    entries = (await (await client.get("/api/logs")).json())["entries"]
+    target = entries[0]["id"]
+    url = f"/api/logs/{target}/delete"
+    assert (await client.post(url, json={"confirm": True})).status == 403  # no CSRF token
+    assert (await client.post(url, json={}, headers=hdr(client))).status == 400
+    assert (await client.post("/api/logs/zzz/delete", json={"confirm": True}, headers=hdr(client))).status == 404
+    assert (await client.post(f"/api/logs/{'0' * 12}/delete", json={"confirm": True}, headers=hdr(client))).status == 404
+    assert (await client.post(url, json={"confirm": True}, headers=hdr(client))).status == 200
+    left = (await (await client.get("/api/logs")).json())["entries"]
+    assert target not in [e["id"] for e in left] and len(left) == len(entries) - 1
+    assert (await client.post("/api/logs/clear", json={}, headers=hdr(client))).status == 400
+    r = await client.post("/api/logs/clear", json={"confirm": True}, headers={**hdr(client), "X-Remote-User-Name": "alice"})
+    assert r.status == 200 and (await r.json())["deleted"] == len(left)
+    [entry] = (await (await client.get("/api/logs")).json())["entries"]
+    assert entry["kind"] == "log" and entry["user"] == "alice" and entry["entries"] == len(left)
+
+
+async def test_state_counts_the_stored_older_versions(mgr, net):
+    """The row menu disables "Downgrade" without a stored older version."""
+    await mgr.scan()
+    count = lambda: {d["id"]: d["downgrades"] for d in mgr.public_state()["devices"]}
+    assert count() == {A: 0, B: 0, C: 0}  # only 1.5.0 is stored: not older than any device
+    store(mgr, "Plus1", "1.3.0")
+    store(mgr, "Plus1", "1.4.0")
+    store(mgr, "Plus1", "1.4.0", source="upload", content=b"u" * 3000)  # same version: counted once
+    store(mgr, "Plus1", "1.2.0-beta1")
+    assert count() == {A: 1, B: 2, C: 1}  # A, C on 1.4.0, B on 1.5.0
+    assert {i: len(mgr.downgrade_versions(i)) for i in (A, B, C)} == count()
 
 
 async def test_state_shows_the_downgrade_marker(mgr, net):

@@ -1,6 +1,6 @@
 """Shared helpers of the Playwright UI checks (qa/*.py). Not part of the app.
 
-Browser lookup (3.0.1): SFM_CHROME (path to a chrome / chrome-headless-shell binary)
+Browser lookup: SFM_CHROME (path to a chrome / chrome-headless-shell binary)
 wins; otherwise the newest Chromium found in the usual Playwright locations is used;
 if none is found, Playwright's own default browser is launched."""
 

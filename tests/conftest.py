@@ -13,7 +13,9 @@ import pytest
 APP = Path(__file__).resolve().parents[1] / "shelly_firmware_manager" / "app"
 sys.path.insert(0, str(APP))
 
+import data_paths
 import manager
+import manager_installs
 import shelly
 import web_ui
 from aiohttp.test_utils import TestClient, TestServer
@@ -48,6 +50,7 @@ class FakeNet:
         self.unreachable = set()
         self.downloads = 0
         self.offer_calls = 0
+        self.offer_version = "1.5.0"  # stable version offered by the manufacturer's server
         self.gate = None  # asyncio.Event: device_info waits for it (simulates slow devices)
         self.download_gate = None
         self.info_calls = 0
@@ -81,7 +84,7 @@ def net(monkeypatch, tmp_path):
         "CHANGELOG_FILE": data / "changelog.json",
         "EVENTS_FILE": data / "events.json",
     }.items():
-        monkeypatch.setattr(manager, name, value)
+        monkeypatch.setattr(data_paths, name, value)
 
     async def resolve(url):
         return url.rstrip("/")
@@ -112,15 +115,17 @@ def net(monkeypatch, tmp_path):
             raise fake.settings_error
         return {"shelly_name": "plus1", "ntp": "time.local", "eco": False, "ap": False, "ble": "unsupported", "outputs": []}
 
-    async def fetch_offer(_session, info, _allowed, _pins=None):
+    async def fetch_offer(_session, _fw_type, _pins=None):
         fake.offer_calls += 1
-        return {"version": "1.5.0", "url": "https://fw.example/Plus1.zip"}
+        return {"version": fake.offer_version, "url": "https://fw.example/Plus1.zip"}
 
     async def download_firmware(_session, _url, target_dir, _pins=None, https_only=False):
         fake.downloads += 1
         if fake.download_gate is not None:
             await fake.download_gate.wait()
         content = b"x" * 70000
+        if fake.offer_version != "1.5.0":  # another offered version is another file
+            content = fake.offer_version.encode() + content
         import hashlib
 
         sha = hashlib.sha256(content).hexdigest()
@@ -131,7 +136,7 @@ def net(monkeypatch, tmp_path):
         return None
 
     class NoWebSocket:
-        """rc6: Gen2+ installations try the device WebSocket first; in tests there is
+        """Gen2+ installations try the device WebSocket first; in tests there is
         none unless a test installs its own fake (the HTTP fallback is used)."""
 
         def __init__(self, *_args, **_kwargs):
@@ -152,9 +157,19 @@ def net(monkeypatch, tmp_path):
 
 
 @pytest.fixture
+def quick_install(monkeypatch):
+    """Short installation timings for installs that run to the end in a test
+    (first poll at once, then every 10 ms, limits of 0.1 s and 0.3 s)."""
+    monkeypatch.setattr(manager_installs, "INSTALL_FIRST_CHECK_S", 0)
+    monkeypatch.setattr(manager_installs, "INSTALL_POLL_S", 0.01)
+    monkeypatch.setattr(manager_installs, "INSTALL_NO_DOWNLOAD_S", 0.1)
+    monkeypatch.setattr(manager_installs, "INSTALL_WAIT_S", 0.3)
+
+
+@pytest.fixture
 async def mgr(net):
     """Manager with fake registry; notifications are recorded instead of sent."""
-    m = manager.Manager(dict(OPTIONS), session=None, token="t", version="3.0.1")
+    m = manager.Manager(dict(OPTIONS), session=None, token="t")
 
     async def registry():
         await asyncio.sleep(0)
