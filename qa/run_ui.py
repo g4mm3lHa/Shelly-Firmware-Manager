@@ -1,4 +1,4 @@
-"""Start the demo servers, run the UI checks, stop the demos – one command (3.0.1).
+"""Start the demo servers, run the UI checks, stop the demos – one command.
 
 Usage (repository root): python qa/run_ui.py [quick|full] [shots-dir]
   quick (default, per UI change): ui_test.py quick matrix + ui_features.py

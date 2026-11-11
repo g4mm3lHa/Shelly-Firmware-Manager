@@ -47,7 +47,7 @@ def build_download_app(mgr: Manager) -> web.Application:
             "Content-Type": "application/octet-stream",
             "Content-Disposition": f'attachment; filename="{name}"',
         }
-        if request.method != "GET":  # HEAD: no transfer, not counted (rc6 R6)
+        if request.method != "GET":  # HEAD: no transfer, not counted
             return web.FileResponse(path, headers=headers)
         mgr.record_download(name, client)  # the transfer starts now (diagnosis per device)
         log.info("Download %s to %s", name, client)

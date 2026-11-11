@@ -1,5 +1,5 @@
-"""Shelly passwords: per-device credentials entered in the UI (v3 removed the
-shared password option and its fallback completely).
+"""Shelly passwords: per-device credentials entered in the UI (there is no shared
+password option and no fallback).
 
 Storage rules:
 - Per-device passwords live only in /data/credentials.json (mode 0600), never in

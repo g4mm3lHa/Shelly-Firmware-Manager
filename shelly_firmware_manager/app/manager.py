@@ -10,10 +10,10 @@ parallelism never duplicates a request or a file. Installations run in parallel
 up to a limit (asyncio.Semaphore); checks and installations exclude each other.
 Installations are always started manually. Ignored devices are left out of the
 full check (an explicit single-device check is still possible).
-Stored firmware is never deleted automatically (rc7): the user deletes files in
+Stored firmware is never deleted automatically: the user deletes files in
 the Firmware tab. Older stored versions allow a downgrade of Gen2+ devices, and
 older files can be uploaded manually (two steps: stage, then confirm).
-The firmware store comes first (3.1.0): a check provides the next higher stored
+The firmware store comes first: a check provides the next higher stored
 version of the device's firmware ID (downloads and uploads); the manufacturer's
 server is only asked for devices without such a file, once per firmware ID (Gen1:
 once for all types). A confirmed installation is followed by a check of the
@@ -68,7 +68,7 @@ EVENTS_FILE = DATA_DIR / "events.json"
 
 # Device status – shown like this in the UI
 STATUS_CURRENT = "up-to-date"
-STATUS_AVAILABLE = "available"  # update exists, firmware not (yet) downloaded
+STATUS_AVAILABLE = "available"  # newer version known, provided at the next check (after a downgrade)
 STATUS_READY = "ready"  # firmware downloaded, waiting for manual installation
 STATUS_INSTALLING = "installing"
 STATUS_UNCLEAR = "unconfirmed"  # installation without confirmed target version
@@ -81,7 +81,7 @@ INSTALL_FIRST_CHECK_S = 30  # wait after the update command
 INSTALL_POLL_S = 10  # then check every 10 s
 INSTALL_NO_DOWNLOAD_S = 120  # no download request: give up after 2 min (a Shelly may
 # still answer with the old version for a while after accepting the update)
-INSTALL_WAIT_S = 180  # upper limit in case the Shelly gets stuck (3.1.1: 3 min, before 5)
+INSTALL_WAIT_S = 180  # upper limit (3 min) in case the Shelly gets stuck
 SUPERVISOR = "http://supervisor"  # Supervisor API (Core API proxy below /core)
 SUPERVISOR_TIMEOUT = aiohttp.ClientTimeout(total=15)
 
@@ -92,7 +92,7 @@ ACTIVITY_DOWNLOADING = "downloading"  # firmware for this device is being downlo
 ACTIVITY_RELOADING = "reloading"  # Reload Device Info is reading the device
 PART_PREFIX = ".part-"  # temporary download files (see shelly._store)
 
-# Manual firmware upload (rc7): the file is first staged (temporary name below
+# Manual firmware upload: the file is first staged (temporary name below
 # FW_DIR, removed at start like an incomplete download), then confirmed with type
 # and version. Only one upload is staged at a time.
 UPLOAD_PREFIX = PART_PREFIX + "upload-"
@@ -102,7 +102,7 @@ STABLE_VERSION_RE = re.compile(r"^\d{1,4}\.\d{1,4}\.\d{1,4}$")  # stable Gen2+ v
 SOURCE_DOWNLOAD = "download"  # downloaded from the manufacturer by a check
 SOURCE_UPLOAD = "upload"  # uploaded manually in the Firmware tab
 
-# Where the update provided for a device comes from (device field offer_source, 3.1.0)
+# Where the update provided for a device comes from (device field offer_source)
 OFFER_MANUFACTURER = "manufacturer"  # offered by the manufacturer's server in this check
 OFFER_STORE = "store"  # stored download of an earlier check, server not asked
 OFFER_UPLOAD = "upload"  # manually uploaded file from the store, server not asked
@@ -122,14 +122,14 @@ MAX_COLUMNS = 30
 # the check time of larger installations by roughly a factor of 4 while keeping
 # Wi-Fi and Home Assistant load low. Internal constant, not a setting.
 CHECK_PARALLEL = 4
-# Check after confirmed installations (3.1.0): it needs the check slot, which a
+# Check after confirmed installations: it needs the check slot, which a
 # Reload Device Info or a check started in the same moment may hold for a few seconds
 FOLLOWUP_ATTEMPTS = 6
 FOLLOWUP_RETRY_S = 5
 PASSWORD_MODES = ("store", "enable", "change", "remove", "forget")
 MAX_SERVED_IPS = 16  # download diagnosis: client addresses recorded per file
 
-# download_base_url problems that block installations (rc6, R1)
+# download_base_url problems that block installations
 DOWNLOAD_BASE_MESSAGES = {
     "missing": "Installations are disabled: set the download base URL (LAN IP address of Home "
     "Assistant and port 8098) in the Settings tab.",
@@ -156,7 +156,6 @@ class Manager:
         session: aiohttp.ClientSession,
         token: str,
         pins: CertificatePins | None = None,
-        version: str = "",
     ) -> None:
         """Apply the options and load the stored state, passwords, changelogs and log."""
         options = app_options.with_defaults(options)
@@ -164,7 +163,7 @@ class Manager:
         self.check_days = int(options["check_interval_days"])
         self.check_time = options["check_time"]
         self.tz, self.tz_name = schedule.local_zone()
-        # Optional since rc6: no default, installations are refused while it is unset
+        # Optional, no default: installations are refused while it is unset
         self.download_base = (options.get("download_base_url") or "").rstrip("/") or None
         self.download_base_confirmed: str | None = None  # confirmed legacy example value (persisted)
         self.restrict_downloads = bool(options["restrict_downloads_to_devices"])
@@ -173,12 +172,10 @@ class Manager:
         self.session = session
         self.token = token
         self.pins = pins  # certificate pins for shelly.cloud
-        self.version = version  # app version (stored with every check)
         self.lock = asyncio.Lock()  # check (exclusive)
         self.install_slots = asyncio.Semaphore(int(options.get("max_parallel_installs", 5)))
         self.installing: set[str] = set()  # device IDs: running or waiting
         self.last_scan: int | None = None
-        self.scanned_version: str | None = None  # app version of the last check
         self.devices: dict[str, Device] = {}  # HA device ID -> state
         self.downloads: dict[str, dict[str, Any]] = {}  # file name -> {"served": {ip: n}, "rejected": {ip, ...}}
         self.firmware: dict[str, FirmwareMeta] = {}  # file name -> metadata of the stored firmware
@@ -225,7 +222,6 @@ class Manager:
                 raise ValueError("state is not an object")
             self.devices = data.get("devices") or {}
             self.last_scan = data.get("last_scan")
-            self.scanned_version = data.get("scanned_version")
             self.firmware = data["firmware"] if isinstance(data.get("firmware"), dict) else {}
             if isinstance(data.get("ui"), dict) and data.get("ui_version") == UI_VERSION:
                 self.ui = data["ui"]
@@ -241,7 +237,7 @@ class Manager:
             # A restart during an installation leaves an unclear state
             if dev.get("status") == STATUS_INSTALLING:
                 dev.update(status=STATUS_UNCLEAR, message="App was restarted during the installation")
-            dev.pop("downgrade", None)  # marker of a running downgrade (rc7), memory semantics
+            dev.pop("downgrade", None)  # marker of a running downgrade, memory semantics
 
     @staticmethod
     def _remove_partial_downloads() -> None:
@@ -261,7 +257,6 @@ class Manager:
         state = {
             "devices": self.devices,
             "last_scan": self.last_scan,
-            "scanned_version": self.scanned_version,
             "firmware": self.firmware,
             "ui": self.ui,
             "ui_version": UI_VERSION,
@@ -341,7 +336,7 @@ class Manager:
 
     @staticmethod
     def _source(meta: FirmwareMeta) -> str:
-        """Origin of a store entry; entries before rc7 were always downloaded."""
+        """Origin of a store entry; entries without the field (3.0.0 candidates) were downloaded."""
         return SOURCE_UPLOAD if meta.get("source") == SOURCE_UPLOAD else SOURCE_DOWNLOAD
 
     def _in_use(self) -> set[str]:
@@ -349,7 +344,7 @@ class Manager:
         return {d["file"] for d in self.devices.values() if d.get("status") in PENDING and d.get("file")}
 
     def cleanup_firmware(self) -> None:
-        """Housekeeping of the store – never deletes a registered firmware (rc7).
+        """Housekeeping of the store – never deletes a registered firmware.
 
         Store entries whose file is missing are dropped; files on disk that are not
         in the store are removed. Temporary files (running downloads and staged
@@ -407,7 +402,7 @@ class Manager:
 
     async def _store_offer(self, info: dict[str, Any]) -> tuple[str, FirmwareMeta] | None:
         """The stored firmware to provide for a device before the manufacturer's
-        server is asked (3.1.0): the next higher stable version of its firmware ID.
+        server is asked: the next higher stable version of its firmware ID.
 
         Downloads and uploads count; of two files with the same version the
         manufacturer download is preferred. Every candidate is verified by its
@@ -434,7 +429,7 @@ class Manager:
         return None
 
     def _delete_lock(self, name: str) -> str | None:
-        """Reason why a stored firmware cannot be deleted now, else None (rc7 Q9)."""
+        """Reason why a stored firmware cannot be deleted now, else None."""
         if self.checking:
             return "Locked during a check"
         holders = [d for d in self.devices.values() if d.get("file") == name]
@@ -474,7 +469,7 @@ class Manager:
         return result
 
     def firmware_changelog(self, name: str) -> list[dict[str, Any]] | None:
-        """The changelog kept with a stored firmware, for the Firmware tab (3.1.0):
+        """The changelog kept with a stored firmware, for the Firmware tab:
         one version in the form of changelog_for, or None if none is stored yet.
         Nothing is requested – the changelog is stored by a check that provides the
         file (see _store_changelogs)."""
@@ -492,7 +487,7 @@ class Manager:
         self, name: str, user: str = "unknown", confirm: object = False, acknowledged: object = False
     ) -> None:
         """Delete a stored firmware – only manually, with a second confirmation
-        (confirm and acknowledged, as for the device password; rc7 Q9).
+        (confirm and acknowledged, as for the device password).
 
         Refused during a check and for a file that is installed right now or held
         as pending update for a device (the device must be checked or installed
@@ -517,11 +512,11 @@ class Manager:
         )
         self.save()
 
-    # ------------------------------------------------------------ Downgrade (rc7)
+    # ------------------------------------------------------------ Downgrade
 
     def downgrade_versions(self, device_id: str) -> list[dict[str, Any]]:
         """Stored stable versions of the device's firmware ID that are older than the
-        installed one, newest first (rc7). Gen1: never (empty list).
+        installed one, newest first. Gen1: never (empty list).
 
         One entry per version; a manufacturer download is preferred over an upload
         of the same version."""
@@ -612,7 +607,7 @@ class Manager:
             return "Device has not been checked successfully yet"
         return None
 
-    # ------------------------------------------------------------ Manual upload (rc7)
+    # ------------------------------------------------------------ Manual upload
 
     def _drop_upload(self) -> None:
         """Forget the staged upload and remove its temporary file."""
@@ -876,7 +871,7 @@ class Manager:
 
     @property
     def download_base_issue(self) -> str | None:
-        """Why installations are blocked by download_base_url (rc6, R1), else None.
+        """Why installations are blocked by download_base_url, else None.
 
         "missing": not set (optional option without default). "unconfirmed": still the
         former example value, which is only accepted after an explicit confirmation –
@@ -1003,7 +998,6 @@ class Manager:
                 # Also runs on cancellation (app stop): no device stays "checking"
                 self._end_check()
                 self.last_scan = int(time.time())
-                self.scanned_version = self.version
                 self.cleanup_firmware()
                 self.save()
                 self.schedule_changed.set()
@@ -1071,7 +1065,7 @@ class Manager:
         )
 
     async def _store_changelogs(self, devices: Iterable[Device]) -> None:
-        """Keep the changelog of every offered firmware with its store entry (3.1.0).
+        """Keep the changelog of every offered firmware with its store entry.
 
         A changelog page is requested only if a firmware provided for one of the
         devices has no changelog yet – once per check and generation, never with
@@ -1121,7 +1115,7 @@ class Manager:
         Returns the IDs of the checked devices."""
         offers: OfferTasks = {}  # shared manufacturer requests: one per firmware ID
         entries = self._shelly_entries(await self._registry())
-        for dev in self.devices.values():  # 3.1.1: a full check ends the "just updated" display
+        for dev in self.devices.values():  # A full check ends the "just updated" display
             dev.pop("updated", None)
         # Ignored devices count as registered (seen) but are not contacted
         seen = set(entries)
@@ -1218,7 +1212,7 @@ class Manager:
             self.reserve_check("device", device_id)
         async with self.lock:
             dev = self.devices[device_id]
-            dev.pop("updated", None)  # 3.1.1: checked again by the user, no longer "just updated"
+            dev.pop("updated", None)  # Checked again by the user, no longer "just updated"
             started = time.monotonic()
             failure = None
             progress = self._progress()
@@ -1249,7 +1243,7 @@ class Manager:
         return {"status": dev.get("status"), "error": failure}
 
     async def _check_after_installs(self) -> None:
-        """Check the devices whose installation was confirmed (3.1.0), so that the
+        """Check the devices whose installation was confirmed, so that the
         next stored version – or the manufacturer's offer – is provided at once.
 
         Runs when the last running installation has ended (a check cannot start
@@ -1325,7 +1319,7 @@ class Manager:
         if info["gen"] == 1 and info["type"] not in self.gen1_allowed:
             raise ShellyError(f"Gen1 type {info['type']} is not in the list of allowed types")
 
-        # 3.1.0: the firmware store comes first. The next higher stored version is
+        # The firmware store comes first. The next higher stored version is
         # provided – also instead of an update provided before – and the
         # manufacturer's server is not asked for this device.
         stored = await self._store_offer(info)
@@ -1477,7 +1471,7 @@ class Manager:
     # ------------------------------------------------------------ Device settings
 
     def _auth(self, device_id: str, dev: Device) -> DeviceAuth | None:
-        """Stored credentials of a device, else None (v3: no shared password)."""
+        """Stored credentials of a device, else None (there is no shared password)."""
         return self.credentials.auth_for(device_id, dev.get("gen") or 1)
 
     def _auth_for(self, device_id: str) -> Callable[[int], DeviceAuth | None]:
@@ -1781,7 +1775,7 @@ class Manager:
 
     async def install(self, device_id: str, sha: str, approved_by: str, downgrade: bool = False) -> bool:
         """Install an approved update or downgrade (see _install_approved), then check
-        the installed devices once no installation is running anymore (3.1.0, see
+        the installed devices once no installation is running anymore (see
         _check_after_installs). True only if the target version is confirmed."""
         ok = await self._install_approved(device_id, sha, approved_by, downgrade)
         await self._check_after_installs()
@@ -1796,7 +1790,7 @@ class Manager:
         time; others wait for a free slot. Nothing starts during a check, and each
         device is in progress at most once. approved_by is only written to the log.
 
-        downgrade (rc7, Gen2+ only): install the stored older version with this
+        downgrade (Gen2+ only): install the stored older version with this
         SHA-256 instead of the provided update. The confirmation flags are checked by
         the web UI; the same install path (pre-check, download server, OTA events,
         verification of the exact target version) is used."""
@@ -1857,7 +1851,7 @@ class Manager:
                     self._after_downgrade(dev)
                 elif ok:
                     self._followup.add(device_id)  # checked when the installations ended
-                    # 3.1.1: stays in the "Updates available" group until the next full
+                    # Stays in the "Updates available" group until the next full
                     # check or a single-device check of this device
                     dev["updated"] = True
                 event = "confirmed" if ok else "unconfirmed"
@@ -1903,7 +1897,7 @@ class Manager:
             raise ShellyError("Device or firmware changed since the check – please check again")
 
         # 2. Trigger the update; the Shelly downloads from the app's download server.
-        # Gen2+ (rc6, R3): over the device WebSocket, so the device's own OTA events
+        # Gen2+: over the device WebSocket, so the device's own OTA events
         # (progress, error) arrive; plain HTTP as fallback if the WebSocket is unusable.
         url = f"{self.download_base}/{dev['file']}"
         self._reset_download(dev)
@@ -2046,7 +2040,7 @@ class Manager:
     def may_download(self, name: str, client_ip: str) -> bool:
         """May client_ip download the file name? Only provided files, optionally only to Shellys.
         Rejected attempts on provided files are recorded for the installation diagnosis;
-        served downloads are counted by record_download (GET only, rc6 R6)."""
+        served downloads are counted by record_download (GET only)."""
         owners = [d for d in self.devices.values() if d.get("status") in PENDING and d.get("file") == name]
         if not owners:
             return False  # unknown file: record nothing
@@ -2060,7 +2054,7 @@ class Manager:
 
     def record_download(self, name: str, client_ip: str) -> None:
         """Count a GET that starts the transfer of a provided file, per client
-        address (rc6 R4: parallel installations of one firmware share the file)."""
+        address (parallel installations of one firmware share the file)."""
         record = self.downloads.get(name)
         if record is None:
             return
@@ -2078,7 +2072,7 @@ class Manager:
         """True if this device has started downloading its file. A request from an
         address that belongs to no known device (Docker without the sender IP, see
         restrict_downloads_to_devices) cannot be attributed and counts for every
-        device of that file, as before rc6."""
+        device of that file."""
         served = (self.downloads.get(str(dev.get("file"))) or {}).get("served") or {}
         if served.get(shelly.origin_ip(dev.get("origin", ""))):
             return True
@@ -2159,7 +2153,7 @@ class Manager:
                 {
                     "id": key,
                     **{f: dev.get(f) for f in fields},
-                    # 3.1.1: number of stored older versions (row menu: Downgrade enabled or not)
+                    # Number of stored older versions (row menu: Downgrade enabled or not)
                     "downgrades": self._downgrade_count(dev, stored),
                     "installing": key in self.installing,
                     "activity": self.activity.get(key),

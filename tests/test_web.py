@@ -183,12 +183,12 @@ async def test_http_upload_flow(client, mgr, net):
     assert r.status == 200 and (await r.json())["version"] == "1.3.0"
     listing = await (await client.get("/api/firmware")).json()
     assert listing["total_size"] == mgr.store_size() and len(listing["firmware"]) == 2
-    # 3.1.0: devices a file is provided for, with their IDs (Install button of the Firmware tab)
+    # Devices a file is provided for, with their IDs (Install button of the Firmware tab)
     provided = next(f for f in listing["firmware"] if f["version"] == "1.5.0")
     assert {d["id"] for d in provided["devices"]} == {A, C} and all(d["name"] for d in provided["devices"])
     state = await (await client.get("/api/state")).json()
     assert next(d for d in state["devices"] if d["id"] == A)["offer_source"] == "manufacturer"
-    # 3.1.0: changelog of a stored firmware for the Firmware tab (flag in the list, text on demand)
+    # Changelog of a stored firmware for the Firmware tab (flag in the list, text on demand)
     assert provided["changelog"] is False
     r = await client.get(f"/api/firmware/{provided['name']}/changelog")
     assert r.status == 200 and await r.json() == {"available": False, "versions": []}
@@ -242,7 +242,7 @@ async def test_http_downgrade_and_delete_need_acknowledgment(client, mgr, net):
 
 
 async def test_log_entries_can_be_deleted_over_http(client, mgr, net):
-    """3.1.1: delete one entry / all entries – confirmation and CSRF token required."""
+    """Delete one entry / all entries – confirmation and CSRF token required."""
     await mgr.scan()
     await mgr.check_device(A)
     entries = (await (await client.get("/api/logs")).json())["entries"]
@@ -263,7 +263,7 @@ async def test_log_entries_can_be_deleted_over_http(client, mgr, net):
 
 
 async def test_state_counts_the_stored_older_versions(mgr, net):
-    """3.1.1: the row menu disables "Downgrade" without a stored older version."""
+    """The row menu disables "Downgrade" without a stored older version."""
     await mgr.scan()
     count = lambda: {d["id"]: d["downgrades"] for d in mgr.public_state()["devices"]}
     assert count() == {A: 0, B: 0, C: 0}  # only 1.5.0 is stored: not older than any device

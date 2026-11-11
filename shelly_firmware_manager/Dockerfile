@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir --no-index --find-links /tmp/wheels --require-has
 # Same pinned base image for the runtime
 FROM python:3.12.16-alpine3.24@sha256:e064671ca452259bab50e8e2c7bd896e39e9a343bb06ca25234adf6fe18d0fc7
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/deps
-# No package tooling at runtime (rc6): pip/setuptools/wheel are not used by the app and
+# No package tooling at runtime: pip/setuptools/wheel are not used by the app and
 # only add attack surface. The pinned base image itself stays unchanged.
 RUN rm -rf /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.12 \
         /usr/local/lib/python3.12/ensurepip \

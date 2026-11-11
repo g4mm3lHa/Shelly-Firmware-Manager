@@ -28,7 +28,7 @@ def stored(s, gen, versions, age):
 
 
 async def test_page_fetched_recently_is_not_requested_again(store):
-    """3.1.0: refresh is only called for a missing changelog; a page fetched less
+    """Refresh is only called for a missing changelog; a page fetched less
     than an hour ago is not asked again (it may not list the version yet)."""
     stored(store, 2, ["1.4.0"], age=600)
     await store.refresh(None, {2}, None)
@@ -59,7 +59,7 @@ def test_version_entry_matches_gen1_format_and_exact_version(store):
 
 
 def test_between_takes_the_target_from_the_store_entry(store):
-    """3.1.0: the offered version comes from the changelog kept with the firmware;
+    """The offered version comes from the changelog kept with the firmware;
     versions in between are added as far as the last fetched page lists them."""
     kept = {"date": "2026-10-01", "entries": [{"category": "Security", "text": "Kept with the file", "models": []}]}
     assert store.between(2, "1.4.0", "1.6.0") is None  # nothing stored at all
@@ -75,7 +75,7 @@ def test_between_takes_the_target_from_the_store_entry(store):
 
 
 async def test_page_is_parsed_in_a_worker_thread(store, monkeypatch):
-    """3.1.0: the (up to 4 MiB) page is parsed outside the event loop thread."""
+    """The (up to 4 MiB) page is parsed outside the event loop thread."""
     import threading
 
     original, threads = changelog.parse, []

@@ -55,8 +55,9 @@ tools/dev/check.sh build    # rebuild app/static from ui-src first
 
 `tools/dev/` also works offline with the bundled wheels (see `tools/dev/README.md`).
 A map of modules, stored data, API routes and tests is in `docs/CODEMAP.md`. Tool
-settings (ruff, pytest) are in `pyproject.toml`.
+settings (ruff, mypy, pytest) are in `pyproject.toml`.
 
 Layout: `shelly_firmware_manager/` (app definition, `README.md`/`DOCS.md` for the app
-store, Dockerfile, pinned wheels, `app/` Python sources, `ui-src/`), `tests/` (by area), `qa/` (UI checks, demo server,
-screenshots), `tools/`, `docs/`, `candidates/` (current test report).
+store, Dockerfile, pinned wheels, `app/` Python sources, `ui-src/`), `tests/` (by area),
+`qa/` (UI checks, demo server, screenshots of the current version), `tools/`, `docs/`,
+`candidates/` (current test report).

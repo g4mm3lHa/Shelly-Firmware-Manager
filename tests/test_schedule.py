@@ -100,13 +100,13 @@ async def test_due_check_waits_for_installations(mgr, net):
 async def test_no_immediate_check_without_schedule(net):
     """A state without schedule (e.g. from an older version) is not due at once: next clock time."""
     manager.STATE_FILE.write_text(json.dumps({"devices": {}, "last_scan": 1, "scanned_version": "2.2.1"}))
-    m = manager.Manager(dict(OPTIONS), session=None, token="t", version="3.0.0")
+    m = manager.Manager(dict(OPTIONS), session=None, token="t")
     assert m.scan_due_in(datetime.now(UTC).timestamp()) > 0
     assert m.schedule["days"] == 7 and m.schedule["time"] == "02:45"
 
 
 async def test_manual_and_single_checks_do_not_shift_schedule(mgr, net):
-    """3.0: only the configured schedule counts – manual and single-device checks
+    """Only the configured schedule counts – manual and single-device checks
     leave it unchanged (replaces the 2.x interval-from-last-check test)."""
     before = dict(mgr.schedule)
     await mgr.scan(user="u")

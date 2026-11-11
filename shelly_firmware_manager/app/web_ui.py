@@ -6,14 +6,14 @@ Protection layers:
    panel (panel_admin) are available to administrators only.
 2. Every write request – and every request that contacts a Shelly – needs a CSRF
    token (only visible in the delivered page) and Content-Type JSON. The only
-   exception to JSON is the firmware upload (rc7): Content-Type
+   exception to JSON is the firmware upload: Content-Type
    application/octet-stream, streamed to disk with its own limit of 64 MiB; the
    32 KB body limit stays for every other request.
 3. Strict Content Security Policy; the frontend uses textContent only.
 4. Secrets are write-only: no endpoint ever returns a password or hash.
 5. Device-side password changes, deleting stored firmware and downgrades need
-   explicit confirmation flags (confirm + acknowledged), checked on the server
-   (never inferred from the UI alone).
+   explicit confirmation flags (confirm + acknowledged), deleting log entries the
+   flag confirm – checked on the server (never inferred from the UI alone).
 """
 
 import asyncio
@@ -45,7 +45,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 DEVICE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 RESTART_DELAY_S = 1  # let the answer reach the browser before the app restarts
-UPLOAD_ROUTE = "firmware-upload"  # the one route that takes a binary body (rc7)
+UPLOAD_ROUTE = "firmware-upload"  # the one route that takes a binary body
 UPLOAD_TYPE = "application/octet-stream"
 UPLOAD_CHUNK = 128 * 1024
 
@@ -199,7 +199,7 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Applic
     async def install(request: web.Request) -> web.StreamResponse:
         """Start an approved installation, bound to the SHA-256 shown to the user.
 
-        {"downgrade": true} (rc7, Gen2+): install the stored older version with that
+        {"downgrade": true} (Gen2+): install the stored older version with that
         SHA-256; needs the second confirmation ("acknowledged": true) as well."""
         device_id = device_id_from(request)
         body = await json_body(request)
@@ -218,7 +218,7 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Applic
             return web.json_response({"started": True})
         if mgr.checking:
             raise web.HTTPConflict(text="Check in progress – please try again afterwards")
-        if mgr.download_base_issue:  # rc6 R1: unset or unconfirmed former example value
+        if mgr.download_base_issue:  # Unset or unconfirmed former example value
             raise web.HTTPConflict(text=DOWNLOAD_BASE_MESSAGES[mgr.download_base_issue])
         if device_id in mgr.installing:
             raise web.HTTPConflict(text="Installation for this device is already running")
@@ -228,7 +228,7 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Applic
         return web.json_response({"started": True})
 
     async def downgrades(request: web.Request) -> web.StreamResponse:
-        """Stored older stable versions for a downgrade (rc7; Gen1: none)."""
+        """Stored older stable versions for a downgrade (Gen1: none)."""
         device_id = device_id_from(request)
         dev = mgr.devices[device_id]
         return web.json_response(
@@ -344,7 +344,7 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Applic
 
     async def firmware_delete(request: web.Request) -> web.StreamResponse:
         """Delete a stored firmware (logged with the HA user). Needs the second
-        confirmation: {"confirm": true, "acknowledged": true} (rc7)."""
+        confirmation: {"confirm": true, "acknowledged": true}."""
         name = firmware_name_from(request)
         body = await json_body(request)
         try:
@@ -358,7 +358,7 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Applic
         return web.json_response({"ok": True})
 
     async def firmware_upload(request: web.Request) -> web.StreamResponse:
-        """Step 1 of a manual upload (rc7): the raw file as body, its name in the
+        """Step 1 of a manual upload: the raw file as body, its name in the
         X-Filename header. Needs a Content-Length of at most 64 MiB; the body is
         streamed to disk and never read into memory as a whole."""
         length = request.content_length
@@ -399,7 +399,7 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Applic
         return web.json_response({"entries": mgr.events.list()})
 
     async def log_delete(request: web.Request) -> web.StreamResponse:
-        """Delete one log entry (3.1.1). The deletion is written to the app log only."""
+        """Delete one log entry. The deletion is written to the app log only."""
         entry_id = request.match_info["id"]
         if (await json_body(request)).get("confirm") is not True:
             raise web.HTTPBadRequest(text="Confirmation incomplete")
@@ -409,7 +409,7 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Applic
         return web.json_response({"deleted": True})
 
     async def logs_clear(request: web.Request) -> web.StreamResponse:
-        """Delete all log entries (3.1.1); one entry naming the user stays."""
+        """Delete all log entries; one entry naming the user stays."""
         if (await json_body(request)).get("confirm") is not True:
             raise web.HTTPBadRequest(text="Confirmation incomplete")
         user = user_from(request.headers)
@@ -418,7 +418,7 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Applic
         return web.json_response({"deleted": count})
 
     async def options_get(_request: web.Request) -> web.StreamResponse:
-        """App options (v3 has no secret options)."""
+        """App options (there are no secret options)."""
         return web.json_response(mgr.options_view())
 
     async def options_save(request: web.Request) -> web.StreamResponse:

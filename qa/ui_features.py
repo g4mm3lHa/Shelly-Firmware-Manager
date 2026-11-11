@@ -167,14 +167,14 @@ def firmware_store(browser, out):
         last = index == len(cases) - 1
         case = f"rc7-{width}-{scheme}{'-embedded' if embedded else ''}"
         entry = "Downgrade"
-        if index == 0:   # 3.1.1: no stored older version (demo "idle") -> entry disabled, no dialog
+        if index == 0:   # No stored older version (demo "idle") -> entry disabled, no dialog
             ctx, page, f, errors = open_page(browser, IDLE, width, scheme, embedded)
             items = dict(menu_items(f, "Hall"))
             check(f"{case}: downgrade disabled without a stored older version", items.get(entry) is True, str(items))
             ctx.close()
         ctx, page, f, errors = open_page(browser, RC7, width, scheme, embedded, ignore=("/upload/confirm",))
 
-        # 3.1.1: device list – Install button next to "Ready", "Updated" stays on top, icon colours
+        # Device list – Install button next to "Ready", "Updated" stays on top, icon colours
         card = f.locator("#dev-cards .card").first
         install = card.locator(".status-cell button.install")
         check(f"{case}: Install button for every ready device", install.count() == 5 and install.first.is_enabled(), str(install.count()))
@@ -255,7 +255,7 @@ def firmware_store(browser, out):
         check(f"{case}: no overflow (firmware)", f.evaluate(OVERFLOW_JS) <= 0)
         page.screenshot(path=out / f"{case}-firmware.png", full_page=True)
 
-        # 3.1.0: Install button behind every device a file is provided for; it opens
+        # Install button behind every device a file is provided for; it opens
         # the usual installation dialog, which names the source of the update
         rows.first.locator(".fw-dev summary").click()
         entries = rows.first.locator(".fw-dev li")
@@ -276,7 +276,7 @@ def firmware_store(browser, out):
         f.locator("#dlg-btns button", has_text="Cancel").click()   # nothing is installed in the demo
         rows.first.locator(".fw-dev summary").click()
 
-        # 3.1.0: changelog icon per version – dialog with the stored changelog, disabled without one
+        # Changelog icon per version – dialog with the stored changelog, disabled without one
         logs = f.locator(".fw-row .actions button[aria-label^='Changelog of']")
         check(f"{case}: one changelog icon per version", logs.count() == rows.count(), f"{logs.count()} / {rows.count()}")
         check(f"{case}: icon disabled without a stored changelog", logs.nth(1).is_disabled()
@@ -333,7 +333,7 @@ def firmware_store(browser, out):
             f.locator("#dlg-btns button", has_text="Cancel").click()
             f.wait_for_timeout(300)
 
-        # 3.1.1: Logs – group bar, findings coloured by severity, delete one entry / all (last case)
+        # Logs – group bar, findings coloured by severity, delete one entry / all (last case)
         f.locator("#tab-logs").click()
         entries = f.locator("#log-list .log, #log-list .log-m")
         entries.first.wait_for()

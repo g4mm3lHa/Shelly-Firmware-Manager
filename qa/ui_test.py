@@ -115,7 +115,7 @@ def run_case(pw, width, scheme, embedded, base=IDLE, tag="idle"):
         det = f.evaluate("() => [...document.querySelectorAll('.c-details')].every(e => getComputedStyle(e).display === 'none')")
         check(page, f"{case}: details column hidden on desktop", det)
         head = f.evaluate("() => [...document.querySelectorAll('thead th')].filter(t => getComputedStyle(t).display !== 'none').map(t => t.textContent)")
-        check(page, f"{case}: desktop columns", head[1:7] == ["Device", "IP", "Gen", "Firmware", "Status", "Action"], str(head))  # v3 default (rc3: AOP is an icon in Action)
+        check(page, f"{case}: desktop columns", head[1:7] == ["Device", "IP", "Gen", "Firmware", "Status", "Action"], str(head))  # default columns (the power-on action is an icon in Action)
     # Pill contrast (WCAG AA 4.5:1 for small text)
     worst = []
     for p in f.evaluate(PILL_JS):

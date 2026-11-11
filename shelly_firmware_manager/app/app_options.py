@@ -30,8 +30,8 @@ DEFAULTS = {
 # All option keys of config.yaml. Anything else in options.json is ignored everywhere,
 # so an unknown (e.g. removed) key can never reach the UI, the log or a save request.
 KEYS = frozenset({*INT_RANGES, *BOOLS, *DEFAULTS, "download_base_url", "gen1_allowed_types", "pinned_certificates"})
-# Former default/example of download_base_url (up to rc5). Since rc6 the option is
-# optional without default; this value only counts after an explicit confirmation.
+# Former default/example of download_base_url (release candidates of 3.0.0). The option
+# is optional without default; this value only counts after an explicit confirmation.
 LEGACY_DOWNLOAD_BASE = "http://192.168.178.50:8098"
 OPTIONAL = ("download_base_url",)  # options that can be removed (empty input)
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -48,7 +48,7 @@ def with_defaults(options: dict[str, Any]) -> dict[str, Any]:
 
 
 def public_view(options: dict[str, Any]) -> dict[str, Any]:
-    """Options for the UI (v3 has no secret options any more)."""
+    """Options for the UI (there are no secret options)."""
     return with_defaults(options)
 
 
@@ -120,7 +120,7 @@ def merge(options: dict[str, Any], changes: object) -> tuple[dict[str, Any], lis
 def change_list(old: dict[str, Any], new: dict[str, Any], changed: list[str]) -> list[dict[str, str]]:
     """Activity-log view of changed options: [{"option", "old", "new"}].
 
-    v3 has no secret options; historic entries of the removed shared password
+    There are no secret options; historic entries of the removed shared password
     ({"option", "redacted": True}) stay readable in the UI."""
     return [{"option": key, "old": _display(old.get(key)), "new": _display(new.get(key))} for key in changed]
 

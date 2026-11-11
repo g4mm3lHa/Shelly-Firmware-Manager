@@ -67,7 +67,7 @@ both servers in parallel (cancels checks/installations, saves the state), exit 0
 
 | File | Content |
 |---|---|
-| `state.json` | `{devices, last_scan, scanned_version, firmware, ui, ui_version (3), schedule, download_base_confirmed}` |
+| `state.json` | `{devices, last_scan, firmware, ui, ui_version (3), schedule, download_base_confirmed}` |
 | `firmware/` | `<sha256>.<zip\|bin\|gbl>`; temporary `.part-*` (downloads, staged uploads) |
 | `events.json` | activity log, one JSON object per line with `id` (3.0.0: one JSON array, converted once; IDs added once by 3.1.1) |
 | `credentials.json` | `{device id: {"gen": 1, "password"} \| {"gen": 2, "realm", "ha1"}}` |

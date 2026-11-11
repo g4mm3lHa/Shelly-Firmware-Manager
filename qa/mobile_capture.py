@@ -11,7 +11,7 @@ B = "http://127.0.0.1:8711"
 LONG = "Living room ceiling light with a really long device name over the sofa"
 def fw_patch(route):
     r = route.fetch(); d = r.json(); base = d["firmware"][0]
-    dev = lambda n, name: {"id": f"{n:032x}", "name": name}  # 3.1.0: devices carry their ID (Install button)
+    dev = lambda n, name: {"id": f"{n:032x}", "name": name}  # Devices carry their ID (Install button)
     d["firmware"][0]["devices"] = d["firmware"][0]["devices"] + [dev(1, LONG), dev(3, "Garage-door-controller-north-entrance-2nd-floor")]
     for i, v in enumerate(["1.4.0", "1.3.2"]):
         d["firmware"].append({**base, "name": f"{i}{base['name'][1:]}", "version": v, "devices": [] if i else [dev(2, "Hall")], "deletable": i == 0,

@@ -12,7 +12,7 @@ CACHE_MIN_AGE_S, because it may simply not list the version yet):
 The HTML is parsed server-side with the standard library parser into plain text
 (no markup, scripts or links survive), limited in size and stored in
 /data/changelog.json (the last fetched page per generation). The changelog of a
-stored firmware is copied from there to its store entry (3.1.0) and is then never
+stored firmware is copied from there to its store entry and is then never
 requested again. The UI only ever receives plain strings.
 """
 

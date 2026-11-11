@@ -1,5 +1,5 @@
 """Full and single-device checks: progress, reservation, single flight, cancellation,
-ignored devices, Reload Device Info, log severity, firmware store first (3.1.0).
+ignored devices, Reload Device Info, log severity, firmware store first.
 
 All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test servers."""
 
@@ -163,7 +163,7 @@ def changelog_page(mgr, versions=("1.5.0",)):
 
 
 async def test_changelog_is_kept_with_the_firmware_and_requested_once(mgr, net):
-    """3.1.0: the changelog of a provided firmware is stored with its store entry; a
+    """The changelog of a provided firmware is stored with its store entry; a
     stored changelog is never requested again and is shown without the page."""
     calls = changelog_page(mgr)
     await mgr.scan()
@@ -223,7 +223,7 @@ async def test_cancelled_check_leaves_no_running_download(mgr, net):
 async def test_cancelled_single_check_leaves_no_running_download(mgr, net):
     """Same for the single-device check."""
     await mgr.scan()  # device known
-    for name in list(mgr.firmware):  # force a new download (rc7: a provided file
+    for name in list(mgr.firmware):  # force a new download (a provided file
         (manager.FW_DIR / name).unlink()  # cannot be deleted in the UI, remove it directly)
     mgr.firmware.clear()
     net.download_gate = asyncio.Event()
@@ -240,7 +240,7 @@ async def test_cancelled_single_check_leaves_no_running_download(mgr, net):
 
 async def test_cancelled_check_cancels_shared_offer_task(mgr, net, monkeypatch):
     """Two devices of one type wait for one shared offer task; cancelling the check
-    leaves no task running (rc4 result confirmed for the offer as well)."""
+    leaves no task running (the shared offer task is cancelled as well)."""
     gate = asyncio.Event()
 
     async def slow_offer(*_args, **_kwargs):
@@ -332,7 +332,7 @@ async def test_parallel_check_is_bounded_and_single_flight(mgr, net, monkeypatch
     assert net.offer_calls == 1 and net.downloads == 1
     ready = [d for d in mgr.devices.values() if d["status"] == manager.STATUS_READY]
     assert len(ready) == 12
-    # 3.1.0: devices reached after the download get the same manufacturer offer – a
+    # Devices reached after the download get the same manufacturer offer – a
     # file downloaded by this check is not labelled as "from the store"
     assert {d["offer_source"] for d in ready} == {"manufacturer"} and all(d["source_url"] for d in ready)
 
@@ -352,7 +352,7 @@ async def test_check_severity_levels(mgr, net):
     assert "0 warning(s), 3 error(s)" in entry["result"]
 
 
-# ---------------------------------------------------------------- Firmware store first (3.1.0)
+# ---------------------------------------------------------------- Firmware store first
 
 
 async def test_store_first_provides_the_next_higher_version_without_asking_the_server(mgr, net):
@@ -493,7 +493,7 @@ def gen1_net(net, monkeypatch, types):
 
 
 async def test_gen1_list_is_requested_once_for_all_types(net, monkeypatch):
-    """3.1.0: the manufacturer serves one list for all Gen1 types – one request per
+    """The manufacturer serves one list for all Gen1 types – one request per
     check, whatever the number of types; a type that is not allowed is refused."""
     calls = gen1_net(net, monkeypatch, {A: "SHSW-1", B: "SHPLG-S", C: "SHSW-25"})
     m = make_manager(net, gen1_allowed_types=["SHSW-1", "SHPLG-S"])
@@ -518,7 +518,7 @@ async def test_gen1_store_first_respects_the_allowed_types(net, monkeypatch):
     assert m.devices[C]["status"] == manager.STATUS_ERROR and m.devices[C].get("file") is None
 
 
-# ---------------------------------------------------------------- Manufacturer server access (3.0.1)
+# ---------------------------------------------------------------- Manufacturer server access
 
 
 class _FakeBody:
@@ -572,7 +572,7 @@ async def test_cloud_json_and_text_share_redirect_and_limit_checks(monkeypatch):
 
 
 async def test_offer_with_invalid_step_count_is_a_readable_error(monkeypatch):
-    """3.1.0: a non-numeric "nsteps" in the manufacturer's offer is reported as
+    """A non-numeric "nsteps" in the manufacturer's offer is reported as
     ShellyError, not as "invalid literal for int()"."""
     fake_cloud(monkeypatch, {
         "https://updates.shelly.cloud/update/Plus1": (200, {}, b'{"stable": {"url": "u", "version": "1.5.0", "nsteps": "x"}}'),
@@ -582,7 +582,7 @@ async def test_offer_with_invalid_step_count_is_a_readable_error(monkeypatch):
 
 
 async def test_gen1_list_is_one_document_for_all_types(monkeypatch):
-    """3.1.0: the Gen1 list is fetched once; the offer of a type is read from it."""
+    """The Gen1 list is fetched once; the offer of a type is read from it."""
     seen = fake_cloud(monkeypatch, {"https://api.shelly.cloud/files/firmware": (200, {}, (
         b'{"isok": true, "data": {"SHSW-1": {"url": "http://x/SHSW-1.zip", "version": "v1.14.0"}, "SHEM": {"version": "v1"}}}'))})
     offers = await shelly.fetch_gen1_offers(None)
@@ -595,7 +595,7 @@ async def test_gen1_list_is_one_document_for_all_types(monkeypatch):
 
 
 def test_error_text_drops_the_field_labels_and_keeps_the_values():
-    """3.1.1: aiohttp's HTTP error text without "message=" and "url=" – the status,
+    """Aiohttp's HTTP error text without "message=" and "url=" – the status,
     the reason and the complete URL stay."""
     raw = "408, message='Request Timeout', url='https://updates.shelly.cloud/update/Mini1G3'"
     assert shelly.error_text(raw) == "408, 'Request Timeout', 'https://updates.shelly.cloud/update/Mini1G3'"

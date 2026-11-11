@@ -113,7 +113,7 @@ def clip(value: object, limit: int = 200) -> str:
 
 
 def error_text(err: object, limit: int = 200) -> str:
-    """Text of an error for status messages and the log (3.1.1): the field labels of
+    """Text of an error for status messages and the log: the field labels of
     aiohttp's HTTP errors ("408, message='Request Timeout', url='https://…'") are
     dropped, the values – also the URL – stay; limited like clip."""
     return clip(_ERROR_LABEL_RE.sub("", str(err if err is not None else "")), limit)
@@ -362,7 +362,7 @@ async def device_info(
     /shelly – so a device whose password is missing or wrong is still identified
     and a device password can be set for it.
 
-    v3: the Gen2+ /shelly answer already is Shelly.GetDeviceInfo (id, mac, model,
+    The Gen2+ /shelly answer already is Shelly.GetDeviceInfo (id, mac, model,
     gen, fw_id, ver, app, auth_en), so the second request is only made if a field
     is missing. auth_enabled is the protection status reported by the device
     itself (Gen2+ auth_en, Gen1 auth; None if not reported) – never derived from

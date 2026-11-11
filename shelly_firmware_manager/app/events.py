@@ -7,16 +7,16 @@ that never started, restarts, anything secret (passwords and hashes never reach 
 module; for secret options only the key is logged).
 Retention: entries older than retention_days and beyond max_entries are dropped.
 
-Storage (3.0.1): JSON Lines – one entry per line, a new entry is appended, so adding
+Storage: JSON Lines – one entry per line, a new entry is appended, so adding
 an entry no longer rewrites the whole log. The file is rewritten (atomically) only
 when the dropped entries on disk exceed COMPACT_SLACK lines, at start after a trim,
 and once to convert the JSON array written by 3.0.0. A damaged line (e.g. a write cut
 off by a power loss) is skipped.
 
-Severity (v3): every new entry carries "severity" = success | warning | error.
+Severity: every new entry carries "severity" = success | warning | error.
 Historic entries without it are never rewritten; readers derive it from "ok".
 
-Deleting (3.1.1): every entry carries a random "id" (entries of older versions get one
+Deleting: every entry carries a random "id" (entries of older versions get one
 at the first start, the file is rewritten once). An administrator can delete a single entry
 or the whole log in the Logs tab; clearing the log leaves one entry that names who
 cleared it.
@@ -53,7 +53,8 @@ def _line(entry: dict[str, Any]) -> str:
 
 
 class EventLog:
-    """Append-only list of log entries with time and size based retention."""
+    """Log entries with time and size based retention; new entries are appended, single
+    entries or the whole log can be deleted by an administrator."""
 
     def __init__(self, path: Path, retention_days: int = 90, max_entries: int = 1000) -> None:
         """Load stored entries; missing or broken file = empty log."""
@@ -126,7 +127,7 @@ class EventLog:
         return self.entries[::-1]
 
     def remove(self, entry_id: str) -> bool:
-        """Delete the entry with this ID (3.1.1). False if there is none (anymore)."""
+        """Delete the entry with this ID. False if there is none (anymore)."""
         kept = [e for e in self.entries if e.get("id") != entry_id]
         if len(kept) == len(self.entries):
             return False
@@ -135,7 +136,7 @@ class EventLog:
         return True
 
     def clear(self, user: str) -> int:
-        """Delete all entries (3.1.1) and record who did it – this one entry stays,
+        """Delete all entries and record who did it – this one entry stays,
         so an emptied log is never silent. Returns the number of deleted entries."""
         count = len(self.entries)
         self.entries = []

@@ -24,7 +24,7 @@ def fast_install(monkeypatch):
 
 
 async def test_no_automatic_deletion_of_stored_firmware(mgr, net):
-    """Q6: any number of versions stays stored after checks and installations."""
+    """Any number of versions stays stored after checks and installations."""
     await mgr.scan()
     for version in ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.3.1", "1.4.0"):
         store(mgr, "Plus1", version)
@@ -40,7 +40,7 @@ async def test_no_automatic_deletion_of_stored_firmware(mgr, net):
 
 
 async def test_housekeeping_keeps_temporary_files_and_drops_orphans(mgr, net):
-    """Q8: unknown files and entries without file are cleaned, temporary files are not
+    """Unknown files and entries without file are cleaned, temporary files are not
     (they belong to a running download/upload); leftovers are removed at start."""
     name, _ = store(mgr, "Plus1", "1.3.0")
     gone, _ = store(mgr, "Plus1", "1.2.0")
@@ -57,7 +57,7 @@ async def test_housekeeping_keeps_temporary_files_and_drops_orphans(mgr, net):
 
 
 async def test_total_size_and_sources_in_the_list(mgr, net):
-    """Q10: total store size; upload entries are marked and have no https flag."""
+    """Total store size; upload entries are marked and have no https flag."""
     store(mgr, "Plus1", "1.3.0")
     store(mgr, "Plus1", "1.2.0", source=manager.SOURCE_UPLOAD)
     assert mgr.store_size() == sum(m["size"] for m in mgr.firmware.values())
@@ -97,7 +97,7 @@ async def test_delete_needs_second_confirmation(mgr, net):
 
 
 async def test_downgrade_lists_all_older_stable_versions(mgr, net):
-    """Q1/Q7: all stored older stable versions of the firmware ID, newest first;
+    """All stored older stable versions of the firmware ID, newest first;
     neither the installed nor newer versions, no pre-releases, no other types."""
     await mgr.scan()  # B has 1.5.0 installed, 1.5.0 is stored
     for version in ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.6.0", "1.4.1-beta1"):
@@ -117,7 +117,7 @@ async def test_downgrade_prefers_download_over_upload_of_the_same_version(mgr, n
 
 
 async def test_downgrade_also_for_up_to_date_and_ignored_devices(mgr, net):
-    """D4: up-to-date and ignored devices can be downgraded."""
+    """Up-to-date and ignored devices can be downgraded."""
     await mgr.scan()
     store(mgr, "Plus1", "1.4.0")
     mgr.set_ignored(B, True)
@@ -126,7 +126,7 @@ async def test_downgrade_also_for_up_to_date_and_ignored_devices(mgr, net):
 
 
 async def test_no_downgrade_for_gen1(mgr, net):
-    """D4: Gen1 never offers a downgrade."""
+    """Gen1 never offers a downgrade."""
     await mgr.scan()
     store(mgr, "SHSW-1", "1.13.0", gen=1)
     mgr.devices[A].update(gen=1, type="SHSW-1", version="20230913-112003/v1.14.0-gcb84623")
@@ -162,7 +162,7 @@ async def test_downgrade_installs_the_selected_version(mgr, net, monkeypatch, fa
     dev = mgr.devices[A]
     assert served == [True] and dev["version"] == "1.3.0"
     assert dev["status"] == manager.STATUS_AVAILABLE and "a newer version is provided again" in dev["message"]
-    # 3.1.0: a downgrade is never followed by the check after installations
+    # A downgrade is never followed by the check after installations
     assert all(e.get("trigger") != "install" for e in mgr.events.entries if e["kind"] == "check")
     assert "downgrade" not in dev and mgr.notified[-1][0] == "Shelly downgraded: Kitchen"
     events = [e for e in mgr.events.entries if e["kind"] == "install"]
@@ -205,7 +205,7 @@ async def test_restart_during_downgrade_is_unconfirmed(mgr, net):
 
 
 async def test_upload_prefills_from_manifest_and_registers(mgr, net):
-    """Q4/Q5: type/version pre-filled from manifest.json, confirmed by the user; a
+    """Type/version pre-filled from manifest.json, confirmed by the user; a
     matching SHA-256 is recorded as checked."""
     await mgr.scan()
     data = firmware_zip({"name": "Plus1", "platform": "esp32", "build_id": "20240101-000000/1.3.0-gabc"})
@@ -316,7 +316,7 @@ async def test_uploaded_file_is_provided_as_update(mgr, net):
 
 
 async def test_stored_changelog_is_available_for_the_firmware_tab(mgr, net):
-    """3.1.0: the list flags a stored changelog; the text comes from the store
+    """The list flags a stored changelog; the text comes from the store
     entry only (one version, entries marked) – nothing is requested for it."""
     await mgr.scan()
     name = mgr.devices[A]["file"]
@@ -332,7 +332,7 @@ async def test_stored_changelog_is_available_for_the_firmware_tab(mgr, net):
 
 
 async def test_firmware_list_names_the_devices_with_their_ids(mgr, net):
-    """3.1.0: the Firmware tab gets ID and name of every device a file is provided
+    """The Firmware tab gets ID and name of every device a file is provided
     for (Install button), ordered by name; other files have none."""
     await mgr.scan()
     other, _ = store(mgr, "Plus1", "1.3.0")

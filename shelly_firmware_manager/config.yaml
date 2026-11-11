@@ -42,7 +42,7 @@ options:
   # Automatic check every N days at HH:MM (time zone of Home Assistant)
   check_interval_days: 7
   check_time: "02:45"
-  # download_base_url has no default (rc6): LAN IP of Home Assistant + port 8098,
+  # download_base_url has no default: LAN IP of Home Assistant + port 8098,
   # e.g. http://<HA-IP>:8098 – installations are refused until it is set
   restrict_downloads_to_devices: true
   max_parallel_installs: 5
@@ -55,7 +55,7 @@ options:
     - SHSW-25
     - SHPLG-S
     - SHEM
-  # Default pins for the Shelly servers with the in-house Allterco CA (see README)
+  # Default pins for the Shelly servers with the in-house Allterco CA (see DOCS.md, Certificate pinning)
   pinned_certificates:
     - host: updates.shelly.cloud
       sha256: "6B:B3:78:67:78:EB:2A:7E:E1:D5:D2:75:CE:CC:01:D5:3D:DC:17:45:E8:00:2A:94:00:46:8F:F5:77:EF:EA:C0"

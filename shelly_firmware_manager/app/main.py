@@ -77,7 +77,7 @@ async def main() -> None:
         raise SystemExit(f"Configuration error: {err}") from None
 
     async with aiohttp.ClientSession(headers={"User-Agent": USER_AGENT}, trust_env=False) as session:
-        mgr = Manager(options, session, token, pins, version=VERSION)
+        mgr = Manager(options, session, token, pins)
         runners = [
             await start_site(build_ui_app(mgr), UI_PORT),
             await start_site(build_download_app(mgr), DOWNLOAD_PORT),
@@ -114,7 +114,7 @@ async def main() -> None:
             for task in (scheduler, stopper):
                 task.cancel()
             results = await asyncio.gather(scheduler, stopper, return_exceptions=True)
-            # Both servers in parallel (rc6 R5): the stop needs at most one
+            # Both servers in parallel: the stop needs at most one
             # SHUTDOWN_TIMEOUT_S, not one per server – well inside the 10 s of the Supervisor
             await asyncio.gather(*(runner.cleanup() for runner in runners))
             log.info("Stopped")

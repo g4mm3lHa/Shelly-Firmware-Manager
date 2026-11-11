@@ -134,7 +134,7 @@ def net(monkeypatch, tmp_path):
         return None
 
     class NoWebSocket:
-        """rc6: Gen2+ installations try the device WebSocket first; in tests there is
+        """Gen2+ installations try the device WebSocket first; in tests there is
         none unless a test installs its own fake (the HTTP fallback is used)."""
 
         def __init__(self, *_args, **_kwargs):
@@ -157,7 +157,7 @@ def net(monkeypatch, tmp_path):
 @pytest.fixture
 async def mgr(net):
     """Manager with fake registry; notifications are recorded instead of sent."""
-    m = manager.Manager(dict(OPTIONS), session=None, token="t", version="3.0.1")
+    m = manager.Manager(dict(OPTIONS), session=None, token="t")
 
     async def registry():
         await asyncio.sleep(0)

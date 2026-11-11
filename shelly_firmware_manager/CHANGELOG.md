@@ -46,6 +46,12 @@ Changes in rc1
 - Phones: the IP address in a device tile ends in line with the ⋮ menu.
 - API: `POST /api/logs/{id}/delete`, `POST /api/logs/clear`; `/api/state` has
   `updated` and `downgrades` per device; log entries carry `id`.
+- Clean-up (no change of behaviour): the unused field `scanned_version` is no longer
+  written to `state.json` (older files are read as before); unused style rules and an
+  unused parameter removed; version and ticket marks removed from code comments (the
+  history is in this changelog). Development: screenshots of earlier versions removed
+  from the repository (`qa/screenshots/` keeps the current version only; older ones
+  remain in the git history).
 
 ## 3.1.0
 

@@ -57,7 +57,7 @@ async function api(path, body) {
   if (!r.ok) throw new Error(await r.text() || r.status);
   return r.json();
 }
-/** rc7: send a firmware file as raw body (the only non-JSON write); errors throw with the server text. */
+/** Send a firmware file as raw body (the only non-JSON write); errors throw with the server text. */
 async function uploadFile(file) {
   const r = await fetch("api/firmware/upload", {method: "POST", body: file,
     // Header values must be ASCII: other characters of the file name are replaced (display only)
@@ -99,7 +99,7 @@ const ICONS = {
   delete: "M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z",
   copy: "M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z",
   close: "M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z",
-  // 3.0 action column: flash (power-on action), leaf, lock, wifi, bluetooth, link (actions), calendar, pencil
+  // Action column: flash (power-on action), leaf, lock, wifi, bluetooth, link (actions), calendar, pencil
   eco: "M17,8C8,10 5.9,16.17 3.82,21.34L5.71,22L6.66,19.7C7.14,19.87 7.64,20 8,20C19,20 22,3 22,3C21,5 14,5.25 9,6.25C4,7.25 2,11.5 2,13.5C2,15.5 3.75,17.25 3.75,17.25C7,8 17,8 17,8Z",
   lock: "M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z",
   ap: "M12,21L15.6,16.2C14.6,15.45 13.35,15 12,15C10.65,15 9.4,15.45 8.4,16.2L12,21M12,3C7.95,3 4.21,4.34 1.2,6.6L3,9C5.5,7.12 8.62,6 12,6C15.38,6 18.5,7.12 21,9L22.8,6.6C19.79,4.34 16.05,3 12,3M12,9C9.3,9 6.81,9.89 4.8,11.4L6.6,13.8C8.1,12.67 9.97,12 12,12C14.03,12 15.9,12.67 17.4,13.8L19.2,11.4C17.19,9.89 14.7,9 12,9Z",
@@ -107,7 +107,7 @@ const ICONS = {
   aop: "M7,2V13H10V22L17,10H13L17,2H7Z",
   actions: "M10.59,13.41C11,13.8 11,14.44 10.59,14.83C10.2,15.22 9.56,15.22 9.17,14.83C7.22,12.88 7.22,9.71 9.17,7.76L12.71,4.22C14.66,2.27 17.83,2.27 19.78,4.22C21.73,6.17 21.73,9.34 19.78,11.29L18.29,12.78C18.3,11.96 18.17,11.14 17.89,10.36L18.36,9.88C19.54,8.71 19.54,6.81 18.36,5.64C17.19,4.46 15.29,4.46 14.12,5.64L10.59,9.17C9.41,10.34 9.41,12.24 10.59,13.41M13.41,9.17C13.8,8.78 14.44,8.78 14.83,9.17C16.78,11.12 16.78,14.29 14.83,16.24L11.29,19.78C9.34,21.73 6.17,21.73 4.22,19.78C2.27,17.83 2.27,14.66 4.22,12.71L5.71,11.22C5.7,12.04 5.83,12.86 6.11,13.65L5.64,14.12C4.46,15.29 4.46,17.19 5.64,18.36C6.81,19.54 8.71,19.54 9.88,18.36L13.41,14.83C14.59,13.66 14.59,11.76 13.41,10.59C13,10.2 13,9.56 13.41,9.17Z",
   schedules: "M19,19H5V8H19M16,1V3H8V1H6V3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3H18V1M17,12H12V17H17V12Z",
-  // 3.1.0: changelog of a stored firmware (same document shape as the Logs tab icon)
+  // Changelog of a stored firmware (same document shape as the Logs tab icon)
   changelog: "M5,3C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3H5M5,5H19V19H5V5M7,7V9H17V7H7M7,11V13H17V11H7M7,15V17H14V15H7Z",
   pencil: "M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z",
 };
@@ -195,16 +195,16 @@ function valueList(pairs) {
 const STATUS_LABELS = {"up-to-date": "Up-To-Date", available: "Available", ready: "Ready", queued: "Queued",
   installing: "Installing", unconfirmed: "Unconfirmed", error: "Error", unregistered: "Unregistered", skipped: "Skipped",
   updated: "Updated"};
-// 3.1.1: a device with a confirmed installation is shown as "Updated" (and stays in the
+// A device with a confirmed installation is shown as "Updated" (and stays in the
 // "Updates available" card) until the next full check or a single check of this device
 const justUpdated = d => !!d.updated && d.status === "up-to-date";
 const shownStatus = d => d.installing && d.status === "ready" ? "queued" : justUpdated(d) ? "updated" : d.status;
 const hasUpdate = d => ["available", "ready", "installing"].includes(d.status);
 // Ignored devices are not installable until they are resumed; nothing is installable
-// while the download base URL is missing or the unconfirmed former example (rc6)
+// while the download base URL is missing or the unconfirmed former example
 const installable = (d, s) => d.status === "ready" && !d.installing && !d.ignored && !s.scanning &&
   !(s.download_base && s.download_base.issue);
-// rc7: a downgrade needs a reached Gen2+ device, no check/installation and a valid download URL
+// A downgrade needs a reached Gen2+ device, no check/installation and a valid download URL
 const downgradable = (d, s) => d.gen >= 2 && !!d.ip && !d.installing && d.status !== "installing" && !s.scanning &&
   d.activity !== "reloading" && !(s.download_base && s.download_base.issue);
 // Settings can be read/changed once the device was reached and while it is not updating or reloading
@@ -238,7 +238,7 @@ function aopSummary(d) {
   return values.length === 1 ? values[0] : "Mixed";
 }
 const AOP_NOTE = "Power-on action: not available – this device has no switchable output.";
-/** Power-on action (AOP) in the action column: flash icon with state (3.1.1) – green
+/** Power-on action (AOP) in the action column: flash icon with state – green
  *  if every output restores its last state, red if an output has another value, "?"
  *  if the settings could not be read; opens the same dialog as the row menu. Mobile
  *  (labeled): the current value is shown on the button next to the icon. Devices
@@ -289,7 +289,7 @@ function actionButton(d, item, labeled) {
   let text = `${item.label}: ${state === "on" ? item.on : state === "off" ? item.off : state === "unsupported" ? "not supported by this device" : "unknown"}`;
   if (state === "unknown" && d.settings_error) text += ` – ${d.settings_error.message}`;
   if (gen1Ap) text += ` – ${GEN1_AP_NOTE}`;
-  // 3.1.1: protected without a password stored in this app = warning (the app cannot
+  // Protected without a password stored in this app = warning (the app cannot
   // read or update the device); green only if protection is on and the password is stored
   const unstored = item.key === "auth_enabled" && state === "on" && !d.password_set;
   if (unstored) text += " – password not stored in this app";
@@ -327,13 +327,13 @@ function statusCell(d) {
     return chip;
   }
   const key = shownStatus(d);
-  // Gen2+ installations report the device's own download progress (rc6)
+  // Gen2+ installations report the device's own download progress
   const label = (STATUS_LABELS[key] || key || "–") + (key === "installing" && typeof d.ota_progress === "number" ? ` ${d.ota_progress} %` : "");
   const p = el("button", label, "pill p-" + (key || "").replace(/[^a-z]/g, ""));
   p.onclick = () => showStatus(d); attachTip(p, () => statusText(d));
   return p;
 }
-/** 3.1.1: "Install" next to the status of a device with a provided update ("Ready").
+/** "Install" next to the status of a device with a provided update ("Ready").
  *  Opens the usual installation dialog; disabled with the reason while it is not
  *  possible (same conditions as "Install update"). Not shown while a check runs for
  *  the device or its installation is queued. */
@@ -558,7 +558,7 @@ function buildChooser() {
 function syncChooser() { for (const cb of $("cols-devices").querySelectorAll("input")) cb.checked = !prefs.devices.hidden.includes(cb.dataset.col); }
 document.addEventListener("click", e => { if (!$("cols").contains(e.target)) $("cols").open = false; });
 $("dev-search").oninput = () => render(true);
-/** 3.1.1: delete the whole activity log after a confirmation (one entry naming the user stays). */
+/** Delete the whole activity log after a confirmation (one entry naming the user stays). */
 $("log-clear").onclick = () => {
   const title = "Delete all logs?", count = ui.logs.length;
   modal(title, [el("p", `All ${count} log entr${count === 1 ? "y" : "ies"} are deleted for good – regardless of the filter. One entry stays that names who cleared the log.`)],
@@ -580,8 +580,8 @@ function openRowMenu(d, anchor) {
   const busy = ui.state && ui.state.busy;
   add("Check for updates", () => checkDevice(d), !busy && !d.installing);
   if (installable(d, ui.state)) add("Install update", () => openInstall([d]), true);   // only for Ready
-  // rc7: downgrade to a stored older version – Gen2+ only, also up to date / ignored devices
-  // 3.1.1: disabled (no dialog) while no older version is stored or something blocks it
+  // Downgrade to a stored older version – Gen2+ only, also up to date / ignored devices
+  // Disabled (no dialog) while no older version is stored or something blocks it
   if (d.gen >= 2) add("Downgrade", () => openDowngrade(d), downgradable(d, ui.state) && d.downgrades > 0);
   add("Reload device info", () => reloadDevice(d), !busy && !d.installing && !d.activity && !!d.ip);
   if (busy) items.push(el("div", `Not available – ${busy}`, "menu-hint"));   // reason, also for touch
@@ -656,7 +656,7 @@ function changelogBox(d) {
   api(`${devUrl(d)}/changelog`).then(r => c.replaceChildren(...changelogNodes(r))).catch(() => c.replaceChildren(...changelogNodes(null)));
   return c;
 }
-// 3.1.0: where the provided update comes from (device field offer_source). Updates
+// Where the provided update comes from (device field offer_source). Updates
 // from the firmware store are provided without asking the Shelly update server.
 const OFFER_SOURCES = {manufacturer: "Shelly update server", store: "Firmware store (downloaded from Shelly earlier)",
   upload: "Firmware store (uploaded file)"};
@@ -699,7 +699,7 @@ function openInstall(devs) {
       errors.length ? message("Installation", errors.join("\n"), "error") : closeModal();
     }}]);
 }
-// ---------------------------------------------------------------- Downgrade (rc7)
+// ---------------------------------------------------------------- Downgrade
 // Flow: list of stored older versions -> installation dialog for the selected
 // version -> second confirmation with acknowledgment (as for the device password).
 const DOWNGRADE_WARNING = "A downgrade installs an older firmware. The device may refuse it, settings added by newer versions may be lost, and some devices may need a factory reset afterwards. Install only if you need this version.";
@@ -946,7 +946,7 @@ function installBlocker(d, s) {
   if (s.download_base && s.download_base.issue) return s.download_base.message || "Download base URL is not set";
   return d.status === "ready" ? null : "Not provided for this device anymore";
 }
-/** 3.1.0: device a firmware is provided for, with an "Install" button that opens the
+/** Device a firmware is provided for, with an "Install" button that opens the
  *  usual installation dialog (same conditions as "Install update" in the Devices tab). */
 function firmwareDevice(entry) {
   const s = ui.state || {devices: []}, d = s.devices.find(x => x.id === entry.id);
@@ -956,7 +956,7 @@ function firmwareDevice(entry) {
   go.onclick = () => { if (d && installable(d, ui.state)) openInstall([d]); };
   return box("li", null, el("span", entry.name), go);
 }
-/** 3.1.0: dialog with the changelog kept with a stored firmware (nothing is requested
+/** Dialog with the changelog kept with a stored firmware (nothing is requested
  *  from Shelly; a check stores it when it provides the file). */
 async function openFirmwareChangelog(f) {
   const title = `Changelog – ${f.type} ${f.version}`;
@@ -986,7 +986,7 @@ function firmwareRow(f, latest) {
     el("span", mb(f.size || 0), "nowrap fw-size"), el("span", fmt(f.downloaded), "nowrap sub fw-date"), sha, devices, box("div", "actions", log, dl, del));
 }
 /** Delete a stored firmware: dialog, then a second confirmation with
- *  acknowledgment (as for the device password, rc7). Nothing is deleted automatically. */
+ *  acknowledgment (as for the device password). Nothing is deleted automatically. */
 function deleteFirmware(f) {
   const title = "Delete firmware?", details = valueList([["Firmware ID", f.type], ["Version", f.version], ["Source", fwSource(f)], ["SHA-256", f.sha256]]);
   modal(title, [details, el("p", f.source === "upload" ? "An uploaded file can only be restored by uploading it again." :
@@ -1001,7 +1001,7 @@ function deleteFirmware(f) {
     const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; };
   }}]);
 }
-/** rc7: upload a firmware file (3.1.0: a newer one is provided as update by the next check) –
+/** Upload a firmware file (a newer one is provided as update by the next check) –
  *  step 1 choose and transfer, step 2 confirm
  *  firmware ID and version (pre-filled from the file where possible), optional SHA-256. */
 function openUpload() {
@@ -1054,7 +1054,7 @@ const LOG_FILTERS = {all: ["All", () => true], checks: ["Checks", e => e.kind ==
   warnings: ["Warnings", e => severity(e) === "warning"], errors: ["Errors", e => severity(e) === "error"]};
 const KIND_LABELS = {check: "Check", download: "Download", upload: "Upload", install: "Installation", delete: "Deleted", setting: "Setting",
   password: "Password", options: "App settings", log: "Log"};
-// Successful actions (3.0), failed actions are logged with the mode; older entries: set/removed/test_failed
+// Successful actions, failed actions are logged with the mode; older entries: set/removed/test_failed
 const PASSWORD_ACTIONS = {stored: "password stored", enabled: "password protection enabled", changed: "password changed",
   removed: "password protection removed", forgotten: "stored password forgotten",
   store: "storing the password failed", enable: "enabling protection failed", change: "changing the password failed",
@@ -1099,12 +1099,12 @@ function logContent(e) {
       return [el("div", e.kind)];
   }
 }
-/** Device results of a check, each colored by its own severity (3.1.1: an update is
+/** Device results of a check, each colored by its own severity (an update is
  *  green and a warning yellow also inside an entry that is an error as a whole). */
 function checkFindings(e) {
   return box("ul", null, ...e.findings.map(f => {
     const sev = f.severity || (f.error ? "error" : "success");
-    // 3.1.0: updates from the firmware store are marked (the server was not asked)
+    // Updates from the firmware store are marked (the server was not asked)
     const from = f.source && f.source !== "manufacturer" && OFFER_SOURCES[f.source] ? ` · ${OFFER_SOURCES[f.source]}` : "";
     return el("li", f.error ? `${f.device}: ${f.error}` : `${f.device}: ${arrow(f.version, f.offer)}${from}`, sev === "error" ? "bad" : sev === "warning" ? "warnc" : "okc");
   }));
@@ -1135,10 +1135,10 @@ mobileQuery.addEventListener("change", () => render(true));
 /** The device an entry is about (for grouping): the device of an installation, setting
  *  or password entry, or the only device of a single-device check with a finding. */
 const logDevice = e => e.device || (e.kind === "check" && e.devices === 1 && e.findings && e.findings.length === 1 ? e.findings[0].device : null) || null;
-/** 3.1.1: delete one log entry after a confirmation. */
-function deleteLogEntry(e, d) {
+/** Delete one log entry after a confirmation. */
+function deleteLogEntry(e) {
   const title = "Delete log entry?";
-  modal(title, [valueList([["Time", `${fmt(e.ts)}`], ["Type", KIND_LABELS[e.kind] || e.kind], ["Entry", logSummary(e).join(" · ")]]),
+  modal(title, [valueList([["Time", fmt(e.ts)], ["Type", KIND_LABELS[e.kind] || e.kind], ["Entry", logSummary(e).join(" · ")]]),
     el("p", "The entry is removed from the activity log for good.", "hint")],
   [{text: "Cancel"}, {text: "Delete", kind: "danger", action: async () => {
     try { await api(`api/logs/${encodeURIComponent(e.id)}/delete`, {confirm: true}); closeModal(); lastLogs = 0; load(true); }
@@ -1146,8 +1146,8 @@ function deleteLogEntry(e, d) {
   }}]);
 }
 /** Delete icon of an entry (entries of versions before 3.1.1 get their ID at the start). */
-function logDelete(e, d) {
-  const b = iconButton("delete", "Delete entry", () => deleteLogEntry(e, d), "red log-del"); b.disabled = !e.id;
+function logDelete(e) {
+  const b = iconButton("delete", "Delete entry", () => deleteLogEntry(e), "red log-del"); b.disabled = !e.id;
   return b;
 }
 /** Desktop entry: time, type, content, user, delete. group = position in a run of
@@ -1157,13 +1157,13 @@ function logRow(e, d, group) {
   return box("div", "log" + (group ? ` grp grp-${group}` : ""), el("span", `${pad(d.getHours())}:${pad(d.getMinutes())}`, "mono sub"),
     el("span", KIND_LABELS[e.kind] || e.kind, "tag" + (sev === "error" ? " sec" : "")),
     box("div", "log-body" + (sev === "error" ? " bad" : ""), el("span", SEVERITY_LABELS[sev], `tag sev-${sev}`), box("div", null, ...logContent(e))),
-    el("span", e.user || "", "user"), logDelete(e, d));
+    el("span", e.user || "", "user"), logDelete(e));
 }
 /** Mobile entry: time/type/outcome, short summary, details collapsed. */
 function logTile(e, d, group) {
   const sev = severity(e), summary = logSummary(e);
   const head = box("div", "log-head", el("span", `${pad(d.getHours())}:${pad(d.getMinutes())}`, "mono sub"),
-    el("span", KIND_LABELS[e.kind] || e.kind, "tag"), el("span", SEVERITY_LABELS[sev], `tag sev-${sev}`), el("span", null, "spacer"), logDelete(e, d));
+    el("span", KIND_LABELS[e.kind] || e.kind, "tag"), el("span", SEVERITY_LABELS[sev], `tag sev-${sev}`), el("span", null, "spacer"), logDelete(e));
   const body = box("div", "log-details", ...(e.kind === "check" ? (e.findings && e.findings.length ? [checkFindings(e)] : [el("div", e.result, "sub")]) : logContent(e)),
     e.user ? el("div", `By ${e.user}`, "sub") : null);
   const det = el("details"), key = `logm-${e.ts}-${e.kind}`;
@@ -1185,7 +1185,7 @@ function renderLogs() {
   }));
   const out = [], shown = base.filter(LOG_FILTERS[ui.logFilter][1]);
   const dayOf = e => { const d = new Date(e.ts * 1000); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
-  // 3.1.1: directly consecutive entries of the same device on the same day form a group
+  // Directly consecutive entries of the same device on the same day form a group
   const same = (a, b) => !!a && !!b && !!logDevice(a) && logDevice(a) === logDevice(b) && dayOf(a) === dayOf(b);
   let day = null, card = null;
   shown.forEach((e, i) => {
@@ -1227,7 +1227,7 @@ let settingsInputs = {};
 // Assistant in the local network. Not enforced (the Supervisor schema only requires a
 // URL); the Settings tab shows a hint while typing. No hint for private IPv4 ranges,
 // IPv6 unique-local (fc00::/7) and link-local (fe80::/10). Any other IP address (and
-// localhost) gets the "not local" hint; every host name (rc6, R2 – also .local, .lan,
+// localhost) gets the "not local" hint; every host name (also .local, .lan,
 // single-label names) gets the advice to use the IP: Shellys often cannot resolve names.
 const LAN_IPV4 = /^(10\.\d{1,3}|172\.(1[6-9]|2\d|3[01])|192\.168)\.\d{1,3}\.\d{1,3}$/;
 const LAN_IPV6 = /^\[(f[cd][0-9a-f]{2}|fe[89ab][0-9a-f]):/i;
@@ -1371,7 +1371,7 @@ function renderMeta(s) {
   attachTip(cycle, () => `Next automatic check: ${next} (${sc.timezone})`); cycle.tabIndex = 0;
   $("meta").replaceChildren(el("span", `Last checked: ${fmt(s.last_scan)}`, "pill meta-pill"), cycle);
 }
-/** Notice while installations are disabled by the download base URL (rc6, R1): not set,
+/** Notice while installations are disabled by the download base URL: not set,
  *  or still the former example value that the admin has not confirmed yet. Rebuilt only
  *  when the problem changes, so polling does not steal the focus from its buttons. */
 function renderNotice(info) {

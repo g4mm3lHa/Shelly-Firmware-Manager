@@ -104,7 +104,7 @@ async def test_gen2_identity_from_shelly_endpoint(device_api):
     ],
 )
 async def test_incomplete_identity_is_a_readable_device_error(device_api, answer):
-    """3.1.0: a missing or wrongly typed field becomes a ShellyError with a readable
+    """A missing or wrongly typed field becomes a ShellyError with a readable
     message instead of a bare KeyError/ValueError text such as "'fw'"."""
     calls, answers = device_api
     answers["/shelly"] = answer

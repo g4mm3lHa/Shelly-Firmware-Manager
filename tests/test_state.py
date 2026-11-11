@@ -98,7 +98,7 @@ async def test_upload_log_entries_survive_a_restart(mgr, net):
     assert any(e["kind"] == "upload" and e["version"] == "1.2.0" for e in m.events.entries)
 
 
-# ---------------------------------------------------------------- Activity log storage (3.0.1)
+# ---------------------------------------------------------------- Activity log storage
 
 
 def without_id(entries):
@@ -123,7 +123,7 @@ def test_log_array_of_3_0_0_is_converted_once(tmp_path):
 
 
 def test_log_entries_get_an_id_once(tmp_path, monkeypatch):
-    """3.1.1: entries of older versions get an ID at the first start (one rewrite);
+    """Entries of older versions get an ID at the first start (one rewrite);
     afterwards the file is left alone and new entries carry their own ID."""
     path = tmp_path / "events.json"
     now = int(datetime.now(UTC).timestamp())
@@ -140,7 +140,7 @@ def test_log_entries_get_an_id_once(tmp_path, monkeypatch):
 
 
 def test_log_entry_can_be_deleted_and_the_log_cleared(tmp_path):
-    """3.1.1: a single entry is removed from memory and file; clearing removes all
+    """A single entry is removed from memory and file; clearing removes all
     entries and leaves one entry that names the user."""
     path = tmp_path / "events.json"
     log = EventLog(path, 90, 1000)

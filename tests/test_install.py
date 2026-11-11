@@ -1,5 +1,5 @@
 """Installation: target version verification, Gen2+ OTA WebSocket, HTTP fallback,
-download diagnosis per device, check after confirmed installations (3.1.0).
+download diagnosis per device, check after confirmed installations.
 
 All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test servers."""
 
@@ -302,7 +302,7 @@ async def test_only_get_counts_as_served(mgr, monkeypatch):
     assert mgr.downloads[name]["served"] == {"127.0.0.1": 1}
 
 
-# ---------------------------------------------------------------- Check after installations (3.1.0)
+# ---------------------------------------------------------------- Check after installations
 
 
 @pytest.fixture
@@ -399,7 +399,7 @@ async def test_check_after_installation_gives_up_if_the_slot_stays_busy(mgr, net
     assert len(checks(mgr)) == 1 and mgr._followup == set() and not mgr.checking
 
 
-# ---------------------------------------------------------------- "Updated" mark and texts (3.1.1)
+# ---------------------------------------------------------------- "Updated" mark and texts
 
 
 async def test_updated_mark_stays_until_the_next_user_check(mgr, net, updating):
@@ -430,7 +430,7 @@ async def test_no_updated_mark_after_downgrade_or_unconfirmed_installation(mgr, 
 
 
 def test_diagnosis_after_a_download_recommends_websocket_debugging(mgr):
-    """3.1.1: the hint for a Shelly that fetched the file but kept its version."""
+    """The hint for a Shelly that fetched the file but kept its version."""
     dev = {"file": "x.zip", "version": "2.0.3", "origin": "http://192.168.1.10"}
     mgr.downloads["x.zip"] = {"served": {"192.168.1.10": 1}, "rejected": set()}
     text = mgr._install_diagnosis(dev)
