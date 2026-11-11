@@ -2,10 +2,17 @@
 
 ## 3.1.1
 
-Release candidate rc3 (not released). Contains everything of 3.1.0 (which was never
-released) plus the changes below: clearer states in the device list, log entries can be
-deleted, shorter waiting time after an installation. rc2: internal restructuring only.
-rc3: findings of the live test of rc2.
+Released 2026-11-11. Contains everything of 3.1.0 (which was never released) plus the
+changes below: clearer states in the device list, log entries can be deleted, shorter
+waiting time after an installation, no check after installations anymore. rc2:
+internal restructuring only. rc3: findings of the live test of rc2.
+
+Final release (same code as rc3)
+- Version 3.1.1. No functional change compared with rc3 (live-tested).
+- Security review before the release: no known vulnerability (CVE/GHSA) in the
+  pinned packages (aiohttp 3.14.5 and its dependencies), Python 3.12.16 or the
+  pinned base image `python:3.12.16-alpine3.24`; dependencies, wheels and base image
+  are unchanged since 3.0.0.
 
 Changes in rc3
 - No check after installations anymore: the automatic check of the installed devices
