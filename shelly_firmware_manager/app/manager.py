@@ -45,7 +45,7 @@ import shelly
 from changelog import Changelogs, marked
 from credentials import Credentials
 from events import EventLog, worst
-from shelly import UNSUPPORTED, AuthError, DeviceAuth, ShellyError, clip
+from shelly import UNSUPPORTED, AuthError, DeviceAuth, ShellyError, clip, error_text
 from tls import CertificatePins
 
 log = logging.getLogger("sfm.manager")
@@ -79,9 +79,9 @@ PENDING = (STATUS_READY, STATUS_INSTALLING)  # device holds a firmware file
 
 INSTALL_FIRST_CHECK_S = 30  # wait after the update command
 INSTALL_POLL_S = 10  # then check every 10 s
-INSTALL_NO_DOWNLOAD_S = 180  # no download request: give up after 3 min (a Shelly may
+INSTALL_NO_DOWNLOAD_S = 120  # no download request: give up after 2 min (a Shelly may
 # still answer with the old version for a while after accepting the update)
-INSTALL_WAIT_S = 300  # upper limit in case the Shelly gets stuck
+INSTALL_WAIT_S = 180  # upper limit in case the Shelly gets stuck (3.1.1: 3 min, before 5)
 SUPERVISOR = "http://supervisor"  # Supervisor API (Core API proxy below /core)
 SUPERVISOR_TIMEOUT = aiohttp.ClientTimeout(total=15)
 
@@ -560,6 +560,33 @@ class Manager:
             for name, meta in ordered
         ]
 
+    def _downgrade_candidates(self) -> dict[str, set[tuple[int, ...]]]:
+        """Stored final Gen2+ versions per firmware ID whose file exists – computed
+        once per state request, so the row menu knows whether a downgrade is possible
+        without one request per device (same rules as downgrade_versions)."""
+        stored: dict[str, set[tuple[int, ...]]] = {}
+        for name, meta in self.firmware.items():
+            if (meta.get("gen") or 1) < 2:
+                continue
+            try:
+                parsed = shelly.parse_version(meta.get("version"))
+            except ShellyError:
+                continue
+            if parsed[3] == 3 and (FW_DIR / name).is_file():
+                stored.setdefault(str(meta.get("type")), set()).add(parsed)
+        return stored
+
+    @staticmethod
+    def _downgrade_count(dev: Device, stored: dict[str, set[tuple[int, ...]]]) -> int:
+        """Number of stored versions older than the installed one (0 for Gen1)."""
+        if (dev.get("gen") or 1) < 2 or not dev.get("type"):
+            return 0
+        try:
+            installed = shelly.parse_version(dev.get("version"))
+        except ShellyError:
+            return 0
+        return sum(1 for version in stored.get(dev["type"], ()) if version < installed)
+
     def downgrade_match(self, device_id: str, sha: object) -> dict[str, Any] | None:
         """The offered downgrade entry with exactly this SHA-256, else None."""
         if not isinstance(sha, str):
@@ -835,7 +862,7 @@ class Manager:
         try:
             await self._supervisor_post("/addons/self/options", {"options": new})
         except ShellyError as err:
-            self.events.add("options", ok=False, changes=diff, user=user, error=clip(err, 300))
+            self.events.add("options", ok=False, changes=diff, user=user, error=error_text(err, 300))
             raise
         log.info("App options changed by %s (%s) – restarting", user, ", ".join(changed))
         self.events.add("options", changes=diff, user=user)
@@ -970,7 +997,7 @@ class Manager:
                 await self._store_changelogs(self.devices.values())
             except Exception as err:  # report overall errors (e.g. registry), do not crash
                 log.exception("Check failed")
-                failure = clip(err, 500) or type(err).__name__
+                failure = error_text(err, 500) or type(err).__name__
                 await self.notify("Shelly firmware check failed", failure, "sfm_summary")
             finally:
                 # Also runs on cancellation (app stop): no device stays "checking"
@@ -1094,6 +1121,8 @@ class Manager:
         Returns the IDs of the checked devices."""
         offers: OfferTasks = {}  # shared manufacturer requests: one per firmware ID
         entries = self._shelly_entries(await self._registry())
+        for dev in self.devices.values():  # 3.1.1: a full check ends the "just updated" display
+            dev.pop("updated", None)
         # Ignored devices count as registered (seen) but are not contacted
         seen = set(entries)
         for device_id in seen & set(self.devices):
@@ -1166,7 +1195,7 @@ class Manager:
         except (TimeoutError, ShellyError, aiohttp.ClientError, KeyError, ValueError, OSError) as err:
             log.warning("%s: %s", dev["name"], err)
             dev.update(
-                status=STATUS_ERROR, message=clip(err, 500) or type(err).__name__, error_level=severity_of(err)
+                status=STATUS_ERROR, message=error_text(err, 500) or type(err).__name__, error_level=severity_of(err)
             )
             return False
         else:
@@ -1189,6 +1218,7 @@ class Manager:
             self.reserve_check("device", device_id)
         async with self.lock:
             dev = self.devices[device_id]
+            dev.pop("updated", None)  # 3.1.1: checked again by the user, no longer "just updated"
             started = time.monotonic()
             failure = None
             progress = self._progress()
@@ -1208,7 +1238,7 @@ class Manager:
                         await self._store_changelogs([dev])
             except Exception as err:  # registry failure etc.: report, do not crash
                 log.exception("Device check failed")
-                failure = clip(err, 500) or type(err).__name__
+                failure = error_text(err, 500) or type(err).__name__
             finally:
                 self._end_check()
                 self.cleanup_firmware()
@@ -1260,7 +1290,7 @@ class Manager:
                 await self._store_changelogs([self.devices[i] for i in checked])
             except Exception as err:  # registry failure etc.: report, do not crash
                 log.exception("Check after installation failed")
-                failure = clip(err, 500) or type(err).__name__
+                failure = error_text(err, 500) or type(err).__name__
             finally:
                 self._end_check()
                 self.cleanup_firmware()
@@ -1468,7 +1498,8 @@ class Manager:
             )
         except (TimeoutError, ShellyError, aiohttp.ClientError, KeyError, ValueError) as err:
             log.warning("%s: reading settings failed: %s", dev.get("name"), err)
-            dev["settings_error"] = {"message": clip(err, 300) or type(err).__name__, "severity": severity_of(err)}
+            message = error_text(err, 300) or type(err).__name__
+            dev["settings_error"] = {"message": message, "severity": severity_of(err)}
             return False
         dev.pop("settings_error", None)
         return True
@@ -1543,7 +1574,7 @@ class Manager:
                     dev.update(status=STATUS_CURRENT, file=None, sha256=None, message="Known offer installed")
             dev["info_refreshed"] = int(time.time())
         except (TimeoutError, aiohttp.ClientError, KeyError, ValueError, OSError) as err:
-            raise ShellyError(f"Device not reachable: {clip(err, 200) or type(err).__name__}") from None
+            raise ShellyError(f"Device not reachable: {error_text(err, 200) or type(err).__name__}") from None
         finally:
             self.reloading.discard(device_id)
             self.activity.pop(device_id, None)
@@ -1570,7 +1601,7 @@ class Manager:
                 self.session, dev["gen"], dev["origin"], clean, self._auth(device_id, dev)
             )
         except (TimeoutError, ShellyError, aiohttp.ClientError, ValueError) as err:
-            error = clip(err, 300) or type(err).__name__
+            error = error_text(err, 300) or type(err).__name__
             self.events.add("setting", ok=False, device=dev.get("name"), changes=diff, user=user, error=error)
             raise
         log.info("%s: settings changed by %s (%s)", dev.get("name"), user, ", ".join(sorted(clean)))
@@ -1649,7 +1680,7 @@ class Manager:
         try:
             result = await self._password_action(device_id, dev, mode, password, gen, origin, realm)
         except (TimeoutError, ShellyError, aiohttp.ClientError, ValueError) as err:
-            error = clip(err, 300) or type(err).__name__
+            error = error_text(err, 300) or type(err).__name__
             if not isinstance(err, ValueError):  # input errors never reached the device
                 self.events.add("password", ok=False, device=name, action=mode, user=user, error=error)
             raise
@@ -1785,6 +1816,7 @@ class Manager:
             return False
         dev = self.devices[device_id]
         self.installing.add(device_id)  # no await before this: no double starts possible
+        dev.pop("updated", None)  # a new installation: the former "just updated" mark is obsolete
         if target is not None:
             # The device now holds the older file: the download server serves it to
             # this device only while the installation runs (status installing). The
@@ -1825,11 +1857,14 @@ class Manager:
                     self._after_downgrade(dev)
                 elif ok:
                     self._followup.add(device_id)  # checked when the installations ended
+                    # 3.1.1: stays in the "Updates available" group until the next full
+                    # check or a single-device check of this device
+                    dev["updated"] = True
                 event = "confirmed" if ok else "unconfirmed"
                 self.events.add("install", ok=ok, event=event, detail=diagnosis, **entry)
                 return ok
         except (TimeoutError, ShellyError, aiohttp.ClientError, OSError, KeyError, ValueError) as err:
-            dev.update(status=STATUS_ERROR, message=clip(err, 500) or type(err).__name__)
+            dev.update(status=STATUS_ERROR, message=error_text(err, 500) or type(err).__name__)
             if entry:
                 self.events.add("install", ok=False, event="failed", detail=dev["message"], **entry)
             return False
@@ -1891,7 +1926,7 @@ class Manager:
         (parsed version number; Gen1 the vX.Y.Z part): wait 30 s, then check every
         10 s until the Shelly is reachable again. A different version (also a newer
         one) is never reported as success. If it has not even requested the file
-        after 3 min, stop waiting – the update will never arrive. A Gen2+ ota_error
+        after 2 min, stop waiting – the update will never arrive. A Gen2+ ota_error
         event ends the wait at once (raises OtaError).
         Returns (confirmed, diagnosis or None)."""
         target = shelly.parse_version(dev["pending_version"])
@@ -1956,7 +1991,7 @@ class Manager:
             await channel.__aenter__()
         except (TimeoutError, aiohttp.ClientError, OSError, ShellyError) as err:
             log.info("%s: device WebSocket not available (%s) – update command via HTTP",
-                     dev["name"], clip(err, 120) or type(err).__name__)
+                     dev["name"], error_text(err, 120) or type(err).__name__)
             return None
         try:
             accepted = await channel.update(url)
@@ -2056,7 +2091,8 @@ class Manager:
         if self._downloaded(dev):
             return (
                 "The Shelly downloaded the firmware but still reports "
-                f"{dev.get('version')} – check the device log or the Shelly's web interface"
+                f"{dev.get('version')} – check the device log or the Shelly's web interface "
+                "and try again with enabled websocket debugging"
             )
         if record.get("rejected"):
             ips = ", ".join(sorted(record["rejected"]))
@@ -2108,6 +2144,7 @@ class Manager:
             "outputs",
             "source_url",
             "offer_source",
+            "updated",
             "info_refreshed",
             "settings_error",
             "error_level",
@@ -2115,12 +2152,15 @@ class Manager:
             "downgrade",
         )
         devices: list[dict[str, Any]] = []
+        stored = self._downgrade_candidates()
         for key, dev in self.devices.items():
             origin = dev.get("origin")  # checked by resolve_device_origin: private IP
             devices.append(
                 {
                     "id": key,
                     **{f: dev.get(f) for f in fields},
+                    # 3.1.1: number of stored older versions (row menu: Downgrade enabled or not)
+                    "downgrades": self._downgrade_count(dev, stored),
                     "installing": key in self.installing,
                     "activity": self.activity.get(key),
                     "ignored": bool(dev.get("ignored")),

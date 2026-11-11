@@ -49,8 +49,11 @@ button{cursor:pointer;padding:6px 12px;border-radius:var(--ha-button-border-radi
   border:1px solid var(--divider-color);background:var(--card-background-color)}
 button.primary{background:var(--primary-color);color:var(--text-primary-color);border-color:transparent}
 button.danger{background:var(--error-color);color:#fff;border-color:transparent}
+button.small{padding:1px 10px}
+input.ghost{visibility:hidden}   /* keeps the indentation of a row without checkbox */
 button:disabled{opacity:.45;cursor:default}
-button.icon{background:none;border:0;padding:4px;line-height:0;color:var(--secondary-text-color);border-radius:50%}
+button.icon,a.icon{background:none;border:0;padding:4px;line-height:0;color:var(--secondary-text-color);border-radius:50%}
+a.icon{display:inline-block;color:var(--primary-color)}   /* same box as an icon button: icons of a row stay on one line */
 button.icon:hover:not(:disabled),button.icon:focus-visible{color:var(--primary-color);
   background:color-mix(in srgb,var(--primary-color) 12%,transparent)}
 button.icon svg,.svg{width:18px;height:18px;fill:currentColor;vertical-align:middle}
@@ -136,7 +139,7 @@ td.c-menu{text-align:right}
   color:color-mix(in srgb,var(--pill) 50%,var(--primary-text-color))}
 button.pill{cursor:pointer}
 .pill{--pill:var(--secondary-text-color)}
-.p-uptodate{--pill:var(--success-color)}
+.p-uptodate,.p-updated{--pill:var(--success-color)}
 .p-ready,.p-available,.p-queued,.p-installing{--pill:var(--warning-color)}
 .p-error,.p-unconfirmed{--pill:var(--error-color)}
 .p-ignored{--pill:var(--warning-color)}   /* marker only, no function */
@@ -160,6 +163,10 @@ button.pill{cursor:pointer}
   color:var(--warning-color)}
 .act.s-unknown svg{opacity:.55}
 .act.restart{--act:var(--primary-text-color)}
+/* 3.1.1: explicit state colours (power-on action, protected without stored password) */
+.act.c-good{--act:var(--success-color)}
+.act.c-alert{--act:var(--error-color)}
+.act.s-on.c-warn{--act:var(--warning-color)}
 /* Mobile details: labeled buttons */
 .act-strip.labeled{width:auto;max-width:none;gap:6px}
 .act-strip.labeled .act{width:auto;height:auto;min-height:44px;padding:6px 12px;line-height:1.2;
@@ -194,14 +201,19 @@ button.pill{cursor:pointer}
 .fw-row details ul{margin:4px 0 0;padding-left:18px}
 .fw-row details li{margin:2px 0}
 .fw-row details li>span{margin-right:8px;overflow-wrap:anywhere}
-.fw-row details li>button{padding:1px 10px}
 .actions{display:flex;flex-wrap:nowrap;gap:2px;justify-content:flex-end}
 
 /* Logs */
 .day{margin:16px 0 6px;color:var(--secondary-text-color);font-weight:500}
-.log{display:grid;grid-template-columns:52px 110px 1fr auto;gap:4px 12px;padding:8px 16px;align-items:start;
+.log{display:grid;grid-template-columns:52px 110px 1fr auto auto;gap:4px 12px;padding:8px 16px;align-items:start;
   border-bottom:1px solid color-mix(in srgb,var(--primary-text-color) 12%,transparent)}
 .log:last-child{border-bottom:0}
+/* 3.1.1: consecutive entries of one device – side bar only, the content is not indented */
+.log.grp,.log-m.grp{box-shadow:inset 3px 0 0 var(--primary-color)}
+.log.grp-first,.log.grp-mid{border-bottom-color:transparent}
+.log .log-del{margin:-3px 0}
+.tag[class*=sev-]{min-width:64px;text-align:center}   /* Success / Warning / Error: one size */
+.okc{color:color-mix(in srgb,var(--success-color) 60%,var(--primary-text-color))}
 .log details summary{cursor:pointer}
 .log ul{margin:4px 0 0;padding-left:18px}
 .log .user{color:var(--secondary-text-color);font-size:.85em;white-space:nowrap}
@@ -295,7 +307,8 @@ dialog table th,dialog table td{padding:6px 8px}
   td.c-status{grid-column:3;grid-row:1}
   td.c-menu{grid-column:4;grid-row:1;width:auto}
   td.c-firmware{grid-column:2;grid-row:2}
-  td.c-ip{grid-column:3/5;grid-row:2;text-align:right}
+  /* right edge of the IP in line with the dots of the ⋮ button (18 px icon in a 44 px button) */
+  td.c-ip{grid-column:3/5;grid-row:2;text-align:right;padding-right:13px}
   td.c-details{grid-column:2/5;grid-row:3}
   td.c-firmware .sub{display:none}   /* firmware ID is listed in the details */
   td.c-gen,td.c-action,td.c-last_update,td.c-ntp{display:none}
@@ -306,9 +319,9 @@ dialog table th,dialog table td{padding:6px 8px}
   #log-list .card:has(>.log-m){background:none;border:0;box-shadow:none;overflow:visible}
   .log-m,.log-m:last-child{margin-bottom:5px;background:var(--card-background-color);border-radius:10px;
     border:1px solid color-mix(in srgb,var(--primary-text-color) 50%,var(--card-background-color))}
-  /* Firmware: version, size + date, checksum, devices, then one right-aligned button row */
-  .fw-row{grid-template-columns:auto 1fr;grid-template-areas:"ver ver" "size date" "sha sha" "dev dev" "act act";
-    gap:6px 12px;padding:12px 16px}
+  /* Firmware: version with the icon buttons right-aligned in the head, size + date, checksum, devices */
+  .fw-row{grid-template-columns:auto 1fr;grid-template-areas:"ver act" "size date" "sha sha" "dev dev";
+    gap:6px 12px;padding:8px 16px 12px}
   .fw-ver{grid-area:ver;overflow-wrap:anywhere}
   .fw-size{grid-area:size}.fw-date{grid-area:date}
   .fw-sha{grid-area:sha;display:flex;align-items:center;gap:4px;min-width:0}
@@ -319,11 +332,14 @@ dialog table th,dialog table td{padding:6px 8px}
   .fw-row details ul{padding-left:0;list-style:none}
   .fw-row details li{display:flex;align-items:center;justify-content:space-between;gap:8px}
   .fw-ver .tag{margin-left:6px}
-  .fw-row>.actions{grid-area:act;justify-content:flex-end;align-items:center;gap:8px}
+  .fw-row>.actions{grid-area:act;justify-content:flex-end;align-items:center;gap:2px}
+  a.icon{min-width:44px;min-height:44px}
   .fw-row>.actions>*{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px}
   .settings-grid{grid-template-columns:1fr}
   .log{grid-template-columns:52px 1fr}
   .log .user{grid-column:2}
+  .log-head .spacer{flex:1}
+  .log-head .log-del{margin:-8px -6px -8px 0}
   /* Settings: each option is one block (label, control, help) with a separator */
   .form{display:block}
   .set-field{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;padding:14px 0;

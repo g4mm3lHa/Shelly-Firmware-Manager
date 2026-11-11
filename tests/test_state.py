@@ -5,6 +5,7 @@ All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test 
 import json
 from datetime import UTC, datetime
 
+import events
 import manager
 import pytest
 from credentials import Credentials
@@ -100,20 +101,56 @@ async def test_upload_log_entries_survive_a_restart(mgr, net):
 # ---------------------------------------------------------------- Activity log storage (3.0.1)
 
 
+def without_id(entries):
+    """Entries without the "id" every entry carries since 3.1.1."""
+    return [{k: v for k, v in e.items() if k != "id"} for e in entries]
+
+
 def test_log_array_of_3_0_0_is_converted_once(tmp_path):
     """The JSON array written by 3.0.0 is read and rewritten as JSON Lines; historic
-    entries (also without severity) stay unchanged."""
+    entries (also without severity) stay unchanged apart from the ID added by 3.1.1."""
     path = tmp_path / "events.json"
     now = int(datetime.now(UTC).timestamp())
     old = [{"ts": now, "kind": "check", "ok": False, "result": "x"}, {"ts": now, "kind": "upload", "ok": True}]
     path.write_text(json.dumps(old))
     log = EventLog(path, 90, 1000)
-    assert log.entries == old
-    assert [json.loads(line) for line in path.read_text().splitlines()] == old
+    assert without_id(log.entries) == old
+    assert without_id([json.loads(line) for line in path.read_text().splitlines()]) == old
     log.add("delete", type="t")
     lines = [json.loads(line) for line in path.read_text().splitlines()]
-    assert lines[:2] == old and lines[2]["severity"] == "success"
+    assert without_id(lines[:2]) == old and lines[2]["severity"] == "success"
     assert EventLog(path, 90, 1000).entries == lines
+
+
+def test_log_entries_get_an_id_once(tmp_path, monkeypatch):
+    """3.1.1: entries of older versions get an ID at the first start (one rewrite);
+    afterwards the file is left alone and new entries carry their own ID."""
+    path = tmp_path / "events.json"
+    now = int(datetime.now(UTC).timestamp())
+    path.write_text("".join(json.dumps({"ts": now, "kind": "check", "ok": True, "n": n}) + "\n" for n in range(3)))
+    log = EventLog(path, 90, 1000)
+    ids = [e["id"] for e in log.entries]
+    assert len(set(ids)) == 3 and all(events.ENTRY_ID_RE.match(i) for i in ids)
+    stored = path.read_text()
+    assert [json.loads(line)["id"] for line in stored.splitlines()] == ids
+    monkeypatch.setattr(EventLog, "_compact", lambda _self: pytest.fail("rewritten again"))
+    again = EventLog(path, 90, 1000)
+    assert [e["id"] for e in again.entries] == ids and path.read_text() == stored
+    assert events.ENTRY_ID_RE.match(again.add("check")["id"])
+
+
+def test_log_entry_can_be_deleted_and_the_log_cleared(tmp_path):
+    """3.1.1: a single entry is removed from memory and file; clearing removes all
+    entries and leaves one entry that names the user."""
+    path = tmp_path / "events.json"
+    log = EventLog(path, 90, 1000)
+    first, second, third = (log.add("check", n=n) for n in range(3))
+    assert log.remove(second["id"]) is True and log.remove(second["id"]) is False
+    assert [e["n"] for e in EventLog(path, 90, 1000).entries] == [0, 2]
+    assert log.clear("alice") == 2
+    [entry] = EventLog(path, 90, 1000).entries
+    assert (entry["kind"], entry["action"], entry["entries"], entry["user"]) == ("log", "cleared", 2, "alice")
+    assert first["id"] != third["id"] != entry["id"]
 
 
 def test_log_add_appends_one_line(tmp_path, monkeypatch):
@@ -151,5 +188,5 @@ def test_log_skips_a_damaged_line(tmp_path):
     good = {"ts": now, "kind": "check", "ok": True, "severity": "success"}
     path.write_text(json.dumps(good) + "\n" + '{"ts": 1, "kind": "che')
     log = EventLog(path, 90, 1000)
-    assert log.entries == [good]
-    assert path.read_text() == json.dumps(good, separators=(",", ":")) + "\n"
+    assert without_id(log.entries) == [good]
+    assert without_id([json.loads(line) for line in path.read_text().splitlines()]) == [good]

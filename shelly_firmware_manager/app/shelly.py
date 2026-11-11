@@ -45,6 +45,7 @@ MAX_FW_SIZE = 64 * 1024 * 1024  # upper limit for a firmware file
 MIN_FW_SIZE = 1024  # anything smaller is certainly no firmware
 FW_EXTENSIONS = (".zip", ".bin", ".gbl")
 FW_NAME_RE = re.compile(r"^[0-9a-f]{64}\.(zip|bin|gbl)$")
+_ERROR_LABEL_RE = re.compile(r"\b(?:message|url)=(?=['\"])")  # labels of aiohttp's ClientResponseError
 VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)(\d+))?")
 
 DEVICE_TIMEOUT = aiohttp.ClientTimeout(total=15)
@@ -109,6 +110,13 @@ UNSUPPORTED = "unsupported"  # the device/firmware does not offer the feature
 def clip(value: object, limit: int = 200) -> str:
     """Limit external values before they are stored or displayed."""
     return str(value if value is not None else "")[:limit]
+
+
+def error_text(err: object, limit: int = 200) -> str:
+    """Text of an error for status messages and the log (3.1.1): the field labels of
+    aiohttp's HTTP errors ("408, message='Request Timeout', url='https://…'") are
+    dropped, the values – also the URL – stay; limited like clip."""
+    return clip(_ERROR_LABEL_RE.sub("", str(err if err is not None else "")), limit)
 
 
 def parse_version(text: object) -> tuple[int, int, int, int, int]:

@@ -6,9 +6,11 @@ Suites, in this order (the last two change the demo state in their last case):
                       localhost, host names). Demo "idle" on 8801.
 - download_url_notice notice for a missing / unconfirmed download base URL, device
                       progress of a Gen2+ installation. Demos "legacy" 8803, "missing" 8804.
-- firmware_store      downgrade from the device menu, upload, two-step delete and the
-                      Install button behind a device (3.1.0) in the Firmware tab.
-                      Demo "rc7" on 8805.
+- firmware_store      downgrade from the device menu, upload, two-step delete, the
+                      Install button behind a device and the changelog icon in the
+                      Firmware tab; 3.1.1: Install button and "Updated" in the device
+                      list, state colours of the action icons, log grouping and
+                      deleting log entries. Demo "rc7" on 8805 (and "idle" on 8801).
 Usage: python qa/ui_features.py <shots-dir> [suite ...]   (qa/run_ui.py starts the demos)
 Every suite checks: no horizontal overflow, no console errors; screenshots go to
 <shots-dir>."""
@@ -128,7 +130,7 @@ def download_url_notice(browser, out):
         check(f"{case}: notice shown", notice.is_visible() and "former example value" in notice.text_content())
         buttons = f.locator("#notice button").all_text_contents()
         check(f"{case}: confirm and settings buttons", buttons == ["This address is correct", "Open settings"], str(buttons))
-        check(f"{case}: no install selection", f.locator("td.c-select input").count() == 0)
+        check(f"{case}: no install selection", f.locator("td.c-select input:not(.ghost)").count() == 0)
         pills = f.locator("button.pill").all_text_contents()
         check(f"{case}: device progress in the status pill", "Installing 55 %" in pills, str(sorted(set(pills))))
         check(f"{case}: no horizontal overflow", f.evaluate(OVERFLOW_JS) <= 0)
@@ -164,8 +166,33 @@ def firmware_store(browser, out):
     for index, (width, scheme, embedded) in enumerate(cases):
         last = index == len(cases) - 1
         case = f"rc7-{width}-{scheme}{'-embedded' if embedded else ''}"
-        ctx, page, f, errors = open_page(browser, RC7, width, scheme, embedded, ignore=("/upload/confirm",))
         entry = "Downgrade"
+        if index == 0:   # 3.1.1: no stored older version (demo "idle") -> entry disabled, no dialog
+            ctx, page, f, errors = open_page(browser, IDLE, width, scheme, embedded)
+            items = dict(menu_items(f, "Hall"))
+            check(f"{case}: downgrade disabled without a stored older version", items.get(entry) is True, str(items))
+            ctx.close()
+        ctx, page, f, errors = open_page(browser, RC7, width, scheme, embedded, ignore=("/upload/confirm",))
+
+        # 3.1.1: device list – Install button next to "Ready", "Updated" stays on top, icon colours
+        card = f.locator("#dev-cards .card").first
+        install = card.locator(".status-cell button.install")
+        check(f"{case}: Install button for every ready device", install.count() == 5 and install.first.is_enabled(), str(install.count()))
+        check(f"{case}: Install button is red", "danger" in install.first.get_attribute("class"))
+        updated = card.locator("tr", has_text="Bedroom shutter")
+        check(f"{case}: updated device stays in the updates card", updated.count() == 1
+              and updated.locator(".pill").first.inner_text() == "Updated" and updated.locator("input.ghost").count() == 1)
+        check(f"{case}: no overflow (devices)", f.evaluate(OVERFLOW_JS) <= 0)
+        page.screenshot(path=out / f"{case}-devices.png")
+        install.first.click()
+        check(f"{case}: Install opens the installation dialog (devices)", dialog(f)["title"] == "Install update?")
+        f.locator("#dlg-btns button", has_text="Cancel").click()
+        if width > 700:   # the icon strip is part of the table on wide screens
+            counts = f.evaluate("""() => ({good: document.querySelectorAll('.act.c-good').length,
+              alert: document.querySelectorAll('.act.c-alert').length, warn: document.querySelectorAll('.act.c-warn').length,
+              ap: document.querySelectorAll('.act.alert.s-on[aria-label^="Access point"]').length})""")
+            check(f"{case}: power-on action green and red, lock yellow, access point red",
+                  all(counts[k] > 0 for k in ("good", "alert", "warn", "ap")), str(counts))
 
         # Menu entry: Gen2+ (also ignored), never Gen1
         items = dict(menu_items(f, "Hall"))
@@ -218,6 +245,9 @@ def firmware_store(browser, out):
         tip = f.locator("#fw-info").get_attribute("data-tip")
         check(f"{case}: no automatic deletion hint", "never deleted automatically" in tip, tip[:60])
         rows = f.locator(".fw-row")
+        centers = rows.first.locator(".actions > *").evaluate_all(
+            "els => els.map(e => { const r = e.getBoundingClientRect(); return Math.round(r.top + r.height / 2); })")
+        check(f"{case}: changelog, download and delete icons on one line", len(centers) == 3 and max(centers) - min(centers) <= 1, str(centers))
         first_del = rows.first.locator("button[aria-label], button.red").last
         check(f"{case}: provided file locked with reason", first_del.is_disabled()
               and first_del.get_attribute("title") == "Locked: provided as pending update", str(first_del.get_attribute("title")))
@@ -302,6 +332,37 @@ def firmware_store(browser, out):
         else:
             f.locator("#dlg-btns button", has_text="Cancel").click()
             f.wait_for_timeout(300)
+
+        # 3.1.1: Logs – group bar, findings coloured by severity, delete one entry / all (last case)
+        f.locator("#tab-logs").click()
+        entries = f.locator("#log-list .log, #log-list .log-m")
+        entries.first.wait_for()
+        total = entries.count()
+        check(f"{case}: three consecutive entries of one device grouped", f.locator("#log-list .grp").count() == 3
+              and f.locator("#log-list .grp-first").count() == 1 and f.locator("#log-list .grp-last").count() == 1)
+        check(f"{case}: delete icon per entry", f.locator("#log-list .log-del").count() == total, str(total))
+        f.locator("#log-list summary", has_text="30.7 s").first.click()
+        colours = f.evaluate("""() => { const ul = [...document.querySelectorAll('#log-list ul')].find(u => u.textContent.includes('Sauna'));
+          return [...ul.children].map(li => li.className); }""")
+        check(f"{case}: findings coloured by their own severity", colours == ["okc", "warnc", "bad"], str(colours))
+        check(f"{case}: no overflow (logs)", f.evaluate(OVERFLOW_JS) <= 0)
+        page.screenshot(path=out / f"{case}-logs.png", full_page=True)
+        f.locator("#log-list .log-del").last.click()
+        check(f"{case}: delete entry asks first", dialog(f)["title"] == "Delete log entry?")
+        if last:
+            f.locator("#dlg-btns button", has_text="Delete").click()
+            f.wait_for_timeout(800)
+            check(f"{case}: entry deleted", entries.count() == total - 1, str(entries.count()))
+            f.locator("#log-clear").click()
+            d = dialog(f)
+            check(f"{case}: clear asks first", d["title"] == "Delete all logs?" and str(total - 1) in d["body"], d["body"][:120])
+            f.locator("#dlg-btns button", has_text="Delete all").click()
+            f.wait_for_timeout(800)
+            check(f"{case}: log cleared, one entry names the user", entries.count() == 1 and "Log cleared" in entries.first.inner_text(),
+                  entries.first.inner_text()[:80])
+            page.screenshot(path=out / f"{case}-logs-cleared.png")
+        else:
+            f.locator("#dlg-btns button", has_text="Cancel").click()
 
         check(f"{case}: no overflow", f.evaluate(OVERFLOW_JS) <= 0)
         check(f"{case}: no console errors", not errors, "; ".join(errors[:3]))

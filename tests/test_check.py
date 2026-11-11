@@ -592,3 +592,22 @@ async def test_gen1_list_is_one_document_for_all_types(monkeypatch):
     fake_cloud(monkeypatch, {"https://api.shelly.cloud/files/firmware": (200, {}, b'{"isok": false}')})
     with pytest.raises(ShellyError, match="reports an error"):
         await shelly.fetch_gen1_offers(None)
+
+
+def test_error_text_drops_the_field_labels_and_keeps_the_values():
+    """3.1.1: aiohttp's HTTP error text without "message=" and "url=" – the status,
+    the reason and the complete URL stay."""
+    raw = "408, message='Request Timeout', url='https://updates.shelly.cloud/update/Mini1G3'"
+    assert shelly.error_text(raw) == "408, 'Request Timeout', 'https://updates.shelly.cloud/update/Mini1G3'"
+    assert shelly.error_text("Cannot connect to host 192.168.1.5:80 ssl:default") == "Cannot connect to host 192.168.1.5:80 ssl:default"
+    assert shelly.error_text("https://x.example/?url=1&message=2") == "https://x.example/?url=1&message=2"  # no label
+    assert shelly.error_text("x" * 50, 10) == "x" * 10 and shelly.error_text(None) == ""
+
+
+async def test_check_error_message_uses_the_readable_text(mgr, net, monkeypatch):
+    async def failing(*_args, **_kwargs):
+        raise ShellyError("408, message='Request Timeout', url='https://updates.shelly.cloud/update/Plus1'")
+
+    monkeypatch.setattr(shelly, "fetch_offer", failing)
+    await mgr.scan()
+    assert mgr.devices[A]["message"] == "408, 'Request Timeout', 'https://updates.shelly.cloud/update/Plus1'"

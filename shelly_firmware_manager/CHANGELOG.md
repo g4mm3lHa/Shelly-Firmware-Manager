@@ -1,10 +1,58 @@
 # Changelog
 
+## 3.1.1
+
+Release candidate rc1 (not released). Contains everything of 3.1.0 (which was never
+released) plus the changes below: clearer states in the device list, log entries can be
+deleted, shorter waiting time after an installation.
+
+Changes in rc1
+- Devices: red "Install" button next to the status "Ready" (also on phones). It opens
+  the usual installation dialog and is greyed out with the reason while an installation
+  is not possible. The "Install" buttons of the Firmware tab are red as well.
+- Devices: a device whose installation was confirmed stays in the "Updates available"
+  card with the status "Updated" (no checkbox). The automatic check after the
+  installation leaves it there; a check of this device or the next full check (manual
+  or scheduled) moves it to the other devices.
+- Action icons with clearer states:
+  - Power-on action: green if every output restores its last state, red if an output
+    has another value, "?" if the settings could not be read. The tooltip names the
+    value of every output.
+  - Password protection: green if the device is protected and its password is stored
+    in the app, yellow if it is protected but the password is not stored (the app
+    cannot read or update the device then), grey if it is not protected.
+  - Access point: red while the access point is on.
+- Row menu: "Downgrade" is greyed out while no older version is stored for the device
+  or something blocks it (check, installation, missing download base URL); the former
+  dialog "No stored version …" no longer appears.
+- Logs: every entry has a delete icon (one confirmation), and "Delete all logs" clears
+  the whole log (one confirmation, regardless of the filter). After clearing, one entry
+  remains that names who cleared the log; single deletions are written to the app log
+  of Home Assistant only. Entries of older versions get an internal ID at the first
+  start (the log file is rewritten once).
+- Logs: directly consecutive entries of the same device are marked as a group by a bar
+  at the side. The lines of a check are coloured by their own result (update green,
+  warning yellow, error red) also inside a check that failed as a whole, and the
+  Success / Warning / Error labels have one size.
+- Installation: the app waits at most 3 minutes for the target version (before: 5) and
+  gives up after 2 minutes (before: 3) if the Shelly is reachable, still reports the
+  old version and never requested the firmware.
+- Messages (new entries only): HTTP errors of the Shelly servers no longer contain the
+  words "message=" and "url=" (`408, 'Request Timeout', 'https://…'`); the hint for a
+  Shelly that downloaded the firmware but kept its version adds "and try again with
+  enabled websocket debugging".
+- Firmware tab: the changelog, download and delete icons of a version are on one line
+  (the download icon was shifted); on phones they are in the head of the version tile.
+- Phones: the IP address in a device tile ends in line with the ⋮ menu.
+- API: `POST /api/logs/{id}/delete`, `POST /api/logs/clear`; `/api/state` has
+  `updated` and `downgrades` per device; log entries carry `id`.
+
 ## 3.1.0
 
-Release candidate rc3 (not released). rc1: store integration, robustness and code
-quality. rc2: the firmware store comes first in every check, fewer requests to the
-Shelly servers, Install button in the Firmware tab. rc3: changelog in the Firmware tab.
+Never released (release candidates rc1 to rc3 only); all its changes are part of 3.1.1.
+rc1: store integration, robustness and code quality. rc2: the firmware store comes
+first in every check, fewer requests to the Shelly servers, Install button in the
+Firmware tab. rc3: changelog in the Firmware tab.
 
 Changes in rc3
 - Firmware tab: changelog icon in every version row. It opens a dialog with the

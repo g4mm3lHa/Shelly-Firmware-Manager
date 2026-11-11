@@ -63,7 +63,8 @@ for i, n in enumerate(names):
         "message": "Device not reachable" if st == "error" else "", "origin": f"http://192.168.1.{10 + i}",
         "last_check": now - 3600, "last_success": now - (90000 if st == "error" else 3600),
         "last_update": now - 86400 * 3 if i % 3 == 0 else None, "ntp": "time.local", "eco": i % 2 == 0,
-        "outputs": [{"key": "switch:0", "name": None, "state": "off", "aop": "off", "options": ["off", "on", "restore_last"]}] if i % 4 else [],
+        # power-on action: "restore_last" (green icon) or another value (red icon, 3.1.1); every 4th device has no output
+        "outputs": [{"key": "switch:0", "name": None, "aop": "restore_last" if i % 8 < 4 else "off", "options": ["off", "on", "restore_last"]}] if i % 4 else [],
         "file": f"{sha}.zip" if st == "ready" else None, "sha256": sha if st == "ready" else None, "size": len(content),
         "pending_version": "1.5.0" if st == "ready" else None,
         # 3.1.0: source of the provided update – the first device got it from the store
@@ -96,6 +97,21 @@ m.events.add("check", trigger="install", devices=2, duration=2.4, updates=2, war
                        {"device": "Hall", "version": "1.4.0", "offer": "1.5.0", "source": "upload", "severity": "success"}])
 m.events.add("password", device="Kitchen light", action="enabled", user="demo")
 m.devices[f"{4:032x}"]["settings_error"] = {"message": "Device not reachable", "severity": "warning"}
+# 3.1.1: a device with a confirmed installation stays in the updates card as "Updated";
+# password protection with (green lock) and without (yellow lock) a password stored in the app
+m.devices[f"{6:032x}"]["updated"] = True
+m.credentials.entries[f"{1:032x}"] = {"gen": 2, "realm": "shelly-1", "ha1": "0" * 64}
+# three consecutive log entries of one device (grouped by a side bar) and a check with mixed findings
+m.events.add("setting", device="Pool pump", changes=[{"setting": "Eco mode", "old": "on", "new": "off"}], user="demo")
+m.events.add("install", event="started", device="Pool pump", type="Plus1", old="1.4.0", new="1.5.0", user="demo")
+m.events.add("install", ok=False, severity="warning", event="unconfirmed", device="Pool pump", type="Plus1", old="1.4.0", new="1.5.0",
+             user="demo", detail="The Shelly downloaded the firmware but still reports 1.4.0 – check the device log or the Shelly's "
+             "web interface and try again with enabled websocket debugging")
+m.events.add("check", severity="error", trigger="manual", devices=25, duration=30.7, updates=1, warnings=1, errors=1,
+             result="1 update(s), 1 warning(s), 1 error(s)", user="demo",
+             findings=[{"device": "Sauna", "version": "1.6.2", "offer": "2.0.3", "source": "manufacturer", "severity": "success"},
+                       {"device": "Doorbell", "error": "Cannot connect to host 192.168.1.34:80", "severity": "warning"},
+                       {"device": "Fridge", "error": "The Shelly rejected the password", "severity": "error"}])
 if scenario == "legacy":  # an installation started before (device progress shown)
     ids = list(m.devices)
     m.devices[ids[7]].update(status="installing", ota_progress=55, message="The Shelly is downloading the firmware: 55 %")

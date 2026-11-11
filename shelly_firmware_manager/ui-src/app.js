@@ -193,8 +193,12 @@ function valueList(pairs) {
 
 // ---------------------------------------------------------------- Devices
 const STATUS_LABELS = {"up-to-date": "Up-To-Date", available: "Available", ready: "Ready", queued: "Queued",
-  installing: "Installing", unconfirmed: "Unconfirmed", error: "Error", unregistered: "Unregistered", skipped: "Skipped"};
-const shownStatus = d => d.installing && d.status === "ready" ? "queued" : d.status;
+  installing: "Installing", unconfirmed: "Unconfirmed", error: "Error", unregistered: "Unregistered", skipped: "Skipped",
+  updated: "Updated"};
+// 3.1.1: a device with a confirmed installation is shown as "Updated" (and stays in the
+// "Updates available" card) until the next full check or a single check of this device
+const justUpdated = d => !!d.updated && d.status === "up-to-date";
+const shownStatus = d => d.installing && d.status === "ready" ? "queued" : justUpdated(d) ? "updated" : d.status;
 const hasUpdate = d => ["available", "ready", "installing"].includes(d.status);
 // Ignored devices are not installable until they are resumed; nothing is installable
 // while the download base URL is missing or the unconfirmed former example (rc6)
@@ -234,12 +238,16 @@ function aopSummary(d) {
   return values.length === 1 ? values[0] : "Mixed";
 }
 const AOP_NOTE = "Power-on action: not available – this device has no switchable output.";
-/** Power-on action (AOP) in the action column: flash icon without state, coloured
- *  like restart; opens the same dialog as the row menu. Mobile (labeled): the
- *  current value is shown on the button next to the icon. Devices without
- *  switchable outputs get a disabled icon with an explanation. */
+/** Power-on action (AOP) in the action column: flash icon with state (3.1.1) – green
+ *  if every output restores its last state, red if an output has another value, "?"
+ *  if the settings could not be read; opens the same dialog as the row menu. Mobile
+ *  (labeled): the current value is shown on the button next to the icon. Devices
+ *  without switchable outputs get a disabled icon with an explanation. */
+const AOP_RESTORE = ["restore_last", "last"];
 function aopButton(d, labeled) {
-  const b = el("button", null, "act restart");
+  const outputs = d.outputs || [];
+  const state = !outputs.length ? "restart" : d.settings_error ? "s-unknown" : outputs.every(o => AOP_RESTORE.includes(o.aop)) ? "c-good" : "c-alert";
+  const b = el("button", null, `act ${state}`);
   b.append(icon("aop"));
   if (!d.outputs || !d.outputs.length) {
     if (labeled) b.append(el("span", "Power-on action"));
@@ -248,7 +256,7 @@ function aopButton(d, labeled) {
     return b;
   }
   if (labeled) b.append(el("span", `Power-on: ${aopSummary(d)}`));
-  const text = labeled ? "Action on power on – " + d.outputs.map(o => `${o.name || o.key}: ${aopLabel(o.aop)}`).join(", ") : "Power-on action";
+  const text = "Power-on action – " + (d.settings_error ? `unknown – ${d.settings_error.message}` : d.outputs.map(o => `${o.name || o.key}: ${aopLabel(o.aop)}`).join(", "));
   b.setAttribute("aria-label", `${text} (${d.name})`); attachTip(b, () => text);
   b.disabled = !editable(d); b.onclick = () => editAop(d);
   return b;
@@ -262,7 +270,7 @@ const GEN1_AP_NOTE = "Not available on Gen1: enabling the access point turns off
 const ACTION_ITEMS = [
   {key: "eco", icon: "eco", label: "Eco mode", on: "on", off: "off", edit: d => editEco(d)},
   {key: "auth_enabled", icon: "lock", label: "Password protection", on: "protected", off: "not protected", edit: d => editPassword(d), always: true},
-  {key: "ap", icon: "ap", label: "Access point", on: "on", off: "off", edit: d => editSwitch(d, "ap")},
+  {key: "ap", icon: "ap", label: "Access point", on: "on", off: "off", alert: true, edit: d => editSwitch(d, "ap")},
   {key: "ble", icon: "ble", label: "Bluetooth", on: "on", off: "off", edit: d => editSwitch(d, "ble")},
   {key: "actions", icon: "actions", label: "Actions", on: "at least one active", off: "none active", alert: true, link: true},
   {key: "schedules", icon: "schedules", label: "Schedules", on: "at least one active", off: "none active", alert: true, link: true},
@@ -281,9 +289,13 @@ function actionButton(d, item, labeled) {
   let text = `${item.label}: ${state === "on" ? item.on : state === "off" ? item.off : state === "unsupported" ? "not supported by this device" : "unknown"}`;
   if (state === "unknown" && d.settings_error) text += ` – ${d.settings_error.message}`;
   if (gen1Ap) text += ` – ${GEN1_AP_NOTE}`;
+  // 3.1.1: protected without a password stored in this app = warning (the app cannot
+  // read or update the device); green only if protection is on and the password is stored
+  const unstored = item.key === "auth_enabled" && state === "on" && !d.password_set;
+  if (unstored) text += " – password not stored in this app";
   const url = item.link ? webUrl(d) : null;
   const node = item.link && url && state !== "unsupported" ? el("a") : el("button");
-  node.className = `act s-${state}${item.alert ? " alert" : ""}`;
+  node.className = `act s-${state}${item.alert ? " alert" : ""}${unstored ? " c-warn" : ""}`;
   node.setAttribute("aria-label", text); attachTip(node, () => text);
   node.append(icon(item.icon)); if (labeled) node.append(el("span", item.label));
   if (node.tagName === "A") {   // opens the device web UI (root, no route probing)
@@ -321,6 +333,18 @@ function statusCell(d) {
   p.onclick = () => showStatus(d); attachTip(p, () => statusText(d));
   return p;
 }
+/** 3.1.1: "Install" next to the status of a device with a provided update ("Ready").
+ *  Opens the usual installation dialog; disabled with the reason while it is not
+ *  possible (same conditions as "Install update"). Not shown while a check runs for
+ *  the device or its installation is queued. */
+function installButton(d) {
+  if (d.status !== "ready" || d.activity || d.installing) return null;
+  const blocker = installBlocker(d, ui.state), go = el("button", "Install", "danger small install");
+  go.disabled = !!blocker; go.title = blocker || "Install the provided update";
+  go.setAttribute("aria-label", `Install update on ${d.name}`);
+  go.onclick = () => { if (installable(d, ui.state)) openInstall([d]); };
+  return go;
+}
 /** Mobile only: expandable details with the controls hidden from the compact card.
  *  The content is built only while open (keeps the DOM small on wide screens and
  *  for closed cards); the open state survives re-rendering. */
@@ -354,6 +378,10 @@ const shortVersion = (d, v) => { const m = d.gen === 1 && GEN1_VERSION_RE.exec(v
 // Each column: label, cell renderer (returns nodes), sort value, fixed = always shown
 const COLUMNS = {
   select: {label: "", fixed: true, cell: d => {
+    if (justUpdated(d)) {   // no selection, but the row keeps the indentation of a checkbox
+      const gap = el("input"); gap.type = "checkbox"; gap.disabled = true; gap.className = "ghost"; gap.setAttribute("aria-hidden", "true"); gap.tabIndex = -1;
+      return [gap];
+    }
     if (!installable(d, ui.state)) return [];
     const cb = el("input"); cb.type = "checkbox"; cb.checked = selected.has(d.id); cb.setAttribute("aria-label", `Select ${d.name}`);
     cb.onchange = () => { cb.checked ? selected.add(d.id) : selected.delete(d.id); render(true); };
@@ -382,7 +410,7 @@ const COLUMNS = {
     }
     return [line, el("div", d.type || "–", "sub")];
   }},
-  status: {label: "Status", sort: d => STATUS_LABELS[shownStatus(d)] || d.status, cell: d => [box("div", "status-cell", statusCell(d), ignoredPill(d))]},
+  status: {label: "Status", sort: d => STATUS_LABELS[shownStatus(d)] || d.status, cell: d => [box("div", "status-cell", statusCell(d), installButton(d), ignoredPill(d))]},
   action: {label: "Action", cell: d => [actionStrip(d)]},
   last_update: {label: "Last update", optional: true, sort: d => d.last_update, cell: d => [el("span", d.last_update ? fmt(d.last_update) : "–", "nowrap")]},
   ntp: {label: "NTP", optional: true, sort: d => d.ntp, cell: d => [d.ntp || "–"]},
@@ -495,7 +523,7 @@ function renderDevices() {
   const rows = found.filter(FILTERS[ui.devFilter][1]);
   // Ignored devices form their own group, always last (known update stays visible there)
   const ignored = rows.filter(d => d.ignored), active = rows.filter(d => !d.ignored);
-  const updates = active.filter(d => hasUpdate(d) || shownStatus(d) === "queued"), others = active.filter(d => !updates.includes(d));
+  const updates = active.filter(d => hasUpdate(d) || shownStatus(d) === "queued" || justUpdated(d)), others = active.filter(d => !updates.includes(d));
   const cards = [];
   if (updates.length) {
     const sel = updates.filter(d => ok.has(d.id));
@@ -530,6 +558,15 @@ function buildChooser() {
 function syncChooser() { for (const cb of $("cols-devices").querySelectorAll("input")) cb.checked = !prefs.devices.hidden.includes(cb.dataset.col); }
 document.addEventListener("click", e => { if (!$("cols").contains(e.target)) $("cols").open = false; });
 $("dev-search").oninput = () => render(true);
+/** 3.1.1: delete the whole activity log after a confirmation (one entry naming the user stays). */
+$("log-clear").onclick = () => {
+  const title = "Delete all logs?", count = ui.logs.length;
+  modal(title, [el("p", `All ${count} log entr${count === 1 ? "y" : "ies"} are deleted for good – regardless of the filter. One entry stays that names who cleared the log.`)],
+    [{text: "Cancel"}, {text: "Delete all", kind: "danger", action: async () => {
+      try { await api("api/logs/clear", {confirm: true}); closeModal(); lastLogs = 0; load(true); }
+      catch (err) { message(title, err.message, "error"); }
+    }}]);
+};
 
 // ---------------------------------------------------------------- Row menu ⋮
 const rowmenu = $("rowmenu");
@@ -544,7 +581,8 @@ function openRowMenu(d, anchor) {
   add("Check for updates", () => checkDevice(d), !busy && !d.installing);
   if (installable(d, ui.state)) add("Install update", () => openInstall([d]), true);   // only for Ready
   // rc7: downgrade to a stored older version – Gen2+ only, also up to date / ignored devices
-  if (d.gen >= 2) add("Downgrade", () => openDowngrade(d), downgradable(d, ui.state));
+  // 3.1.1: disabled (no dialog) while no older version is stored or something blocks it
+  if (d.gen >= 2) add("Downgrade", () => openDowngrade(d), downgradable(d, ui.state) && d.downgrades > 0);
   add("Reload device info", () => reloadDevice(d), !busy && !d.installing && !d.activity && !!d.ip);
   if (busy) items.push(el("div", `Not available – ${busy}`, "menu-hint"));   // reason, also for touch
   add(d.ignored ? "Resume device" : "Ignore device", () => setIgnored(d, !d.ignored), !d.installing);
@@ -912,7 +950,7 @@ function installBlocker(d, s) {
  *  usual installation dialog (same conditions as "Install update" in the Devices tab). */
 function firmwareDevice(entry) {
   const s = ui.state || {devices: []}, d = s.devices.find(x => x.id === entry.id);
-  const blocker = installBlocker(d, s), go = el("button", "Install", "small");
+  const blocker = installBlocker(d, s), go = el("button", "Install", "danger small");
   go.disabled = !!blocker; go.title = blocker || "Install this firmware on the device";
   go.setAttribute("aria-label", `Install on ${entry.name}`);
   go.onclick = () => { if (d && installable(d, ui.state)) openInstall([d]); };
@@ -1015,7 +1053,7 @@ const LOG_FILTERS = {all: ["All", () => true], checks: ["Checks", e => e.kind ==
   installs: ["Installations", e => e.kind === "install"], settings: ["Settings", e => ["setting", "password", "options"].includes(e.kind)],
   warnings: ["Warnings", e => severity(e) === "warning"], errors: ["Errors", e => severity(e) === "error"]};
 const KIND_LABELS = {check: "Check", download: "Download", upload: "Upload", install: "Installation", delete: "Deleted", setting: "Setting",
-  password: "Password", options: "App settings"};
+  password: "Password", options: "App settings", log: "Log"};
 // Successful actions (3.0), failed actions are logged with the mode; older entries: set/removed/test_failed
 const PASSWORD_ACTIONS = {stored: "password stored", enabled: "password protection enabled", changed: "password changed",
   removed: "password protection removed", forgotten: "stored password forgotten",
@@ -1055,17 +1093,20 @@ function logContent(e) {
       return [el("div", e.ok ? "App settings saved – app restarted" : "App settings could not be saved"),
         ...(e.changes || []).map(c => el("div", c.redacted ? `${optionLabel(c.option)}: changed` : `${optionLabel(c.option)}: ${arrow(c.old, c.new)}`, "sub")),
         e.error ? el("div", e.error, "bad") : null].filter(Boolean);
+    case "log":
+      return [el("div", `Log cleared · ${e.entries ?? 0} entr${e.entries === 1 ? "y" : "ies"} deleted`)];
     default:
       return [el("div", e.kind)];
   }
 }
-/** Device results of a check, colored by severity. */
+/** Device results of a check, each colored by its own severity (3.1.1: an update is
+ *  green and a warning yellow also inside an entry that is an error as a whole). */
 function checkFindings(e) {
   return box("ul", null, ...e.findings.map(f => {
     const sev = f.severity || (f.error ? "error" : "success");
     // 3.1.0: updates from the firmware store are marked (the server was not asked)
     const from = f.source && f.source !== "manufacturer" && OFFER_SOURCES[f.source] ? ` · ${OFFER_SOURCES[f.source]}` : "";
-    return el("li", f.error ? `${f.device}: ${f.error}` : `${f.device}: ${arrow(f.version, f.offer)}${from}`, sev === "error" ? "bad" : sev === "warning" ? "warnc" : "");
+    return el("li", f.error ? `${f.device}: ${f.error}` : `${f.device}: ${arrow(f.version, f.offer)}${from}`, sev === "error" ? "bad" : sev === "warning" ? "warnc" : "okc");
   }));
 }
 /** Mobile: short summary lines of an entry (details stay collapsed). */
@@ -1085,24 +1126,44 @@ function logSummary(e) {
     case "setting": return [e.device];
     case "password": return [`${e.device}: ${PASSWORD_ACTIONS[e.action] || e.action}`];
     case "options": return [e.confirmed ? "Download base URL confirmed" : e.ok ? "App settings saved" : "App settings not saved"];
+    case "log": return ["Log cleared"];
     default: return [e.kind];
   }
 }
 const mobileQuery = matchMedia("(max-width:700px)");
 mobileQuery.addEventListener("change", () => render(true));
-/** Desktop entry (arrangement unchanged): time, type, content, user. */
-function logRow(e, d) {
+/** The device an entry is about (for grouping): the device of an installation, setting
+ *  or password entry, or the only device of a single-device check with a finding. */
+const logDevice = e => e.device || (e.kind === "check" && e.devices === 1 && e.findings && e.findings.length === 1 ? e.findings[0].device : null) || null;
+/** 3.1.1: delete one log entry after a confirmation. */
+function deleteLogEntry(e, d) {
+  const title = "Delete log entry?";
+  modal(title, [valueList([["Time", `${fmt(e.ts)}`], ["Type", KIND_LABELS[e.kind] || e.kind], ["Entry", logSummary(e).join(" · ")]]),
+    el("p", "The entry is removed from the activity log for good.", "hint")],
+  [{text: "Cancel"}, {text: "Delete", kind: "danger", action: async () => {
+    try { await api(`api/logs/${encodeURIComponent(e.id)}/delete`, {confirm: true}); closeModal(); lastLogs = 0; load(true); }
+    catch (err) { message(title, err.message, "error"); }
+  }}]);
+}
+/** Delete icon of an entry (entries of versions before 3.1.1 get their ID at the start). */
+function logDelete(e, d) {
+  const b = iconButton("delete", "Delete entry", () => deleteLogEntry(e, d), "red log-del"); b.disabled = !e.id;
+  return b;
+}
+/** Desktop entry: time, type, content, user, delete. group = position in a run of
+ *  entries of the same device ("first" | "mid" | "last" | null): marked by a side bar. */
+function logRow(e, d, group) {
   const sev = severity(e);
-  return box("div", "log", el("span", `${pad(d.getHours())}:${pad(d.getMinutes())}`, "mono sub"),
+  return box("div", "log" + (group ? ` grp grp-${group}` : ""), el("span", `${pad(d.getHours())}:${pad(d.getMinutes())}`, "mono sub"),
     el("span", KIND_LABELS[e.kind] || e.kind, "tag" + (sev === "error" ? " sec" : "")),
     box("div", "log-body" + (sev === "error" ? " bad" : ""), el("span", SEVERITY_LABELS[sev], `tag sev-${sev}`), box("div", null, ...logContent(e))),
-    el("span", e.user || "", "user"));
+    el("span", e.user || "", "user"), logDelete(e, d));
 }
 /** Mobile entry: time/type/outcome, short summary, details collapsed. */
-function logTile(e, d) {
+function logTile(e, d, group) {
   const sev = severity(e), summary = logSummary(e);
   const head = box("div", "log-head", el("span", `${pad(d.getHours())}:${pad(d.getMinutes())}`, "mono sub"),
-    el("span", KIND_LABELS[e.kind] || e.kind, "tag"), el("span", SEVERITY_LABELS[sev], `tag sev-${sev}`));
+    el("span", KIND_LABELS[e.kind] || e.kind, "tag"), el("span", SEVERITY_LABELS[sev], `tag sev-${sev}`), el("span", null, "spacer"), logDelete(e, d));
   const body = box("div", "log-details", ...(e.kind === "check" ? (e.findings && e.findings.length ? [checkFindings(e)] : [el("div", e.result, "sub")]) : logContent(e)),
     e.user ? el("div", `By ${e.user}`, "sub") : null);
   const det = el("details"), key = `logm-${e.ts}-${e.kind}`;
@@ -1110,7 +1171,7 @@ function logTile(e, d) {
   det.ontoggle = () => { det.open ? openDetails.add(key) : openDetails.delete(key); };
   const sum = el("summary"); sum.append(...summary.map(t => el("div", t)));
   det.append(sum, body);
-  return box("div", "log-m", head, det);
+  return box("div", "log-m" + (group ? ` grp grp-${group}` : ""), head, det);
 }
 /** Logs tab: grouped by day, filters, device search, quiet checks. */
 function renderLogs() {
@@ -1122,16 +1183,22 @@ function renderLogs() {
     b.append(el("span", base.filter(fn).length, "count")); b.onclick = () => { ui.logFilter = key; render(true); };
     return b;
   }));
-  const out = [];
+  const out = [], shown = base.filter(LOG_FILTERS[ui.logFilter][1]);
+  const dayOf = e => { const d = new Date(e.ts * 1000); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+  // 3.1.1: directly consecutive entries of the same device on the same day form a group
+  const same = (a, b) => !!a && !!b && !!logDevice(a) && logDevice(a) === logDevice(b) && dayOf(a) === dayOf(b);
   let day = null, card = null;
-  for (const e of base.filter(LOG_FILTERS[ui.logFilter][1])) {
-    const d = new Date(e.ts * 1000), key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  shown.forEach((e, i) => {
+    const d = new Date(e.ts * 1000), key = dayOf(e);
     if (key !== day) {
       day = key; out.push(el("div", `${key} · ${d.toLocaleDateString("en", {weekday: "long"})}`, "day"));
       card = el("div", null, "card"); out.push(card);
     }
-    card.append(mobileQuery.matches ? logTile(e, d) : logRow(e, d));
-  }
+    const before = same(shown[i - 1], e), after = same(e, shown[i + 1]);
+    const group = before && after ? "mid" : before ? "last" : after ? "first" : null;
+    card.append(mobileQuery.matches ? logTile(e, d, group) : logRow(e, d, group));
+  });
+  $("log-clear").disabled = !ui.logs.length;
   if (!out.length) out.push(box("div", "card", el("div", ui.logs.length ? "No entries match." : "No log entries yet.", "empty")));
   $("log-list").replaceChildren(...out);
 }

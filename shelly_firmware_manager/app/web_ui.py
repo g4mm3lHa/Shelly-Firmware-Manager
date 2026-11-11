@@ -32,7 +32,7 @@ import aiohttp
 from aiohttp import web
 from aiohttp.typedefs import Handler
 from download_server import strip_server_header
-from events import user_from
+from events import ENTRY_ID_RE, user_from
 from manager import DOWNLOAD_BASE_MESSAGES, FW_DIR, Manager
 from shelly import FW_NAME_RE, MAX_FW_SIZE, ShellyError
 
@@ -398,6 +398,25 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Applic
         """Activity log, newest first."""
         return web.json_response({"entries": mgr.events.list()})
 
+    async def log_delete(request: web.Request) -> web.StreamResponse:
+        """Delete one log entry (3.1.1). The deletion is written to the app log only."""
+        entry_id = request.match_info["id"]
+        if (await json_body(request)).get("confirm") is not True:
+            raise web.HTTPBadRequest(text="Confirmation incomplete")
+        if not ENTRY_ID_RE.match(entry_id) or not mgr.events.remove(entry_id):
+            raise web.HTTPNotFound(text="Unknown log entry")
+        log.info("Log entry %s deleted by %s", entry_id, user_from(request.headers))
+        return web.json_response({"deleted": True})
+
+    async def logs_clear(request: web.Request) -> web.StreamResponse:
+        """Delete all log entries (3.1.1); one entry naming the user stays."""
+        if (await json_body(request)).get("confirm") is not True:
+            raise web.HTTPBadRequest(text="Confirmation incomplete")
+        user = user_from(request.headers)
+        count = mgr.events.clear(user)
+        log.info("Activity log cleared by %s (%d entries)", user, count)
+        return web.json_response({"deleted": count})
+
     async def options_get(_request: web.Request) -> web.StreamResponse:
         """App options (v3 has no secret options)."""
         return web.json_response(mgr.options_view())
@@ -453,6 +472,8 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Applic
     app.router.add_get("/api/firmware/{name}/download", firmware_download)
     app.router.add_post("/api/firmware/{name}/delete", firmware_delete)
     app.router.add_get("/api/logs", logs)
+    app.router.add_post("/api/logs/clear", logs_clear)
+    app.router.add_post("/api/logs/{id}/delete", log_delete)
     app.router.add_get("/api/settings", options_get)
     app.router.add_post("/api/settings", options_save)
     app.router.add_post("/api/settings/download-base/confirm", confirm_download_base)

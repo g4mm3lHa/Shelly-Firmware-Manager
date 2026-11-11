@@ -20,9 +20,9 @@ from helpers import store
 
 
 def test_install_timing_constants():
-    """Polling unchanged (30 s, every 10 s, max. 5 min); early abort after 3 min."""
+    """Polling unchanged (30 s, every 10 s); 3.1.1: early abort after 2 min, max. 3 min."""
     assert (manager.INSTALL_FIRST_CHECK_S, manager.INSTALL_POLL_S) == (30, 10)
-    assert (manager.INSTALL_NO_DOWNLOAD_S, manager.INSTALL_WAIT_S) == (180, 300)
+    assert (manager.INSTALL_NO_DOWNLOAD_S, manager.INSTALL_WAIT_S) == (120, 180)
 
 
 @pytest.fixture
@@ -397,3 +397,42 @@ async def test_check_after_installation_gives_up_if_the_slot_stays_busy(mgr, net
     mgr.reloading.add(B)
     await mgr._check_after_installs()
     assert len(checks(mgr)) == 1 and mgr._followup == set() and not mgr.checking
+
+
+# ---------------------------------------------------------------- "Updated" mark and texts (3.1.1)
+
+
+async def test_updated_mark_stays_until_the_next_user_check(mgr, net, updating):
+    """A confirmed installation marks the device as just updated: the automatic check
+    after the installation keeps the mark, a single check of the device or a full
+    check ends it."""
+    await mgr.scan()
+    assert await mgr.install(A, mgr.devices[A]["sha256"], "alice") is True
+    assert await mgr.install(C, mgr.devices[C]["sha256"], "alice") is True
+    state = {d["id"]: d for d in mgr.public_state()["devices"]}
+    assert state[A]["updated"] is True and state[A]["status"] == manager.STATUS_CURRENT and not state[B]["updated"]
+    assert len(checks(mgr)) == 2  # the checks after the installations kept the mark
+    await mgr.check_device(A)
+    assert "updated" not in mgr.devices[A] and mgr.devices[C]["updated"] is True
+    await mgr.scan()
+    assert "updated" not in mgr.devices[C]
+
+
+async def test_no_updated_mark_after_downgrade_or_unconfirmed_installation(mgr, net, updating):
+    await mgr.scan()
+    updating["accept"] = False
+    assert await mgr.install(A, mgr.devices[A]["sha256"], "alice") is False
+    assert "updated" not in mgr.devices[A]
+    updating["accept"] = True
+    _, older = store(mgr, "Plus1", "1.3.0")
+    assert await mgr.install(B, older, "alice", downgrade=True) is True
+    assert "updated" not in mgr.devices[B] and mgr.devices[B]["version"] == "1.3.0"
+
+
+def test_diagnosis_after_a_download_recommends_websocket_debugging(mgr):
+    """3.1.1: the hint for a Shelly that fetched the file but kept its version."""
+    dev = {"file": "x.zip", "version": "2.0.3", "origin": "http://192.168.1.10"}
+    mgr.downloads["x.zip"] = {"served": {"192.168.1.10": 1}, "rejected": set()}
+    text = mgr._install_diagnosis(dev)
+    assert text.endswith("check the device log or the Shelly's web interface and try again with enabled websocket debugging")
+    assert "still reports 2.0.3" in text

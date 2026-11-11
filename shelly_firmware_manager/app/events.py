@@ -15,10 +15,17 @@ off by a power loss) is skipped.
 
 Severity (v3): every new entry carries "severity" = success | warning | error.
 Historic entries without it are never rewritten; readers derive it from "ok".
+
+Deleting (3.1.1): every entry carries a random "id" (entries of older versions get one
+at the first start, the file is rewritten once). An administrator can delete a single entry
+or the whole log in the Logs tab; clearing the log leaves one entry that names who
+cleared it.
 """
 
 import json
 import logging
+import re
+import secrets
 import time
 from collections.abc import Mapping
 from pathlib import Path
@@ -28,7 +35,9 @@ from shelly import clip
 
 log = logging.getLogger("sfm.events")
 
-KINDS = ("check", "download", "upload", "install", "delete", "setting", "password", "options")
+# "log": the log itself was cleared (see EventLog.clear)
+KINDS = ("check", "download", "upload", "install", "delete", "setting", "password", "options", "log")
+ENTRY_ID_RE = re.compile(r"^[0-9a-f]{12}$")  # "id" of an entry, also checked for IDs from the URL
 SEVERITIES = ("success", "warning", "error")  # ordered from lowest to highest
 COMPACT_SLACK = 200  # dropped lines tolerated in the file before it is rewritten
 
@@ -78,6 +87,10 @@ class EventLog:
                 except ValueError:
                     rewrite = True  # damaged line: dropped by the next rewrite
         self.entries = [e for e in rows if isinstance(e, dict) and e.get("kind") in KINDS]
+        for entry in self.entries:  # entries written before 3.1.1 (or with a damaged ID)
+            if not ENTRY_ID_RE.match(str(entry.get("id") or "")):
+                entry["id"] = secrets.token_hex(6)
+                rewrite = True
         if self._prune() or rewrite or len(self.entries) != self._lines:
             self._compact()
 
@@ -87,7 +100,13 @@ class EventLog:
         severity defaults to "success"/"error" from ok; "ok" is kept for the
         legacy readers and is False only for errors."""
         severity = severity if severity in SEVERITIES else ("success" if ok else "error")
-        entry: dict[str, Any] = {"ts": int(time.time()), "kind": kind, "ok": severity != "error", "severity": severity}
+        entry: dict[str, Any] = {
+            "id": secrets.token_hex(6),
+            "ts": int(time.time()),
+            "kind": kind,
+            "ok": severity != "error",
+            "severity": severity,
+        }
         entry.update({k: v for k, v in fields.items() if v is not None})
         self.entries.append(entry)
         self._prune()
@@ -105,6 +124,24 @@ class EventLog:
     def list(self) -> list[dict[str, Any]]:
         """All entries, newest first (the UI groups them by day)."""
         return self.entries[::-1]
+
+    def remove(self, entry_id: str) -> bool:
+        """Delete the entry with this ID (3.1.1). False if there is none (anymore)."""
+        kept = [e for e in self.entries if e.get("id") != entry_id]
+        if len(kept) == len(self.entries):
+            return False
+        self.entries = kept
+        self._compact()
+        return True
+
+    def clear(self, user: str) -> int:
+        """Delete all entries (3.1.1) and record who did it – this one entry stays,
+        so an emptied log is never silent. Returns the number of deleted entries."""
+        count = len(self.entries)
+        self.entries = []
+        self._compact()
+        self.add("log", action="cleared", entries=count, user=user)
+        return count
 
     def _prune(self) -> bool:
         """Apply the retention rules; True if something was removed."""

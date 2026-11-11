@@ -59,10 +59,14 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 - **Check now** checks all devices; the header shows the last check and the schedule.
 - Devices with updates are listed on top, then all other devices, ignored devices at
   the end. Search, filters (Updates, Errors, Up to date, Ignored) and a column chooser
-  help with larger installations.
+  help with larger installations. A device you just updated stays on top as "Updated"
+  until you check it again or the next full check runs.
 - The action icons show and change power-on action, eco mode, password protection,
   access point, Bluetooth, actions and schedules, and restart the device. A "?" means
-  the value is currently unknown.
+  the value is currently unknown. Colours: power-on action green = every output
+  restores its last state, red = another value; lock green = protected and the password
+  is stored in the app, yellow = protected but the password is not stored here; access
+  point, actions and schedules red = active.
 - The row menu ⋮ offers: Check for updates (this device only), Install update,
   Downgrade, Reload device info, Ignore / Resume device, Open web UI, device settings,
   Status details and Restart.
@@ -73,7 +77,8 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 |---|---|
 | Up-To-Date | Nothing newer is stored and the Shelly server offers no newer stable firmware |
 | Available | An update exists, the firmware is provided at the next check |
-| Ready | Firmware provided (from the firmware store or downloaded), waiting for your approval |
+| Ready | Firmware provided (from the firmware store or downloaded), waiting for your approval – "Install" next to the status opens the installation dialog |
+| Updated | The installation was confirmed; shown until the next check of the device |
 | Queued / Installing | Installation waiting for a free slot / running (with progress for Gen2+) |
 | Unconfirmed | The installation ran, but the target version was not confirmed (see the details) |
 | Error | Check, download or installation failed |
@@ -112,7 +117,7 @@ and kept with the stored firmware; it is not requested again afterwards.
 3. **Approve installation.** The Shelly downloads the firmware from the app and restarts.
 
 The app then checks every 10 seconds until the device reports exactly the target
-version (at most 5 minutes). If that does not happen, the status becomes "Unconfirmed"
+version (at most 3 minutes). If that does not happen, the status becomes "Unconfirmed"
 with a diagnosis – see [Troubleshooting](#troubleshooting). Scheduled checks create a
 Home Assistant notification when they find new updates.
 
@@ -124,7 +129,7 @@ of the Shelly server – is provided right away. This check appears in the log a
 ### Downgrade (Gen2+)
 
 Row menu ⋮ → **Downgrade** lists all stored versions that are older than the installed
-one. Choose a version, check the installation dialog and confirm a second time. The
+one (the entry is greyed out while no older version is stored). Choose a version, check the installation dialog and confirm a second time. The
 downgrade runs like a normal installation and is logged as such. It is available for
 up-to-date and ignored devices too, but never for Gen1.
 
@@ -158,7 +163,11 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
 The activity log records checks, downloads, uploads, installations and downgrades,
 deleted firmware, setting and password changes on devices and changes of the app
 settings – each with time, user and result (success, warning, error). Filters and a
-device search help to find entries. Passwords never appear in the log.
+device search help to find entries. Passwords never appear in the log. Consecutive
+entries of the same device are marked by a bar at the side.
+
+The bin icon deletes a single entry, **Delete all logs** the whole log (each after a
+confirmation). After clearing, one entry remains that names who cleared the log.
 
 ### Settings
 
@@ -263,8 +272,9 @@ server interfaces are not officially guaranteed.
   `http://192.168.178.50:8098` is still set, installations are blocked until you change
   it or confirm it with "This address is correct".
 - **From 3.0.0 or 3.0.1:** nothing to do. From 3.0.0 the activity log is converted once
-  to its new storage format at the first start. 3.1.0 adds a watchdog: check that the
-  **Watchdog** switch on the app page is on.
+  to its new storage format at the first start. 3.1.1 adds a watchdog: check that the
+  **Watchdog** switch on the app page is on. Log entries get an internal ID at the
+  first start of 3.1.1 (needed to delete single entries).
 - **From 2.x or 1.x:** since 3.0.1 the conversion code of these versions is no longer
   included. Update to 3.0.0 first and start it once (it removes the former shared Shelly
   password from the stored options and converts the table settings), then update to
