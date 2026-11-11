@@ -1,4 +1,4 @@
-# Shelly Firmware Manager 3.1.1-rc1
+# Shelly Firmware Manager 3.1.1-rc2
 
 Home Assistant app that keeps your Shelly devices (Gen1 to Gen4) up to date – locally
 and under your control. It finds all Shellys of the Shelly integration, checks for new
@@ -40,9 +40,9 @@ To update the app, replace the folder, run "Check for updates" and then "Update"
 
 ## Development
 
-Not part of the app image. The UI sources are in `shelly_firmware_manager/ui-src/`;
-`tools/build_ui.py` builds the shipped files in `app/static/` (pinned esbuild 0.28.2,
-`--check` verifies them). Tests mock all network access. One command runs the checks
+Not part of the app image. The UI sources are in `shelly_firmware_manager/ui-src/`
+(ES modules in `js/`, `style.css`); `tools/build_ui.py` bundles and minifies them into
+the shipped files in `app/static/` (pinned esbuild 0.28.2, `--check` verifies them). Tests mock all network access. One command runs the checks
 in the efficient order (lint, build check, version match, backend tests, optionally
 the Playwright UI checks against demo servers with fake data):
 

@@ -2,9 +2,25 @@
 
 ## 3.1.1
 
-Release candidate rc1 (not released). Contains everything of 3.1.0 (which was never
+Release candidate rc2 (not released). Contains everything of 3.1.0 (which was never
 released) plus the changes below: clearer states in the device list, log entries can be
-deleted, shorter waiting time after an installation.
+deleted, shorter waiting time after an installation. rc2: internal restructuring only.
+
+Changes in rc2
+- No change of behaviour, no new function: the code was restructured for easier
+  maintenance.
+  - Backend: the former `manager.py` (about 2200 lines, one class) is split into six
+    modules, one layer each (`manager_core`, `manager_store`, `manager_devices`,
+    `manager_checks`, `manager_installs`, `manager`); the paths of the app's storage
+    are in `data_paths`. The class `Manager` and all its methods are unchanged.
+  - UI: the former `ui-src/app.js` is split into eight ES modules in `ui-src/js/`
+    (core, devices, install, device-settings, firmware, logs, app-settings, main);
+    `tools/build_ui.py` bundles them into the one shipped `app/static/app.js`.
+  - Development (not part of the image): extended lint rules in `pyproject.toml`
+    (comprehensions, performance, returns, pathlib, refurb, unused arguments, logging,
+    print statements, ruff's own rules) with the few findings fixed; the installation
+    timings of the tests come from one fixture; the UI feature checks of the Firmware
+    suite are split into one helper per area.
 
 Changes in rc1
 - Devices: red "Install" button next to the status "Ready" (also on phones). It opens

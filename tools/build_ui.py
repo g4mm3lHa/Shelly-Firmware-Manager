@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Build the minified UI files from the readable sources (development only).
 
-  shelly_firmware_manager/ui-src/{app.js,style.css}  readable, commented sources (edit these)
+  shelly_firmware_manager/ui-src/js/*.js    readable, commented ES modules (edit these;
+                                            entry module: main.js)
+  shelly_firmware_manager/ui-src/style.css  readable, commented styles (edit this)
   shelly_firmware_manager/app/static/{app.js,style.css}  minified build output (shipped)
 
 Runs esbuild locally (pinned version, via npx; nothing is uploaded, the image needs no
-Node). Every output starts with a comment holding the SHA-256 of its source; the test
-suite fails if an output is older than its source (tests/test_build.py).
+Node): the modules are bundled into one classic script (IIFE), the styles are minified.
+Every output starts with a comment holding the SHA-256 of its sources; the test suite
+fails if an output is older than its sources (tests/test_build.py).
 
 Usage: python tools/build_ui.py [--check]
   --check  only verify that the outputs match the sources (no Node needed)
@@ -22,17 +25,27 @@ ROOT = Path(__file__).resolve().parents[1] / "shelly_firmware_manager"
 SRC = ROOT / "ui-src"
 OUT = ROOT / "app" / "static"
 FILES = ("app.js", "style.css")
-HEADER = "/* Built from ui-src/{name} sha256:{sha} – do not edit, run tools/build_ui.py */\n"
+JS_DIR = SRC / "js"  # ES modules bundled into app.js
+JS_ENTRY = JS_DIR / "main.js"
+HEADER = "/* Built from ui-src/{source} sha256:{sha} – do not edit, run tools/build_ui.py */\n"
+
+
+def sources(name):
+    """Source files of an output: all modules for app.js, the one file otherwise."""
+    return sorted(JS_DIR.glob("*.js")) if name == "app.js" else [SRC / name]
 
 
 def source_sha(name):
-    """SHA-256 of a source file."""
-    return hashlib.sha256((SRC / name).read_bytes()).hexdigest()
+    """SHA-256 over the names and contents of the source files of an output."""
+    digest = hashlib.sha256()
+    for path in sources(name):
+        digest.update(path.name.encode() + b"\0" + path.read_bytes() + b"\0")
+    return digest.hexdigest()
 
 
 def header(name):
     """First line of the built file."""
-    return HEADER.format(name=name, sha=source_sha(name))
+    return HEADER.format(source="js/*.js" if name == "app.js" else name, sha=source_sha(name))
 
 
 def is_current(name):
@@ -42,15 +55,18 @@ def is_current(name):
 
 
 def build(name):
-    """Minify one file with esbuild (syntax kept as is: no target lowering)."""
+    """Bundle the modules / minify the styles with esbuild (syntax kept as is: no
+    target lowering)."""
+    source = [str(JS_ENTRY), "--bundle", "--format=iife"] if name == "app.js" else [str(SRC / name)]
     result = subprocess.run(  # nosec B603 B607  # fixed arguments, no shell, developer tool
-        ["npx", "--yes", ESBUILD, str(SRC / name), "--minify", "--log-level=warning"],
+        ["npx", "--yes", ESBUILD, *source, "--minify", "--log-level=warning"],
         check=True,
         capture_output=True,
         text=True,
     )
     (OUT / name).write_text(header(name) + result.stdout, encoding="utf-8")
-    print(f"{name}: {(SRC / name).stat().st_size} -> {(OUT / name).stat().st_size} bytes")
+    size = sum(path.stat().st_size for path in sources(name))
+    print(f"{name}: {size} -> {(OUT / name).stat().st_size} bytes")
 
 
 def main():
