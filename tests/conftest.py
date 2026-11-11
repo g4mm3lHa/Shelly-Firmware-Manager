@@ -13,7 +13,9 @@ import pytest
 APP = Path(__file__).resolve().parents[1] / "shelly_firmware_manager" / "app"
 sys.path.insert(0, str(APP))
 
+import data_paths
 import manager
+import manager_installs
 import shelly
 import web_ui
 from aiohttp.test_utils import TestClient, TestServer
@@ -82,7 +84,7 @@ def net(monkeypatch, tmp_path):
         "CHANGELOG_FILE": data / "changelog.json",
         "EVENTS_FILE": data / "events.json",
     }.items():
-        monkeypatch.setattr(manager, name, value)
+        monkeypatch.setattr(data_paths, name, value)
 
     async def resolve(url):
         return url.rstrip("/")
@@ -152,6 +154,16 @@ def net(monkeypatch, tmp_path):
     fake.refresh = refresh
     fake.data = data
     return fake
+
+
+@pytest.fixture
+def quick_install(monkeypatch):
+    """Short installation timings for installs that run to the end in a test
+    (first poll at once, then every 10 ms, limits of 0.1 s and 0.3 s)."""
+    monkeypatch.setattr(manager_installs, "INSTALL_FIRST_CHECK_S", 0)
+    monkeypatch.setattr(manager_installs, "INSTALL_POLL_S", 0.01)
+    monkeypatch.setattr(manager_installs, "INSTALL_NO_DOWNLOAD_S", 0.1)
+    monkeypatch.setattr(manager_installs, "INSTALL_WAIT_S", 0.3)
 
 
 @pytest.fixture

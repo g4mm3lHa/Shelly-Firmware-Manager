@@ -5,12 +5,11 @@ All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test 
 import asyncio
 import json
 
-import manager
+import data_paths
 import pytest
 import shelly
-from shelly import ShellyError
-
 from conftest import A, B, C
+from shelly import ShellyError
 
 
 async def test_settings_refused_while_device_checked(mgr, net):
@@ -208,7 +207,7 @@ async def test_secrets_never_in_state_or_logs(mgr, device):
     """Neither password nor HA1 appear in the log, state file or public state."""
     await mgr.set_device_password(A, "enable", "Very-Secret-1", confirm=True, acknowledged=True)
     ha1 = mgr.credentials.entries[A]["ha1"]
-    blobs = [json.dumps(mgr.events.entries), manager.STATE_FILE.read_text(), json.dumps(mgr.public_state())]
+    blobs = [json.dumps(mgr.events.entries), data_paths.STATE_FILE.read_text(), json.dumps(mgr.public_state())]
     assert not any("Very-Secret-1" in b or ha1 in b for b in blobs)
 
 

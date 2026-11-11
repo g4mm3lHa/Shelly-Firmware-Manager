@@ -11,9 +11,10 @@ Deliberately minimal:
 
 import logging
 
+import data_paths
 from aiohttp import web
 from aiohttp.typedefs import Handler
-from manager import FW_DIR, Manager
+from manager import Manager
 from shelly import FW_NAME_RE
 
 log = logging.getLogger("sfm.download")
@@ -39,10 +40,10 @@ def build_download_app(mgr: Manager) -> web.Application:
         client = request.remote or "?"
         if not FW_NAME_RE.match(name) or not mgr.may_download(name, client):
             log.warning("Download rejected: %s from %s", name[:80], client)
-            raise web.HTTPNotFound()
-        path = FW_DIR / name
+            raise web.HTTPNotFound
+        path = data_paths.FW_DIR / name
         if not path.is_file() or path.is_symlink():
-            raise web.HTTPNotFound()
+            raise web.HTTPNotFound
         headers = {  # security headers are set by harden()
             "Content-Type": "application/octet-stream",
             "Content-Disposition": f'attachment; filename="{name}"',

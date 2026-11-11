@@ -29,11 +29,13 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 import aiohttp
+import data_paths
 from aiohttp import web
 from aiohttp.typedefs import Handler
 from download_server import strip_server_header
 from events import ENTRY_ID_RE, user_from
-from manager import DOWNLOAD_BASE_MESSAGES, FW_DIR, Manager
+from manager import Manager
+from manager_core import DOWNLOAD_BASE_MESSAGES
 from shelly import FW_NAME_RE, MAX_FW_SIZE, ShellyError
 
 log = logging.getLogger("sfm.ui")
@@ -328,7 +330,7 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Applic
     async def firmware_download(request: web.Request) -> web.StreamResponse:
         """Stored firmware file as download with a descriptive file name."""
         name = firmware_name_from(request)
-        path = FW_DIR / name
+        path = data_paths.FW_DIR / name
         if path.is_symlink() or not path.is_file():
             raise web.HTTPNotFound(text="File missing")
         meta = mgr.firmware[name]

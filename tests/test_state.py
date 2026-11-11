@@ -5,19 +5,20 @@ All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test 
 import json
 from datetime import UTC, datetime
 
+import data_paths
 import events
 import manager
+import manager_core
 import pytest
+from conftest import OPTIONS, A
 from credentials import Credentials
 from events import EventLog
-
-from conftest import OPTIONS, A
 from helpers import chunks, firmware_zip
 
 
 async def test_partial_downloads_removed_at_start(net):
     """Leftover .part files from a crash are deleted when the app starts."""
-    fw = manager.FW_DIR
+    fw = data_paths.FW_DIR
     fw.mkdir(parents=True)
     (fw / ".part-0123456789abcdef").write_bytes(b"half")
     (fw / ("a" * 64 + ".zip")).write_bytes(b"keep")
@@ -29,36 +30,36 @@ async def test_partial_downloads_removed_at_start(net):
 async def test_save_failure_keeps_previous_state(mgr, net, monkeypatch):
     """Write error (e.g. disk full): old state.json intact, error shown, check continues."""
     await mgr.scan()
-    old = manager.STATE_FILE.read_text()
-    real = type(manager.STATE_FILE).write_text
+    old = data_paths.STATE_FILE.read_text()
+    real = type(data_paths.STATE_FILE).write_text
 
     def failing(self, *args, **kwargs):
         if self.suffix == ".tmp":
             raise OSError(28, "No space left on device")
         return real(self, *args, **kwargs)
 
-    monkeypatch.setattr(type(manager.STATE_FILE), "write_text", failing)
+    monkeypatch.setattr(type(data_paths.STATE_FILE), "write_text", failing)
     assert await mgr.scan() is True
-    assert manager.STATE_FILE.read_text() == old
+    assert data_paths.STATE_FILE.read_text() == old
     assert "No space left" in mgr.storage_error
     assert mgr.public_state()["storage_error"]
-    assert not manager.STATE_FILE.with_suffix(".tmp").exists()
-    monkeypatch.setattr(type(manager.STATE_FILE), "write_text", real)
+    assert not data_paths.STATE_FILE.with_suffix(".tmp").exists()
+    monkeypatch.setattr(type(data_paths.STATE_FILE), "write_text", real)
     assert mgr.save() and mgr.storage_error is None
 
 
 async def test_state_file_compact_and_no_runtime_state(mgr, net):
     """state.json is compact JSON and does not persist activity/progress."""
     await mgr.scan()
-    text = manager.STATE_FILE.read_text()
+    text = data_paths.STATE_FILE.read_text()
     assert "\n" not in text and "activity" not in text and "progress" not in json.loads(text)
 
 
 async def test_restart_during_install_is_unconfirmed(net):
     """An installation interrupted by a restart is never shown as success."""
-    manager.STATE_FILE.write_text(json.dumps({"devices": {A: {"name": "K", "status": "installing", "last_check": 5}}}))
+    data_paths.STATE_FILE.write_text(json.dumps({"devices": {A: {"name": "K", "status": "installing", "last_check": 5}}}))
     m = manager.Manager(dict(OPTIONS), session=None, token="t")
-    assert m.devices[A]["status"] == manager.STATUS_UNCLEAR
+    assert m.devices[A]["status"] == manager_core.STATUS_UNCLEAR
     assert m.progress is None and m.activity == {}
 
 

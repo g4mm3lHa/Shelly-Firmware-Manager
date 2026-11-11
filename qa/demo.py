@@ -15,24 +15,23 @@ from pathlib import Path
 
 app_dir, port, scenario = sys.argv[1], int(sys.argv[2]), sys.argv[3]
 sys.path.insert(0, app_dir)
-import manager  # noqa: E402
-import web_ui  # noqa: E402
-from aiohttp import web  # noqa: E402
-import logging  # noqa: E402
+import data_paths
+import manager
+import web_ui
+from aiohttp import web
+import logging
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 data = Path(tempfile.mkdtemp())
 for name, value in {"STATE_FILE": data / "state.json", "FW_DIR": data / "fw", "CREDENTIALS_FILE": data / "c.json",
                     "CHANGELOG_FILE": data / "cl.json", "EVENTS_FILE": data / "ev.json"}.items():
-    setattr(manager, name, value)
-if hasattr(web_ui, "FW_DIR"):
-    web_ui.FW_DIR = data / "fw"
+    setattr(data_paths, name, value)
 
 opts = {"check_interval_days": 7, "check_time": "02:45", "download_base_url": "http://192.168.1.2:8098", "restrict_downloads_to_devices": True,
         "gen1_updates_enabled": True, "gen1_allowed_types": ["SHSW-1"], "max_parallel_installs": 2,
         "log_retention_days": 30, "log_entry_limit": 1000}
 if scenario == "legacy":
-    import app_options  # noqa: E402
+    import app_options
     opts["download_base_url"] = app_options.LEGACY_DOWNLOAD_BASE
 elif scenario == "missing":
     del opts["download_base_url"]

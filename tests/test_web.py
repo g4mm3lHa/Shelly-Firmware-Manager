@@ -9,7 +9,6 @@ import re
 import shelly
 import web_ui
 from aiohttp.test_utils import TestClient, TestServer
-
 from conftest import A, B, C
 from helpers import binary, firmware_zip, store
 

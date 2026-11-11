@@ -189,7 +189,7 @@ class _Gen1Parser(HTMLParser):
             self.cell.append(data)
 
 
-_NO_CODE = re.compile(r"<(script|style)\b.*?</\1\s*>", re.S | re.I)
+_NO_CODE = re.compile(r"<(script|style)\b.*?</\1\s*>", re.DOTALL | re.IGNORECASE)
 
 
 def parse(gen: int, html: str) -> dict[str, dict[str, Any]]:

@@ -5,21 +5,22 @@ All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test 
 
 import asyncio
 
-import manager
+import data_paths
+import manager_checks
+import manager_core
 import pytest
 import shelly
-from shelly import ShellyError
-
 from conftest import A, B, C
 from helpers import make_manager, store
+from shelly import ShellyError
 
 
 async def test_full_check_provides_firmware_and_reuses_download(mgr, net):
     """One download per firmware, reused for the second device; progress is cleared."""
     assert await mgr.scan(user="u")
-    assert mgr.devices[A]["status"] == manager.STATUS_READY
-    assert mgr.devices[C]["status"] == manager.STATUS_READY
-    assert mgr.devices[B]["status"] == manager.STATUS_CURRENT
+    assert mgr.devices[A]["status"] == manager_core.STATUS_READY
+    assert mgr.devices[C]["status"] == manager_core.STATUS_READY
+    assert mgr.devices[B]["status"] == manager_core.STATUS_CURRENT
     assert net.downloads == 1  # second device reuses the stored file
     assert net.offer_calls == 1  # one offer per (gen, type)
     assert mgr.progress is None and mgr.activity == {} and not mgr.checking
@@ -37,7 +38,7 @@ async def test_single_check_keeps_last_scan_and_logs(mgr, net):
     mgr.schedule_changed.clear()
     net.devices[A] = ("Kitchen", "192.168.1.10", "1.5.0", "1.5.0")  # updated meanwhile
     result = await mgr.check_device(A, user="alice")
-    assert result == {"status": manager.STATUS_CURRENT, "error": None}
+    assert result == {"status": manager_core.STATUS_CURRENT, "error": None}
     assert mgr.last_scan == before
     assert not mgr.schedule_changed.is_set()
     assert mgr.devices[B] == other  # other devices untouched
@@ -50,10 +51,10 @@ async def test_single_check_downloads_missing_firmware(mgr, net):
     """Missing firmware is downloaded like in the full check; stored firmware is reused."""
     mgr.devices[A] = {"name": "Kitchen"}
     await mgr.check_device(A)
-    assert mgr.devices[A]["status"] == manager.STATUS_READY and net.downloads == 1
+    assert mgr.devices[A]["status"] == manager_core.STATUS_READY and net.downloads == 1
     mgr.devices[C] = {"name": "Garage"}
     await mgr.check_device(C)
-    assert mgr.devices[C]["status"] == manager.STATUS_READY and net.downloads == 1
+    assert mgr.devices[C]["status"] == manager_core.STATUS_READY and net.downloads == 1
 
 
 async def test_single_check_error_keeps_last_success(mgr, net):
@@ -65,7 +66,7 @@ async def test_single_check_error_keeps_last_success(mgr, net):
     net.unreachable.add(B)
     result = await mgr.check_device(B)
     dev = mgr.devices[B]
-    assert result["status"] == manager.STATUS_ERROR
+    assert result["status"] == manager_core.STATUS_ERROR
     assert dev["last_success"] == success < dev["last_check"]
     assert dev["version"] == "1.5.0"
 
@@ -75,7 +76,7 @@ async def test_single_check_unregistered(mgr, net):
     await mgr.scan()
     del net.devices[C]
     result = await mgr.check_device(C)
-    assert mgr.devices[C]["status"] == manager.STATUS_UNREGISTERED
+    assert mgr.devices[C]["status"] == manager_core.STATUS_UNREGISTERED
     assert "registry" in result["error"]
 
 
@@ -90,7 +91,7 @@ async def test_reservation_blocks_second_check(mgr, net):
     await mgr.scan()
     net.gate = asyncio.Event()
     mgr.reserve_check("device", A)
-    assert mgr.checking and mgr.activity[A] == manager.ACTIVITY_WAITING
+    assert mgr.checking and mgr.activity[A] == manager_core.ACTIVITY_WAITING
     with pytest.raises(ShellyError):
         mgr.reserve_check("all")
     with pytest.raises(ShellyError):
@@ -98,7 +99,7 @@ async def test_reservation_blocks_second_check(mgr, net):
     assert await mgr.scan() is False  # automatic check during a reserved one: skipped
     task = asyncio.create_task(mgr.check_device(A))
     await asyncio.sleep(0.05)
-    assert mgr.activity[A] == manager.ACTIVITY_CHECKING
+    assert mgr.activity[A] == manager_core.ACTIVITY_CHECKING
     assert mgr.progress["kind"] == "device" and mgr.progress["phase"] == "devices"
     assert "Checking Kitchen" in mgr.busy
     net.gate.set()
@@ -140,13 +141,13 @@ async def test_cancel_during_download_leaves_no_file(mgr, net):
     net.download_gate = asyncio.Event()
     task = asyncio.create_task(mgr.scan())
     await asyncio.sleep(0.05)
-    assert manager.ACTIVITY_DOWNLOADING in mgr.activity.values()
+    assert manager_core.ACTIVITY_DOWNLOADING in mgr.activity.values()
     assert mgr.progress["phase"] == "download"
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
     assert mgr.firmware == {} and mgr.activity == {}
-    assert all(d.get("status") != manager.STATUS_READY for d in mgr.devices.values())
+    assert all(d.get("status") != manager_core.STATUS_READY for d in mgr.devices.values())
 
 
 def changelog_page(mgr, versions=("1.5.0",)):
@@ -224,7 +225,7 @@ async def test_cancelled_single_check_leaves_no_running_download(mgr, net):
     """Same for the single-device check."""
     await mgr.scan()  # device known
     for name in list(mgr.firmware):  # force a new download (a provided file
-        (manager.FW_DIR / name).unlink()  # cannot be deleted in the UI, remove it directly)
+        (data_paths.FW_DIR / name).unlink()  # cannot be deleted in the UI, remove it directly)
     mgr.firmware.clear()
     net.download_gate = asyncio.Event()
     mgr.reserve_check("device", A)
@@ -267,7 +268,7 @@ async def test_ignored_device_not_contacted_and_stays_registered(mgr, net):
     await mgr.scan()
     assert net.info_calls == calls + 2  # only B and C
     dev = mgr.devices[A]
-    assert dev["status"] == manager.STATUS_READY and dev["name"] == "Kitchen renamed"
+    assert dev["status"] == manager_core.STATUS_READY and dev["name"] == "Kitchen renamed"
     check = [e for e in mgr.events.entries if e["kind"] == "check"][-1]
     assert check["devices"] == 2
     await mgr.check_device(A)  # explicit single-device check stays possible
@@ -291,7 +292,7 @@ async def test_reload_device_reads_only_the_device(mgr, net):
     # Version reached the known offer (e.g. updated in the Shelly app): up to date
     net.devices[A] = (*net.devices[A][:2], "1.5.0", "1.5.0")
     await mgr.reload_device(A)
-    assert dev["status"] == manager.STATUS_CURRENT and dev["last_update"] and net.offer_calls == offers
+    assert dev["status"] == manager_core.STATUS_CURRENT and dev["last_update"] and net.offer_calls == offers
 
 
 async def test_reload_partial_failure_and_locks(mgr, net):
@@ -303,7 +304,7 @@ async def test_reload_partial_failure_and_locks(mgr, net):
     net.gate = asyncio.Event()
     task = asyncio.create_task(mgr.scan())
     await asyncio.sleep(0.05)
-    with pytest.raises(manager.ShellyError):
+    with pytest.raises(shelly.ShellyError):
         await mgr.reload_device(B)
     net.gate.set()
     await task
@@ -328,9 +329,9 @@ async def test_parallel_check_is_bounded_and_single_flight(mgr, net, monkeypatch
 
     monkeypatch.setattr(shelly, "device_info", counting)
     assert await mgr.scan()
-    assert peak == manager.CHECK_PARALLEL
+    assert peak == manager_checks.CHECK_PARALLEL
     assert net.offer_calls == 1 and net.downloads == 1
-    ready = [d for d in mgr.devices.values() if d["status"] == manager.STATUS_READY]
+    ready = [d for d in mgr.devices.values() if d["status"] == manager_core.STATUS_READY]
     assert len(ready) == 12
     # Devices reached after the download get the same manufacturer offer – a
     # file downloaded by this check is not labelled as "from the store"
@@ -368,7 +369,7 @@ async def test_store_first_provides_the_next_higher_version_without_asking_the_s
     pending = {i: mgr.devices[i]["pending_version"] for i in (A, B, C)}
     assert pending == {A: "1.5.0", B: "1.6.0", C: "1.5.0"}  # A, C: 1.4.0 installed, B: 1.5.0
     dev = mgr.devices[A]
-    assert dev["status"] == manager.STATUS_READY and dev["offer_version"] == "1.5.0"
+    assert dev["status"] == manager_core.STATUS_READY and dev["offer_version"] == "1.5.0"
     assert dev["offer_source"] == "store" and dev["source_url"] is None
     assert dev["message"] == "Provided from the firmware store, not installed"
     assert mgr.approval_matches(A, dev["sha256"]) and mgr.firmware[dev["file"]]["version"] == "1.5.0"
@@ -393,18 +394,18 @@ async def test_server_is_asked_once_for_devices_without_a_stored_version(mgr, ne
 async def test_single_stored_newer_version_is_used_and_uploads_count(mgr, net):
     """One newer file is enough, and an uploaded file is provided like a download –
     marked as upload."""
-    name, sha = store(mgr, "Plus1", "1.6.0", source=manager.SOURCE_UPLOAD)
+    name, sha = store(mgr, "Plus1", "1.6.0", source=manager_core.SOURCE_UPLOAD)
     mgr.devices[A] = {"name": "Kitchen"}
     await mgr.check_device(A)
     dev = mgr.devices[A]
-    assert net.offer_calls == 0 and dev["status"] == manager.STATUS_READY
+    assert net.offer_calls == 0 and dev["status"] == manager_core.STATUS_READY
     assert (dev["file"], dev["sha256"], dev["pending_version"]) == (name, sha, "1.6.0")
     assert dev["offer_source"] == "upload" and "uploaded file" in dev["message"]
     assert mgr.public_state()["devices"][0]["offer_source"] == "upload"
 
 
 async def test_download_is_preferred_over_an_upload_of_the_same_version(mgr, net):
-    store(mgr, "Plus1", "1.5.0", source=manager.SOURCE_UPLOAD, content=b"u" * 3000)
+    store(mgr, "Plus1", "1.5.0", source=manager_core.SOURCE_UPLOAD, content=b"u" * 3000)
     name, _ = store(mgr, "Plus1", "1.5.0")
     mgr.devices[A] = {"name": "Kitchen"}
     await mgr.check_device(A)
@@ -418,7 +419,7 @@ async def test_provided_update_is_replaced_by_the_stored_version(mgr, net):
     await mgr.scan()
     old = mgr.devices[A]["sha256"]
     assert mgr.devices[A]["pending_version"] == "1.6.0" and mgr.devices[A]["offer_source"] == "manufacturer"
-    name, sha = store(mgr, "Plus1", "1.5.0", source=manager.SOURCE_UPLOAD)
+    name, sha = store(mgr, "Plus1", "1.5.0", source=manager_core.SOURCE_UPLOAD)
     calls = net.offer_calls
     await mgr.check_device(A)
     dev = mgr.devices[A]
@@ -434,14 +435,14 @@ async def test_damaged_stored_file_is_skipped(mgr, net):
     taken, and without another one the server is asked."""
     bad, _ = store(mgr, "Plus1", "1.5.0")
     good, _ = store(mgr, "Plus1", "1.6.0")
-    (manager.FW_DIR / bad).write_bytes(b"damaged" * 500)
+    (data_paths.FW_DIR / bad).write_bytes(b"damaged" * 500)
     mgr.devices.update({A: {"name": "Kitchen"}, C: {"name": "Garage"}})
     await mgr.check_device(A)
     assert mgr.devices[A]["file"] == good and bad not in mgr.firmware and net.offer_calls == 0
-    (manager.FW_DIR / good).unlink()
+    (data_paths.FW_DIR / good).unlink()
     await mgr.check_device(C)
     assert net.offer_calls == 1 and mgr.devices[C]["offer_source"] == "manufacturer"
-    assert good not in mgr.firmware and mgr.devices[A]["status"] == manager.STATUS_READY  # A: checked again later
+    assert good not in mgr.firmware and mgr.devices[A]["status"] == manager_core.STATUS_READY  # A: checked again later
 
 
 async def test_stored_file_is_verified_once_per_check(mgr, net, monkeypatch):
@@ -500,9 +501,9 @@ async def test_gen1_list_is_requested_once_for_all_types(net, monkeypatch):
     m._registry = lambda: asyncio.sleep(0, net.registry())
     await m.scan()
     assert len(calls) == 1
-    assert m.devices[A]["status"] == manager.STATUS_READY and m.devices[A]["offer_source"] == "manufacturer"
-    assert m.devices[B]["status"] == manager.STATUS_CURRENT and m.devices[B]["message"] == "No stable offer"
-    assert m.devices[C]["status"] == manager.STATUS_ERROR and "not in the list of allowed types" in m.devices[C]["message"]
+    assert m.devices[A]["status"] == manager_core.STATUS_READY and m.devices[A]["offer_source"] == "manufacturer"
+    assert m.devices[B]["status"] == manager_core.STATUS_CURRENT and m.devices[B]["message"] == "No stable offer"
+    assert m.devices[C]["status"] == manager_core.STATUS_ERROR and "not in the list of allowed types" in m.devices[C]["message"]
 
 
 async def test_gen1_store_first_respects_the_allowed_types(net, monkeypatch):
@@ -514,8 +515,8 @@ async def test_gen1_store_first_respects_the_allowed_types(net, monkeypatch):
     store(m, "SHSW-25", "20230913-112003/v1.14.0-gcb84623", gen=1)
     await m.scan()
     assert calls == [] and net.downloads == 0
-    assert m.devices[A]["offer_source"] == "store" and m.devices[B]["status"] == manager.STATUS_READY
-    assert m.devices[C]["status"] == manager.STATUS_ERROR and m.devices[C].get("file") is None
+    assert m.devices[A]["offer_source"] == "store" and m.devices[B]["status"] == manager_core.STATUS_READY
+    assert m.devices[C]["status"] == manager_core.STATUS_ERROR and m.devices[C].get("file") is None
 
 
 # ---------------------------------------------------------------- Manufacturer server access
