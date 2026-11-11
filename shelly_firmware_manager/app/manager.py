@@ -42,7 +42,7 @@ import aiohttp
 import app_options
 import schedule
 import shelly
-from changelog import Changelogs
+from changelog import Changelogs, marked
 from credentials import Credentials
 from events import EventLog, worst
 from shelly import UNSUPPORTED, AuthError, DeviceAuth, ShellyError, clip
@@ -466,11 +466,23 @@ class Manager:
                     "source": source,
                     "sha_checked": bool(meta.get("sha_checked")) if source == SOURCE_UPLOAD else None,
                     "devices": holders,
+                    "changelog": "changelog" in meta,  # flag only; text: firmware_changelog
                     "deletable": lock is None,
                     "locked": lock,
                 }
             )
         return result
+
+    def firmware_changelog(self, name: str) -> list[dict[str, Any]] | None:
+        """The changelog kept with a stored firmware, for the Firmware tab (3.1.0):
+        one version in the form of changelog_for, or None if none is stored yet.
+        Nothing is requested – the changelog is stored by a check that provides the
+        file (see _store_changelogs)."""
+        meta = self.firmware[name]
+        stored = meta.get("changelog")
+        if not isinstance(stored, dict):
+            return None
+        return [marked(str(meta.get("version") or ""), stored, meta.get("type"))]
 
     def store_size(self) -> int:
         """Total size of all stored firmware files in bytes (information only)."""

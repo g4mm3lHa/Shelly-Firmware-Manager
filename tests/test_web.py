@@ -188,6 +188,14 @@ async def test_http_upload_flow(client, mgr, net):
     assert {d["id"] for d in provided["devices"]} == {A, C} and all(d["name"] for d in provided["devices"])
     state = await (await client.get("/api/state")).json()
     assert next(d for d in state["devices"] if d["id"] == A)["offer_source"] == "manufacturer"
+    # 3.1.0: changelog of a stored firmware for the Firmware tab (flag in the list, text on demand)
+    assert provided["changelog"] is False
+    r = await client.get(f"/api/firmware/{provided['name']}/changelog")
+    assert r.status == 200 and await r.json() == {"available": False, "versions": []}
+    mgr.firmware[provided["name"]]["changelog"] = {"date": None, "entries": [{"category": None, "text": "Fix", "models": []}]}
+    data = await (await client.get(f"/api/firmware/{provided['name']}/changelog")).json()
+    assert data["available"] and data["versions"][0]["version"] == "1.5.0" and data["versions"][0]["entries"][0]["text"] == "Fix"
+    assert (await client.get(f"/api/firmware/{'0' * 64}.zip/changelog")).status == 404
 
 
 async def test_http_upload_guards(client, mgr, net):

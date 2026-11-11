@@ -319,6 +319,12 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Applic
         """Stored firmware files with metadata and the total size of the store."""
         return web.json_response({"firmware": mgr.firmware_list(), "total_size": mgr.store_size()})
 
+    async def firmware_changelog(request: web.Request) -> web.StreamResponse:
+        """Changelog kept with a stored firmware (plain text entries); nothing is
+        requested from the manufacturer for it."""
+        entries = mgr.firmware_changelog(firmware_name_from(request))
+        return web.json_response({"available": entries is not None, "versions": entries or []})
+
     async def firmware_download(request: web.Request) -> web.StreamResponse:
         """Stored firmware file as download with a descriptive file name."""
         name = firmware_name_from(request)
@@ -443,6 +449,7 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Applic
     app.router.add_post("/api/firmware/upload", firmware_upload, name=UPLOAD_ROUTE)
     app.router.add_post("/api/firmware/upload/confirm", firmware_upload_confirm)
     app.router.add_post("/api/firmware/upload/cancel", firmware_upload_cancel)
+    app.router.add_get("/api/firmware/{name}/changelog", firmware_changelog)
     app.router.add_get("/api/firmware/{name}/download", firmware_download)
     app.router.add_post("/api/firmware/{name}/delete", firmware_delete)
     app.router.add_get("/api/logs", logs)

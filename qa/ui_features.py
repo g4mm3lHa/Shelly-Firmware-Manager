@@ -246,6 +246,21 @@ def firmware_store(browser, out):
         f.locator("#dlg-btns button", has_text="Cancel").click()   # nothing is installed in the demo
         rows.first.locator(".fw-dev summary").click()
 
+        # 3.1.0: changelog icon per version – dialog with the stored changelog, disabled without one
+        logs = f.locator(".fw-row .actions button[aria-label^='Changelog of']")
+        check(f"{case}: one changelog icon per version", logs.count() == rows.count(), f"{logs.count()} / {rows.count()}")
+        check(f"{case}: icon disabled without a stored changelog", logs.nth(1).is_disabled()
+              and "No changelog stored" in logs.nth(1).get_attribute("title"), str(logs.nth(1).get_attribute("title")))
+        logs.first.click()
+        f.wait_for_selector("#dlg-body .cl-list")
+        d = dialog(f)
+        check(f"{case}: changelog dialog of the stored version", d["title"] == "Changelog – Plus1 1.5.0"
+              and "1.5.0 · 2026-10-01" in d["body"] and "Fixed a vulnerability" in d["body"] and "This model" in d["body"], d["body"][:300])
+        check(f"{case}: changelog dialog fits", f.evaluate("() => { const r = document.getElementById('dlg').getBoundingClientRect();"
+                                                           f" return r.left >= 0 && r.right <= {width}; }}"))
+        page.screenshot(path=out / f"{case}-firmware-changelog.png")
+        f.locator("#dlg-btns button", has_text="Close").click()
+
         # Two-step delete of 1.3.0
         row = rows.filter(has_text="1.3.0")
         row.locator("button.red").click()

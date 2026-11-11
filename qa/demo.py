@@ -49,6 +49,11 @@ sha = hashlib.sha256(content).hexdigest()
 (data / "fw").mkdir(exist_ok=True)
 (data / "fw" / f"{sha}.zip").write_bytes(content)
 m._register_firmware(f"{sha}.zip", "Plus1", 2, "1.5.0", sha, len(content), True)
+# 3.1.0: changelog kept with the stored firmware (Firmware tab, installation dialog)
+m.firmware[f"{sha}.zip"]["changelog"] = {"date": "2026-10-01", "entries": [
+    {"category": "Security", "text": "Fixed a vulnerability in the web server", "models": []},
+    {"category": "Fixed", "text": "Wi-Fi reconnect after a router restart", "models": ["ShellyPlus1"]},
+    {"category": "Added", "text": "Support for longer device names in the web interface and in all exported configuration files", "models": []}]}
 for i, n in enumerate(names):
     st = statuses[i % len(statuses)]
     gen = 1 if st == "skipped" else (2 + i % 2)

@@ -27,7 +27,7 @@ both servers in parallel (cancels checks/installations, saves the state), exit 0
 | `app_options.py` | option validation, merge, log diff | `with_defaults`, `merge`, `change_list`, `LEGACY_DOWNLOAD_BASE` |
 | `events.py` | activity log (JSON Lines), severity | `EventLog.add/list`, `worst`, `user_from`, `KINDS` |
 | `credentials.py` | per-device passwords (0600; Gen2 HA1 only) | `Credentials.auth_for/candidate/store/remove` |
-| `changelog.py` | changelog pages → plain text (parsed in a worker thread), last page per generation | `Changelogs.refresh/version_entry/between`, `parse` |
+| `changelog.py` | changelog pages → plain text (parsed in a worker thread), last page per generation | `Changelogs.refresh/version_entry/between`, `marked`, `parse` |
 | `tls.py` | certificate pinning for `*.shelly.cloud` | `CertificatePins.ssl_for`, `explain_tls_error` |
 
 ### `Manager` by area
@@ -52,7 +52,7 @@ both servers in parallel (cancels checks/installations, saves the state), exit 0
 - **Download server support:** `may_download`, `record_download`, `_downloaded`,
   `_reset_download`.
 - **Firmware store / upload:** `_register_firmware`, `cleanup_firmware`
-  (housekeeping only), `firmware_list`, `store_size`, `delete_firmware`
+  (housekeeping only), `firmware_list`, `firmware_changelog`, `store_size`, `delete_firmware`
   (`_delete_lock`), `stage_upload` → `confirm_upload` / `cancel_upload`,
   `_read_manifest`, `upload_types`.
 - **Device settings / passwords:** `_settings_device` (guards), `refresh_settings`,
@@ -109,7 +109,8 @@ the changelog page lists it; never requested again).
 | `POST /api/devices/{id}/password` | `set_device_password` (`mode`, `confirm`, `acknowledged`) |
 | `POST /api/devices/{id}/ignore` | `set_ignored` |
 | `POST /api/devices/{id}/reload` | `reload_device` |
-| `GET /api/firmware` | `firmware_list` (per file `devices`: `id`, `name` of the devices it is provided for), `store_size` |
+| `GET /api/firmware` | `firmware_list` (per file `devices`: `id`, `name` of the devices it is provided for; `changelog` flag), `store_size` |
+| `GET /api/firmware/{name}/changelog` | `firmware_changelog` (stored changelog of this file, no request) |
 | `POST /api/firmware/upload` | `stage_upload` (octet-stream, ≤ 64 MiB, streamed – the only non-JSON route) |
 | `POST /api/firmware/upload/confirm` · `/cancel` | `confirm_upload` · `cancel_upload` |
 | `GET /api/firmware/{name}/download` | file response |
@@ -125,7 +126,7 @@ Download server (port 8098): `GET|HEAD /<sha256>.<zip|bin|gbl>` → `may_downloa
 ## UI (`ui-src/app.js`, `ui-src/style.css` → built into `app/static/`)
 
 Single page, `textContent` only. Polls `api/state` (30 s idle, 3 s busy, paused when
-hidden, ETag). Tabs: devices (`COLUMNS`, row menu, dialogs), firmware (store, upload, `firmwareDevice` = Install button per device,
+hidden, ETag). Tabs: devices (`COLUMNS`, row menu, dialogs), firmware (store, upload, `firmwareDevice` = Install button per device, `openFirmwareChangelog`,
 delete), logs, settings (`OPTION_FIELDS`). Build: `tools/build_ui.py`; never edit
 `app/static/app.js|style.css` by hand.
 
@@ -155,7 +156,7 @@ paths in tmp), `mgr`, `client` (UI test client with CSRF token).
 |---|---|---|
 | `run_ui.py quick\|full` | starts all demos | one command; prints one line per suite |
 | `ui_test.py [--full]` | 8801 idle, 8802 busy | layout, menus, dialogs, contrast; quick = 5 cases, full = 13 |
-| `ui_features.py` | 8801, 8803 legacy, 8804 missing, 8805 rc7 | download URL hints/notice, downgrade, upload, delete, Install button in the Firmware tab |
+| `ui_features.py` | 8801, 8803 legacy, 8804 missing, 8805 rc7 | download URL hints/notice, downgrade, upload, delete, Install button and changelog icon in the Firmware tab |
 | `mobile_capture.py` | 8711 idle | screenshots + overflow, full only |
 
 `tools/dev/check.sh [tests|ui|full|build]` runs everything in order: ruff → mypy (strict,

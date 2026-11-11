@@ -174,7 +174,7 @@ async def test_changelog_is_kept_with_the_firmware_and_requested_once(mgr, net):
     assert calls == [{2}]
     mgr.changelogs.data.clear()
     assert [v["version"] for v in mgr.changelog_for(A)] == ["1.5.0"]
-    assert "changelog" not in mgr.firmware_list()[0]  # not part of the Firmware tab data
+    assert mgr.firmware_list()[0]["changelog"] is True  # list: flag only, the text is fetched on demand
 
 
 async def test_changelog_page_requested_only_for_provided_firmware_without_one(mgr, net):

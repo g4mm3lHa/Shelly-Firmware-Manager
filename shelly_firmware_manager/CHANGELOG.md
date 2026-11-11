@@ -2,9 +2,19 @@
 
 ## 3.1.0
 
-Release candidate rc2 (not released). rc1: store integration, robustness and code
+Release candidate rc3 (not released). rc1: store integration, robustness and code
 quality. rc2: the firmware store comes first in every check, fewer requests to the
-Shelly servers, Install button in the Firmware tab.
+Shelly servers, Install button in the Firmware tab. rc3: changelog in the Firmware tab.
+
+Changes in rc3
+- Firmware tab: changelog icon in every version row. It opens a dialog with the
+  changelog kept with this stored firmware (security entries and entries for the
+  firmware's model are highlighted, as in the installation dialog). Nothing is
+  requested from Shelly for it. The icon is disabled while no changelog is stored –
+  a changelog is stored by a check that provides the file to a device, or when a
+  changelog page is fetched for another version of the same generation.
+  API: `GET /api/firmware` has the flag `changelog` per file, the text comes from
+  `GET /api/firmware/{name}/changelog`.
 
 Changes in rc2
 - Checks – firmware store first: before the Shelly update server is asked for a

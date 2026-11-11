@@ -206,6 +206,26 @@ def _model_key(text: object) -> str:
     return key.removeprefix("shelly")
 
 
+def marked(version: str, info: dict[str, Any], model: str | None = None) -> dict[str, Any]:
+    """One version {"version", "date", "entries"} for the UI. Each entry is marked:
+    security (category "Security" or security keywords), model_specific (refers to a
+    device model) and this_model (Gen2+: refers to the given model)."""
+    own = _model_key(model) if model else None
+    entries: list[dict[str, Any]] = []
+    for entry in info.get("entries") or []:
+        models = entry.get("models") or []
+        entries.append(
+            {
+                **entry,
+                "security": (entry.get("category") or "").lower() == "security"
+                or bool(SECURITY_RE.search(entry.get("text", ""))),
+                "model_specific": bool(models),
+                "this_model": bool(own) and any(_model_key(m) == own for m in models),
+            }
+        )
+    return {"version": version, "date": info.get("date"), "entries": entries}
+
+
 class Changelogs:
     """Stored changelogs per generation, refreshed by the firmware check."""
 
@@ -297,9 +317,8 @@ class Changelogs:
         target_changelog is the changelog kept with the offered firmware in the
         store: it is used for the target version. Versions in between come from the
         last fetched page as far as it lists them – nothing is requested for them.
-        Each entry is marked: security (category "Security" or security keywords),
-        model_specific (refers to a device model) and this_model (Gen2+: refers to
-        the device's own model). Returns None if nothing is stored at all."""
+        Entries are marked for the device's model (see marked). Returns None if
+        nothing is stored at all."""
         stored = self.data.get("1" if gen == 1 else "2")
         if not stored and not target_changelog:
             return None
@@ -318,20 +337,4 @@ class Changelogs:
         if target_changelog and low < high:
             label = found[high][0] if high in found else ".".join(str(n) for n in high[:3])
             found[high] = (label, target_changelog)
-        own = _model_key(model) if model else None
-        result: list[dict[str, Any]] = []
-        for _, (version, info) in sorted(found.items(), reverse=True):
-            entries: list[dict[str, Any]] = []
-            for entry in info.get("entries") or []:
-                models = entry.get("models") or []
-                entries.append(
-                    {
-                        **entry,
-                        "security": (entry.get("category") or "").lower() == "security"
-                        or bool(SECURITY_RE.search(entry.get("text", ""))),
-                        "model_specific": bool(models),
-                        "this_model": bool(own) and any(_model_key(m) == own for m in models),
-                    }
-                )
-            result.append({"version": version, "date": info.get("date"), "entries": entries})
-        return result
+        return [marked(version, info, model) for _, (version, info) in sorted(found.items(), reverse=True)]

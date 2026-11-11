@@ -138,6 +138,9 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
   SHA-256 and the devices they are provided for. The total size is shown at the top.
 - **Install** behind a device name opens the usual installation dialog for this device
   and this firmware (same conditions as "Install update" in the Devices tab).
+- The **changelog icon** of a version shows the changelog stored with this firmware.
+  It is greyed out while none is stored: the changelog is stored when a check provides
+  the file to a device (see [How a check works](#how-a-check-works)).
 - Firmware is **never deleted automatically**. Delete files you no longer need with the
   bin icon (two confirmations). Files that are waiting to be installed cannot be deleted.
 - **Upload firmware** adds a version you have from another source:

@@ -315,6 +315,22 @@ async def test_uploaded_file_is_provided_as_update(mgr, net):
     assert listed["devices"] == [{"id": A, "name": "Kitchen"}] and not listed["deletable"]
 
 
+async def test_stored_changelog_is_available_for_the_firmware_tab(mgr, net):
+    """3.1.0: the list flags a stored changelog; the text comes from the store
+    entry only (one version, entries marked) – nothing is requested for it."""
+    await mgr.scan()
+    name = mgr.devices[A]["file"]
+    other, _ = store(mgr, "Plus1", "1.3.0")
+    mgr.firmware[name]["changelog"] = {"date": "2026-10-01", "entries": [
+        {"category": "Security", "text": "Fix", "models": []}, {"category": None, "text": "For Plus 1", "models": ["ShellyPlus1"]}]}
+    flags = {f["name"]: f["changelog"] for f in mgr.firmware_list()}
+    assert flags == {name: True, other: False}
+    [version] = mgr.firmware_changelog(name)
+    assert (version["version"], version["date"]) == ("1.5.0", "2026-10-01")
+    assert version["entries"][0]["security"] and version["entries"][1]["this_model"]
+    assert mgr.firmware_changelog(other) is None
+
+
 async def test_firmware_list_names_the_devices_with_their_ids(mgr, net):
     """3.1.0: the Firmware tab gets ID and name of every device a file is provided
     for (Install button), ordered by name; other files have none."""
