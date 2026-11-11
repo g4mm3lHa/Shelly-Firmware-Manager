@@ -220,8 +220,8 @@ function statusText(d) {
 /** Popup with all status details of a device. */
 function showStatus(d) {
   modal(`Status – ${d.name}`, [valueList([["Status", STATUS_LABELS[shownStatus(d)] || d.status], ["Details", d.message],
-    ["Installed", d.version], ["Available", d.offer_version], ["Last check", fmt(d.last_check)],
-    ["Last successful check", d.last_success ? fmt(d.last_success) : "never"],
+    ["Installed", d.version], ["Available", d.offer_version], ["Source", hasUpdate(d) ? OFFER_SOURCES[d.offer_source] : null],
+    ["Last check", fmt(d.last_check)], ["Last successful check", d.last_success ? fmt(d.last_success) : "never"],
     ["Last update", d.last_update ? fmt(d.last_update) : null]])],
     // Ready (and installable): red button right of Close opens the existing install dialog
     installable(d, ui.state) ? [{text: "Close"}, {text: "Install update", kind: "danger", action: () => openInstall([d])}] : undefined);
@@ -615,6 +615,13 @@ function changelogBox(d) {
   api(`${devUrl(d)}/changelog`).then(r => c.replaceChildren(...changelogNodes(r))).catch(() => c.replaceChildren(...changelogNodes(null)));
   return c;
 }
+// 3.1.0: where the provided update comes from (device field offer_source). Updates
+// from the firmware store are provided without asking the Shelly update server.
+const OFFER_SOURCES = {manufacturer: "Shelly update server", store: "Firmware store (downloaded from Shelly earlier)",
+  upload: "Firmware store (uploaded file)"};
+const OFFER_SHORT = {manufacturer: "Shelly server", store: "Store", upload: "Upload"};
+/** Source line of the install dialog: the store label, or the manufacturer's URL. */
+const offerSource = d => d.offer_source && d.offer_source !== "manufacturer" ? OFFER_SOURCES[d.offer_source] : d.source_url;
 const GEN1_WARNING = "Gen1 firmware is offered by Shelly only via plain HTTP and without a checksum – its integrity and origin cannot be verified. Install only if you accept this risk.";
 /** Confirmation dialog: one device with all details, several as an overview; approval bound to the SHA-256. */
 function openInstall(devs) {
@@ -622,16 +629,18 @@ function openInstall(devs) {
   if (devs.length === 1) {
     const d = devs[0];
     content.push(valueList([["Device", d.name], ["Shelly", d.shelly_name], ["IP", d.ip], ["Generation", d.gen], ["Firmware ID", d.type],
-      ["Model", d.model], ["Installed", d.version], ["Target", d.offer_version], ["Size", mb(d.size || 0)], ["SHA-256", d.sha256], ["Source", d.source_url]]));
+      ["Model", d.model], ["Installed", d.version], ["Target", d.offer_version], ["Size", mb(d.size || 0)], ["SHA-256", d.sha256], ["Source", offerSource(d)]]));
     if (d.gen === 1) content.push(el("div", GEN1_WARNING, "warnbox"));
+    if (d.offer_source === "upload") content.push(el("div", UPLOAD_HINT, "warnbox"));
     content.push(el("h2", "Changelog"), changelogBox(d));
   } else {
     const t = el("table"), h = el("tr");
-    for (const c of ["Device", "IP", "Installed", "Target"]) h.append(el("th", c));
+    for (const c of ["Device", "IP", "Installed", "Target", "Source"]) h.append(el("th", c));
     t.append(box("thead", null, h));
-    for (const d of devs) { const r = el("tr"); for (const v of [d.name, d.ip, d.version, d.offer_version]) r.append(el("td", v ?? "–")); t.append(r); }
+    for (const d of devs) { const r = el("tr"); for (const v of [d.name, d.ip, d.version, d.offer_version, OFFER_SHORT[d.offer_source]]) r.append(el("td", v ?? "–")); t.append(r); }
     content.push(t);
     if (devs.some(d => d.gen === 1)) content.push(el("div", GEN1_WARNING, "warnbox"));
+    if (devs.some(d => d.offer_source === "upload")) content.push(el("div", UPLOAD_HINT, "warnbox"));
     for (const d of devs) {
       const det = el("details"); det.append(el("summary", `Changelog – ${d.name}`));
       det.ontoggle = () => { if (det.open && det.children.length === 1) det.append(changelogBox(d)); };
@@ -871,7 +880,7 @@ function passwordConfirm(d, title, mode, password) {
 /** Firmware tab: one card per firmware ID, versions as rows, newest first. */
 function renderFirmware() {
   const q = $("fw-search").value.trim().toLowerCase();
-  const list = ui.firmware.filter(f => !q || [f.type, f.version, ...f.used_by].some(v => String(v || "").toLowerCase().includes(q)));
+  const list = ui.firmware.filter(f => !q || [f.type, f.version, ...f.devices.map(d => d.name)].some(v => String(v || "").toLowerCase().includes(q)));
   const total = ui.firmwareTotal;
   $("fw-summary").textContent = `${ui.firmware.length} file${ui.firmware.length === 1 ? "" : "s"} · ${mb(total)} stored`;
   const groups = new Map();
@@ -887,13 +896,32 @@ function renderFirmware() {
   if (!cards.length) cards.push(box("div", "card", el("div", ui.firmware.length ? "No firmware matches." : "No firmware stored.", "empty")));
   $("fw-cards").replaceChildren(...cards);
 }
+/** Why "Install" is not possible for a device right now (tooltip of the disabled button). */
+function installBlocker(d, s) {
+  if (!d) return "Device is not known anymore";
+  if (d.installing || d.status === "installing") return "Installation is running";
+  if (s.scanning) return "Check in progress";
+  if (d.ignored) return "Device is ignored";
+  if (s.download_base && s.download_base.issue) return s.download_base.message || "Download base URL is not set";
+  return d.status === "ready" ? null : "Not provided for this device anymore";
+}
+/** 3.1.0: device a firmware is provided for, with an "Install" button that opens the
+ *  usual installation dialog (same conditions as "Install update" in the Devices tab). */
+function firmwareDevice(entry) {
+  const s = ui.state || {devices: []}, d = s.devices.find(x => x.id === entry.id);
+  const blocker = installBlocker(d, s), go = el("button", "Install", "small");
+  go.disabled = !!blocker; go.title = blocker || "Install this firmware on the device";
+  go.setAttribute("aria-label", `Install on ${entry.name}`);
+  go.onclick = () => { if (d && installable(d, ui.state)) openInstall([d]); };
+  return box("li", null, el("span", entry.name), go);
+}
 /** One version row with size, date, SHA (copy), devices and icon actions. */
 function firmwareRow(f, latest) {
   const sha = box("span", "nowrap fw-sha", el("span", (f.sha256 || "").slice(0, 12) + "…", "mono"),
     iconButton("copy", "Copy SHA-256", async () => { await copyText(f.sha256 || ""); }));
   sha.title = f.sha256 || "";
-  const devices = f.used_by.length
-    ? keptDetails(`fw-${f.name}`, `For ${f.used_by.length} device${f.used_by.length === 1 ? "" : "s"} ▾`, box("ul", null, ...f.used_by.map(n => el("li", n))))
+  const devices = f.devices.length
+    ? keptDetails(`fw-${f.name}`, `For ${f.devices.length} device${f.devices.length === 1 ? "" : "s"} ▾`, box("ul", null, ...f.devices.map(firmwareDevice)))
     : el("span", "–", "muted");
   devices.classList.add("fw-dev");
   const dl = el("a", null, "icon"); dl.href = `api/firmware/${encodeURIComponent(f.name)}/download`; dl.setAttribute("download", "");
@@ -922,12 +950,13 @@ function deleteFirmware(f) {
     const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; };
   }}]);
 }
-/** rc7: upload an older firmware file – step 1 choose and transfer, step 2 confirm
+/** rc7: upload a firmware file (3.1.0: a newer one is provided as update by the next check) –
+ *  step 1 choose and transfer, step 2 confirm
  *  firmware ID and version (pre-filled from the file where possible), optional SHA-256. */
 function openUpload() {
   const title = "Upload firmware", input = el("input"); input.type = "file"; input.accept = ".zip,.bin,.gbl";
   modal(title, [box("label", "field", "Firmware file (.zip, .bin or .gbl, max. 64 MiB)", input),
-    el("p", "Only for Gen2+ devices known to this app and stable versions. Use files from a source you trust.", "hint"), el("div", UPLOAD_HINT, "warnbox")],
+    el("p", "Only for Gen2+ devices known to this app and stable versions. A version newer than the installed one is provided as update by the next check, an older one allows a downgrade. Use files from a source you trust.", "hint"), el("div", UPLOAD_HINT, "warnbox")],
   [{text: "Cancel"}, {text: "Upload", kind: "primary", action: async () => {
     const file = input.files && input.files[0];
     if (!file) { message(title, "No file selected.", "error"); return; }
@@ -983,7 +1012,7 @@ const PASSWORD_ACTIONS = {stored: "password stored", enabled: "password protecti
 /** Label of an app option for the log (key if unknown). */
 const optionLabel = key => (OPTION_FIELDS.find(f => f[0] === key) || [key, key])[1];
 const INSTALL_EVENTS = {started: "started", confirmed: "confirmed", unconfirmed: "not confirmed", failed: "failed"};
-const TRIGGER_LABELS = {manual: "Manual", scheduled: "Scheduled", device: "Single-device"};
+const TRIGGER_LABELS = {manual: "Manual", scheduled: "Scheduled", device: "Single-device", install: "After-installation"};
 const arrow = (a, b) => `${a ?? "–"} → ${b ?? "–"}`;
 
 /** Main line and optional details of one log entry. */
@@ -1021,7 +1050,9 @@ function logContent(e) {
 function checkFindings(e) {
   return box("ul", null, ...e.findings.map(f => {
     const sev = f.severity || (f.error ? "error" : "success");
-    return el("li", f.error ? `${f.device}: ${f.error}` : `${f.device}: ${arrow(f.version, f.offer)}`, sev === "error" ? "bad" : sev === "warning" ? "warnc" : "");
+    // 3.1.0: updates from the firmware store are marked (the server was not asked)
+    const from = f.source && f.source !== "manufacturer" && OFFER_SOURCES[f.source] ? ` · ${OFFER_SOURCES[f.source]}` : "";
+    return el("li", f.error ? `${f.device}: ${f.error}` : `${f.device}: ${arrow(f.version, f.offer)}${from}`, sev === "error" ? "bad" : sev === "warning" ? "warnc" : "");
   }));
 }
 /** Mobile: short summary lines of an entry (details stay collapsed). */

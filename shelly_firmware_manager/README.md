@@ -7,6 +7,8 @@ Nothing is installed without your approval.
 
 - Shellys only talk to Home Assistant – they need no internet access.
 - Every installation is approved manually and verified afterwards.
+- Stored firmware comes first: a check provides the next higher stored version before
+  the Shelly update server is asked.
 - Older firmware versions stay stored and allow a downgrade (Gen2+).
 - Device settings such as name, NTP server, power-on action, eco mode and password
   protection can be edited directly.

@@ -61,6 +61,9 @@ for i, n in enumerate(names):
         "outputs": [{"key": "switch:0", "name": None, "state": "off", "aop": "off", "options": ["off", "on", "restore_last"]}] if i % 4 else [],
         "file": f"{sha}.zip" if st == "ready" else None, "sha256": sha if st == "ready" else None, "size": len(content),
         "pending_version": "1.5.0" if st == "ready" else None,
+        # 3.1.0: source of the provided update – the first device got it from the store
+        "offer_source": ("store" if i == 0 else "manufacturer") if st == "ready" else None,
+        "source_url": "https://fwcdn.shelly.cloud/gen2/Plus1/demo" if st == "ready" and i else None,
         # 3.0 feature states: on/off, unsupported and unknown (None) variants
         "ap": [False, True, None, "unsupported"][i % 4], "ble": "unsupported" if gen == 1 else [True, False, None][i % 3],
         "actions": [False, True, None][i % 3], "schedules": [True, False, "unsupported", None][i % 4],
@@ -82,6 +85,10 @@ m.events.add("check", severity="error", trigger="manual", devices=25, duration=1
              result="0 update(s), 2 warning(s), 5 error(s)", user="demo",
              findings=[{"device": "Hall", "error": "Device not reachable", "severity": "warning"},
                        {"device": "Garage door", "error": "The Shelly rejected the password", "severity": "error"}])
+m.events.add("check", trigger="install", devices=2, duration=2.4, updates=2, warnings=0, errors=0,
+             result="2 update(s), 0 warning(s), 0 error(s)",
+             findings=[{"device": "Kitchen light", "version": "1.4.0", "offer": "1.5.0", "source": "store", "severity": "success"},
+                       {"device": "Hall", "version": "1.4.0", "offer": "1.5.0", "source": "upload", "severity": "success"}])
 m.events.add("password", device="Kitchen light", action="enabled", user="demo")
 m.devices[f"{4:032x}"]["settings_error"] = {"message": "Device not reachable", "severity": "warning"}
 if scenario == "legacy":  # an installation started before (device progress shown)

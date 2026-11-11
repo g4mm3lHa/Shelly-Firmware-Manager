@@ -9,6 +9,7 @@ Assistant). Version history: `CHANGELOG.md` (Changelog tab).
 - [Configuration](#configuration)
 - [Using the app](#using-the-app)
   - [Devices](#devices)
+  - [How a check works](#how-a-check-works)
   - [Installing updates](#installing-updates)
   - [Downgrade (Gen2+)](#downgrade-gen2)
   - [Firmware](#firmware)
@@ -70,19 +71,42 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 
 | Status | Meaning |
 |---|---|
-| Up-To-Date | The newest stable firmware is installed |
-| Available | An update exists, the firmware is not downloaded yet |
-| Ready | Firmware downloaded, waiting for your approval |
+| Up-To-Date | Nothing newer is stored and the Shelly server offers no newer stable firmware |
+| Available | An update exists, the firmware is provided at the next check |
+| Ready | Firmware provided (from the firmware store or downloaded), waiting for your approval |
 | Queued / Installing | Installation waiting for a free slot / running (with progress for Gen2+) |
 | Unconfirmed | The installation ran, but the target version was not confirmed (see the details) |
 | Error | Check, download or installation failed |
 | Skipped | Gen1 device while Gen1 updates are disabled |
 | Unregistered | Device is no longer in the Home Assistant device registry |
 
+### How a check works
+
+A check (all devices, a single device or the schedule) works in this order:
+
+1. Every device is asked in your network for its firmware ID and installed version.
+2. **The firmware store comes first.** If the store holds a newer stable version for
+   the device's firmware ID, it is provided – downloaded and uploaded files alike,
+   after a SHA-256 check. If several newer versions are stored, the **next higher**
+   one is provided, so a device is updated step by step through the stored versions.
+   The Shelly update server is not asked for this device. A newer version on the Shelly
+   server therefore shows up only once the device has reached the newest stored version.
+3. Only for devices without a newer stored version the Shelly update server is asked –
+   once per firmware ID, however many devices share it (Gen1: one request for all
+   types). A newer version is downloaded once and stored.
+
+An update that was already provided is replaced if the store holds a version closer to
+the installed one. The status details, the installation dialog and the log name the
+source of an update: Shelly update server, firmware store, or an uploaded file. To skip
+a stored version, delete it in the **Firmware** tab.
+
+The changelog of a provided version is requested once from the Shelly documentation
+and kept with the stored firmware; it is not requested again afterwards.
+
 ### Installing updates
 
 1. Tick the devices under "Updates available" and click **Review & install** (or use
-   "Install update" in the row menu).
+   "Install update" in the row menu, or **Install** behind a device in the Firmware tab).
 2. The dialog shows installed and target version, size, SHA-256, source and the
    changelog (security entries and entries for this model are highlighted).
 3. **Approve installation.** The Shelly downloads the firmware from the app and restarts.
@@ -91,6 +115,11 @@ The app then checks every 10 seconds until the device reports exactly the target
 version (at most 5 minutes). If that does not happen, the status becomes "Unconfirmed"
 with a diagnosis – see [Troubleshooting](#troubleshooting). Scheduled checks create a
 Home Assistant notification when they find new updates.
+
+After a confirmed installation the installed devices are checked again automatically
+(once all running installations have ended), so the next stored version – or the offer
+of the Shelly server – is provided right away. This check appears in the log as
+"After-installation check". It does not run after a downgrade or a failed installation.
 
 ### Downgrade (Gen2+)
 
@@ -107,15 +136,19 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
 
 - All downloaded and uploaded firmware files, grouped by device type, with size, date,
   SHA-256 and the devices they are provided for. The total size is shown at the top.
+- **Install** behind a device name opens the usual installation dialog for this device
+  and this firmware (same conditions as "Install update" in the Devices tab).
 - Firmware is **never deleted automatically**. Delete files you no longer need with the
   bin icon (two confirmations). Files that are waiting to be installed cannot be deleted.
-- **Upload firmware** adds an older version you have from another source:
+- **Upload firmware** adds a version you have from another source:
   1. Choose the file (`.zip`, `.bin` or `.gbl`, max. 64 MB).
   2. Device type and version are filled in from the file where possible – check them.
   3. Optionally enter the expected SHA-256; the upload is refused if it does not match.
 
-  Uploaded files are marked "Uploaded" and are only used for downgrades. The app cannot
-  verify where an uploaded file comes from – only use files you trust.
+  Uploaded files are marked "Uploaded". A version newer than the installed one is
+  provided as update by the next check (see [How a check works](#how-a-check-works)),
+  an older one allows a downgrade. The app cannot verify where an uploaded file comes
+  from, and the version is the one you confirmed – only use files you trust.
 
 ### Logs
 

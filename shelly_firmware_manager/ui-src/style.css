@@ -192,6 +192,9 @@ button.pill{cursor:pointer}
 .fw-row:last-child{border-bottom:0}
 .fw-row details summary{cursor:pointer;color:var(--secondary-text-color)}
 .fw-row details ul{margin:4px 0 0;padding-left:18px}
+.fw-row details li{margin:2px 0}
+.fw-row details li>span{margin-right:8px;overflow-wrap:anywhere}
+.fw-row details li>button{padding:1px 10px}
 .actions{display:flex;flex-wrap:nowrap;gap:2px;justify-content:flex-end}
 
 /* Logs */
@@ -313,6 +316,8 @@ dialog table th,dialog table td{padding:6px 8px}
   .fw-dev{grid-area:dev;min-width:0;overflow-wrap:anywhere;padding-top:6px;
     border-top:1px dashed color-mix(in srgb,var(--primary-text-color) 18%,transparent)}
   .fw-dev summary{padding:6px 0}
+  .fw-row details ul{padding-left:0;list-style:none}
+  .fw-row details li{display:flex;align-items:center;justify-content:space-between;gap:8px}
   .fw-ver .tag{margin-left:6px}
   .fw-row>.actions{grid-area:act;justify-content:flex-end;align-items:center;gap:8px}
   .fw-row>.actions>*{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px}

@@ -1,5 +1,5 @@
 name: Shelly Firmware Manager
-version: "3.1.0-rc1"
+version: "3.1.0-rc2"
 slug: shelly_firmware_manager
 description: >-
   Downloads Shelly firmware via Home Assistant, provides it through its own

@@ -48,6 +48,7 @@ class FakeNet:
         self.unreachable = set()
         self.downloads = 0
         self.offer_calls = 0
+        self.offer_version = "1.5.0"  # stable version offered by the manufacturer's server
         self.gate = None  # asyncio.Event: device_info waits for it (simulates slow devices)
         self.download_gate = None
         self.info_calls = 0
@@ -112,15 +113,17 @@ def net(monkeypatch, tmp_path):
             raise fake.settings_error
         return {"shelly_name": "plus1", "ntp": "time.local", "eco": False, "ap": False, "ble": "unsupported", "outputs": []}
 
-    async def fetch_offer(_session, info, _allowed, _pins=None):
+    async def fetch_offer(_session, _fw_type, _pins=None):
         fake.offer_calls += 1
-        return {"version": "1.5.0", "url": "https://fw.example/Plus1.zip"}
+        return {"version": fake.offer_version, "url": "https://fw.example/Plus1.zip"}
 
     async def download_firmware(_session, _url, target_dir, _pins=None, https_only=False):
         fake.downloads += 1
         if fake.download_gate is not None:
             await fake.download_gate.wait()
         content = b"x" * 70000
+        if fake.offer_version != "1.5.0":  # another offered version is another file
+            content = fake.offer_version.encode() + content
         import hashlib
 
         sha = hashlib.sha256(content).hexdigest()

@@ -11,12 +11,13 @@ B = "http://127.0.0.1:8711"
 LONG = "Living room ceiling light with a really long device name over the sofa"
 def fw_patch(route):
     r = route.fetch(); d = r.json(); base = d["firmware"][0]
-    d["firmware"][0]["used_by"] = d["firmware"][0]["used_by"] + [LONG, "Garage-door-controller-north-entrance-2nd-floor"]
+    dev = lambda n, name: {"id": f"{n:032x}", "name": name}  # 3.1.0: devices carry their ID (Install button)
+    d["firmware"][0]["devices"] = d["firmware"][0]["devices"] + [dev(1, LONG), dev(3, "Garage-door-controller-north-entrance-2nd-floor")]
     for i, v in enumerate(["1.4.0", "1.3.2"]):
-        d["firmware"].append({**base, "name": f"{i}{base['name'][1:]}", "version": v, "used_by": [] if i else ["Hall"], "deletable": i == 0,
+        d["firmware"].append({**base, "name": f"{i}{base['name'][1:]}", "version": v, "devices": [] if i else [dev(2, "Hall")], "deletable": i == 0,
                               "sha256": ("f" * 64)})
     d["firmware"].append({**base, "name": "g1" + base["name"][2:], "type": "SHSW-1", "gen": 1, "https": False,
-                          "version": "20230913-112003/v1.14.0-gcb84623", "used_by": ["Garden plug", "Kids room"]})
+                          "version": "20230913-112003/v1.14.0-gcb84623", "devices": [dev(8, "Garden plug"), dev(18, "Kids room")]})
     route.fulfill(response=r, body=json.dumps(d), headers={**r.headers, "etag": "x"})
 def set_patch(route):
     r = route.fetch(); d = r.json()

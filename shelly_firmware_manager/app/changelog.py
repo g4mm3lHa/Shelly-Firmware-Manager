@@ -1,9 +1,9 @@
 """Firmware changelogs from the official Shelly API documentation.
 
-Sources (fetched only when a check found an update, at most once per check and
-generation, without any device data in the request). A stored changelog is reused
-for CACHE_MAX_AGE_S if it already lists every offered version; a version it does not
-list yet causes a new fetch, but not more often than CACHE_MIN_AGE_S:
+Sources (fetched without any device data in the request, at most once per check and
+generation, and only when a firmware offered to a device has no changelog stored
+with it yet – see Manager._store_changelogs; a page is not fetched again within
+CACHE_MIN_AGE_S, because it may simply not list the version yet):
 - Gen2+: https://shelly-api-docs.shelly.cloud/gen2/changelog/
   (h2 "[x.y.z] date", h3 category, list items)
 - Gen1:  https://shelly-api-docs.shelly.cloud/gen1/ – table below h2#changelog
@@ -11,7 +11,9 @@ list yet causes a new fetch, but not more often than CACHE_MIN_AGE_S:
 
 The HTML is parsed server-side with the standard library parser into plain text
 (no markup, scripts or links survive), limited in size and stored in
-/data/changelog.json. The UI only ever receives plain strings.
+/data/changelog.json (the last fetched page per generation). The changelog of a
+stored firmware is copied from there to its store entry (3.1.0) and is then never
+requested again. The UI only ever receives plain strings.
 """
 
 import asyncio
@@ -19,7 +21,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Iterable
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
@@ -35,8 +37,7 @@ SOURCES = {
     1: "https://shelly-api-docs.shelly.cloud/gen1/",
     2: "https://shelly-api-docs.shelly.cloud/gen2/changelog/",
 }
-CACHE_MAX_AGE_S = 24 * 3600  # reuse a complete stored changelog for one day
-CACHE_MIN_AGE_S = 3600  # refetch for a missing version at most once per hour
+CACHE_MIN_AGE_S = 3600  # fetch a page for a missing version at most once per hour
 MAX_PAGE = 4 * 1024 * 1024  # the Gen1 page is ~1.2 MB (complete API reference)
 MAX_VERSIONS = 300
 MAX_ENTRIES = 300  # per version
@@ -220,49 +221,29 @@ class Changelogs:
         except (ValueError, OSError) as err:
             log.warning("Changelog file unreadable, ignoring it: %s", err)
 
-    def _is_fresh(self, gen: int, wanted: Collection[str | None] | None, now: int) -> bool:
-        """True if the stored changelog of gen can be reused instead of a fetch.
-
-        wanted: offered versions that should be listed. Complete and younger than
-        CACHE_MAX_AGE_S -> reuse; a missing version -> fetch, unless the last fetch
-        is younger than CACHE_MIN_AGE_S (the page may not list it yet)."""
+    def _recently_fetched(self, gen: int, now: int) -> bool:
+        """True if the page of gen was fetched less than CACHE_MIN_AGE_S ago: a
+        version it does not list is not asked for again that soon."""
         stored = self.data.get(str(gen))
         if not stored or not isinstance(stored.get("fetched"), int):
             return False
         age = now - int(stored["fetched"])
-        if age < 0:  # clock jumped back: do not trust the timestamp
-            return False
-        known: set[tuple[int, ...]] = set()
-        for version in stored.get("versions", {}):
-            try:
-                known.add(parse_version(version)[:3])
-            except ShellyError:
-                continue
-        missing = False
-        for version in wanted or ():
-            try:
-                missing |= parse_version(version)[:3] not in known
-            except ShellyError:
-                continue
-        return age < (CACHE_MIN_AGE_S if missing else CACHE_MAX_AGE_S)
+        return 0 <= age < CACHE_MIN_AGE_S  # negative: clock jumped back, do not trust it
 
     async def refresh(
-        self,
-        session: aiohttp.ClientSession,
-        gens: Iterable[int],
-        pins: CertificatePins | None,
-        wanted: Mapping[int, Collection[str | None]] | None = None,
+        self, session: aiohttp.ClientSession, gens: Iterable[int], pins: CertificatePins | None
     ) -> None:
         """Fetch and parse the changelog pages for the given generations (1 / 2).
 
-        wanted maps a generation to the offered versions; a fresh stored changelog
-        that lists them is reused without any request (see _is_fresh). Failures
-        keep the previously stored version and are only logged."""
+        Called only for generations with a version whose changelog is still missing
+        (see Manager._store_changelogs); a page fetched within CACHE_MIN_AGE_S is
+        not requested again. Failures keep the previously stored page and are only
+        logged."""
         changed = False
         now = int(time.time())
         for gen in sorted(gens):
-            if self._is_fresh(gen, (wanted or {}).get(gen), now):
-                log.debug("Changelog Gen%s reused from the cache", gen)
+            if self._recently_fetched(gen, now):
+                log.debug("Changelog Gen%s was fetched recently, not requested again", gen)
                 continue
             try:
                 html = await fetch_cloud_text(session, SOURCES[gen], pins, MAX_PAGE)
@@ -284,31 +265,64 @@ class Changelogs:
                 temp.unlink(missing_ok=True)
                 log.warning("Changelog not saved: %s", err)
 
+    def version_entry(self, gen: int | None, version: object) -> dict[str, Any] | None:
+        """Changelog {"date", "entries"} of exactly this version from the last fetched
+        page of its generation, else None. Versions are compared as numbers, so the
+        Gen1 form '20230913-112003/v1.14.0-g…' matches the page's '1.14.0'."""
+        stored = self.data.get("1" if gen == 1 else "2")
+        if not stored:
+            return None
+        try:
+            wanted = parse_version(version)
+        except ShellyError:
+            return None
+        for listed, info in stored.get("versions", {}).items():
+            try:
+                if parse_version(listed) == wanted and isinstance(info, dict):
+                    return {"date": info.get("date"), "entries": list(info.get("entries") or [])}
+            except ShellyError:
+                continue
+        return None
+
     def between(
-        self, gen: int | None, installed: str, target: str, model: str | None = None
+        self,
+        gen: int | None,
+        installed: str,
+        target: str,
+        model: str | None = None,
+        target_changelog: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]] | None:
         """All versions with installed < version <= target, newest first.
 
+        target_changelog is the changelog kept with the offered firmware in the
+        store: it is used for the target version. Versions in between come from the
+        last fetched page as far as it lists them – nothing is requested for them.
         Each entry is marked: security (category "Security" or security keywords),
         model_specific (refers to a device model) and this_model (Gen2+: refers to
-        the device's own model). Returns None if no changelog is stored."""
+        the device's own model). Returns None if nothing is stored at all."""
         stored = self.data.get("1" if gen == 1 else "2")
-        if not stored:
+        if not stored and not target_changelog:
             return None
         try:
             low, high = parse_version(installed), parse_version(target)
         except ShellyError:
             return None
-        own = _model_key(model) if model else None
-        result: list[dict[str, Any]] = []
-        for version, info in stored.get("versions", {}).items():
+        found: dict[tuple[int, ...], tuple[str, dict[str, Any]]] = {}  # parsed version -> (label, changelog)
+        for version, info in (stored or {}).get("versions", {}).items():
             try:
-                if not low < parse_version(version) <= high:
-                    continue
+                parsed = parse_version(version)
             except ShellyError:
                 continue
+            if low < parsed <= high and isinstance(info, dict):
+                found[parsed] = (version, info)
+        if target_changelog and low < high:
+            label = found[high][0] if high in found else ".".join(str(n) for n in high[:3])
+            found[high] = (label, target_changelog)
+        own = _model_key(model) if model else None
+        result: list[dict[str, Any]] = []
+        for _, (version, info) in sorted(found.items(), reverse=True):
             entries: list[dict[str, Any]] = []
-            for entry in info.get("entries", []):
+            for entry in info.get("entries") or []:
                 models = entry.get("models") or []
                 entries.append(
                     {
@@ -320,5 +334,4 @@ class Changelogs:
                     }
                 )
             result.append({"version": version, "date": info.get("date"), "entries": entries})
-        result.sort(key=lambda v: parse_version(v["version"]), reverse=True)
         return result

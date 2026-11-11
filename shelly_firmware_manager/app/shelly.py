@@ -922,27 +922,32 @@ async def fetch_cloud_text(
 
 
 async def fetch_offer(
-    session: aiohttp.ClientSession,
-    info: dict[str, Any],
-    gen1_allowed: Iterable[str],
-    pins: CertificatePins | None = None,
+    session: aiohttp.ClientSession, fw_type: str, pins: CertificatePins | None = None
 ) -> dict[str, str] | None:
-    """Stable firmware offer {'version', 'url'} or None."""
-    if info["gen"] >= 2:
-        meta = await _cloud_json(session, GEN2_META_URL.format(app=quote(info["type"], safe="")), pins)
-        stable = meta.get("stable") if isinstance(meta, dict) else None
-        if not isinstance(stable, dict) or not stable.get("url"):
-            return None
-        if _int_field(stable, "nsteps", 1) > 1:
-            raise ShellyError("Multi-step update offered – please check manually as described by Shelly")
-        return {"version": clip(stable.get("version"), 64), "url": str(stable["url"])}
+    """Stable firmware offer {'version', 'url'} of a Gen2+ firmware ID, or None."""
+    meta = await _cloud_json(session, GEN2_META_URL.format(app=quote(fw_type, safe="")), pins)
+    stable = meta.get("stable") if isinstance(meta, dict) else None
+    if not isinstance(stable, dict) or not stable.get("url"):
+        return None
+    if _int_field(stable, "nsteps", 1) > 1:
+        raise ShellyError("Multi-step update offered – please check manually as described by Shelly")
+    return {"version": clip(stable.get("version"), 64), "url": str(stable["url"])}
 
-    if info["type"] not in gen1_allowed:
-        raise ShellyError(f"Gen1 type {info['type']} is not in the list of allowed types")
+
+async def fetch_gen1_offers(session: aiohttp.ClientSession, pins: CertificatePins | None = None) -> dict[str, Any]:
+    """Firmware list of all Gen1 types {type: entry} – the manufacturer serves it as
+    one document, so one request per check covers every Gen1 type (see gen1_offer)."""
     meta = await _cloud_json(session, GEN1_META_URL, pins)
     if not isinstance(meta, dict) or not meta.get("isok"):
         raise ShellyError("Gen1 firmware server reports an error")
-    entry = (meta.get("data") or {}).get(info["type"])
+    data = meta.get("data")
+    return data if isinstance(data, dict) else {}
+
+
+def gen1_offer(offers: dict[str, Any], fw_type: str) -> dict[str, str] | None:
+    """Stable firmware offer {'version', 'url'} of one Gen1 type from the list of
+    fetch_gen1_offers, or None."""
+    entry = offers.get(fw_type)
     if not isinstance(entry, dict) or not entry.get("url"):
         return None
     return {"version": clip(entry.get("version"), 128), "url": str(entry["url"])}

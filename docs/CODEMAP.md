@@ -20,28 +20,35 @@ both servers in parallel (cancels checks/installations, saves the state), exit 0
 |---|---|---|
 | `main.py` | start, servers, scheduler loop, clean stop | `main`, `run_schedule`, `start_site`, `VERSION` (= config.yaml) |
 | `manager.py` | all workflows and the state (one class `Manager`) | see sections below |
-| `shelly.py` | device and manufacturer access, auth, SSRF/redirect/size guards | `device_info`, `read_settings`, `write_settings`, `validate_settings`, `set_protection`, `protection_status`, `restart`, `trigger_update`, `OtaChannel`, `fetch_offer`, `download_firmware`, `fetch_cloud_text`, `_cloud_get`, `check_download_url`, `resolve_device_origin`, `DeviceAuth`, `parse_version`, `clip` |
+| `shelly.py` | device and manufacturer access, auth, SSRF/redirect/size guards | `device_info`, `read_settings`, `write_settings`, `validate_settings`, `set_protection`, `protection_status`, `restart`, `trigger_update`, `OtaChannel`, `fetch_offer` (Gen2+), `fetch_gen1_offers` / `gen1_offer` (one list for all Gen1 types), `download_firmware`, `fetch_cloud_text`, `_cloud_get`, `check_download_url`, `resolve_device_origin`, `DeviceAuth`, `parse_version`, `clip` |
 | `web_ui.py` | Ingress UI + JSON API, CSRF/JSON/size middleware | `build_ui_app` (all handlers inside), `security`, `guarded`, `SECURITY_HEADERS` |
 | `download_server.py` | GET/HEAD `<sha256>.<ext>` for the Shellys | `build_download_app`, `strip_server_header` |
 | `schedule.py` | every N days at HH:MM, HA time zone, DST, catch-up | `configure`, `status`, `seconds_until`, `next_run`, `local_zone` |
 | `app_options.py` | option validation, merge, log diff | `with_defaults`, `merge`, `change_list`, `LEGACY_DOWNLOAD_BASE` |
 | `events.py` | activity log (JSON Lines), severity | `EventLog.add/list`, `worst`, `user_from`, `KINDS` |
 | `credentials.py` | per-device passwords (0600; Gen2 HA1 only) | `Credentials.auth_for/candidate/store/remove` |
-| `changelog.py` | changelog pages → plain text (parsed in a worker thread), cache | `Changelogs.refresh/between`, `parse` |
+| `changelog.py` | changelog pages → plain text (parsed in a worker thread), last page per generation | `Changelogs.refresh/version_entry/between`, `parse` |
 | `tls.py` | certificate pinning for `*.shelly.cloud` | `CertificatePins.ssl_for`, `explain_tls_error` |
 
 ### `Manager` by area
 
 - **Persistence:** `_load`, `save` (atomic), `set_ui`, `_remove_partial_downloads`.
-- **Check:** `reserve_check` (synchronous slot) → `scan` / `check_device` →
-  `_scan_all` (TaskGroup, `CHECK_PARALLEL`) → `_check_entry` → `_scan_device` →
-  shared offer task per (gen, type) and `_provide` per (type, version) (single
-  flight) → `_stored_firmware` (SHA-256 verified) or `shelly.download_firmware`;
-  `_log_check`, `_refresh_changelogs_for`, `_notify_new_updates`.
+- **Check:** `reserve_check` (synchronous slot) → `scan` / `check_device` /
+  `_check_after_installs` → `_scan_all` → `_check_entries` (TaskGroup,
+  `CHECK_PARALLEL`) → `_check_entry` → `_scan_device`: store first – `_store_offer`
+  (next higher stored version, downloads and uploads, `_intact` = SHA-256 verified
+  once per file and check) → else `_manufacturer_offer` (shared request per firmware
+  ID, Gen1 one list: `GEN1_OFFERS`) and `_provide` per (type, version) (single
+  flight) → `_stored_firmware` or `shelly.download_firmware`; `OFFER_*` (source of
+  the provided update), `_end_check`, `_log_check`, `_store_changelogs` /
+  `_attach_changelogs` (changelog kept with the store entry), `changelog_for`,
+  `_notify_new_updates`.
 - **Install / downgrade:** `approval_matches`, `downgrade_versions/match/blocker`,
-  `install` (slots, log) → `_install` (pre-check, WebSocket `_update_over_websocket`
-  or HTTP `trigger_update`) → `_await_target_version` (`INSTALL_*` timings, `_pause`
-  ends on `ota_error`), `_after_downgrade`, `_install_diagnosis`.
+  `install` → `_install_approved` (slots, log) → `_install` (pre-check, WebSocket
+  `_update_over_websocket` or HTTP `trigger_update`) → `_await_target_version`
+  (`INSTALL_*` timings, `_pause` ends on `ota_error`), `_after_downgrade`,
+  `_install_diagnosis`; then `_check_after_installs` (confirmed installations only,
+  once no installation runs, `FOLLOWUP_*`).
 - **Download server support:** `may_download`, `record_download`, `_downloaded`,
   `_reset_download`.
 - **Firmware store / upload:** `_register_firmware`, `cleanup_firmware`
@@ -63,7 +70,7 @@ both servers in parallel (cancels checks/installations, saves the state), exit 0
 | `firmware/` | `<sha256>.<zip\|bin\|gbl>`; temporary `.part-*` (downloads, staged uploads) |
 | `events.json` | activity log, one JSON object per line (3.0.0: one JSON array, converted once) |
 | `credentials.json` | `{device id: {"gen": 1, "password"} \| {"gen": 2, "realm", "ha1"}}` |
-| `changelog.json` | `{"1"\|"2": {"fetched", "versions": {version: {"date", "entries"}}}}` |
+| `changelog.json` | last fetched page per generation: `{"1"\|"2": {"fetched", "versions": {version: {"date", "entries"}}}}` |
 
 Device entry (`state.devices[<HA device id>]`): identity `name`, `shelly_name`,
 `gen`, `type` (firmware ID / app), `model`, `mac`, `shelly_id` (Gen2+ realm),
@@ -71,15 +78,18 @@ Device entry (`state.devices[<HA device id>]`): identity `name`, `shelly_name`,
 (`up-to-date|available|ready|installing|unconfirmed|error|unregistered|skipped`),
 `message`, `error_level`, `last_check`, `last_success`, `last_update`,
 `info_refreshed`, `offer_version`, `notified_version`; provided update `file`,
-`sha256`, `size`, `pending_version`, `pending_build`, `source_url`; settings `ntp`,
+`sha256`, `size`, `pending_version`, `pending_build`, `source_url`, `offer_source`
+(`manufacturer|store|upload`); settings `ntp`,
 `eco`, `ap`, `ble`, `outputs`, `actions`, `schedules`, `auth_enabled`,
 `settings_error`; flags `ignored`; runtime only (not trusted after a restart)
 `ota_progress`, `downgrade`. Memory only: `Manager.activity`, `progress`,
-`installing`, `reloading`, `downloads`, `_upload`.
+`installing`, `reloading`, `downloads`, `_upload`, `_followup` (devices to check
+after their installation), `_verifying` / `_fresh` (running check only).
 
 Firmware entry (`state.firmware[<file name>]`): `type`, `gen`, `version`, `sha256`,
 `size`, `downloaded`, `https` (downloads), `source` (`download|upload`),
-`sha_checked` (uploads).
+`sha_checked` (uploads), `changelog` (`{"date", "entries"}` of this version, set once
+the changelog page lists it; never requested again).
 
 ## HTTP API (`web_ui.py`, Ingress only; writes need `X-CSRF-Token` + JSON ≤ 32 KB)
 
@@ -99,7 +109,7 @@ Firmware entry (`state.firmware[<file name>]`): `type`, `gen`, `version`, `sha25
 | `POST /api/devices/{id}/password` | `set_device_password` (`mode`, `confirm`, `acknowledged`) |
 | `POST /api/devices/{id}/ignore` | `set_ignored` |
 | `POST /api/devices/{id}/reload` | `reload_device` |
-| `GET /api/firmware` | `firmware_list`, `store_size` |
+| `GET /api/firmware` | `firmware_list` (per file `devices`: `id`, `name` of the devices it is provided for), `store_size` |
 | `POST /api/firmware/upload` | `stage_upload` (octet-stream, ≤ 64 MiB, streamed – the only non-JSON route) |
 | `POST /api/firmware/upload/confirm` · `/cancel` | `confirm_upload` · `cancel_upload` |
 | `GET /api/firmware/{name}/download` | file response |
@@ -115,7 +125,7 @@ Download server (port 8098): `GET|HEAD /<sha256>.<zip|bin|gbl>` → `may_downloa
 ## UI (`ui-src/app.js`, `ui-src/style.css` → built into `app/static/`)
 
 Single page, `textContent` only. Polls `api/state` (30 s idle, 3 s busy, paused when
-hidden, ETag). Tabs: devices (`COLUMNS`, row menu, dialogs), firmware (store, upload,
+hidden, ETag). Tabs: devices (`COLUMNS`, row menu, dialogs), firmware (store, upload, `firmwareDevice` = Install button per device,
 delete), logs, settings (`OPTION_FIELDS`). Build: `tools/build_ui.py`; never edit
 `app/static/app.js|style.css` by hand.
 
@@ -123,8 +133,8 @@ delete), logs, settings (`OPTION_FIELDS`). Build: `tools/build_ui.py`; never edi
 
 | File | Covers |
 |---|---|
-| `test_check.py` | full/single check, reservation, progress, single flight, cancellation, ignored, Reload Device Info, log severity, manufacturer server access |
-| `test_install.py` | target version verification, OTA WebSocket channel, HTTP fallback, download diagnosis |
+| `test_check.py` | full/single check, reservation, progress, single flight, cancellation, ignored, Reload Device Info, log severity, firmware store first, Gen1 list, changelog kept with the firmware, manufacturer server access |
+| `test_install.py` | target version verification, OTA WebSocket channel, HTTP fallback, download diagnosis, check after installations |
 | `test_firmware_store.py` | store housekeeping, delete, downgrade, upload |
 | `test_device_settings.py` | device identity (incomplete answers), settings/capabilities, AP/BLE, password workflow, no secrets |
 | `test_schedule.py` | schedule, DST, catch-up, deferral |
@@ -133,7 +143,7 @@ delete), logs, settings (`OPTION_FIELDS`). Build: `tools/build_ui.py`; never edi
 | `test_web.py` | HTTP endpoints, CSRF, Ingress, 409s, upload/downgrade/delete over HTTP |
 | `test_security.py` | CSP and headers, 32 KB limit, download server refusals |
 | `test_lifecycle.py` | SIGTERM, parallel server stop |
-| `test_changelog.py` | changelog cache, parsing off the event loop |
+| `test_changelog.py` | page fetch limit, changelog of one version, display between versions, parsing off the event loop |
 | `test_build.py` | built UI files match `ui-src` |
 
 `conftest.py`: `net` (FakeNet: registry, devices A/B/C, offers, downloads; all `/data`
@@ -145,7 +155,7 @@ paths in tmp), `mgr`, `client` (UI test client with CSRF token).
 |---|---|---|
 | `run_ui.py quick\|full` | starts all demos | one command; prints one line per suite |
 | `ui_test.py [--full]` | 8801 idle, 8802 busy | layout, menus, dialogs, contrast; quick = 5 cases, full = 13 |
-| `ui_features.py` | 8801, 8803 legacy, 8804 missing, 8805 rc7 | download URL hints/notice, downgrade, upload, delete |
+| `ui_features.py` | 8801, 8803 legacy, 8804 missing, 8805 rc7 | download URL hints/notice, downgrade, upload, delete, Install button in the Firmware tab |
 | `mobile_capture.py` | 8711 idle | screenshots + overflow, full only |
 
 `tools/dev/check.sh [tests|ui|full|build]` runs everything in order: ruff → mypy (strict,

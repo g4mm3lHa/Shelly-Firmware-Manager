@@ -6,8 +6,9 @@ Suites, in this order (the last two change the demo state in their last case):
                       localhost, host names). Demo "idle" on 8801.
 - download_url_notice notice for a missing / unconfirmed download base URL, device
                       progress of a Gen2+ installation. Demos "legacy" 8803, "missing" 8804.
-- firmware_store      downgrade from the device menu, upload and two-step delete in
-                      the Firmware tab. Demo "rc7" on 8805.
+- firmware_store      downgrade from the device menu, upload, two-step delete and the
+                      Install button behind a device (3.1.0) in the Firmware tab.
+                      Demo "rc7" on 8805.
 Usage: python qa/ui_features.py <shots-dir> [suite ...]   (qa/run_ui.py starts the demos)
 Every suite checks: no horizontal overflow, no console errors; screenshots go to
 <shots-dir>."""
@@ -223,6 +224,27 @@ def firmware_store(browser, out):
         check(f"{case}: upload tag in the list", f.locator(".fw-row .tag.warn", has_text="Uploaded").count() == 1)
         check(f"{case}: no overflow (firmware)", f.evaluate(OVERFLOW_JS) <= 0)
         page.screenshot(path=out / f"{case}-firmware.png", full_page=True)
+
+        # 3.1.0: Install button behind every device a file is provided for; it opens
+        # the usual installation dialog, which names the source of the update
+        rows.first.locator(".fw-dev summary").click()
+        entries = rows.first.locator(".fw-dev li")
+        buttons = rows.first.locator(".fw-dev li button")
+        check(f"{case}: one Install button per device", entries.count() == 5 and buttons.count() == 5,
+              f"{entries.count()} / {buttons.count()}")
+        names = [t.replace("Install", "").strip() for t in entries.all_inner_texts()]
+        check(f"{case}: devices ordered by name", names == sorted(names, key=str.lower) and "Kitchen light" in names, str(names))
+        kitchen = entries.filter(has_text="Kitchen light").locator("button")   # got its update from the store
+        check(f"{case}: Install enabled for a ready device", kitchen.is_enabled(), str(kitchen.get_attribute("title")))
+        check(f"{case}: no overflow (firmware devices)", f.evaluate(OVERFLOW_JS) <= 0)
+        page.screenshot(path=out / f"{case}-firmware-devices.png", full_page=True)
+        kitchen.click()
+        d = dialog(f)
+        check(f"{case}: Install opens the installation dialog", d["title"] == "Install update?"
+              and "Kitchen light" in d["body"] and "Firmware store (downloaded from Shelly earlier)" in d["body"], d["body"][:300])
+        page.screenshot(path=out / f"{case}-firmware-install.png")
+        f.locator("#dlg-btns button", has_text="Cancel").click()   # nothing is installed in the demo
+        rows.first.locator(".fw-dev summary").click()
 
         # Two-step delete of 1.3.0
         row = rows.filter(has_text="1.3.0")

@@ -2,8 +2,56 @@
 
 ## 3.1.0
 
-Release candidate rc1 (not released). Store integration, robustness and code quality; no
-new functions of the app itself.
+Release candidate rc2 (not released). rc1: store integration, robustness and code
+quality. rc2: the firmware store comes first in every check, fewer requests to the
+Shelly servers, Install button in the Firmware tab.
+
+Changes in rc2
+- Checks – firmware store first: before the Shelly update server is asked for a
+  device, the app looks for a newer stable version of the device's firmware ID in its
+  firmware store. One stored newer version is provided; of several, the next higher
+  one to the installed version. Only without a newer stored version the server is
+  asked, as before. Applies to the full check, the single-device check and the
+  schedule, for all generations (Gen1: allowed types only, as before).
+  - Downloaded **and uploaded** files count (changed decision: until rc1 an upload was
+    never provided as an update). Of two files with the same version the download is
+    preferred. Every file is verified by its SHA-256 before it is provided; a damaged
+    file is dropped from the store and the next one is taken.
+  - A device that is already "Ready" gets the stored version at the next check if it is
+    closer to the installed one; the approval of the former file is void.
+  - Consequences: devices are updated step by step through the stored versions, and a
+    newer version on the Shelly server is found only once a device has reached the
+    newest stored version. To skip a version, delete its file in the Firmware tab.
+- Fewer requests to the Shelly servers: no request for a firmware ID whose devices all
+  get a stored version; the Gen1 firmware list is requested once per check for all
+  Gen1 types (before: once per type); still one request and one download per firmware
+  ID for any number of devices.
+- Check after installations: after a confirmed installation the installed devices are
+  checked automatically as soon as no installation is running anymore (one check for
+  all of them), so the next stored version or the server's offer is provided at once.
+  Not after a downgrade, an unconfirmed or a failed installation. Logged as
+  "After-installation check"; the time of the last full check and the schedule are not
+  changed. Changed decision: until rc1 no check ran after an update.
+- Source of an update is shown: status message ("Provided from the firmware store, not
+  installed", with "(uploaded file)" for uploads), status details, installation dialog
+  (with the upload warning) and the findings of a check in the log.
+- Changelogs are kept with the stored firmware: the changelog of a provided version is
+  stored with its file and never requested again. A changelog page is requested only
+  if a provided firmware has none yet (at most once per check and generation, and not
+  again within an hour if the page does not list the version); a fetched page also
+  fills the other stored versions. The daily refresh of the pages is gone, so later
+  corrections by Shelly to a stored changelog are not picked up. Versions between the
+  installed and the offered one are shown as far as the last fetched page lists them.
+- Firmware tab: "Install" button behind every device a firmware is provided for. It
+  opens the usual installation dialog and is disabled under the same conditions as
+  "Install update" (check running, device ignored or installing, download base URL
+  missing). The API field `used_by` of `GET /api/firmware` is replaced by `devices`
+  (`id`, `name`).
+- After a downgrade the status message says "a newer version is provided again at the
+  next check" (the next check may provide a stored version in between).
+- Code: `shelly.fetch_offer` (Gen2+) and `shelly.fetch_gen1_offers`/`gen1_offer`
+  replace the former combined function; new device field `offer_source`, new store
+  field `changelog`. No conversion needed: missing fields are filled by the next check.
 
 Changes in rc1
 - App store: the user documentation is shown in the Documentation tab of the app page

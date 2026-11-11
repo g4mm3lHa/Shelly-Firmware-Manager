@@ -10,7 +10,7 @@ import pytest
 import shelly
 from shelly import ShellyError
 
-from conftest import OPTIONS, A, B
+from conftest import OPTIONS, A, B, C
 from helpers import chunks, firmware_zip, store
 
 
@@ -161,7 +161,9 @@ async def test_downgrade_installs_the_selected_version(mgr, net, monkeypatch, fa
     assert await mgr.install(A, sha, "alice", downgrade=True) is True
     dev = mgr.devices[A]
     assert served == [True] and dev["version"] == "1.3.0"
-    assert dev["status"] == manager.STATUS_AVAILABLE and "1.5.0" in dev["message"]
+    assert dev["status"] == manager.STATUS_AVAILABLE and "a newer version is provided again" in dev["message"]
+    # 3.1.0: a downgrade is never followed by the check after installations
+    assert all(e.get("trigger") != "install" for e in mgr.events.entries if e["kind"] == "check")
     assert "downgrade" not in dev and mgr.notified[-1][0] == "Shelly downgraded: Kitchen"
     events = [e for e in mgr.events.entries if e["kind"] == "install"]
     assert [e["event"] for e in events] == ["started", "confirmed"]
@@ -297,20 +299,30 @@ async def test_upload_token_expiry_and_cancel(mgr, net, monkeypatch):
         mgr.confirm_upload(staged["token"], "Plus1", "1.2.0")
 
 
-async def test_uploaded_file_is_never_provided_as_offer(mgr, net):
-    """An upload with the version of a later offer is not reused for the update:
-    the check downloads the manufacturer's file."""
+async def test_uploaded_file_is_provided_as_update(mgr, net):
+    """3.1.0: an uploaded newer version is provided by the next
+    check like a stored download – marked as upload, the server is not asked."""
     await mgr.scan()
     for name in list(mgr.firmware):
         (manager.FW_DIR / name).unlink()
     mgr.firmware.clear()
-    store(mgr, "Plus1", "1.5.0", source=manager.SOURCE_UPLOAD, content=b"u" * 3000)
-    net.devices[A] = (*net.devices[A][:3], "1.5.0")
-    downloads = net.downloads
+    upload, _ = store(mgr, "Plus1", "1.5.0", source=manager.SOURCE_UPLOAD, content=b"u" * 3000)
+    downloads, offers = net.downloads, net.offer_calls
     await mgr.check_device(A)
-    assert net.downloads == downloads + 1
-    provided = mgr.firmware[mgr.devices[A]["file"]]
-    assert provided["source"] == "download"
+    assert (net.downloads, net.offer_calls) == (downloads, offers)
+    assert mgr.devices[A]["file"] == upload and mgr.devices[A]["offer_source"] == "upload"
+    listed = next(f for f in mgr.firmware_list() if f["name"] == upload)
+    assert listed["devices"] == [{"id": A, "name": "Kitchen"}] and not listed["deletable"]
+
+
+async def test_firmware_list_names_the_devices_with_their_ids(mgr, net):
+    """3.1.0: the Firmware tab gets ID and name of every device a file is provided
+    for (Install button), ordered by name; other files have none."""
+    await mgr.scan()
+    other, _ = store(mgr, "Plus1", "1.3.0")
+    files = {f["name"]: f for f in mgr.firmware_list()}
+    assert files[mgr.devices[A]["file"]]["devices"] == [{"id": C, "name": "Garage"}, {"id": A, "name": "Kitchen"}]
+    assert files[other]["devices"] == [] and all("used_by" not in f for f in files.values())
 
 
 async def test_deletion_refused_during_check(mgr, net):
