@@ -45,7 +45,7 @@ def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "quick"
     if mode not in ("quick", "full"):
         raise SystemExit(__doc__)
-    # An empty argument (check.sh without a folder) also means: temporary folder
+    # An empty argument (e.g. from a shell wrapper) also means: temporary folder, never the current directory
     shots = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else tempfile.mkdtemp(prefix="sfm-shots-")
     demos = {**DEMOS, **(MOBILE_DEMO if mode == "full" else {})}
     procs = [
