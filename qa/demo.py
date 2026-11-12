@@ -103,6 +103,10 @@ m.devices[f"{4:032x}"]["settings_error"] = {"message": "Device not reachable", "
 m.devices[f"{6:032x}"]["updated"] = True
 # An unconfirmed installation also stays in the updates card (status "Unconfirmed", no checkbox)
 m.devices[f"{5:032x}"]["updated"] = True
+# A failed installation stays there with checkbox and Install (retry with the provided file)
+m.devices[f"{14:032x}"].update(install_failed=True, file=f"{sha}.zip", sha256=sha, pending_version="1.5.0", offer_version="1.5.0",
+                                offer_source="store", message="The Shelly reports an update error: error. It downloaded the firmware "
+                                "but rejected it – the installed version may be too old for a direct update to 1.5.0")
 m.credentials.entries[f"{1:032x}"] = {"gen": 2, "realm": "shelly-1", "ha1": "0" * 64}
 # three consecutive log entries of one device (grouped by a side bar) and a check with mixed findings
 m.events.add("setting", device="Pool pump", changes=[{"setting": "Eco mode", "old": "on", "new": "off"}], user="demo")

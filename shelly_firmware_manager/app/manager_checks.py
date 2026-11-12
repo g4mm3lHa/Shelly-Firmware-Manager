@@ -25,8 +25,8 @@ from events import worst
 from shelly import ShellyError, clip, error_text
 
 from manager_core import (
-    ACTIVITY_CHECKING, ACTIVITY_DOWNLOADING, ACTIVITY_WAITING, Device, PENDING, SOURCE_UPLOAD, STATUS_AVAILABLE,
-    STATUS_CURRENT, STATUS_ERROR, STATUS_READY, STATUS_SKIPPED, STATUS_UNREGISTERED, severity_of,
+    ACTIVITY_CHECKING, ACTIVITY_DOWNLOADING, ACTIVITY_WAITING, Device, SOURCE_UPLOAD, STATUS_AVAILABLE,
+    STATUS_CURRENT, STATUS_ERROR, STATUS_READY, STATUS_SKIPPED, STATUS_UNREGISTERED, holds_file, severity_of,
 )
 from manager_devices import DeviceSettings
 
@@ -128,6 +128,7 @@ class Checks(DeviceSettings):
         async with self.lock:
             dev = self.devices[device_id]
             dev.pop("updated", None)  # Checked again by the user, no longer "just updated"
+            dev.pop("install_failed", None)  # nor a failed installation to retry
             self._check_user = user or "unknown"
             started = time.monotonic()
             failure = None
@@ -164,7 +165,8 @@ class Checks(DeviceSettings):
         offers: OfferTasks = {}  # shared manufacturer requests: one per firmware ID
         entries = self._shelly_entries(await self._registry())
         for dev in self.devices.values():  # A full check ends the "just updated" display
-            dev.pop("updated", None)
+            dev.pop("updated", None)  # and the retry of a failed installation
+            dev.pop("install_failed", None)
         # Ignored devices count as registered (seen) but are not contacted
         seen = set(entries)
         for device_id in seen & set(self.devices):
@@ -492,7 +494,7 @@ class Checks(DeviceSettings):
         dev = self.devices[device_id]
         if not dev.get("offer_version") or not dev.get("version"):
             return None
-        meta = self.firmware.get(str(dev.get("file"))) if dev.get("status") in PENDING else None
+        meta = self.firmware.get(str(dev.get("file"))) if holds_file(dev) else None
         return self.changelogs.between(
             dev.get("gen"), dev["version"], dev["offer_version"], dev.get("type"), (meta or {}).get("changelog")
         )

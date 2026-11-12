@@ -10,7 +10,9 @@ Suites, in this order (the last two change the demo state in their last case):
                       Install button behind a device and the changelog icon in the
                       Firmware tab; 3.1.1: Install button and "Updated" in the device
                       list, state colours of the action icons, log grouping and
-                      deleting log entries. Demo "rc7" on 8805 (and "idle" on 8801).
+                      deleting log entries; 3.2.0: failed installation in the updates
+                      card, dialog sections, phone tile layout, no tooltip after a tap,
+                      user in the log tile. Demo "rc7" on 8805 (and "idle" on 8801).
 Usage: python qa/ui_features.py <shots-dir> [suite ...]   (qa/run_ui.py starts the demos)
 Every suite checks: no horizontal overflow, no console errors; screenshots go to
 <shots-dir>."""
@@ -167,7 +169,8 @@ def _device_list(c):
     # Device list – Install button next to "Ready", "Updated" stays on top, icon colours
     card = f.locator("#dev-cards .card").first
     install = card.locator(".status-cell button.install")
-    check(f"{case}: Install button for every ready device", install.count() == 5 and install.first.is_enabled(), str(install.count()))
+    check(f"{case}: Install button for every ready device and the failed installation", install.count() == 6
+          and install.first.is_enabled(), str(install.count()))
     check(f"{case}: Install button is red", "danger" in install.first.get_attribute("class"))
     updated = card.locator("tr", has_text="Bedroom shutter")
     check(f"{case}: updated device stays in the updates card", updated.count() == 1
@@ -192,6 +195,57 @@ def _device_list(c):
           ap: document.querySelectorAll('.act.alert.s-on[aria-label^="Access point"]').length})""")
         check(f"{case}: power-on action green and red, lock yellow, access point red",
               all(counts[k] > 0 for k in ("good", "alert", "warn", "ap")), str(counts))
+
+
+def _layout(c):
+    """Failed installation in the updates card, status dialog, installation dialog
+    sections, tooltips on touch, phone tile alignment and the user in the log tile."""
+    case, f, page, out, width = c.case, c.f, c.page, c.out, c.width
+    card = f.locator("#dev-cards .card").first
+    failed = card.locator("tr", has_text="Fridge")
+    check(f"{case}: failed installation stays in the updates card with checkbox and Install", failed.count() == 1
+          and failed.locator(".pill").first.inner_text() == "Error" and failed.locator("input[type=checkbox]:not(.ghost)").count() == 1
+          and failed.locator("button.install").is_enabled())
+    failed.locator("button.pill").click()
+    pos = f.evaluate("""() => { const r = e => e.getBoundingClientRect(), m = document.querySelector('#dlg .dmsg'),
+      p = document.querySelector('#dlg .dstatus .pill'); return {mid: Math.abs((r(m).top + r(m).height / 2) - (r(p).top + r(p).height / 2)),
+      right: r(p).left >= r(m).right, title: document.getElementById('dlg-title').textContent,
+      sections: [...document.querySelectorAll('#dlg .dsec h3')].map(h => h.textContent)}; }""")
+    check(f"{case}: status dialog – message left, status right, sections", pos["right"] and pos["title"] == "Fridge"
+          and pos["sections"] == ["Firmware", "History"], str(pos))
+    page.screenshot(path=out / f"{case}-status-failed.png")
+    f.locator("#dlg-x").click()
+    tip_after_tap = None
+    if width < 700:   # touch: a tap shows no tooltip
+        card.locator("button.pill").first.tap()
+        tip_after_tap = f.evaluate("document.getElementById('tip').hidden")
+        f.locator("#dlg-x").click()
+        check(f"{case}: no tooltip after a tap", tip_after_tap is True)
+    card.locator("button.install").first.click()
+    heads = f.evaluate("[...document.querySelectorAll('#dlg .dsec h3')].map(h => h.textContent)")
+    check(f"{case}: installation dialog in sections", heads == ["Device", "Firmware", "Changelog"], str(heads))
+    page.screenshot(path=out / f"{case}-install-dialog.png")
+    f.locator("#dlg-btns button", has_text="Cancel").click()
+    if width < 700:   # phone tile: lines, flush button rows, chevron
+        row = card.locator("tr", has_text="Attic fan")
+        if not row.locator("td.c-details details").evaluate("d => d.open"):
+            row.locator("td.c-details summary").click()
+        row.locator(".act-strip.labeled").wait_for()
+        geo = row.evaluate("""tr => { const r = e => e.getBoundingClientRect(), mid = e => r(e).top + r(e).height / 2;
+          const q = s => tr.querySelector(s), strip = q('.act-strip.labeled'), buttons = [...strip.children];
+          const rows = {}; buttons.forEach(b => { const t = Math.round(r(b).top); rows[t] = Math.max(rows[t] || 0, r(b).right); });
+          return {check: Math.abs(mid(q('td.c-select input')) - mid(q('.name'))), menu: Math.abs(mid(q('td.c-menu button svg')) - mid(q('.name'))),
+            status: Math.abs(mid(q('.status-cell .pill')) - mid(q('.shelly-name'))),
+            flush: Object.values(rows).map(x => Math.round(r(strip).right - x)),
+            chevron: getComputedStyle(q('td.c-details summary'), '::after').borderRightStyle,
+            top: Math.round(r(q('.name')).top - r(tr).top), bottom: Math.round(r(tr).bottom - r(q('dl.tile-kv')).bottom)}; }""")
+        check(f"{case}: tile – checkbox and menu on the name line, status on the Shelly-name line",
+              geo["check"] < 2 and geo["menu"] < 2 and geo["status"] < 2, str(geo))
+        check(f"{case}: tile – every button row flush with the content width", all(x <= 1 for x in geo["flush"]), str(geo["flush"]))
+        check(f"{case}: tile – details chevron, padding top = bottom", geo["chevron"] == "solid" and abs(geo["top"] - geo["bottom"]) <= 3,
+              str(geo))
+        row.screenshot(path=out / f"{case}-tile.png")
+        row.locator("td.c-details summary").click()
 
 
 def _downgrade(c):
@@ -226,7 +280,7 @@ def _downgrade(c):
     # Step 2: installation dialog with the older target
     f.locator("#dlg-btns button", has_text="Continue").click()
     d = dialog(f)
-    check(f"{case}: install dialog with older target", d["title"] == "Downgrade?" and "Target (older)" in d["body"]
+    check(f"{case}: install dialog with older target", d["title"] == "Downgrade?" and "Version (older)" in d["body"]
           and "1.3.0" in d["body"] and "A downgrade installs an older firmware" in d["body"], d["body"][:200])
     page.screenshot(path=out / f"{case}-downgrade-install.png")
 
@@ -269,7 +323,8 @@ def _firmware_tab(c):
     rows.first.locator(".fw-dev summary").click()
     entries = rows.first.locator(".fw-dev li")
     buttons = rows.first.locator(".fw-dev li button")
-    check(f"{case}: one Install button per device", entries.count() == 5 and buttons.count() == 5,
+    # 5 ready devices + the failed installation (its file stays provided for a retry)
+    check(f"{case}: one Install button per device", entries.count() == 6 and buttons.count() == 6,
           f"{entries.count()} / {buttons.count()}")
     names = [t.replace("Install", "").strip() for t in entries.all_inner_texts()]
     check(f"{case}: devices ordered by name", names == sorted(names, key=str.lower) and "Kitchen light" in names, str(names))
@@ -364,6 +419,11 @@ def _logs(c):
           .map(r => { const m = e => { const b = e.getBoundingClientRect(); return b.top + b.height / 2; };
             const icon = r.querySelector('.log-del svg'); return Math.abs(m(r.querySelector('.user')) - m(icon)); })""")
         check(f"{case}: user name and delete icon on one line", offsets and max(offsets) < 1.5, str(offsets[:5]))
+    else:   # phone tiles: user top right, beside the first summary line
+        pos = f.evaluate("""() => { const t = document.querySelector('#log-list .log-m summary .first'), r = e => e.getBoundingClientRect();
+          const u = t.querySelector('.user'), x = t.firstChild, tile = t.closest('.log-m');
+          return {line: Math.abs(r(u).bottom - r(x).bottom) < 4, right: r(tile).right - r(u).right < 20, user: u.textContent}; }""")
+        check(f"{case}: log tile – user top right beside the first line", pos["line"] and pos["right"] and pos["user"], str(pos))
     scheduled = f.locator("#log-list .log, #log-list .log-m", has_text="Firmware downloaded").first
     check(f"{case}: download names the user of its check", "Schedule" in scheduled.inner_text() if c.width > 700 else True)
     f.locator("#log-list summary", has_text="30.7 s").first.click()
@@ -407,6 +467,7 @@ def firmware_store(browser, out):
 
         c = SimpleNamespace(case=case, f=f, page=page, out=out, width=width, index=index, last=last)
         _device_list(c)
+        _layout(c)
         _downgrade(c)
         rows = _firmware_tab(c)
         _firmware_delete_and_upload(c, rows)

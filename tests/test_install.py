@@ -379,3 +379,97 @@ def test_diagnosis_after_a_download_recommends_websocket_debugging(mgr):
     text = mgr._install_diagnosis(dev)
     assert text.endswith("check the device log or the Shelly's web interface and try again with enabled websocket debugging")
     assert "still reports 2.0.3" in text
+
+
+# ---------------------------------------------------------------- Failed installations and retry
+
+
+async def test_failed_installation_stays_provided_for_a_retry(mgr, net, updating, monkeypatch):
+    """A failed installation keeps its file: error status with the marker
+    install_failed (UI: "Updates available" with checkbox and Install), approval,
+    store lock and Firmware tab as for a ready device; a retry may succeed; the next
+    check of the device ends the marker."""
+    await mgr.scan()
+    real_trigger = shelly.trigger_update
+
+    async def refuse(*_args):
+        raise shelly.ShellyError("Update refused")
+
+    monkeypatch.setattr(shelly, "trigger_update", refuse)
+    dev, sha = mgr.devices[A], mgr.devices[A]["sha256"]
+    assert await mgr.install(A, sha, "alice") is False
+    assert dev["status"] == manager_core.STATUS_ERROR and dev["install_failed"] is True
+    assert {d["id"]: d for d in mgr.public_state()["devices"]}[A]["install_failed"] is True
+    assert mgr.approval_matches(A, sha) and mgr._delete_lock(dev["file"])
+    assert {"id": A, "name": dev["name"]} in next(f for f in mgr.firmware_list() if f["name"] == dev["file"])["devices"]
+    assert not mgr.may_download(dev["file"], "192.168.1.10")  # served only while installing
+    monkeypatch.setattr(shelly, "trigger_update", real_trigger)
+    assert await mgr.install(A, sha, "alice") is True  # retry
+    assert dev["status"] == manager_core.STATUS_CURRENT and "install_failed" not in dev
+    monkeypatch.setattr(shelly, "trigger_update", refuse)
+    assert await mgr.install(C, mgr.devices[C]["sha256"], "alice") is False
+    assert mgr.devices[C]["install_failed"] is True
+    await mgr.check_device(C)  # the next check of the device ends the marker
+    assert "install_failed" not in mgr.devices[C] and mgr.devices[C]["status"] == manager_core.STATUS_READY
+
+
+async def test_failed_downgrade_is_not_retryable(mgr, net, updating, monkeypatch):
+    await mgr.scan()
+    _, older = store(mgr, "Plus1", "1.3.0")
+
+    async def refuse(*_args):
+        raise shelly.ShellyError("Update refused")
+
+    monkeypatch.setattr(shelly, "trigger_update", refuse)
+    assert await mgr.install(B, older, "alice", downgrade=True) is False
+    assert mgr.devices[B]["status"] == manager_core.STATUS_ERROR and "install_failed" not in mgr.devices[B]
+    assert not mgr.approval_matches(B, older)
+
+
+def test_ota_error_text_depends_on_the_download(mgr):
+    """ota_error after the device fetched its file: the device rejected the firmware
+    (e.g. too old for a direct update); without a download: reachability hint."""
+    dev = {"file": "x.zip", "origin": "http://192.168.1.10", "pending_version": "1.7.6"}
+    text = mgr._ota_error_text(dev, "error")
+    assert "reachable from the Shelly" in text and "rejected it" not in text
+    mgr.downloads["x.zip"] = {"served": {"192.168.1.10": 1}, "rejected": set()}
+    text = mgr._ota_error_text(dev, "error")
+    assert "downloaded the firmware but rejected it" in text and "intermediate version" in text
+    assert "1.7.6" in text and "reachable" not in text
+
+
+# ---------------------------------------------------------------- Download server: rejected requests
+
+
+def test_rejected_requests_are_logged_once_per_client_and_window(caplog):
+    caplog.set_level("WARNING", logger="sfm.download")
+    rejects, t = download_server.RejectLog(), 1_000_000.0
+    for i in range(5):
+        rejects.rejected("a.zip", "192.168.1.50", now=t + i)
+    rejects.rejected("a.zip", "192.168.1.51", now=t + 10)
+    lines = [r.getMessage() for r in caplog.records]
+    assert lines == ["Download rejected: a.zip from 192.168.1.50", "Download rejected: a.zip from 192.168.1.51"]
+    caplog.clear()
+    rejects.rejected("a.zip", "192.168.1.50", now=t + download_server.REJECT_WINDOW_S + 1)
+    lines = [r.getMessage() for r in caplog.records]
+    assert lines[0].startswith("4 more rejected download request(s) from 192.168.1.50 since ")
+    assert lines[1] == "Download rejected: a.zip from 192.168.1.50" and len(lines) == 2
+
+
+def test_rejected_clients_are_limited(caplog):
+    caplog.set_level("WARNING", logger="sfm.download")
+    rejects, t = download_server.RejectLog(), 1_000_000.0
+    for i in range(download_server.REJECT_MAX_CLIENTS + 10):
+        rejects.rejected("a.zip", f"10.0.{i // 250}.{i % 250}", now=t)
+    assert len(rejects.clients) == download_server.REJECT_MAX_CLIENTS + 1  # + "other clients"
+    assert rejects.clients[download_server.OTHER_CLIENTS][1] == 9
+    assert len(caplog.records) == download_server.REJECT_MAX_CLIENTS + 1
+
+
+async def test_download_server_limits_rejection_warnings(mgr, caplog):
+    caplog.set_level("WARNING", logger="sfm.download")
+    name = "a" * 64 + ".zip"
+    async with TestClient(TestServer(download_server.build_download_app(mgr))) as client:
+        for _ in range(20):
+            assert (await client.get(f"/{name}")).status == 404
+    assert len([r for r in caplog.records if r.name == "sfm.download"]) == 1

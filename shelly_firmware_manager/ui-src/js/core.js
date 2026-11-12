@@ -141,7 +141,9 @@ export async function copyText(text) {
 
 // ---------------------------------------------------------------- Tooltip
 export const tip = $("tip");
-/** Show a tooltip on hover and keyboard focus; text() is evaluated when shown. */
+/** Show a tooltip on mouse hover and keyboard focus; text() is evaluated when shown.
+ *  Touch and pen do not show it (a tap would leave it over the content), and focus
+ *  only shows it when focus came from the keyboard (:focus-visible). */
 export function attachTip(node, text) {
   const show = () => {
     const t = text(); if (!t) return;
@@ -151,8 +153,10 @@ export function attachTip(node, text) {
     tip.style.top = (r.bottom + h + 8 > innerHeight ? r.top - h - 6 : r.bottom + 6) + "px";
   };
   const hide = () => { tip.hidden = true; };
-  node.addEventListener("mouseenter", show); node.addEventListener("focus", show);
-  node.addEventListener("mouseleave", hide); node.addEventListener("blur", hide);
+  node.addEventListener("pointerenter", e => { if (e.pointerType === "mouse") show(); });
+  node.addEventListener("focus", () => { if (node.matches(":focus-visible")) show(); });
+  node.addEventListener("pointerleave", hide); node.addEventListener("blur", hide);
+  node.addEventListener("pointerdown", e => { if (e.pointerType !== "mouse") hide(); });
 }
 $("fw-info").append(icon("info"));
 attachTip($("fw-info"), () => $("fw-info").dataset.tip);
@@ -188,9 +192,14 @@ export function toast(text, warn) {
   const t = $("toast"); t.textContent = text; t.classList.toggle("warn", !!warn); t.hidden = false;
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, warn ? 8000 : 4000);
 }
-/** Two-column value list. */
-export function valueList(pairs) {
-  const dl = el("dl");
-  for (const [k, v] of pairs) dl.append(el("dt", k), el("dd", v ?? "–"));
+/** Two-column value list: [label, value, optional value class]; rows without a
+ *  value (null or "") are left out. cls: extra class of the list (e.g. the phone tile). */
+export function valueList(pairs, cls) {
+  const dl = el("dl", null, "kv" + (cls ? " " + cls : ""));
+  for (const [k, v, vc] of pairs) if (v != null && v !== "") dl.append(el("dt", k), el("dd", v, vc || ""));
   return dl;
 }
+/** Titled block of a dialog (small uppercase heading). */
+export const section = (title, ...nodes) => box("section", "dsec", el("h3", title), ...nodes);
+/** SHA-256 row of a value list (small, monospace). */
+export const shaRow = sha => ["SHA-256", sha, "mono sha"];

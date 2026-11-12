@@ -124,12 +124,13 @@ function logTile(e, d, group) {
   const sev = severity(e), summary = logSummary(e);
   const head = box("div", "log-head", el("span", `${pad(d.getHours())}:${pad(d.getMinutes())}`, "mono sub"),
     el("span", KIND_LABELS[e.kind] || e.kind, "tag"), el("span", SEVERITY_LABELS[sev], `tag sev-${sev}`), el("span", null, "spacer"), logDelete(e));
-  const body = box("div", "log-details", ...(e.kind === "check" ? (e.findings && e.findings.length ? [checkFindings(e)] : [el("div", e.result, "sub")]) : logContent(e)),
-    e.user ? el("div", `By ${e.user}`, "sub") : null);
+  const body = box("div", "log-details", ...(e.kind === "check" ? (e.findings && e.findings.length ? [checkFindings(e)] : [el("div", e.result, "sub")]) : logContent(e)));
   const det = el("details"), key = `logm-${e.ts}-${e.kind}`;
   det.open = openDetails.has(key);
   det.ontoggle = () => { det.open ? openDetails.add(key) : openDetails.delete(key); };
-  const sum = el("summary"); sum.append(...summary.map(t => el("div", t)));
+  // The user stands top right, beside the first summary line
+  const sum = el("summary");
+  sum.append(...summary.map((t, i) => i === 0 && e.user ? box("div", "first", el("span", t), el("span", e.user, "user")) : el("div", t)));
   det.append(sum, body);
   return box("div", "log-m" + (group ? ` grp grp-${group}` : ""), head, det);
 }

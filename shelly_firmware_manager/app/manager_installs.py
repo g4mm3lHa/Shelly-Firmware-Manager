@@ -21,8 +21,8 @@ from shelly import DeviceAuth, ShellyError, error_text
 
 from manager_checks import Checks
 from manager_core import (
-    Device, PENDING, STATUS_AVAILABLE, STATUS_CURRENT, STATUS_ERROR, STATUS_INSTALLING, STATUS_READY,
-    STATUS_UNCLEAR,
+    PENDING, Device, STATUS_AVAILABLE, STATUS_CURRENT, STATUS_ERROR, STATUS_INSTALLING, STATUS_READY,
+    STATUS_UNCLEAR, holds_file,
 )
 
 log = logging.getLogger("sfm.manager")
@@ -45,11 +45,14 @@ class Installs(Checks):
     # -------------------------------------------------------------------------- Installation and downgrade
 
     def approval_matches(self, device_id: str, sha: str) -> bool:
-        """An approval is only valid while exactly this file (SHA-256) is provided."""
+        """An approval is only valid while exactly this file (SHA-256) is provided –
+        also for a retry after a failed installation (the file stays provided until
+        the next check of the device)."""
         dev = self.devices.get(device_id) or {}
         if dev.get("gen") == 1 and not self.gen1_enabled:
             return False  # Gen1 updates disabled in the settings
-        return dev.get("status") == STATUS_READY and hmac.compare_digest(str(dev.get("sha256")), sha)
+        retry = dev.get("status") == STATUS_ERROR and holds_file(dev)
+        return (dev.get("status") == STATUS_READY or retry) and hmac.compare_digest(str(dev.get("sha256")), sha)
 
     async def install(self, device_id: str, sha: str, approved_by: str, downgrade: bool = False) -> bool:
         """Install an approved update or downgrade (see _install_approved). True only
@@ -87,6 +90,8 @@ class Installs(Checks):
         dev = self.devices[device_id]
         self.installing.add(device_id)  # no await before this: no double starts possible
         dev.pop("updated", None)  # a new installation: the former "just updated" mark is obsolete
+        if dev.pop("install_failed", None) and not downgrade:
+            dev["status"] = STATUS_READY  # retry: the file is provided again (download server)
         if target is not None:
             # The device now holds the older file: the download server serves it to
             # this device only while the installation runs (status installing). The
@@ -134,6 +139,10 @@ class Installs(Checks):
                 return ok
         except (TimeoutError, ShellyError, aiohttp.ClientError, OSError, KeyError, ValueError) as err:
             dev.update(status=STATUS_ERROR, message=error_text(err, 500) or type(err).__name__)
+            if not downgrade and dev.get("file"):
+                # Stays in "Updates available" with its file for a retry until the next
+                # full check or a single check of this device
+                dev["install_failed"] = True
             if entry:
                 self.events.add("install", ok=False, event="failed", detail=dev["message"], **entry)
             return False
@@ -202,7 +211,7 @@ class Installs(Checks):
         old = shelly.parse_version(dev["version"]) if dev.get("version") else None
         unexpected = None  # last reported version that is neither old nor target
         started = time.monotonic()
-        await self._pause(ota, INSTALL_FIRST_CHECK_S)
+        await self._pause(ota, INSTALL_FIRST_CHECK_S, dev)
         while (elapsed := time.monotonic() - started) < INSTALL_WAIT_S:
             downloaded = self._downloaded(dev)
             try:
@@ -233,7 +242,7 @@ class Installs(Checks):
                     if downloaded
                     else "Waiting for the Shelly to download the firmware"
                 )
-            await self._pause(ota, INSTALL_POLL_S)
+            await self._pause(ota, INSTALL_POLL_S, dev)
 
         diagnosis = (
             f"The Shelly reports {unexpected} instead of the target version {dev['pending_version']}"
@@ -299,16 +308,29 @@ class Installs(Checks):
         finally:
             await channel.__aexit__(None, None, None)
 
-    async def _pause(self, ota: dict[str, Any], seconds: float) -> None:
+    async def _pause(self, ota: dict[str, Any], seconds: float, dev: Device) -> None:
         """Sleep while waiting for the device; ends at once on a Gen2+ ota_error."""
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(ota["failed"].wait(), seconds)
         if ota["failed"].is_set():
-            raise shelly.OtaError(
-                f"The Shelly reports an update error: {ota['error']}. Check that "
-                f"{self.download_base} is reachable from the Shelly (LAN IP address of Home "
-                "Assistant, port 8098)"
+            raise shelly.OtaError(self._ota_error_text(dev, ota["error"]))
+
+    def _ota_error_text(self, dev: Device, error: str) -> str:
+        """Message of a Gen2+ ota_error. If the download server has served the file to
+        this device, the device got it and rejected it (e.g. an installed version too
+        old for a direct update); otherwise the download most likely did not reach it."""
+        if self._downloaded(dev):
+            return (
+                f"The Shelly reports an update error: {error}. It downloaded the firmware but "
+                "rejected it – the installed version may be too old for a direct update to "
+                f"{dev.get('pending_version')}: install an intermediate version first (web "
+                "interface of the Shelly or upload in the Firmware tab)"
             )
+        return (
+            f"The Shelly reports an update error: {error}. Check that "
+            f"{self.download_base} is reachable from the Shelly (LAN IP address of Home "
+            "Assistant, port 8098)"
+        )
 
     # ----------------------------------------------------------------------------- Download server support
 
@@ -316,6 +338,7 @@ class Installs(Checks):
         """May client_ip download the file name? Only provided files, optionally only to Shellys.
         Rejected attempts on provided files are recorded for the installation diagnosis;
         served downloads are counted by record_download (GET only)."""
+        # Only while an update is provided or being installed (not for a failed one)
         owners = [d for d in self.devices.values() if d.get("status") in PENDING and d.get("file") == name]
         if not owners:
             return False  # unknown file: record nothing

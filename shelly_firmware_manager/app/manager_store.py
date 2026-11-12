@@ -28,8 +28,8 @@ from changelog import marked
 from shelly import ShellyError, clip
 
 from manager_core import (
-    DOWNLOAD_BASE_MESSAGES, Device, FirmwareMeta, ManagerCore, PART_PREFIX, PENDING, SOURCE_DOWNLOAD,
-    SOURCE_UPLOAD, STATUS_INSTALLING, STATUS_READY,
+    DOWNLOAD_BASE_MESSAGES, Device, FirmwareMeta, ManagerCore, PART_PREFIX, SOURCE_DOWNLOAD,
+    SOURCE_UPLOAD, STATUS_INSTALLING, STATUS_READY, holds_file,
 )
 
 log = logging.getLogger("sfm.manager")
@@ -87,8 +87,9 @@ class FirmwareStore(ManagerCore):
         return SOURCE_UPLOAD if meta.get("source") == SOURCE_UPLOAD else SOURCE_DOWNLOAD
 
     def _in_use(self) -> set[str]:
-        """Files a device currently holds as update or is installing (incl. downgrades)."""
-        return {d["file"] for d in self.devices.values() if d.get("status") in PENDING and d.get("file")}
+        """Files a device currently holds as update, is installing (incl. downgrades) or
+        may retry after a failed installation."""
+        return {d["file"] for d in self.devices.values() if holds_file(d)}
 
     def cleanup_firmware(self) -> None:
         """Housekeeping of the store – never deletes a registered firmware.
@@ -183,7 +184,7 @@ class FirmwareStore(ManagerCore):
         installing = {self.devices.get(i, {}).get("file") for i in self.installing}
         if name in installing or any(d.get("status") == STATUS_INSTALLING for d in holders):
             return "Locked: being installed"
-        if any(d.get("status") == STATUS_READY for d in holders):
+        if any(d.get("status") == STATUS_READY or holds_file(d) for d in holders):
             return "Locked: provided as pending update"
         return None
 
@@ -191,7 +192,7 @@ class FirmwareStore(ManagerCore):
         """Stored firmwares for the "Firmware" tab."""
         users: dict[str, list[dict[str, str]]] = {}  # file name -> devices it is provided for
         for device_id, dev in self.devices.items():
-            if dev.get("status") in PENDING and dev.get("file"):
+            if holds_file(dev):
                 users.setdefault(dev["file"], []).append({"id": device_id, "name": dev.get("name") or "?"})
         result = []
         for name, meta in self.firmware.items():

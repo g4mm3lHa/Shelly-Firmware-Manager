@@ -64,6 +64,15 @@ STATUS_SKIPPED = "skipped"  # Gen1 device while Gen1 updates are disabled
 
 PENDING = (STATUS_READY, STATUS_INSTALLING)  # device holds a firmware file
 
+
+def holds_file(dev: Device) -> bool:
+    """True while the device holds its provided firmware file: ready, installing, or
+    failed installation that can be retried (marker install_failed, kept until the
+    next check of the device)."""
+    if not dev.get("file"):
+        return False
+    return dev.get("status") in PENDING or (dev.get("status") == STATUS_ERROR and bool(dev.get("install_failed")))
+
 SUPERVISOR = "http://supervisor"  # Supervisor API (Core API proxy below /core)
 
 SUPERVISOR_TIMEOUT = aiohttp.ClientTimeout(total=15)

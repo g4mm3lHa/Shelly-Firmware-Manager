@@ -1,5 +1,5 @@
 // Installation and downgrade dialogs (approval bound to the SHA-256 of the provided file).
-import {$, api, box, closeModal, devUrl, el, fmt, mb, message, modal, selected, valueList} from "./core.js";
+import {$, api, box, closeModal, devUrl, el, fmt, mb, message, modal, section, selected, shaRow, valueList} from "./core.js";
 import {load} from "./main.js";
 
 // ---------------------------------------------------------------- Installation
@@ -38,16 +38,21 @@ const OFFER_SHORT = {manufacturer: "Shelly server", store: "Store", upload: "Upl
 /** Source line of the install dialog: the store label, or the manufacturer's URL. */
 const offerSource = d => d.offer_source && d.offer_source !== "manufacturer" ? OFFER_SOURCES[d.offer_source] : d.source_url;
 const GEN1_WARNING = "Gen1 firmware is offered by Shelly only via plain HTTP and without a checksum – its integrity and origin cannot be verified. Install only if you accept this risk.";
+/** "Device" block of the installation and downgrade dialogs. */
+const deviceSection = d => section("Device", valueList([["Name", d.name], ["Shelly", d.shelly_name], ["IP", d.ip, "mono"],
+  ["Model", [d.model, d.gen ? `Gen ${d.gen}` : null].filter(Boolean).join(" · ")]]));
+/** Installed and target version on one line. */
+const versionStep = (from, to) => `${from || "–"}  →  ${to || "–"}`;
 /** Confirmation dialog: one device with all details, several as an overview; approval bound to the SHA-256. */
 export function openInstall(devs) {
   const content = [];
   if (devs.length === 1) {
     const d = devs[0];
-    content.push(valueList([["Device", d.name], ["Shelly", d.shelly_name], ["IP", d.ip], ["Generation", d.gen], ["Firmware ID", d.type],
-      ["Model", d.model], ["Installed", d.version], ["Target", d.offer_version], ["Size", mb(d.size || 0)], ["SHA-256", d.sha256], ["Source", offerSource(d)]]));
+    content.push(deviceSection(d), section("Firmware", valueList([["Firmware ID", d.type], ["Version", versionStep(d.version, d.offer_version), "ver"],
+      ["Size", mb(d.size || 0)], ["Source", offerSource(d), "src"], shaRow(d.sha256)])));
     if (d.gen === 1) content.push(el("div", GEN1_WARNING, "warnbox"));
     if (d.offer_source === "upload") content.push(el("div", UPLOAD_HINT, "warnbox"));
-    content.push(el("h2", "Changelog"), changelogBox(d));
+    content.push(section("Changelog", changelogBox(d)));
   } else {
     const t = el("table"), h = el("tr");
     for (const c of ["Device", "IP", "Installed", "Target", "Source"]) h.append(el("th", c));
@@ -106,8 +111,8 @@ export async function openDowngrade(d) {
 }
 /** Step 2: the known installation dialog, with the selected older version as target. */
 function downgradeInstall(d, v) {
-  const content = [valueList([["Device", d.name], ["Shelly", d.shelly_name], ["IP", d.ip], ["Generation", d.gen], ["Firmware ID", d.type],
-    ["Model", d.model], ["Installed", d.version], ["Target (older)", v.version], ["Size", mb(v.size || 0)], ["SHA-256", v.sha256], ["Source", fwSource(v)]]),
+  const content = [deviceSection(d), section("Firmware", valueList([["Firmware ID", d.type],
+    ["Version (older)", versionStep(d.version, v.version), "ver"], ["Size", mb(v.size || 0)], ["Source", fwSource(v), "src"], shaRow(v.sha256)])),
   el("div", DOWNGRADE_WARNING, "warnbox")];
   if (v.source === "upload") content.push(el("div", UPLOAD_HINT, "warnbox"));
   content.push(el("p", "The device restarts during the installation.", "hint"));

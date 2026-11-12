@@ -1,5 +1,41 @@
 # Changelog
 
+## 3.2.0
+
+Not released yet. Clearer dialogs and phone tiles, failed installations can be retried
+from the updates card, a clearer message when a Shelly rejects a firmware, and fewer
+warnings in the app log for rejected download requests.
+
+Changes in rc1
+- Devices: a device whose installation failed ("Error") stays in the "Updates
+  available" card – with checkbox and "Install" for a retry, as long as its firmware is
+  still provided – until the device is checked again (single check or full check). A
+  failed downgrade is not offered again.
+- Installation (Gen2+): if the Shelly reports an update error after it downloaded the
+  firmware, the message now says that the Shelly rejected the file and that an
+  intermediate version may be needed (e.g. a device on a very old firmware). The hint
+  to check the download base URL is only shown when the Shelly did not download the
+  file.
+- Download server: a rejected request is logged as a warning only once per client
+  address and 10 minutes; further rejections are counted and named in one line when
+  the 10 minutes are over. At most 64 addresses are tracked, more are counted together
+  ("other clients"). Accepted downloads are logged as before.
+- Dialogs: title and buttons are separated by lines; the content is grouped in titled
+  sections (e.g. Device, Firmware, Changelog); value lists have a fixed label column,
+  thin row lines and no empty rows; installed and target version are on one line
+  ("1.4.0 → 1.5.0"), the generation is shown with the model; the SHA-256 is smaller.
+  The buttons are unchanged.
+- Status dialog: titled with the device name; the message and the status label are on
+  one line (label right), followed by "Firmware" and "History".
+- Phone tiles: checkbox and ⋮ on the line of the device name, status and "Install" on
+  the line of the Shelly name, the same space at the top and the bottom. The feature
+  buttons are smaller and every row fills the width of the tile. The detail list shows
+  the values right-aligned with thin row lines. "Details" has an arrow on its right.
+- Logs (phones): the user stands top right, beside the first line of an entry.
+- Phones: tapping a status label (or another element with a tooltip) no longer leaves
+  the tooltip over the tile; tooltips are shown for mouse and keyboard only.
+- AppArmor profile: the version mark in the header comment is removed.
+
 ## 3.1.1
 
 Released 2026-11-11. Contains everything of 3.1.0 (which was never released) plus the

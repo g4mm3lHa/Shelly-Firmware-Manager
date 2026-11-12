@@ -51,6 +51,7 @@ class Manager(Installs):
             "source_url",
             "offer_source",
             "updated",
+            "install_failed",
             "info_refreshed",
             "settings_error",
             "error_level",

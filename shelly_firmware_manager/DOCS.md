@@ -60,8 +60,9 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 - Devices with updates are listed on top, then all other devices, ignored devices at
   the end. Search, filters (Updates, Errors, Up to date, Ignored) and a column chooser
   help with larger installations. A device you just updated stays on top as "Updated"
-  (or "Unconfirmed" if the target version was not confirmed) until you check it again
-  or the next full check runs.
+  (or "Unconfirmed" if the target version was not confirmed, or "Error" if the
+  installation failed – then with checkbox and **Install** for another attempt) until
+  you check it again or the next full check runs.
 - The action icons show and change power-on action, eco mode, password protection,
   access point, Bluetooth, actions and schedules, and restart the device. A "?" means
   the value is currently unknown. Colours: power-on action green = every output
@@ -82,7 +83,7 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 | Updated | The installation was confirmed; shown until the next check of the device |
 | Queued / Installing | Installation waiting for a free slot / running (with progress for Gen2+) |
 | Unconfirmed | The installation ran, but the target version was not confirmed (see the details); stays on top until the next check of the device |
-| Error | Check, download or installation failed |
+| Error | Check, download or installation failed; after a failed installation the device stays on top and can be installed again |
 | Skipped | Gen1 device while Gen1 updates are disabled |
 | Unregistered | Device is no longer in the Home Assistant device registry |
 
@@ -210,6 +211,8 @@ Gen2+ firmware is downloaded over HTTPS only.
 | The Shelly never requested the firmware / Connection error -14 | The download base URL is wrong or blocked: it must be the IP of Home Assistant, port 8098 must be reachable from the Shelly |
 | Download rejected: request came from 172.30.x.x | Docker hides the device address – turn off "Serve downloads only to known Shellys" |
 | The Shelly downloaded the firmware but still reports … | The device did not install it – check the log in the Shelly web UI |
+| The Shelly reports an update error … It downloaded the firmware but rejected it | The installed firmware may be too old for a direct update to this version: install an intermediate version first (web interface of the Shelly, or upload it in the Firmware tab), then the newer one |
+| Many "Download rejected" lines in the app log | Only the first rejected request per address and 10 minutes is logged; the others are counted in one line |
 | The Shelly reports X instead of the target version Y | Check the device; run "Check for updates" again |
 | Certificate of … is not publicly trusted | See [Certificate pinning](#certificate-pinning) |
 | The Shelly requires a password | Store the device password (see [Device passwords](#device-passwords)) |
@@ -277,6 +280,7 @@ server interfaces are not officially guaranteed.
   to its new storage format at the first start. 3.1.1 adds a watchdog: check that the
   **Watchdog** switch on the app page is on. Log entries get an internal ID at the
   first start of 3.1.1 (needed to delete single entries).
+- **From 3.1.1:** nothing to do.
 - **From 2.x or 1.x:** since 3.0.1 the conversion code of these versions is no longer
   included. Update to 3.0.0 first and start it once (it removes the former shared Shelly
   password from the stored options and converts the table settings), then update to

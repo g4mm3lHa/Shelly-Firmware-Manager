@@ -141,7 +141,7 @@ def run_case(pw, width, scheme, embedded, base=IDLE, tag="idle"):
     f.locator("button.pill").first.click()
     page.wait_for_timeout(150)
     dlg = f.evaluate("() => document.getElementById('dlg').open && document.getElementById('dlg-body').textContent")
-    check(page, f"{case}: status dialog with last successful check", dlg and "Last successful check" in dlg)
+    check(page, f"{case}: status dialog with last successful check", dlg and "Last success" in dlg and "History" in dlg)
     page.screenshot(path=OUT / f"{case}-status.png")
     if f.locator("#dlg-x").count():
         f.locator("#dlg-x").click()
