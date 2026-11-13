@@ -107,6 +107,20 @@ m.devices[f"{5:032x}"]["updated"] = True
 m.devices[f"{14:032x}"].update(install_failed=True, file=f"{sha}.zip", sha256=sha, pending_version="1.5.0", offer_version="1.5.0",
                                 offer_source="store", message="The Shelly reports an update error: error. It downloaded the firmware "
                                 "but rejected it – the installed version may be too old for a direct update to 1.5.0")
+# The update server could not be asked: a stored version is offered for a manual installation
+m.devices[f"{16:032x}"].update(status="error", store_fallback=True, error_level="warning", file=f"{sha}.zip", sha256=sha,
+                                pending_version="1.5.0", offer_version="1.5.0", offer_source="store",
+                                message="408, 'Request Timeout', 'https://updates.shelly.cloud/update/Plus1'. Stored version 1.5.0 is "
+                                "ready and can be installed manually – at your own risk: without the answer of the Shelly update "
+                                "server it cannot be verified whether an intermediate version is required first.")
+# An intermediate version on the way to the newest one
+m.devices[f"{7:032x}"].update(step_target="1.7.0", message="Provided, not installed – intermediate version on the way to 1.7.0; "
+                               "the device is checked again after its installation")
+m.events.add("install", event="confirmed", ok=True, unverified=True, device="Entrance", type="Plus1", old="1.4.0", new="1.5.0",
+             user="demo")
+m.events.add("check", trigger="step", devices=1, duration=1.4, updates=1, warnings=0, errors=0,
+             result="1 update(s), 0 warning(s), 0 error(s)", user="demo",
+             findings=[{"device": "Heat pump 3EM", "version": "1.5.0", "offer": "1.7.0", "severity": "success"}])
 m.credentials.entries[f"{1:032x}"] = {"gen": 2, "realm": "shelly-1", "ha1": "0" * 64}
 # three consecutive log entries of one device (grouped by a side bar) and a check with mixed findings
 m.events.add("setting", device="Pool pump", changes=[{"setting": "Eco mode", "old": "on", "new": "off"}], user="demo")

@@ -77,13 +77,13 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 
 | Status | Meaning |
 |---|---|
-| Up-To-Date | Nothing newer is stored and the Shelly server offers no newer stable firmware |
+| Up-To-Date | No newer stable firmware is offered (Gen2+: by the Shelly server; Gen1: neither stored nor by the Shelly server) |
 | Available | An update exists, the firmware is provided at the next check |
 | Ready | Firmware provided (from the firmware store or downloaded), waiting for your approval – "Install" next to the status opens the installation dialog |
 | Updated | The installation was confirmed; shown until the next check of the device |
 | Queued / Installing | Installation waiting for a free slot / running (with progress for Gen2+) |
 | Unconfirmed | The installation ran, but the target version was not confirmed (see the details); stays on top until the next check of the device |
-| Error | Check, download or installation failed; after a failed installation the device stays on top and can be installed again |
+| Error | Check, download or installation failed; after a failed installation – or with a stored version while the Shelly server could not be asked – the device stays on top and can be installed (again) |
 | Skipped | Gen1 device while Gen1 updates are disabled |
 | Unregistered | Device is no longer in the Home Assistant device registry |
 
@@ -92,20 +92,35 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 A check (all devices, a single device or the schedule) works in this order:
 
 1. Every device is asked in your network for its firmware ID and installed version.
-2. **The firmware store comes first.** If the store holds a newer stable version for
-   the device's firmware ID, it is provided – downloaded and uploaded files alike,
-   after a SHA-256 check. If several newer versions are stored, the **next higher**
-   one is provided, so a device is updated step by step through the stored versions.
-   The Shelly update server is not asked for this device. A newer version on the Shelly
-   server therefore shows up only once the device has reached the newest stored version.
-3. Only for devices without a newer stored version the Shelly update server is asked –
-   once per firmware ID, however many devices share it (Gen1: one request for all
-   types). A newer version is downloaded once and stored.
+2. **Gen2+ devices: the Shelly update server decides.** It is asked with the firmware ID
+   and the installed version – the way a Shelly asks itself; only these two values are
+   sent. The server answers with the next allowed step for this version. Devices with
+   the same firmware ID and version share one request.
+   - If the firmware store already holds exactly the offered version (downloaded or
+     uploaded, SHA-256 checked), it is used; otherwise it is downloaded once and stored.
+     A download must match the SHA-256 named in Shelly's download address.
+   - **Intermediate versions:** some old firmware versions must be updated to an
+     intermediate version first (e.g. Plus1 1.0.7 → 1.3.3 → 1.7.x). Such an offer is
+     marked as intermediate version. After its installation is confirmed, the device is
+     checked again at once and the next step is provided – it is installed only after
+     you approve it.
+   - **Server not reachable:** the device shows the error. If a newer version is
+     stored, the error details say so: you can install it manually (checkbox and
+     **Install** stay available), but at your own risk – without the server's answer it
+     cannot be verified whether an intermediate version is needed first. The dialog asks
+     you to accept this risk.
+3. **Gen1 devices: the firmware store comes first.** If the store holds a newer stable
+   version for the device's type, the **next higher** one is provided (step by step
+   through the stored versions); the Shelly list is only asked for devices without
+   one – one request for all Gen1 types.
 
-An update that was already provided is replaced if the store holds a version closer to
-the installed one. The status details, the installation dialog and the log name the
-source of an update: Shelly update server, firmware store, or an uploaded file. To skip
-a stored version, delete it in the **Firmware** tab.
+Every check that asks the Shelly update server also makes one reference request with
+fixed values (Plus1 1.0.7, which must be offered 1.3.3 – no data of your devices). If
+the server answers differently, the check reports a warning: the server no longer
+evaluates the installed version, so required intermediate versions cannot be detected.
+
+The status details, the installation dialog and the log name the source of an update:
+Shelly update server, firmware store, or an uploaded file.
 
 The changelog of a provided version is requested once from the Shelly documentation
 and kept with the stored firmware; it is not requested again afterwards.
@@ -211,7 +226,10 @@ Gen2+ firmware is downloaded over HTTPS only.
 | The Shelly never requested the firmware / Connection error -14 | The download base URL is wrong or blocked: it must be the IP of Home Assistant, port 8098 must be reachable from the Shelly |
 | Download rejected: request came from 172.30.x.x | Docker hides the device address – turn off "Serve downloads only to known Shellys" |
 | The Shelly downloaded the firmware but still reports … | The device did not install it – check the log in the Shelly web UI |
-| The Shelly reports an update error … It downloaded the firmware but rejected it | The installed firmware may be too old for a direct update to this version: install an intermediate version first (web interface of the Shelly, or upload it in the Firmware tab), then the newer one |
+| The Shelly reports an update error … It downloaded the firmware but rejected it | The installed firmware may be too old for a direct update to this version: check the device again – the Shelly update server names the required intermediate version (or install one via the web interface of the Shelly or an upload) |
+| Check warning: the Shelly update server no longer answers with the next step | Shelly changed its update server: required intermediate versions cannot be detected. Prefer the web interface of the Shelly for devices on very old firmware |
+| Error … Stored version X is ready and can be installed manually | The Shelly server could not be asked. Check again later, or install the stored version at your own risk |
+| Download does not match the SHA-256 named by the manufacturer's URL | The download was damaged or altered and was not stored – check again |
 | Many "Download rejected" lines in the app log | Only the first rejected request per address and 10 minutes is logged; the others are counted in one line |
 | The Shelly reports X instead of the target version Y | Check the device; run "Check for updates" again |
 | Certificate of … is not publicly trusted | See [Certificate pinning](#certificate-pinning) |

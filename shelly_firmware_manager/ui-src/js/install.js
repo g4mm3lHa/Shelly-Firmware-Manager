@@ -37,6 +37,9 @@ export const OFFER_SOURCES = {manufacturer: "Shelly update server", store: "Firm
 const OFFER_SHORT = {manufacturer: "Shelly server", store: "Store", upload: "Upload"};
 /** Source line of the install dialog: the store label, or the manufacturer's URL. */
 const offerSource = d => d.offer_source && d.offer_source !== "manufacturer" ? OFFER_SOURCES[d.offer_source] : d.source_url;
+const FALLBACK_WARNING = "The Shelly update server could not be asked. This stored version is offered for a manual installation at your own risk: it cannot be verified whether the device needs an intermediate version first. If it does, the device rejects the firmware.";
+/** Hint of an intermediate version: the device is checked again after its installation. */
+const stepHint = d => `${d.name}: ${d.offer_version} is an intermediate version${d.step_target ? ` on the way to ${d.step_target}` : ""}. After the installation the device is checked again and the next version is provided (it is installed only after a new approval).`;
 const GEN1_WARNING = "Gen1 firmware is offered by Shelly only via plain HTTP and without a checksum – its integrity and origin cannot be verified. Install only if you accept this risk.";
 /** "Device" block of the installation and downgrade dialogs. */
 const deviceSection = d => section("Device", valueList([["Name", d.name], ["Shelly", d.shelly_name], ["IP", d.ip, "mono"],
@@ -52,6 +55,7 @@ export function openInstall(devs) {
       ["Size", mb(d.size || 0)], ["Source", offerSource(d), "src"], shaRow(d.sha256)])));
     if (d.gen === 1) content.push(el("div", GEN1_WARNING, "warnbox"));
     if (d.offer_source === "upload") content.push(el("div", UPLOAD_HINT, "warnbox"));
+    if (d.step_target != null) content.push(el("p", stepHint(d), "hint"));
     content.push(section("Changelog", changelogBox(d)));
   } else {
     const t = el("table"), h = el("tr");
@@ -61,22 +65,33 @@ export function openInstall(devs) {
     content.push(t);
     if (devs.some(d => d.gen === 1)) content.push(el("div", GEN1_WARNING, "warnbox"));
     if (devs.some(d => d.offer_source === "upload")) content.push(el("div", UPLOAD_HINT, "warnbox"));
+    for (const d of devs.filter(x => x.step_target != null)) content.push(el("p", stepHint(d), "hint"));
     for (const d of devs) {
       const det = el("details"); det.append(el("summary", `Changelog – ${d.name}`));
       det.ontoggle = () => { if (det.open && det.children.length === 1) det.append(changelogBox(d)); };
       content.push(det);
     }
   }
+  // A stored version offered without the server's answer needs the risk acknowledgment
+  const unverified = devs.filter(d => d.store_fallback), ack = el("input");
+  if (unverified.length) {
+    ack.type = "checkbox";
+    content.push(el("div", unverified.length === devs.length ? FALLBACK_WARNING
+      : `${unverified.map(d => d.name).join(", ")}: ${FALLBACK_WARNING}`, "warnbox"),
+    box("label", "check", ack, " I accept the risk of installing without the update server's verification"));
+  }
   content.push(el("p", devs.length === 1 ? "The device restarts during the installation." : "The devices restart during the installation.", "hint"));
   modal(devs.length === 1 ? "Install update?" : `Install ${devs.length} updates?`, content, [{text: "Cancel"},
     {text: "Approve installation", kind: "danger", action: async () => {
       const errors = [];
       for (const d of devs) {   // each installation starts in the background – calls return at once
-        try { await api(`${devUrl(d)}/install`, {sha256: d.sha256, confirm: true}); selected.delete(d.id); }
+        const body = {sha256: d.sha256, confirm: true, ...(d.store_fallback ? {acknowledged: ack.checked} : {})};
+        try { await api(`${devUrl(d)}/install`, body); selected.delete(d.id); }
         catch (e) { errors.push(`${d.name}: ${e.message}`); }
       }
       errors.length ? message("Installation", errors.join("\n"), "error") : closeModal();
     }}]);
+  if (unverified.length) { const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; }; }
 }
 // ---------------------------------------------------------------- Downgrade
 // Flow: list of stored older versions -> installation dialog for the selected

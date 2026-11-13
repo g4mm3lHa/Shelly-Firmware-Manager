@@ -16,8 +16,9 @@ const STATUS_LABELS = {"up-to-date": "Up-To-Date", available: "Available", ready
 // this device; a confirmed one is shown as "Updated", an unconfirmed one keeps its status
 const installedRecently = d => !!d.updated && ["up-to-date", "unconfirmed"].includes(d.status);
 // A failed installation also stays there until that check – with checkbox and
-// "Install" for a retry (its file stays provided)
-const failedInstall = d => d.status === "error" && !!d.install_failed;
+// "Install" for a retry (its file stays provided); so does a stored version offered
+// for a manual installation while the Shelly update server could not be asked
+const failedInstall = d => d.status === "error" && !!(d.install_failed || d.store_fallback);
 const justUpdated = d => installedRecently(d) && d.status === "up-to-date";
 const shownStatus = d => d.installing && d.status === "ready" ? "queued" : justUpdated(d) ? "updated" : d.status;
 const hasUpdate = d => ["available", "ready", "installing"].includes(d.status);
@@ -175,7 +176,8 @@ function statusCell(d) {
 function installButton(d) {
   if (!(d.status === "ready" || failedInstall(d)) || d.activity || d.installing) return null;
   const blocker = installBlocker(d, ui.state), go = el("button", "Install", "danger small install");
-  go.disabled = !!blocker; go.title = blocker || "Install the provided update";
+  go.disabled = !!blocker;
+  go.title = blocker || (d.store_fallback ? "Install the stored version (not verified by the Shelly update server)" : "Install the provided update");
   go.setAttribute("aria-label", `Install update on ${d.name}`);
   go.onclick = () => { if (installable(d, ui.state)) openInstall([d]); };
   return go;

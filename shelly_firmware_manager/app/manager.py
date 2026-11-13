@@ -52,6 +52,8 @@ class Manager(Installs):
             "offer_source",
             "updated",
             "install_failed",
+            "store_fallback",
+            "step_target",
             "info_refreshed",
             "settings_error",
             "error_level",

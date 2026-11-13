@@ -134,17 +134,22 @@ class FirmwareStore(ManagerCore):
             log.warning("Stored firmware %s is damaged and is not used anymore", name)
         return False
 
-    async def _stored_firmware(self, fw_type: str, version: str) -> tuple[str, FirmwareMeta] | None:
-        """Already downloaded firmware for exactly this ID and version – after checksum
-        verification. Used for a version offered by the manufacturer's server, so
-        only files downloaded from the manufacturer count here."""
-        for name, meta in list(self.firmware.items()):
-            if (
-                meta.get("type") == fw_type
-                and meta.get("version") == version
-                and self._source(meta) == SOURCE_DOWNLOAD
-                and await self._intact(name, meta)
-            ):
+    async def _stored_firmware(
+        self, fw_type: str, version: str, uploads: bool = False
+    ) -> tuple[str, FirmwareMeta] | None:
+        """Stored firmware for exactly this ID and version offered by the manufacturer's
+        server – after checksum verification. Downloads only, with uploads=True an
+        uploaded file too (a download of the same version is preferred)."""
+        matches = [
+            (name, meta)
+            for name, meta in list(self.firmware.items())
+            if meta.get("type") == fw_type
+            and meta.get("version") == version
+            and (uploads or self._source(meta) == SOURCE_DOWNLOAD)
+        ]
+        matches.sort(key=lambda item: self._source(item[1]) != SOURCE_DOWNLOAD)  # downloads first
+        for name, meta in matches:
+            if await self._intact(name, meta):
                 return name, meta
         return None
 

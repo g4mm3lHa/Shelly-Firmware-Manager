@@ -1,5 +1,7 @@
 """Full and single-device checks: progress, reservation, single flight, cancellation,
-ignored devices, Reload Device Info, log severity, firmware store first.
+ignored devices, Reload Device Info, log severity, Gen2+ next steps (server first,
+stored file of the offered version, intermediate versions, store fallback, reference
+request), Gen1 firmware store first.
 
 All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test servers."""
 
@@ -22,7 +24,7 @@ async def test_full_check_provides_firmware_and_reuses_download(mgr, net):
     assert mgr.devices[C]["status"] == manager_core.STATUS_READY
     assert mgr.devices[B]["status"] == manager_core.STATUS_CURRENT
     assert net.downloads == 1  # second device reuses the stored file
-    assert net.offer_calls == 1  # one offer per (gen, type)
+    assert net.offer_calls == 2  # one request per firmware ID and installed version (1.4.0, 1.5.0)
     assert mgr.progress is None and mgr.activity == {} and not mgr.checking
     assert mgr.last_scan and mgr.schedule_changed.is_set()
     for dev in mgr.devices.values():
@@ -346,7 +348,7 @@ async def test_parallel_check_is_bounded_and_single_flight(mgr, net, monkeypatch
     monkeypatch.setattr(shelly, "device_info", counting)
     assert await mgr.scan()
     assert peak == manager_checks.CHECK_PARALLEL
-    assert net.offer_calls == 1 and net.downloads == 1
+    assert net.offer_calls == 2 and net.downloads == 1  # 1.4.0 and 1.5.0 installed
     ready = [d for d in mgr.devices.values() if d["status"] == manager_core.STATUS_READY]
     assert len(ready) == 12
     # Devices reached after the download get the same manufacturer offer – a
@@ -369,54 +371,32 @@ async def test_check_severity_levels(mgr, net):
     assert "0 warning(s), 3 error(s)" in entry["result"]
 
 
-# ---------------------------------------------------------------- Firmware store first
+# ---------------------------------------------------------------- Gen2+: the server decides, the store serves
 
 
-async def test_store_first_provides_the_next_higher_version_without_asking_the_server(mgr, net):
-    """Several newer stored versions: each device gets the next higher one to its
-    installed version; the manufacturer's server is not asked at all."""
-    store(mgr, "Plus1", "1.7.0")
-    store(mgr, "Plus1", "1.5.0")
-    store(mgr, "Plus1", "1.6.0")
-    store(mgr, "Plus1", "1.3.0")  # older: irrelevant
-    store(mgr, "Other", "9.0.0")  # other firmware ID: irrelevant
+async def test_server_decides_and_a_stored_file_of_the_offered_version_is_used(mgr, net):
+    """Gen2+: the server is asked per firmware ID and installed version; a stored file
+    of exactly the offered version is used instead of a download – newer stored
+    versions are not offered."""
+    name, _ = store(mgr, "Plus1", "1.5.0")
+    store(mgr, "Plus1", "1.7.0")  # newer, but not offered by the server
     assert await mgr.scan(user="u")
-    assert net.offer_calls == 0 and net.downloads == 0
-    pending = {i: mgr.devices[i]["pending_version"] for i in (A, B, C)}
-    assert pending == {A: "1.5.0", B: "1.6.0", C: "1.5.0"}  # A, C: 1.4.0 installed, B: 1.5.0
+    assert net.offer_calls == 2 and net.downloads == 0  # installed 1.4.0 and 1.5.0
     dev = mgr.devices[A]
-    assert dev["status"] == manager_core.STATUS_READY and dev["offer_version"] == "1.5.0"
-    assert dev["offer_source"] == "store" and dev["source_url"] is None
-    assert dev["message"] == "Provided from the firmware store, not installed"
-    assert mgr.approval_matches(A, dev["sha256"]) and mgr.firmware[dev["file"]]["version"] == "1.5.0"
+    assert dev["status"] == manager_core.STATUS_READY and dev["file"] == name and dev["pending_version"] == "1.5.0"
+    assert dev["offer_source"] == "store" and dev["message"] == "Provided from the firmware store, not installed"
+    assert mgr.devices[B]["status"] == manager_core.STATUS_CURRENT  # 1.5.0 installed, 1.5.0 offered
     entry = [e for e in mgr.events.entries if e["kind"] == "check"][-1]
-    assert {f["source"] for f in entry["findings"]} == {"store"} and entry["updates"] == 3
+    assert {f["source"] for f in entry["findings"]} == {"store"} and entry["updates"] == 2
 
 
-async def test_server_is_asked_once_for_devices_without_a_stored_version(mgr, net):
-    """Same firmware ID, different installed versions: the decision is made per
-    device – one server request for the device the store has nothing newer for."""
-    store(mgr, "Plus1", "1.5.0")
-    net.offer_version = "1.6.0"
-    await mgr.scan()
-    assert net.offer_calls == 1 and net.downloads == 1
-    assert {i: mgr.devices[i]["pending_version"] for i in (A, B, C)} == {A: "1.5.0", B: "1.6.0", C: "1.5.0"}
-    assert {i: mgr.devices[i]["offer_source"] for i in (A, B, C)} == {A: "store", B: "manufacturer", C: "store"}
-    assert mgr.devices[B]["source_url"] and mgr.devices[B]["message"] == "Provided, not installed"
-    findings = [e for e in mgr.events.entries if e["kind"] == "check"][-1]["findings"]
-    assert sorted(f["source"] for f in findings) == ["manufacturer", "store", "store"]
-
-
-async def test_single_stored_newer_version_is_used_and_uploads_count(mgr, net):
-    """One newer file is enough, and an uploaded file is provided like a download –
-    marked as upload."""
-    name, sha = store(mgr, "Plus1", "1.6.0", source=manager_core.SOURCE_UPLOAD)
+async def test_uploaded_file_of_the_offered_version_is_used(mgr, net):
+    name, sha = store(mgr, "Plus1", "1.5.0", source=manager_core.SOURCE_UPLOAD)
     mgr.devices[A] = {"name": "Kitchen"}
     await mgr.check_device(A)
     dev = mgr.devices[A]
-    assert net.offer_calls == 0 and dev["status"] == manager_core.STATUS_READY
-    assert (dev["file"], dev["sha256"], dev["pending_version"]) == (name, sha, "1.6.0")
-    assert dev["offer_source"] == "upload" and "uploaded file" in dev["message"]
+    assert net.offer_calls == 1 and net.downloads == 0
+    assert (dev["file"], dev["sha256"], dev["offer_source"]) == (name, sha, "upload") and "uploaded file" in dev["message"]
     assert mgr.public_state()["devices"][0]["offer_source"] == "upload"
 
 
@@ -428,43 +408,86 @@ async def test_download_is_preferred_over_an_upload_of_the_same_version(mgr, net
     assert mgr.devices[A]["file"] == name and mgr.devices[A]["offer_source"] == "store"
 
 
-async def test_provided_update_is_replaced_by_the_stored_version(mgr, net):
-    """A device that is already "ready" with the manufacturer's version gets the
-    next higher stored version at the next check; the old approval is void."""
-    net.offer_version = "1.6.0"
+async def test_installed_version_is_sent_and_intermediate_versions_are_marked(mgr, net, monkeypatch):
+    """The next step of the server for the installed version is provided; below the
+    newest version it is marked as intermediate version (target: the newest)."""
+    sent = []
+    fake = shelly.fetch_offer
+
+    async def recording(session, fw_type, pins=None, version=None):
+        sent.append((fw_type, version))
+        return await fake(session, fw_type, pins, version)
+
+    monkeypatch.setattr(shelly, "fetch_offer", recording)
+    net.steps = {"1.4.0": "1.5.0"}
+    net.offer_version = "1.7.0"
     await mgr.scan()
-    old = mgr.devices[A]["sha256"]
-    assert mgr.devices[A]["pending_version"] == "1.6.0" and mgr.devices[A]["offer_source"] == "manufacturer"
-    name, sha = store(mgr, "Plus1", "1.5.0", source=manager_core.SOURCE_UPLOAD)
-    calls = net.offer_calls
+    assert ("Plus1", "1.4.0") in sent and ("Plus1", "1.5.0") in sent and ("Plus1", None) in sent
+    assert sent.count(("Plus1", "1.4.0")) == 1  # shared by A and C
+    a, b = mgr.devices[A], mgr.devices[B]
+    assert a["pending_version"] == "1.5.0" and a["step_target"] == "1.7.0"
+    assert "intermediate version on the way to 1.7.0" in a["message"]
+    assert b["pending_version"] == "1.7.0" and b.get("step_target") is None
+    assert net.newest_calls == 1 and mgr.public_state()["devices"][0].get("step_target") in ("1.7.0", None)
+
+
+async def test_several_steps_without_newer_version_are_an_intermediate_version(mgr, net, monkeypatch):
+    fake = shelly.fetch_offer
+
+    async def steps(session, fw_type, pins=None, version=None):
+        offer = await fake(session, fw_type, pins, version)
+        return {**offer, "steps": "2"} if version == "1.4.0" else offer
+
+    monkeypatch.setattr(shelly, "fetch_offer", steps)
+    mgr.devices[A] = {"name": "Kitchen"}
+    await mgr.check_device(A)
+    assert mgr.devices[A]["step_target"] == "" and "intermediate version;" in mgr.devices[A]["message"]
+
+
+async def test_server_error_offers_a_stored_version_for_a_manual_installation(mgr, net):
+    """The server cannot be asked: error as before; a newer stored version is offered
+    for a manual installation with the risk hint (marker store_fallback)."""
+    name, sha = store(mgr, "Plus1", "1.6.0")
+    net.offer_error = ShellyError("408, 'Request Timeout'")
+    mgr.devices.update({A: {"name": "Kitchen"}, B: {"name": "Hall"}})
     await mgr.check_device(A)
     dev = mgr.devices[A]
-    assert net.offer_calls == calls and net.downloads == 1
-    assert (dev["file"], dev["pending_version"], dev["offer_version"]) == (name, "1.5.0", "1.5.0")
-    assert dev["offer_source"] == "upload" and dev["source_url"] is None
-    assert mgr.approval_matches(A, sha) and not mgr.approval_matches(A, old)
-    assert len(mgr.firmware) == 2  # the downloaded 1.6.0 stays stored for the next step
+    assert dev["status"] == manager_core.STATUS_ERROR and dev["store_fallback"] is True
+    assert dev["message"].startswith("408, 'Request Timeout'. Stored version 1.6.0 is ready")
+    assert "at your own risk" in dev["message"] and dev["error_level"] == "warning"
+    assert (dev["file"], dev["pending_version"], dev["offer_source"]) == (name, "1.6.0", "store")
+    assert manager_core.holds_file(dev) and mgr.approval_matches(A, sha)
+    await mgr.check_device(B)  # 1.5.0 installed: 1.6.0 is newer as well
+    assert mgr.devices[B]["store_fallback"] is True
+    net.offer_error = None
+    await mgr.check_device(A)  # server answers again: the marker is gone
+    assert "store_fallback" not in mgr.devices[A] and mgr.devices[A]["pending_version"] == "1.5.0"
 
 
-async def test_damaged_stored_file_is_skipped(mgr, net):
-    """Checksum mismatch: the file counts as not stored – the next higher one is
-    taken, and without another one the server is asked."""
-    bad, _ = store(mgr, "Plus1", "1.5.0")
-    good, _ = store(mgr, "Plus1", "1.6.0")
-    (data_paths.FW_DIR / bad).write_bytes(b"damaged" * 500)
-    mgr.devices.update({A: {"name": "Kitchen"}, C: {"name": "Garage"}})
+async def test_server_error_without_newer_stored_version_stays_a_plain_error(mgr, net):
+    store(mgr, "Plus1", "1.6.0-beta1")  # pre-release: never offered from the store
+    store(mgr, "Plus1", "1.7.0", gen=1)  # other generation
+    net.offer_error = ShellyError("502, 'Bad Gateway'")
+    mgr.devices[A] = {"name": "Kitchen"}
     await mgr.check_device(A)
-    assert mgr.devices[A]["file"] == good and bad not in mgr.firmware and net.offer_calls == 0
-    (data_paths.FW_DIR / good).unlink()
-    await mgr.check_device(C)
-    assert net.offer_calls == 1 and mgr.devices[C]["offer_source"] == "manufacturer"
-    assert good not in mgr.firmware and mgr.devices[A]["status"] == manager_core.STATUS_READY  # A: checked again later
+    dev = mgr.devices[A]
+    assert dev["status"] == manager_core.STATUS_ERROR and dev["message"] == "502, 'Bad Gateway'"
+    assert "store_fallback" not in dev and not manager_core.holds_file(dev)
+
+
+async def test_damaged_stored_file_of_the_offered_version_is_downloaded_again(mgr, net):
+    bad, _ = store(mgr, "Plus1", "1.5.0", content=b"x" * 70000)
+    (data_paths.FW_DIR / bad).write_bytes(b"damaged" * 500)
+    mgr.devices[A] = {"name": "Kitchen"}
+    await mgr.check_device(A)
+    assert net.downloads == 1 and mgr.devices[A]["offer_source"] == "manufacturer"
 
 
 async def test_stored_file_is_verified_once_per_check(mgr, net, monkeypatch):
     """Twelve devices of one type share one checksum verification of the stored file."""
     for i in range(9):
         net.devices[f"{i:031x}e"] = (f"Dev {i}", f"192.168.1.{50 + i}", "1.4.0", "1.5.0")
+    net.offer_version = "1.6.0"
     store(mgr, "Plus1", "1.6.0")
     original, hashed = shelly.file_sha256, []
 
@@ -474,18 +497,44 @@ async def test_stored_file_is_verified_once_per_check(mgr, net, monkeypatch):
 
     monkeypatch.setattr(shelly, "file_sha256", counting)
     await mgr.scan()
-    assert len(hashed) == 1 and net.offer_calls == 0
+    assert len(hashed) == 1 and net.downloads == 0
     assert all(d["pending_version"] == "1.6.0" for d in mgr.devices.values())
-    await mgr.scan()
-    assert len(hashed) == 2 and mgr._verifying == {} and mgr._fresh == {}  # verified again by the next check
-
-
-async def test_pre_release_and_foreign_generation_are_not_offered_from_the_store(mgr, net):
-    store(mgr, "Plus1", "1.6.0-beta1")
-    store(mgr, "Plus1", "1.7.0", gen=1)
-    mgr.devices[A] = {"name": "Kitchen"}
+    await mgr.scan()  # already provided and unchanged: nothing to verify or download again
+    assert len(hashed) == 1 and net.downloads == 0 and mgr._verifying == {} and mgr._fresh == {}
+    mgr.devices[A]["status"] = manager_core.STATUS_CURRENT  # e.g. after a downgrade: provided again
     await mgr.check_device(A)
-    assert net.offer_calls == 1 and mgr.devices[A]["pending_version"] == "1.5.0"
+    assert len(hashed) == 2  # verified again by the next check that uses it
+
+
+async def test_reference_request_detects_a_server_that_ignores_the_version(mgr, net):
+    """One reference request per check; an answer other than the known step is a
+    warning finding of the check, no answer is no conclusion."""
+    await mgr.scan()
+    entry = [e for e in mgr.events.entries if e["kind"] == "check"][-1]
+    assert net.reference_calls == 1 and all(f["device"] != "Shelly update server" for f in entry["findings"])
+    net.reference_answer = "1.7.6"
+    await mgr.check_device(A)
+    entry = [e for e in mgr.events.entries if e["kind"] == "check"][-1]
+    [warning] = [f for f in entry["findings"] if f["device"] == "Shelly update server"]
+    assert warning["severity"] == "warning" and "got 1.7.6" in warning["error"] and entry["severity"] == "warning"
+    assert net.reference_calls == 2 and mgr._header_check is None
+    net.reference_answer = None  # no offer at all: also a deviation
+    await mgr.check_device(A)
+    assert "got nothing" in [e for e in mgr.events.entries if e["kind"] == "check"][-1]["findings"][-1]["error"]
+
+
+async def test_reference_request_failure_is_no_finding(mgr, net, monkeypatch):
+    fake = shelly.fetch_offer
+
+    async def failing_reference(session, fw_type, pins=None, version=None):
+        if version == "1.0.7":
+            raise ShellyError("502, 'Bad Gateway'")
+        return await fake(session, fw_type, pins, version)
+
+    monkeypatch.setattr(shelly, "fetch_offer", failing_reference)
+    await mgr.scan()
+    entry = [e for e in mgr.events.entries if e["kind"] == "check"][-1]
+    assert all(f["device"] != "Shelly update server" for f in entry["findings"])
 
 
 def gen1_net(net, monkeypatch, types):
@@ -554,8 +603,11 @@ def fake_cloud(monkeypatch, pages):
     seen = []
 
     class Request:
-        def __init__(self, _session, url, _pins, _timeout):
+        headers_seen: list = []
+
+        def __init__(self, _session, url, _pins, _timeout, headers=None):
             seen.append(url)
+            Request.headers_seen.append(headers)
             status, headers, body = pages[url]
             self.resp = type("Resp", (), {
                 "status": status, "headers": headers, "charset": None, "content": _FakeBody(body),
@@ -628,3 +680,42 @@ async def test_check_error_message_uses_the_readable_text(mgr, net, monkeypatch)
     monkeypatch.setattr(shelly, "fetch_offer", failing)
     await mgr.scan()
     assert mgr.devices[A]["message"] == "408, 'Request Timeout', 'https://updates.shelly.cloud/update/Plus1'"
+
+
+async def test_offer_request_sends_only_app_and_version(monkeypatch):
+    """The installed version goes in the header Shelly-Info – only "app" and "ver";
+    without version no header (newest version). nsteps is returned as steps."""
+    fake_cloud(monkeypatch, {
+        "https://updates.shelly.cloud/update/Plus1": (200, {}, b'{"stable": {"url": "u", "version": "1.3.3", "nsteps": 2}}'),
+    })
+    headers = shelly._CloudRequest.headers_seen
+    headers.clear()
+    assert await shelly.fetch_offer(None, "Plus1", None, "1.0.7") == {"version": "1.3.3", "url": "u", "steps": "2"}
+    assert await shelly.fetch_offer(None, "Plus1") == {"version": "1.3.3", "url": "u", "steps": "2"}
+    assert headers == [{"Shelly-Info": '{"app":"Plus1","ver":"1.0.7"}'}, None]
+
+
+def test_sha256_named_by_the_firmware_url():
+    sha = "ddd5a7b49ff3e65240d1264eb531f82da2aa86d3d05d045c5226a81e7ea2e43d"
+    assert shelly.url_sha256(f"https://fwcdn.shelly.cloud/gen2-ntest/Plus1/{sha}") == sha
+    assert shelly.url_sha256(f"https://fwcdn.shelly.cloud/x/{sha.upper()}") == sha
+    assert shelly.url_sha256("https://fw.example/Plus1.zip") is None
+    assert shelly.url_sha256(f"https://fwcdn.shelly.cloud/{sha}/Plus1.zip") is None
+
+
+async def test_download_must_match_the_sha256_of_its_url(monkeypatch, tmp_path):
+    """A download whose checksum differs from the SHA-256 in the URL is not stored."""
+    import hashlib
+
+    data = b"f" * 5000
+    good = hashlib.sha256(data).hexdigest()
+    bad = "0" * 64
+    fake_cloud(monkeypatch, {
+        f"https://fwcdn.shelly.cloud/Plus1/{good}": (200, {}, data),
+        f"https://fwcdn.shelly.cloud/Plus1/{bad}": (200, {}, data),
+    })
+    name, sha, size, https = await shelly.download_firmware(None, f"https://fwcdn.shelly.cloud/Plus1/{good}", tmp_path)
+    assert sha == good and size == 5000 and https and (tmp_path / name).is_file()
+    with pytest.raises(ShellyError, match="does not match the SHA-256"):
+        await shelly.download_firmware(None, f"https://fwcdn.shelly.cloud/Plus1/{bad}", tmp_path)
+    assert sorted(p.name for p in tmp_path.iterdir()) == [name]  # nothing else stored, no temp file

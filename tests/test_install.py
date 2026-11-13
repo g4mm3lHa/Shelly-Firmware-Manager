@@ -319,10 +319,8 @@ def updating(mgr, net, monkeypatch, quick_install):
 
 
 async def test_no_check_follows_an_installation(mgr, net, updating):
-    """A confirmed installation is not followed by a check: no server request, no
-    check log entry; the next stored version is provided at the next check."""
-    store(mgr, "Plus1", "1.5.0")
-    store(mgr, "Plus1", "1.6.0")
+    """A confirmed installation (no intermediate version) is not followed by a check:
+    no server request, no check log entry; the next version comes at the next check."""
     await mgr.scan()
     mgr.last_scan -= 5
     before, checks, calls = mgr.last_scan, len(mgr.events.entries), net.offer_calls
@@ -331,10 +329,40 @@ async def test_no_check_follows_an_installation(mgr, net, updating):
     assert dev["version"] == "1.5.0" and dev["status"] == manager_core.STATUS_CURRENT and dev["updated"] is True
     assert mgr.last_scan == before and net.offer_calls == calls and not mgr.checking
     assert [e["kind"] for e in mgr.events.entries[checks:]] == ["install", "install"]
+    net.offer_version = "1.6.0"
     await mgr.check_device(A)
-    assert mgr.devices[A]["pending_version"] == "1.6.0" and mgr.devices[A]["offer_source"] == "store"
+    assert mgr.devices[A]["pending_version"] == "1.6.0"
 
 
+async def test_intermediate_version_is_followed_by_a_check_of_the_device(mgr, net, updating):
+    """After a confirmed intermediate version the device is checked at once (log
+    trigger "step") and the next step is provided – not installed."""
+    net.steps = {"1.4.0": "1.5.0"}
+    net.offer_version = "1.7.0"
+    await mgr.scan()
+    assert mgr.devices[A]["step_target"] == "1.7.0"
+    checks = len(mgr.events.entries)
+    assert await mgr.install(A, mgr.devices[A]["sha256"], "alice") is True
+    dev = mgr.devices[A]
+    assert dev["version"] == "1.5.0" and dev["status"] == manager_core.STATUS_READY
+    assert dev["pending_version"] == "1.7.0" and dev.get("step_target") is None and "updated" not in dev
+    kinds = [(e["kind"], e.get("trigger"), e.get("user")) for e in mgr.events.entries[checks:]]
+    assert kinds[-1] == ("check", "step", "alice") and [k[0] for k in kinds].count("install") == 2
+    assert not mgr._step_checks and not mgr.checking
+
+
+async def test_stored_version_offered_on_server_error_can_be_installed(mgr, net, updating):
+    """The manual option on a server error: installable with the risk acknowledgment
+    only (web UI), logged as unverified; the marker ends with the installation."""
+    store(mgr, "Plus1", "1.6.0")
+    net.offer_error = shelly.ShellyError("408, 'Request Timeout'")
+    await mgr.scan()
+    dev = mgr.devices[A]
+    assert dev["store_fallback"] is True and dev["status"] == manager_core.STATUS_ERROR
+    assert await mgr.install(A, dev["sha256"], "alice") is True
+    assert dev["version"] == "1.6.0" and "store_fallback" not in dev and dev["updated"] is True
+    started = [e for e in mgr.events.entries if e["kind"] == "install"][-2]
+    assert started["unverified"] is True
 # ---------------------------------------------------------------- "Updated" mark and texts
 
 

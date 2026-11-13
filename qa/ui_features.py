@@ -169,7 +169,7 @@ def _device_list(c):
     # Device list – Install button next to "Ready", "Updated" stays on top, icon colours
     card = f.locator("#dev-cards .card").first
     install = card.locator(".status-cell button.install")
-    check(f"{case}: Install button for every ready device and the failed installation", install.count() == 6
+    check(f"{case}: Install button for every ready device, the failed installation and the store fallback", install.count() == 7
           and install.first.is_enabled(), str(install.count()))
     check(f"{case}: Install button is red", "danger" in install.first.get_attribute("class"))
     updated = card.locator("tr", has_text="Bedroom shutter")
@@ -195,6 +195,34 @@ def _device_list(c):
           ap: document.querySelectorAll('.act.alert.s-on[aria-label^="Access point"]').length})""")
         check(f"{case}: power-on action green and red, lock yellow, access point red",
               all(counts[k] > 0 for k in ("good", "alert", "warn", "ap")), str(counts))
+
+
+def _next_steps(c):
+    """Stored version offered on a server error (risk acknowledgment) and the hint of
+    an intermediate version in the installation dialog."""
+    case, f = c.case, c.f
+    card = f.locator("#dev-cards .card").first
+    fallback = card.locator("tr", has_text="Entrance")
+    check(f"{case}: store fallback in the updates card with checkbox and Install", fallback.count() == 1
+          and fallback.locator(".pill").first.inner_text() == "Error"
+          and fallback.locator("input[type=checkbox]:not(.ghost)").count() == 1 and fallback.locator("button.install").is_enabled())
+    fallback.locator("button.install").click()
+    d = dialog(f)
+    approve = [b for b in d["buttons"] if b[0] == "Approve installation"]
+    check(f"{case}: store fallback needs the risk acknowledgment", "at your own risk" in d["body"]
+          and approve == [["Approve installation", True]], str(d["buttons"]))
+    f.locator("#dlg-body label.check input").check()
+    check(f"{case}: acknowledgment enables the approval",
+          f.locator("#dlg-btns button", has_text="Approve installation").is_enabled())
+    c.page.screenshot(path=c.out / f"{case}-install-store-fallback.png")
+    f.locator("#dlg-btns button", has_text="Cancel").click()
+    step = card.locator("tr", has_text="Heat pump 3EM")
+    step.locator("button.install").click()
+    d = dialog(f)
+    check(f"{case}: intermediate version named in the installation dialog",
+          "1.5.0 is an intermediate version on the way to 1.7.0" in d["body"], d["body"][-300:])
+    c.page.screenshot(path=c.out / f"{case}-install-intermediate.png")
+    f.locator("#dlg-btns button", has_text="Cancel").click()
 
 
 def _layout(c):
@@ -324,7 +352,8 @@ def _firmware_tab(c):
     entries = rows.first.locator(".fw-dev li")
     buttons = rows.first.locator(".fw-dev li button")
     # 5 ready devices + the failed installation (its file stays provided for a retry)
-    check(f"{case}: one Install button per device", entries.count() == 6 and buttons.count() == 6,
+    # + the stored version offered while the update server could not be asked
+    check(f"{case}: one Install button per device", entries.count() == 7 and buttons.count() == 7,
           f"{entries.count()} / {buttons.count()}")
     names = [t.replace("Install", "").strip() for t in entries.all_inner_texts()]
     check(f"{case}: devices ordered by name", names == sorted(names, key=str.lower) and "Kitchen light" in names, str(names))
@@ -414,6 +443,10 @@ def _logs(c):
     check(f"{case}: three consecutive entries of one device grouped", f.locator("#log-list .grp").count() == 3
           and f.locator("#log-list .grp-first").count() == 1 and f.locator("#log-list .grp-last").count() == 1)
     check(f"{case}: delete icon per entry", f.locator("#log-list .log-del").count() == total, str(total))
+    if c.width > 700:   # new log texts: check after an intermediate version, unverified installation
+        text = f.locator("#log-list").inner_text()
+        check(f"{case}: check after an intermediate version and unverified installation in the log",
+              "After-intermediate-version check" in text and "Not verified by the update server" in text)
     if c.width > 700:   # desktop rows: user name and delete icon on one line
         offsets = f.evaluate("""() => [...document.querySelectorAll('#log-list .log')].filter(r => r.querySelector('.user').textContent)
           .map(r => { const m = e => { const b = e.getBoundingClientRect(); return b.top + b.height / 2; };
@@ -468,6 +501,7 @@ def firmware_store(browser, out):
         c = SimpleNamespace(case=case, f=f, page=page, out=out, width=width, index=index, last=last)
         _device_list(c)
         _layout(c)
+        _next_steps(c)
         _downgrade(c)
         rows = _firmware_tab(c)
         _firmware_delete_and_upload(c, rows)

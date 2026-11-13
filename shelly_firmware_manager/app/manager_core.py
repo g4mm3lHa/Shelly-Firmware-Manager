@@ -66,12 +66,16 @@ PENDING = (STATUS_READY, STATUS_INSTALLING)  # device holds a firmware file
 
 
 def holds_file(dev: Device) -> bool:
-    """True while the device holds its provided firmware file: ready, installing, or
-    failed installation that can be retried (marker install_failed, kept until the
-    next check of the device)."""
+    """True while the device holds its provided firmware file: ready, installing, a
+    failed installation that can be retried (marker install_failed), or a stored
+    version offered for a manual installation because the manufacturer's server
+    could not be asked (marker store_fallback) – both kept until the next check of
+    the device."""
     if not dev.get("file"):
         return False
-    return dev.get("status") in PENDING or (dev.get("status") == STATUS_ERROR and bool(dev.get("install_failed")))
+    if dev.get("status") in PENDING:
+        return True
+    return dev.get("status") == STATUS_ERROR and bool(dev.get("install_failed") or dev.get("store_fallback"))
 
 SUPERVISOR = "http://supervisor"  # Supervisor API (Core API proxy below /core)
 
@@ -166,6 +170,13 @@ class ManagerCore:
         # User shown in the log for the downloads of this check ("Schedule" for
         # scheduled checks)
         self._check_user: str | None = None
+        # Reference request of the running check: does the manufacturer's server still
+        # answer with the next step for an installed version (see Checks)?
+        self._header_check: asyncio.Future[bool | None] | None = None
+        self._header_ignored: bool | None = None  # result of the running check (None: not asked)
+        self._header_got = ""  # version the reference request was answered with
+        # Devices that installed an intermediate version: checked again at once
+        self._step_checks: set[str] = set()
         self._upload: dict[str, Any] | None = None  # staged manual upload (see stage_upload), memory only
         self._upload_lock = asyncio.Lock()  # one upload transfer at a time
         # Set whenever the schedule changes (check finished): wakes the scheduler in
@@ -459,6 +470,9 @@ class ManagerCore:
         self._verifying.clear()
         self._fresh.clear()
         self._check_user = None
+        if self._header_check is not None and not self._header_check.done():
+            self._header_check.cancel()
+        self._header_check = None
 
     # ---------------------------------------------------------------------------------- Device credentials
 

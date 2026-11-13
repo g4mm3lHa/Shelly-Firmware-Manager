@@ -291,16 +291,16 @@ async def test_upload_token_expiry_and_cancel(mgr, net, monkeypatch):
 
 
 async def test_uploaded_file_is_provided_as_update(mgr, net):
-    """3.1.0: an uploaded newer version is provided by the next
-    check like a stored download – marked as upload, the server is not asked."""
+    """An uploaded file is provided when the server offers exactly its version (Gen2+:
+    the server decides) – marked as upload, nothing is downloaded."""
     await mgr.scan()
     for name in list(mgr.firmware):
         (data_paths.FW_DIR / name).unlink()
     mgr.firmware.clear()
     upload, _ = store(mgr, "Plus1", "1.5.0", source=manager_core.SOURCE_UPLOAD, content=b"u" * 3000)
-    downloads, offers = net.downloads, net.offer_calls
+    downloads = net.downloads
     await mgr.check_device(A)
-    assert (net.downloads, net.offer_calls) == (downloads, offers)
+    assert net.downloads == downloads
     assert mgr.devices[A]["file"] == upload and mgr.devices[A]["offer_source"] == "upload"
     listed = next(f for f in mgr.firmware_list() if f["name"] == upload)
     assert listed["devices"] == [{"id": A, "name": "Kitchen"}] and not listed["deletable"]

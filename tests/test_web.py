@@ -240,6 +240,29 @@ async def test_http_downgrade_and_delete_need_acknowledgment(client, mgr, net):
     assert r.status == 409
 
 
+async def test_http_install_of_a_store_fallback_needs_acknowledgment(client, mgr, net, monkeypatch):
+    """A stored version offered while the server could not be asked is installed only
+    with the risk acknowledgment."""
+    store(mgr, "Plus1", "1.6.0")
+    net.offer_error = shelly.ShellyError("408, 'Request Timeout'")
+    await mgr.scan()
+    started = []
+
+    async def install(device_id, sha, approved_by, downgrade=False):
+        started.append(device_id)
+        return True
+
+    monkeypatch.setattr(mgr, "install", install)
+    sha, hdr = mgr.devices[A]["sha256"], {"X-CSRF-Token": client.csrf}
+    r = await client.post(f"/api/devices/{A}/install", json={"sha256": sha, "confirm": True}, headers=hdr)
+    assert r.status == 400 and not started
+    r = await client.post(f"/api/devices/{A}/install", json={"sha256": sha, "confirm": True, "acknowledged": True},
+                          headers=hdr)
+    assert r.status == 200
+    await asyncio.sleep(0)
+    assert started == [A]
+
+
 async def test_log_entries_can_be_deleted_over_http(client, mgr, net):
     """Delete one entry / all entries – confirmation and CSRF token required."""
     await mgr.scan()

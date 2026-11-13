@@ -23,7 +23,8 @@ const PASSWORD_ACTIONS = {stored: "password stored", enabled: "password protecti
 const optionLabel = key => (OPTION_FIELDS.find(f => f[0] === key) || [key, key])[1];
 const INSTALL_EVENTS = {started: "started", confirmed: "confirmed", unconfirmed: "not confirmed", failed: "failed"};
 // "install": check after installations, only in entries of 3.1.0-rc2 to 3.1.1-rc2
-const TRIGGER_LABELS = {manual: "Manual", scheduled: "Scheduled", device: "Single-device", install: "After-installation"};
+const TRIGGER_LABELS = {manual: "Manual", scheduled: "Scheduled", device: "Single-device", install: "After-installation",
+  step: "After-intermediate-version"};
 const arrow = (a, b) => `${a ?? "–"} → ${b ?? "–"}`;
 
 /** Main line and optional details of one log entry. */
@@ -39,7 +40,8 @@ function logContent(e) {
       return [box("div", null, `Firmware downloaded: ${e.type} ${e.version} · ${mb(e.size || 0)} · SHA ${(e.sha256 || "").slice(0, 12)}… `,
         e.https === false ? el("span", "HTTP only", "tag warn") : null)];
     case "install":
-      return [el("div", `${e.device}: ${e.downgrade ? "downgrade" : "installation"} ${INSTALL_EVENTS[e.event] || e.event} · ${arrow(e.old, e.new)}`), e.detail ? el("div", e.detail, "sub") : null].filter(Boolean);
+      return [box("div", null, `${e.device}: ${e.downgrade ? "downgrade" : "installation"} ${INSTALL_EVENTS[e.event] || e.event} · ${arrow(e.old, e.new)} `,
+        e.unverified ? el("span", "Not verified by the update server", "tag warn") : null), e.detail ? el("div", e.detail, "sub") : null].filter(Boolean);
     case "delete":
       return [el("div", `Firmware deleted: ${e.type} ${e.version}${e.source === "upload" ? " (uploaded)" : ""}`)];
     case "upload":

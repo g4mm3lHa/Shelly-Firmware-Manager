@@ -4,7 +4,41 @@
 
 Not released yet. Clearer dialogs and phone tiles, failed installations can be retried
 from the updates card, a clearer message when a Shelly rejects a firmware, and fewer
-warnings in the app log for rejected download requests.
+warnings in the app log for rejected download requests. rc2: Gen2+ devices get the
+update step the Shelly update server intends for their installed version, required
+intermediate versions included.
+
+Changes in rc2
+- Gen2+ checks: the Shelly update server is asked per device with its firmware ID and
+  installed version – the way a Shelly asks itself (header `Shelly-Info` with only
+  `app` and `ver`, no other device data). The server answers with the next allowed
+  step, e.g. a required intermediate version (Plus1 1.0.7 → 1.3.3) instead of the
+  newest version, which such a device would reject. Requests are shared by devices
+  with the same firmware ID and installed version.
+- Gen2+: the server decides, the firmware store serves. A stored file (download or
+  upload) of exactly the offered version is used instead of a download; a newer stored
+  version is no longer provided on its own ("firmware store first" now applies to Gen1
+  only).
+- Gen2+: if the server cannot be asked, the device shows the error as before; if a
+  newer version is stored, the error details say that it can be installed manually,
+  at your own risk (whether an intermediate version is needed first cannot be
+  verified). The device stays in "Updates available" with checkbox and "Install"; the
+  installation dialog requires an acknowledgment of the risk, and the log marks the
+  installation as not verified by the update server.
+- Intermediate versions: an offer below the newest version (or with several steps) is
+  marked as intermediate version (status details, installation dialog). After its
+  confirmed installation the device is checked again at once and the next step is
+  provided – installed only after a new approval. Log: "After-intermediate-version
+  check". Otherwise no check follows an installation (unchanged).
+- Downloads: a firmware file whose checksum differs from the SHA-256 named in the
+  manufacturer's download URL is not stored.
+- Every check that asks the server makes one reference request with fixed values
+  (Plus1 1.0.7, which must be offered 1.3.3) – no data of your devices. If the server
+  answers differently, the check reports a warning: the server no longer evaluates the
+  installed version, so required intermediate versions cannot be detected. A failed
+  reference request gives no warning.
+- Offers with several steps (`nsteps`) are no longer refused.
+- No repetition of failed server requests (unchanged).
 
 Changes in rc1
 - Devices: a device whose installation failed ("Error") stays in the "Updates

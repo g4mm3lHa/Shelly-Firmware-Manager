@@ -4,7 +4,8 @@ needs to serve the files.
 Installations are always started manually and bound to the SHA-256 of the provided
 file. Several run in parallel up to a limit (asyncio.Semaphore); nothing starts during
 a check. Success is only reported when the device answers with exactly the target
-version.
+version. A confirmed intermediate version is followed by a check of the device, so the
+next step is provided at once (installed only after a new approval).
 """
 
 import asyncio
@@ -46,8 +47,9 @@ class Installs(Checks):
 
     def approval_matches(self, device_id: str, sha: str) -> bool:
         """An approval is only valid while exactly this file (SHA-256) is provided –
-        also for a retry after a failed installation (the file stays provided until
-        the next check of the device)."""
+        also for a retry after a failed installation and for a stored version offered
+        while the server could not be asked (the file stays provided until the next
+        check of the device; the web UI requires the risk acknowledgment for it)."""
         dev = self.devices.get(device_id) or {}
         if dev.get("gen") == 1 and not self.gen1_enabled:
             return False  # Gen1 updates disabled in the settings
@@ -56,9 +58,28 @@ class Installs(Checks):
 
     async def install(self, device_id: str, sha: str, approved_by: str, downgrade: bool = False) -> bool:
         """Install an approved update or downgrade (see _install_approved). True only
-        if the target version is confirmed. No check follows: the device keeps its
-        result until the next full check or a single check of the device."""
-        return await self._install_approved(device_id, sha, approved_by, downgrade)
+        if the target version is confirmed. Normally no check follows: the device
+        keeps its result until the next full check or a single check of the device.
+        After a confirmed intermediate version the device is checked again once no
+        installation runs anymore (see _check_steps)."""
+        ok = await self._install_approved(device_id, sha, approved_by, downgrade)
+        await self._check_steps(approved_by)
+        return ok
+
+    async def _check_steps(self, user: str) -> None:
+        """Check the devices that installed an intermediate version, one after the
+        other, once no installation runs anymore: the next step of the server is
+        provided (log trigger "step"). Skipped if a check started meanwhile – the
+        device then shows the next step at its next check."""
+        if self.installing:
+            return  # the last installation to finish does it
+        while self._step_checks:
+            device_id = min(self._step_checks)
+            self._step_checks.discard(device_id)
+            try:
+                await self.check_device(device_id, user, trigger="step")
+            except (ShellyError, KeyError) as err:
+                log.info("Check after the intermediate version skipped: %s", err)
 
     async def _install_approved(
         self, device_id: str, sha: str, approved_by: str, downgrade: bool = False
@@ -90,8 +111,10 @@ class Installs(Checks):
         dev = self.devices[device_id]
         self.installing.add(device_id)  # no await before this: no double starts possible
         dev.pop("updated", None)  # a new installation: the former "just updated" mark is obsolete
-        if dev.pop("install_failed", None) and not downgrade:
-            dev["status"] = STATUS_READY  # retry: the file is provided again (download server)
+        retry = dev.pop("install_failed", None) or dev.get("store_fallback")
+        if retry and not downgrade:
+            dev["status"] = STATUS_READY  # retry / manual option: the file is provided again (download server)
+        unverified = bool(dev.get("store_fallback")) and not downgrade
         if target is not None:
             # The device now holds the older file: the download server serves it to
             # this device only while the installation runs (status installing). The
@@ -126,6 +149,8 @@ class Installs(Checks):
                 }
                 if downgrade:
                     entry["downgrade"] = True
+                if unverified:
+                    entry["unverified"] = True  # stored version installed without the server's answer
                 self.events.add("install", event="started", **entry)
                 ok, diagnosis = await self._install(device_id, dev, sha)
                 if ok and downgrade:
@@ -134,6 +159,9 @@ class Installs(Checks):
                     # Confirmed or unconfirmed update: stays in the "Updates available"
                     # group until the next full check or a single check of this device
                     dev["updated"] = True
+                    dev.pop("store_fallback", None)
+                    if ok and dev.get("step_target") is not None:
+                        self._step_checks.add(device_id)  # intermediate version: next step at once
                 event = "confirmed" if ok else "unconfirmed"
                 self.events.add("install", ok=ok, event=event, detail=diagnosis, **entry)
                 return ok
