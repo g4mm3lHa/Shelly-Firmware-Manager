@@ -12,7 +12,8 @@ Suites, in this order (the last two change the demo state in their last case):
                       list, state colours of the action icons, log grouping and
                       deleting log entries; 3.2.0: failed installation in the updates
                       card, dialog sections, phone tile layout, no tooltip after a tap,
-                      user in the log tile. Demo "rc7" on 8805 (and "idle" on 8801).
+                      user in the log tile; devices stay in the updates card while
+                      checked, Ignored label size on phones. Demo "rc7" on 8805 (and "idle" on 8801).
 Usage: python qa/ui_features.py <shots-dir> [suite ...]   (qa/run_ui.py starts the demos)
 Every suite checks: no horizontal overflow, no console errors; screenshots go to
 <shots-dir>."""
@@ -195,6 +196,42 @@ def _device_list(c):
           ap: document.querySelectorAll('.act.alert.s-on[aria-label^="Access point"]').length})""")
         check(f"{case}: power-on action green and red, lock yellow, access point red",
               all(counts[k] > 0 for k in ("good", "alert", "warn", "ap")), str(counts))
+
+
+def _keep_listed(c):
+    """Devices of the updates card stay there while they are checked again (the check
+    resets their markers); phone tiles: the Ignored label as high as the status pill."""
+    case, f, page = c.case, c.f, c.page
+    checked = ("Fridge", "Office desk")
+
+    def checking(route):
+        headers = {k: v for k, v in route.request.headers.items() if k.lower() != "if-none-match"}  # no 304
+        state = route.fetch(headers=headers).json()
+        for d in state["devices"]:
+            if d["name"] in checked:   # what a running single check reports
+                d.update(activity="checking", install_failed=None, updated=None, last_update=None)
+        route.fulfill(json=state)
+
+    page.route("**/api/state", checking)
+    f.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
+    page.wait_for_timeout(400)
+    card = f.locator("#dev-cards .card").first
+    for name in checked:
+        row = card.locator("tr", has_text=name)
+        check(f"{case}: {name} stays in the updates card while checked", row.count() == 1
+              and row.locator(".pill").first.inner_text().startswith("Checking"))
+    card.locator("tr", has_text="Fridge").screenshot(path=c.out / f"{case}-checking-kept.png")
+    page.unroute("**/api/state")
+    f.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
+    page.wait_for_timeout(400)
+    if c.width < 700:
+        sizes = f.evaluate("""() => { const t = [...document.querySelectorAll('#dev-cards .status-cell')]
+          .find(e => e.querySelector('.p-ignored') && e.querySelector('button.pill'));
+          if (!t) return null; const r = e => e.getBoundingClientRect().height;
+          return {ignored: r(t.querySelector('.p-ignored')), pill: r(t.querySelector('button.pill'))}; }""")
+        f.locator("#dev-cards tr.ignored").first.screenshot(path=c.out / f"{case}-ignored-tile.png")
+        check(f"{case}: Ignored label as high as the status pill", sizes and abs(sizes["ignored"] - sizes["pill"]) < 1,
+              str(sizes))
 
 
 def _next_steps(c):
@@ -507,6 +544,7 @@ def firmware_store(browser, out):
         c = SimpleNamespace(case=case, f=f, page=page, out=out, width=width, index=index, last=last)
         _device_list(c)
         _layout(c)
+        _keep_listed(c)
         _next_steps(c)
         _downgrade(c)
         rows = _firmware_tab(c)

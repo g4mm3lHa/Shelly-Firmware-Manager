@@ -31,6 +31,8 @@ const arrow = (a, b) => `${a ?? "–"} → ${b ?? "–"}`;
 function logContent(e) {
   switch (e.kind) {
     case "check": {
+      // A scheduled check that could not start (other work running): cancelled, not repeated
+      if (e.skipped) return [el("div", `Scheduled check cancelled · ${e.skipped}`)];
       const line = el("div", `${TRIGGER_LABELS[e.trigger] || "Scheduled"} check · ${e.devices} device${e.devices === 1 ? "" : "s"} · ${e.duration} s · ${e.result}`);
       if (!e.findings || !e.findings.length) return [line];
       const ul = checkFindings(e);
@@ -76,6 +78,7 @@ function checkFindings(e) {
 function logSummary(e) {
   switch (e.kind) {
     case "check": {
+      if (e.skipped) return ["Scheduled check cancelled", e.skipped];
       const first = `${TRIGGER_LABELS[e.trigger] || "Scheduled"} · ${e.devices} device${e.devices === 1 ? "" : "s"} · ${e.duration} s`;
       const counts = typeof e.updates === "number"
         ? `${e.updates} update${e.updates === 1 ? "" : "s"} · ${e.warnings || 0} warning${e.warnings === 1 ? "" : "s"} · ${e.errors || 0} error${e.errors === 1 ? "" : "s"}`

@@ -55,7 +55,8 @@ async def test_downloads_and_checks_name_the_user(mgr, net):
     assert await mgr.scan(user="alice")
     [download] = [e for e in mgr.events.entries if e["kind"] == "download"]
     [check] = [e for e in mgr.events.entries if e["kind"] == "check"]
-    assert download["user"] == check["user"] == "alice" and mgr._check_user is None
+    assert download["user"] == check["user"] == "alice"
+    assert mgr._scan_user is None and mgr._check_users == {}
     mgr.devices.clear()
     for name in list(mgr.firmware):
         (data_paths.FW_DIR / name).unlink()
@@ -105,24 +106,27 @@ async def test_unknown_device_raises_keyerror(mgr):
 
 
 async def test_reservation_blocks_second_check(mgr, net):
-    """A reserved check refuses further checks and approvals until it ends."""
+    """A reserved single check refuses the full check and a second check of the same
+    device until it ends; other devices can be checked at the same time."""
     await mgr.scan()
     net.gate = asyncio.Event()
     mgr.reserve_check("device", A)
-    assert mgr.checking and mgr.activity[A] == manager_core.ACTIVITY_WAITING
+    assert not mgr.checking and mgr.device_checks == {A: "queued"}
+    assert mgr.activity[A] == manager_core.ACTIVITY_WAITING
     with pytest.raises(ShellyError):
         mgr.reserve_check("all")
     with pytest.raises(ShellyError):
-        mgr.reserve_check("device", B)
-    assert await mgr.scan() is False  # automatic check during a reserved one: skipped
+        mgr.reserve_check("device", A)
+    assert await mgr.scan() is False  # full check during a single one: refused
     task = asyncio.create_task(mgr.check_device(A))
+    other = asyncio.create_task(mgr.check_device(B))
     await asyncio.sleep(0.05)
+    assert mgr.device_checks == {A: "running", B: "running"} and mgr.progress is None
     assert mgr.activity[A] == manager_core.ACTIVITY_CHECKING
-    assert mgr.progress["kind"] == "device" and mgr.progress["phase"] == "devices"
-    assert "Checking Kitchen" in mgr.busy
+    assert mgr.busy == "Checking 2 devices"
     net.gate.set()
-    await task
-    assert not mgr.checking and mgr.activity == {}
+    await asyncio.gather(task, other)
+    assert not mgr.checking and mgr.activity == {} and mgr.device_checks == {}
 
 
 async def test_progress_counts_during_full_check(mgr, net):

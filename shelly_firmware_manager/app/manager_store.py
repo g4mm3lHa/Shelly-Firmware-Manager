@@ -183,9 +183,15 @@ class FirmwareStore(ManagerCore):
 
     def _delete_lock(self, name: str) -> str | None:
         """Reason why a stored firmware cannot be deleted now, else None. A file that
-        is only provided to devices can be deleted (see delete_firmware)."""
+        is only provided to devices can be deleted (see delete_firmware). The full
+        check locks all files, a single-device check the files of its device type."""
         if self.checking:
             return "Locked during a check"
+        meta = self.firmware.get(name, {})
+        for device_id in self.device_checks:
+            dev = self.devices.get(device_id, {})
+            if dev.get("file") == name or (meta.get("type") and dev.get("type") == meta.get("type")):
+                return "Locked during the check of a device"
         holders = [d for d in self.devices.values() if d.get("file") == name]
         installing = {self.devices.get(i, {}).get("file") for i in self.installing}
         if name in installing or any(d.get("status") == STATUS_INSTALLING for d in holders):
@@ -378,6 +384,8 @@ class FirmwareStore(ManagerCore):
             return "Installation for this device is already running"
         if device_id in self.reloading:
             return "Device info is being reloaded – please try again in a moment"
+        if device_id in self.device_checks:
+            return "Device is being checked – please try again afterwards"
         if not dev.get("origin") or not dev.get("build") or not dev.get("mac"):
             return "Device has not been checked successfully yet"
         return None

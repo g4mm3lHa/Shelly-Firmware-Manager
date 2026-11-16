@@ -6,7 +6,38 @@ Not released yet. Clearer dialogs and phone tiles, failed installations can be r
 from the updates card, a clearer message when a Shelly rejects a firmware, and fewer
 warnings in the app log for rejected download requests. rc2: Gen2+ devices get the
 update step the Shelly update server intends for their installed version, required
-intermediate versions included. rc3: provided firmware can be deleted.
+intermediate versions included. rc3: provided firmware can be deleted. rc4: single
+checks and installations of different devices run in parallel, a new wait logic after
+the installation.
+
+Changes in rc4
+- Parallel work: an installation or a single-device check no longer blocks single
+  checks or installations of other devices. A device that is being installed cannot be
+  checked, and a device that is being checked cannot be installed or reloaded. Single
+  checks have no limit. "Check all" stays exclusive: it locks everything while it runs
+  and cannot start while single checks, installations or Reload Device Info run (the
+  button stays disabled, the reason is shown).
+- Scheduled check: if it is due while other work runs, it is cancelled and written to
+  the log ("Scheduled check cancelled" with the reason); it is not repeated, the next
+  date counts. Before, it waited and was retried every minute.
+- The check after a confirmed intermediate version starts at once, even while other
+  installations run.
+- Firmware tab: during a single check only the files of the checked device's firmware
+  ID are locked for deletion (during "Check all" all files, as before).
+- Installation wait (Gen2+ with OTA events over the device WebSocket): an ota_error is
+  an error at once. Without a download request after 2 min, or without new progress
+  for 60 s, the installation fails. After 100 % or ota_success the Shelly must restart
+  within 30 s (WebSocket closed or no answer); the status label then shows
+  "Restarting". Within 30 s after the restart it must report the new version; the old
+  version, another version or no answer is an error. The device is polled every 5 s.
+  Such errors behave like a failed installation (retry from the updates card).
+- Installation wait without OTA events (Gen1, HTTP fallback, WebSocket lost before the
+  update was applied): polling as before, limit 5 min instead of 3 min.
+- Devices: a device in "Updates available" (e.g. failed installation, "Unconfirmed" or
+  "Updated") stays there while it is checked again; the result of the check decides
+  afterwards. Before, it moved to "All other devices" as soon as the check started.
+- Phone tiles: the yellow "Ignored" label (and the "Checking…" label) is as high as
+  the status label.
 
 Changes in rc3
 - Firmware tab: a stored file that is provided to devices can now be deleted (two

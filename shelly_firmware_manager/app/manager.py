@@ -58,6 +58,7 @@ class Manager(Installs):
             "settings_error",
             "error_level",
             "ota_progress",
+            "ota_phase",
             "downgrade",
         )
         devices: list[dict[str, Any]] = []

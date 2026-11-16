@@ -3,6 +3,7 @@
 All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test servers."""
 
 import json
+import time
 from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
@@ -11,7 +12,7 @@ import manager
 import pytest
 import schedule
 import shelly
-from conftest import OPTIONS, A
+from conftest import OPTIONS, A, B
 
 BERLIN = ZoneInfo("Europe/Berlin")
 
@@ -88,14 +89,22 @@ async def test_automatic_check_records_attempt_once(mgr, net):
     assert json.loads(data_paths.STATE_FILE.read_text())["schedule"] == mgr.schedule
 
 
-async def test_due_check_waits_for_installations(mgr, net):
-    """A running installation postpones the due check instead of consuming it."""
+async def test_due_check_is_cancelled_while_other_work_runs(mgr, net):
+    """A due check that cannot start (installation or single check running) is
+    cancelled and logged; its date counts as done (no retry)."""
     mgr.schedule = {"days": 7, "time": "02:45", "anchor": "2020-01-01", "last_date": None}
     mgr.installing.add(A)
     assert not await mgr.scan(automatic=True)
-    assert mgr.schedule["last_date"] is None
+    assert mgr.schedule["last_date"] is not None and mgr.scan_due_in(time.time()) > 0
+    [entry] = [e for e in mgr.events.entries if e["kind"] == "check"]
+    assert entry["trigger"] == "scheduled" and entry["user"] == "Schedule" and entry["severity"] == "warning"
+    assert "installations running" in entry["skipped"] and entry["result"].startswith("Cancelled")
     mgr.installing.clear()
-    assert await mgr.scan(automatic=True)
+    mgr.reserve_check("device", B)
+    assert not await mgr.scan(automatic=True)
+    assert len([e for e in mgr.events.entries if e["kind"] == "check"]) == 2
+    assert not await mgr.scan()  # manual: refused, nothing logged
+    assert len([e for e in mgr.events.entries if e["kind"] == "check"]) == 2
 
 
 async def test_no_immediate_check_without_schedule(net):

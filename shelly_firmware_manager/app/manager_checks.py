@@ -31,8 +31,19 @@ from events import worst
 from shelly import ShellyError, clip, error_text
 
 from manager_core import (
-    ACTIVITY_CHECKING, ACTIVITY_DOWNLOADING, ACTIVITY_WAITING, Device, SOURCE_UPLOAD, STATUS_AVAILABLE,
-    STATUS_CURRENT, STATUS_ERROR, STATUS_READY, STATUS_SKIPPED, STATUS_UNREGISTERED, holds_file, severity_of,
+    ACTIVITY_CHECKING,
+    ACTIVITY_DOWNLOADING,
+    ACTIVITY_WAITING,
+    Device,
+    SOURCE_UPLOAD,
+    STATUS_AVAILABLE,
+    STATUS_CURRENT,
+    STATUS_ERROR,
+    STATUS_READY,
+    STATUS_SKIPPED,
+    STATUS_UNREGISTERED,
+    holds_file,
+    severity_of,
 )
 from manager_devices import DeviceSettings
 
@@ -86,6 +97,7 @@ SCHEDULE_USER = "Schedule"
 # Wi-Fi and Home Assistant load low. Internal constant, not a setting.
 CHECK_PARALLEL = 4
 
+
 class Checks(DeviceSettings):
     """Full check and single-device check."""
 
@@ -99,30 +111,34 @@ class Checks(DeviceSettings):
         return schedule.seconds_until(self.schedule, now, self.tz)
 
     async def scan(self, automatic: bool = False, user: str | None = None) -> bool:
-        """Check all Shellys. Returns False if a check or installation is running.
-        Automatic checks report newly found updates as a notification in HA and
-        record their scheduled date when they start (one attempt per date).
+        """Check all Shellys. Returns False if it could not start (another check,
+        single-device checks, installations or Reload Device Info running).
+        Automatic checks record their scheduled date when they are due (one attempt
+        per date); one that cannot start is cancelled and logged (no retry) and
+        report newly found updates as a notification in HA.
         Every check is written to the activity log with the user, "Schedule" for
         automatic checks; its firmware downloads carry the same user."""
-        if not self._reserved("all"):
-            try:
-                self.reserve_check("all")
-            except ShellyError:
-                return False
         if automatic:
             due, _ = schedule.status(self.schedule, time.time(), self.tz)
             if due:
                 self.schedule = {**self.schedule, "last_date": due.isoformat()}
+        if not self._reserved("all"):
+            try:
+                self.reserve_check("all")
+            except ShellyError as err:
+                if automatic:
+                    self._skip_scheduled(str(err))
+                return False
         async with self.lock:
             started = time.monotonic()
             failure: str | None = None
             checked: list[str] = []
-            self._check_user = SCHEDULE_USER if automatic else user or "unknown"
-            self._header_ignored = None
+            header_ignored: bool | None = None
+            self._scan_user = SCHEDULE_USER if automatic else user or "unknown"
             self._progress()["phase"] = "registry"
             try:
                 checked = await self._scan_all()
-                await self._finish_header_check()
+                header_ignored = await self._finish_header_check()
                 self._progress()["phase"] = "changelog"
                 await self._store_changelogs(self.devices.values())
             except Exception as err:  # report overall errors (e.g. registry), do not crash
@@ -136,58 +152,77 @@ class Checks(DeviceSettings):
                 self.cleanup_firmware()
                 self.save()
                 self.schedule_changed.set()
-            self._log_check(checked, automatic, user, time.monotonic() - started, failure)
+            self._log_check(
+                checked, automatic, user, time.monotonic() - started, failure, header_ignored=header_ignored
+            )
         if automatic:
             await self._notify_new_updates()
         return True
 
-    async def check_device(
-        self, device_id: str, user: str | None = None, trigger: str = "device"
-    ) -> dict[str, Any]:
+    def _skip_scheduled(self, reason: str) -> None:
+        """A scheduled check that cannot start (other work running) is cancelled –
+        not repeated – and written to the activity log and the app log."""
+        log.warning("Scheduled check cancelled: %s", reason)
+        self.events.add(
+            "check",
+            severity="warning",
+            trigger="scheduled",
+            devices=0,
+            skipped=reason,
+            result=f"Cancelled: {reason}",
+            user=SCHEDULE_USER,
+        )
+        self.save()
+        self.schedule_changed.set()
+
+    async def check_device(self, device_id: str, user: str | None = None, trigger: str = "device") -> dict[str, Any]:
         """Check a single device without starting the full check.
 
         Same steps as the full check for this one device (device info, firmware
         store first, else offer and download of missing firmware) – never an
         installation, a restart or a settings change. The time of the last full
-        check (last_scan) and the schedule stay unchanged. Raises ShellyError if a
-        check or an installation is running. trigger: log value ("device", or "step"
-        for the check after an intermediate version)."""
+        check (last_scan) and the schedule stay unchanged. Raises ShellyError during
+        the full check or while this device is checked, installed or reloaded;
+        other devices may be checked or installed at the same time. trigger: log
+        value ("device", or "step" for the check after an intermediate version)."""
         if device_id not in self.devices:
             raise KeyError(device_id)
         if not self._reserved("device", device_id):
             self.reserve_check("device", device_id)
-        async with self.lock:
-            dev = self.devices[device_id]
-            dev.pop("updated", None)  # Checked again by the user, no longer "just updated"
-            dev.pop("install_failed", None)  # nor a failed installation to retry
-            self._check_user = user or "unknown"
-            self._header_ignored = None
-            started = time.monotonic()
-            failure = None
-            progress = self._progress()
-            try:
-                progress["phase"] = "registry"
-                entry = self._shelly_entries(await self._registry()).get(device_id)
-                if entry is None:
-                    dev.update(status=STATUS_UNREGISTERED, message="")
-                    failure = "Device is no longer in the Home Assistant device registry"
-                else:
-                    progress["phase"] = "devices"
-                    if not await self._check_entry(device_id, entry, {}):
-                        progress["errors"] = 1
-                    await self._finish_header_check()
-                    progress["done"] = 1
-                    if dev.get("status") == STATUS_READY:
-                        progress["phase"] = "changelog"
-                        await self._store_changelogs([dev])
-            except Exception as err:  # registry failure etc.: report, do not crash
-                log.exception("Device check failed")
-                failure = error_text(err, 500) or type(err).__name__
-            finally:
-                self._end_check()
-                self.cleanup_firmware()
-                self.save()
-            self._log_check([device_id], False, user, time.monotonic() - started, failure, trigger=trigger)
+        self.device_checks[device_id] = "running"
+        dev = self.devices[device_id]
+        dev.pop("updated", None)  # Checked again by the user, no longer "just updated"
+        dev.pop("install_failed", None)  # nor a failed installation to retry
+        self._check_users[device_id] = user or "unknown"
+        started = time.monotonic()
+        failure = None
+        header_ignored: bool | None = None
+        try:
+            entry = self._shelly_entries(await self._registry()).get(device_id)
+            if entry is None:
+                dev.update(status=STATUS_UNREGISTERED, message="")
+                failure = "Device is no longer in the Home Assistant device registry"
+            else:
+                await self._check_entry(device_id, entry, {})
+                header_ignored = await self._finish_header_check()
+                if dev.get("status") == STATUS_READY:
+                    await self._store_changelogs([dev])
+        except Exception as err:  # registry failure etc.: report, do not crash
+            log.exception("Device check failed")
+            failure = error_text(err, 500) or type(err).__name__
+        finally:
+            self._end_device_check(device_id)
+            self.cleanup_firmware()
+            self.save()
+        self._log_check(
+            [device_id],
+            False,
+            user,
+            time.monotonic() - started,
+            failure,
+            trigger=trigger,
+            header_ignored=header_ignored,
+        )
         return {"status": dev.get("status"), "error": failure}
 
     async def _scan_all(self) -> list[str]:
@@ -475,12 +510,15 @@ class Checks(DeviceSettings):
             return False
         return True
 
-    async def _finish_header_check(self) -> None:
-        """Result of the reference request of this check (if one was made)."""
+    async def _finish_header_check(self) -> bool | None:
+        """Result of the reference request of the running checks: True if the server
+        ignored the installed version, False if not, None if no request was made or
+        it gave no answer."""
         task = self._header_check
-        if task is not None:
-            result = await task
-            self._header_ignored = None if result is None else not result
+        if task is None:
+            return None
+        result = await asyncio.shield(task)  # shared by parallel single-device checks
+        return None if result is None else not result
 
     async def _manufacturer_offer(self, info: dict[str, Any], offers: OfferTasks) -> dict[str, str] | None:
         """Gen1 offer: the manufacturer serves one list for all types, so it is fetched
@@ -521,8 +559,13 @@ class Checks(DeviceSettings):
         self._register_firmware(name, info["type"], info["gen"], offer["version"], sha, size, https)
         self._fresh[name] = clip(offer["url"], 500)  # later devices of this check: same offer
         self.events.add(
-            "download", type=info["type"], version=offer["version"], size=size, sha256=sha, https=https,
-            user=self._check_user,
+            "download",
+            type=info["type"],
+            version=offer["version"],
+            size=size,
+            sha256=sha,
+            https=https,
+            user=self._check_users.get(device_id, self._scan_user),
         )
         return name, sha, size
 
@@ -536,6 +579,7 @@ class Checks(DeviceSettings):
         duration: float,
         failure: str | None,
         trigger: str | None = None,
+        header_ignored: bool | None = None,
     ) -> None:
         """One log entry per check; findings = devices with an update, a warning or
         an error. trigger overrides the derived value ("device" for single-device
@@ -572,7 +616,7 @@ class Checks(DeviceSettings):
                         "severity": problem["severity"],
                     }
                 )
-        if self._header_ignored:
+        if header_ignored:
             findings.append(
                 {
                     "device": "Shelly update server",
@@ -638,9 +682,7 @@ class Checks(DeviceSettings):
     async def _notify_new_updates(self) -> None:
         """One HA notification if an automatic check found versions not reported before.
         Lists all open updates so that a replaced notification loses nothing."""
-        open_updates = [
-            d for d in self.devices.values() if d.get("status") in (STATUS_READY, STATUS_AVAILABLE)
-        ]
+        open_updates = [d for d in self.devices.values() if d.get("status") in (STATUS_READY, STATUS_AVAILABLE)]
         new = [d for d in open_updates if d.get("notified_version") != d.get("offer_version")]
         if not new:
             return

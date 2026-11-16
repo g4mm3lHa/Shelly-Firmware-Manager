@@ -28,14 +28,23 @@ from manager_core import (
 
 log = logging.getLogger("sfm.manager")
 
-INSTALL_FIRST_CHECK_S = 30  # wait after the update command
+# Waiting for the result of an installation. Gen2+ over the device WebSocket: the
+# device's own OTA events decide (see _await_over_events); without them (Gen1, HTTP
+# fallback, WebSocket lost before the update was applied) the version is polled.
+INSTALL_FIRST_CHECK_S = 30  # polling: wait after the update command
 
-INSTALL_POLL_S = 10  # then check every 10 s
+INSTALL_POLL_S = 10  # polling: then check every 10 s
 
 INSTALL_NO_DOWNLOAD_S = 120  # no download request: give up after 2 min (a Shelly may
 
 # still answer with the old version for a while after accepting the update)
-INSTALL_WAIT_S = 180  # upper limit (3 min) in case the Shelly gets stuck
+INSTALL_WAIT_S = 300  # polling: upper limit (5 min) in case the Shelly gets stuck
+
+OTA_STALL_S = 60  # events: no new progress for 60 s = the update got stuck
+OTA_RESTART_WAIT_S = 30  # events: after 100 % the Shelly must restart within 30 s
+OTA_BOOT_WAIT_S = 30  # events: and report the target version within 30 s after the restart
+OTA_POLL_S = 5  # events: query interval around the restart
+OTA_TICK_S = 1  # events: check interval while the update runs
 
 MAX_SERVED_IPS = 16  # download diagnosis: client addresses recorded per file
 
@@ -60,26 +69,24 @@ class Installs(Checks):
         """Install an approved update or downgrade (see _install_approved). True only
         if the target version is confirmed. Normally no check follows: the device
         keeps its result until the next full check or a single check of the device.
-        After a confirmed intermediate version the device is checked again once no
-        installation runs anymore (see _check_steps)."""
+        After a confirmed intermediate version the device is checked again at once
+        (see _check_step)."""
         ok = await self._install_approved(device_id, sha, approved_by, downgrade)
-        await self._check_steps(approved_by)
+        await self._check_step(device_id, approved_by)
         return ok
 
-    async def _check_steps(self, user: str) -> None:
-        """Check the devices that installed an intermediate version, one after the
-        other, once no installation runs anymore: the next step of the server is
-        provided (log trigger "step"). Skipped if a check started meanwhile – the
-        device then shows the next step at its next check."""
-        if self.installing:
-            return  # the last installation to finish does it
-        while self._step_checks:
-            device_id = min(self._step_checks)
-            self._step_checks.discard(device_id)
-            try:
-                await self.check_device(device_id, user, trigger="step")
-            except (ShellyError, KeyError) as err:
-                log.info("Check after the intermediate version skipped: %s", err)
+    async def _check_step(self, device_id: str, user: str) -> None:
+        """Check a device that installed an intermediate version: the next step of the
+        server is provided (log trigger "step"). Other installations and single
+        checks do not delay it; skipped if it cannot start (e.g. the full check
+        runs) – the device then shows the next step at its next check."""
+        if device_id not in self._step_checks:
+            return
+        self._step_checks.discard(device_id)
+        try:
+            await self.check_device(device_id, user, trigger="step")
+        except (ShellyError, KeyError) as err:
+            log.info("Check after the intermediate version skipped: %s", err)
 
     async def _install_approved(
         self, device_id: str, sha: str, approved_by: str, downgrade: bool = False
@@ -87,8 +94,9 @@ class Installs(Checks):
         """Install an approved update. True only if the target version is confirmed.
 
         Several installations run in parallel, at most max_parallel_installs at a
-        time; others wait for a free slot. Nothing starts during a check, and each
-        device is in progress at most once. approved_by is only written to the log.
+        time; others wait for a free slot. Nothing starts during the full check or
+        while the device itself is checked, and each device is in progress at most
+        once; other devices may be checked meanwhile. approved_by is only written to the log.
 
         downgrade (Gen2+ only): install the stored older version with this
         SHA-256 instead of the provided update. The confirmation flags are checked by
@@ -99,6 +107,7 @@ class Installs(Checks):
             or self.download_base_issue
             or device_id in self.installing
             or device_id in self.reloading
+            or device_id in self.device_checks
         ):
             return False
         target = None
@@ -213,8 +222,17 @@ class Installs(Checks):
         # (progress, error) arrive; plain HTTP as fallback if the WebSocket is unusable.
         url = f"{self.download_base}/{dev['file']}"
         self._reset_download(dev)
-        ota: dict[str, Any] = {"error": None, "failed": asyncio.Event()}
+        ota: dict[str, Any] = {
+            "dev": dev,
+            "error": None,
+            "failed": asyncio.Event(),  # ota_error
+            "applied": asyncio.Event(),  # ota_success or 100 %
+            "closed": asyncio.Event(),  # the device WebSocket ended (restart)
+            "last": None,  # time of the last OTA event
+            "events": False,  # True while the OTA events are followed
+        }
         reader = await self._update_over_websocket(dev, url, auth, ota) if dev["gen"] >= 2 else None
+        ota["events"] = reader is not None
         if reader is None:
             await shelly.trigger_update(self.session, dev["gen"], dev["origin"], url, auth)
         dev.update(status=STATUS_INSTALLING, message="Update accepted, waiting for restart")
@@ -226,15 +244,129 @@ class Installs(Checks):
                 reader.cancel()
                 await asyncio.gather(reader, return_exceptions=True)
             dev.pop("ota_progress", None)
+            dev.pop("ota_phase", None)
 
     async def _await_target_version(self, device_id: str, dev: Device, ota: dict[str, Any]) -> tuple[bool, str | None]:
-        """3. Report success only when the device reports exactly the target version
-        (parsed version number; Gen1 the vX.Y.Z part): wait 30 s, then check every
-        10 s until the Shelly is reachable again. A different version (also a newer
-        one) is never reported as success. If it has not even requested the file
-        after 2 min, stop waiting – the update will never arrive. A Gen2+ ota_error
-        event ends the wait at once (raises OtaError).
-        Returns (confirmed, diagnosis or None)."""
+        """3. Wait for the result. Success only when the device reports exactly the
+        target version (parsed version number; Gen1 the vX.Y.Z part). Gen2+ with
+        OTA events: see _await_over_events; if the WebSocket ends before the update
+        was applied, the version is polled (_await_by_polling).
+        Returns (confirmed, diagnosis or None); raises ShellyError on an error."""
+        if ota["events"]:
+            result = await self._await_over_events(device_id, dev, ota)
+            if result is not None:
+                return result
+            log.info("%s: device WebSocket ended before the update was applied – polling the version", dev["name"])
+        return await self._await_by_polling(device_id, dev, ota)
+
+    async def _await_over_events(
+        self, device_id: str, dev: Device, ota: dict[str, Any]
+    ) -> tuple[bool, str | None] | None:
+        """Gen2+ with OTA events:
+        - ota_error → error at once;
+        - no download request after 2 min, or no new progress for 60 s → error;
+        - after 100 % / ota_success the Shelly must restart within 30 s (WebSocket
+          closed or no answer), shown as "Restarting";
+        - within 30 s after the restart it must report the target version; the old
+          version, another version or no answer → error.
+        Returns None if the WebSocket ended before the update was applied (the
+        caller polls instead)."""
+        started = time.monotonic()
+        while not ota["applied"].is_set():
+            await self._wait_ota(ota, OTA_TICK_S, "applied", "closed")
+            if ota["applied"].is_set():
+                break
+            if ota["closed"].is_set():
+                return None
+            now = time.monotonic()
+            if ota["last"] is None and not self._downloaded(dev):
+                if now - started >= INSTALL_NO_DOWNLOAD_S:
+                    raise ShellyError(f"Target version not confirmed. {self._install_diagnosis(dev)}")
+            elif now - (ota["last"] or started) >= OTA_STALL_S:
+                at = dev.get("ota_progress")
+                raise ShellyError(
+                    f"The update stopped{f' at {at} %' if at is not None else ''}: no progress "
+                    f"from the Shelly for {OTA_STALL_S} s"
+                )
+
+        # Applied: the Shelly restarts (its WebSocket closes or it stops answering)
+        target = shelly.parse_version(dev["pending_version"])
+        applied_at = time.monotonic()
+        restarted = ota["closed"].is_set()
+        while not restarted and time.monotonic() - applied_at < OTA_RESTART_WAIT_S:
+            info = await self._poll_version(device_id, dev)
+            if info is None:
+                restarted = True
+            elif shelly.parse_version(info["version"]) == target:
+                return await self._confirm(device_id, dev, info), None  # restarted between two queries
+            else:
+                await self._wait_ota(ota, OTA_POLL_S, "closed")
+                restarted = ota["closed"].is_set()
+        if not restarted:
+            raise ShellyError(
+                f"The Shelly applied the update but did not restart within {OTA_RESTART_WAIT_S} s"
+            )
+
+        dev.update(ota_phase="restarting", message="The Shelly restarts")
+        old = shelly.parse_version(dev["version"]) if dev.get("version") else None
+        restart_at = time.monotonic()
+        while time.monotonic() - restart_at < OTA_BOOT_WAIT_S:
+            await asyncio.sleep(OTA_POLL_S)
+            info = await self._poll_version(device_id, dev)
+            if info is None:
+                continue
+            reported = shelly.parse_version(info["version"])
+            if reported == target:
+                return await self._confirm(device_id, dev, info), None
+            if reported == old:
+                raise ShellyError(
+                    f"After the restart the Shelly still reports {info['version']} – the update was not applied"
+                )
+            raise ShellyError(
+                f"After the restart the Shelly reports {info['version']} instead of {dev['pending_version']}"
+            )
+        raise ShellyError(f"No answer from the Shelly within {OTA_BOOT_WAIT_S} s after the restart")
+
+    async def _poll_version(self, device_id: str, dev: Device) -> dict[str, Any] | None:
+        """Device info, or None while the Shelly does not answer (restart)."""
+        try:
+            return await shelly.device_info(self.session, dev["origin"], self._auth_for(device_id))
+        except (TimeoutError, aiohttp.ClientError, ShellyError) as err:
+            log.debug("Waiting for %s: %s", dev["name"], err)
+            return None
+
+    async def _wait_ota(self, ota: dict[str, Any], seconds: float, *events: str) -> None:
+        """Sleep up to seconds or until one of the named OTA events is set; an
+        ota_error raises OtaError at once."""
+        waiters = [asyncio.ensure_future(ota[name].wait()) for name in ("failed", *events)]
+        try:
+            await asyncio.wait(waiters, timeout=seconds, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for waiter in waiters:
+                waiter.cancel()
+        if ota["failed"].is_set():
+            raise shelly.OtaError(self._ota_error_text(ota["dev"], ota["error"]))
+
+    async def _confirm(self, device_id: str, dev: Device, info: dict[str, Any]) -> bool:
+        """The device reports the target version: installed."""
+        dev.update(
+            info,
+            status=STATUS_CURRENT,
+            file=None,
+            sha256=None,
+            last_update=int(time.time()),
+            message="Updated",
+        )
+        title = "Shelly downgraded" if dev.get("downgrade") else "Shelly updated"
+        await self.notify(f"{title}: {dev['name']}", info["version"], f"sfm_{device_id}")
+        return True
+
+    async def _await_by_polling(self, device_id: str, dev: Device, ota: dict[str, Any]) -> tuple[bool, str | None]:
+        """Without OTA events: wait 30 s, then check every 10 s until the Shelly is
+        reachable again, at most 5 min. A different version (also a newer one) is
+        never reported as success. If it has not even requested the file after
+        2 min, stop waiting – the update will never arrive. A Gen2+ ota_error event
+        still ends the wait at once (raises OtaError)."""
         target = shelly.parse_version(dev["pending_version"])
         old = shelly.parse_version(dev["version"]) if dev.get("version") else None
         unexpected = None  # last reported version that is neither old nor target
@@ -246,17 +378,7 @@ class Installs(Checks):
                 info = await shelly.device_info(self.session, dev["origin"], self._auth_for(device_id))
                 reported = shelly.parse_version(info["version"])
                 if reported == target:
-                    dev.update(
-                        info,
-                        status=STATUS_CURRENT,
-                        file=None,
-                        sha256=None,
-                        last_update=int(time.time()),
-                        message="Updated",
-                    )
-                    title = "Shelly downgraded" if dev.get("downgrade") else "Shelly updated"
-                    await self.notify(f"{title}: {dev['name']}", info["version"], f"sfm_{device_id}")
-                    return True, None
+                    return await self._confirm(device_id, dev, info), None
                 # Neither old nor target: keep waiting (polling is unchanged), but the
                 # result can only be "unconfirmed" with this version as hint
                 unexpected = info["version"] if reported != old else None
@@ -318,15 +440,19 @@ class Installs(Checks):
         try:
             async for event in channel.events():
                 kind, msg = event["event"], event["msg"]
+                ota["last"] = time.monotonic()
                 if kind == "ota_progress" and event["progress"] is not None:
                     dev["ota_progress"] = event["progress"]
                     dev["message"] = f"The Shelly is downloading the firmware: {event['progress']} %"
+                    if event["progress"] >= 100:
+                        ota["applied"].set()
                 elif kind == "ota_begin":
                     dev["ota_progress"] = dev.get("ota_progress") or 0
                     dev["message"] = "The Shelly started the update"
                 elif kind == "ota_success":
                     dev["ota_progress"] = 100
                     dev["message"] = "Update applied, the Shelly restarts"
+                    ota["applied"].set()
                 elif kind == "ota_error":
                     ota["error"] = msg or "no details"
                     ota["failed"].set()
@@ -334,6 +460,7 @@ class Installs(Checks):
         except (TimeoutError, aiohttp.ClientError, OSError) as err:
             log.debug("%s: device WebSocket ended: %s", dev["name"], err)  # restart – expected
         finally:
+            ota["closed"].set()
             await channel.__aexit__(None, None, None)
 
     async def _pause(self, ota: dict[str, Any], seconds: float, dev: Device) -> None:

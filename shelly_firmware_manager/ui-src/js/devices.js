@@ -24,13 +24,14 @@ const shownStatus = d => d.installing && d.status === "ready" ? "queued" : justU
 const hasUpdate = d => ["available", "ready", "installing"].includes(d.status);
 // Ignored devices are not installable until they are resumed; nothing is installable
 // while the download base URL is missing or the unconfirmed former example
-export const installable = (d, s) => (d.status === "ready" || failedInstall(d)) && !d.installing && !d.ignored && !s.scanning &&
+export const installable = (d, s) => (d.status === "ready" || failedInstall(d)) && !d.installing && !d.ignored && !s.scanning && !d.activity &&
   !(s.download_base && s.download_base.issue);
 /** Why "Install" is not possible for a device right now (tooltip of the disabled button). */
 export function installBlocker(d, s) {
   if (!d) return "Device is not known anymore";
   if (d.installing || d.status === "installing") return "Installation is running";
   if (s.scanning) return "Check in progress";
+  if (d.activity) return "Device is being checked";
   if (d.ignored) return "Device is ignored";
   if (s.download_base && s.download_base.issue) return s.download_base.message || "Download base URL is not set";
   return d.status === "ready" || failedInstall(d) ? null : "Not provided for this device anymore";
@@ -163,8 +164,10 @@ function statusCell(d) {
     return chip;
   }
   const key = shownStatus(d);
-  // Gen2+ installations report the device's own download progress
-  const label = (STATUS_LABELS[key] || key || "–") + (key === "installing" && typeof d.ota_progress === "number" ? ` ${d.ota_progress} %` : "");
+  // Gen2+ installations report the device's own download progress, then its restart
+  const restarting = key === "installing" && d.ota_phase === "restarting";
+  const label = restarting ? "Restarting" :
+    (STATUS_LABELS[key] || key || "–") + (key === "installing" && typeof d.ota_progress === "number" ? ` ${d.ota_progress} %` : "");
   const p = el("button", label, "pill p-" + (key || "").replace(/[^a-z]/g, ""));
   p.onclick = () => showStatus(d); attachTip(p, () => statusText(d));
   return p;
@@ -344,6 +347,8 @@ function deviceCard(title, rows, head, headExtra) {
   card.append(h, table);
   return card;
 }
+// Devices shown in "Updates available" at the last render (kept there while checked)
+const shownUpdates = new Set();
 /** Device tab: "Updates available" card on top, "All other devices" below. */
 export function renderDevices() {
   const s = ui.state, q = $("dev-search").value.trim().toLowerCase();
@@ -360,7 +365,12 @@ export function renderDevices() {
   const rows = found.filter(FILTERS[ui.devFilter][1]);
   // Ignored devices form their own group, always last (known update stays visible there)
   const ignored = rows.filter(d => d.ignored), active = rows.filter(d => !d.ignored);
-  const updates = active.filter(d => hasUpdate(d) || shownStatus(d) === "queued" || installedRecently(d) || failedInstall(d)), others = active.filter(d => !updates.includes(d));
+  // A device listed here stays while it is checked again (its markers are reset by
+  // the check); the result of the check decides at the next render without activity
+  const listed = d => hasUpdate(d) || shownStatus(d) === "queued" || installedRecently(d) || failedInstall(d) ||
+    (!!d.activity && shownUpdates.has(d.id));
+  const updates = active.filter(listed), others = active.filter(d => !updates.includes(d));
+  for (const d of s.devices) if (listed(d)) shownUpdates.add(d.id); else shownUpdates.delete(d.id);
   const cards = [];
   if (updates.length) {
     const sel = updates.filter(d => ok.has(d.id));
@@ -405,14 +415,17 @@ function openRowMenu(d, anchor) {
     const b = el("button", text, cls); b.role = "menuitem"; b.disabled = !enabled;
     b.onclick = () => { closeRowMenu(); fn(); }; items.push(b);
   };
-  const busy = ui.state && ui.state.busy;
-  add("Check for updates", () => checkDevice(d), !busy && !d.installing);
+  // The full check blocks everything; otherwise only work on this device itself
+  const s = ui.state || {}, running = d.installing || d.status === "installing";
+  const blocked = s.scanning ? s.busy || "Check in progress" : running ? "Installation is running" :
+    d.activity ? (d.activity === "reloading" ? "Device info is being reloaded" : "Device is being checked") : null;
+  add("Check for updates", () => checkDevice(d), !blocked);
   if (installable(d, ui.state)) add("Install update", () => openInstall([d]), true);   // only for Ready
   // Downgrade to a stored older version – Gen2+ only, also up to date / ignored devices
   // Disabled (no dialog) while no older version is stored or something blocks it
   if (d.gen >= 2) add("Downgrade", () => openDowngrade(d), downgradable(d, ui.state) && d.downgrades > 0);
-  add("Reload device info", () => reloadDevice(d), !busy && !d.installing && !d.activity && !!d.ip);
-  if (busy) items.push(el("div", `Not available – ${busy}`, "menu-hint"));   // reason, also for touch
+  add("Reload device info", () => reloadDevice(d), !blocked && !!d.ip);
+  if (blocked) items.push(el("div", `Not available – ${blocked}`, "menu-hint"));   // reason, also for touch
   add(d.ignored ? "Resume device" : "Ignore device", () => setIgnored(d, !d.ignored), !d.installing);
   items.push(el("hr"));
   const url = webUrl(d);

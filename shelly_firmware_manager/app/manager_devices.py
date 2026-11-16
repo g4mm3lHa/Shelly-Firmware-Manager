@@ -61,7 +61,7 @@ class DeviceSettings(FirmwareStore):
         dev = self.devices[device_id]
         if device_id in self.installing or dev.get("status") == STATUS_INSTALLING:
             raise ShellyError("Installation in progress – please try again afterwards")
-        if self.activity.get(device_id) in (ACTIVITY_CHECKING, ACTIVITY_DOWNLOADING):
+        if device_id in self.device_checks or self.activity.get(device_id) in (ACTIVITY_CHECKING, ACTIVITY_DOWNLOADING):
             raise ShellyError("Device is being checked – please try again afterwards")
         if device_id in self.reloading:
             raise ShellyError("Device info is being reloaded – please try again in a moment")

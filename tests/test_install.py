@@ -3,6 +3,7 @@ download diagnosis per device, check after confirmed installations.
 
 All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test servers."""
 
+import asyncio
 import hashlib
 import json
 import time
@@ -20,9 +21,13 @@ from helpers import store
 
 
 def test_install_timing_constants():
-    """Polling unchanged (30 s, every 10 s); 3.1.1: early abort after 2 min, max. 3 min."""
+    """Polling (devices without OTA events): first look after 30 s, every 10 s, early
+    abort after 2 min without download, at most 5 min. OTA events: 60 s without
+    progress, 30 s for the restart, 30 s after it, polled every 5 s."""
     assert (manager_installs.INSTALL_FIRST_CHECK_S, manager_installs.INSTALL_POLL_S) == (30, 10)
-    assert (manager_installs.INSTALL_NO_DOWNLOAD_S, manager_installs.INSTALL_WAIT_S) == (120, 180)
+    assert (manager_installs.INSTALL_NO_DOWNLOAD_S, manager_installs.INSTALL_WAIT_S) == (120, 300)
+    assert (manager_installs.OTA_STALL_S, manager_installs.OTA_RESTART_WAIT_S) == (60, 30)
+    assert (manager_installs.OTA_BOOT_WAIT_S, manager_installs.OTA_POLL_S) == (30, 5)
 
 
 @pytest.fixture
@@ -44,7 +49,7 @@ def run_install(mgr, monkeypatch, quick_install):
             if served:
                 mgr.downloads["x.zip"] = {"served": {"192.168.1.10": 1}, "rejected": set()}
             version = answers[min(len(calls) - 2, len(answers) - 1)]
-            return {"mac": "AA", "build": "b-new", "version": version}
+            return {"mac": "AA", "build": "b-old", "version": version}
 
         async def trigger(*_args):
             return None
@@ -94,8 +99,11 @@ REAL_CHANNEL = shelly.OtaChannel  # conftest replaces it with a fake per test
 class FakeShelly:
     """Local Gen2 RPC WebSocket at /rpc with optional Digest auth (official format)."""
 
-    def __init__(self, password=None, events=(), redirect=False):
+    def __init__(self, password=None, events=(), redirect=False, keep_open=False):
+        """keep_open: after the events the WebSocket stays open until release is set
+        (a device still running; closing it stands for the restart)."""
         self.password, self.events, self.redirect = password, list(events), redirect
+        self.keep_open, self.release = keep_open, asyncio.Event()
         self.realm = "shellyplus1-aabbcc"
         self.frames = []
 
@@ -126,6 +134,8 @@ class FakeShelly:
             for event in self.events:
                 await ws.send_json({"src": self.realm, "dst": frame["src"], "method": "NotifyEvent",
                                     "params": {"ts": 1.0, "events": [{"component": "sys", "ts": 1.0, **event}]}})
+            if self.keep_open:
+                await self.release.wait()
             await ws.close()
         return ws
 
@@ -207,6 +217,11 @@ def ota_install(monkeypatch):
     monkeypatch.setattr(manager_installs, "INSTALL_POLL_S", 0.05)
     monkeypatch.setattr(manager_installs, "INSTALL_NO_DOWNLOAD_S", 5)
     monkeypatch.setattr(manager_installs, "INSTALL_WAIT_S", 10)
+    monkeypatch.setattr(manager_installs, "OTA_TICK_S", 0.01)
+    monkeypatch.setattr(manager_installs, "OTA_POLL_S", 0.02)
+    monkeypatch.setattr(manager_installs, "OTA_STALL_S", 0.3)
+    monkeypatch.setattr(manager_installs, "OTA_RESTART_WAIT_S", 0.3)
+    monkeypatch.setattr(manager_installs, "OTA_BOOT_WAIT_S", 0.3)
     monkeypatch.setattr(shelly, "file_sha256", lambda *_a: "s")
     calls = {"http": 0}
 
@@ -261,6 +276,77 @@ async def test_progress_is_shown_and_success_confirmed(mgr, ota_install, monkeyp
         assert await mgr._install(A, dev, "s") == (True, None)
     assert (55, "The Shelly is downloading the firmware: 55 %") in seen
     assert dev["status"] == manager_core.STATUS_CURRENT and "ota_progress" not in dev
+
+
+DONE = [{"event": "ota_progress", "msg": "", "progress_percent": 100}, {"event": "ota_success", "msg": ""}]
+
+
+async def ota_run(mgr, monkeypatch, events, versions, keep_open=False):
+    """Install over FakeShelly; after the pre-check device_info answers from versions
+    (None: no answer, the last entry repeats). Returns (result or exception, device, phases seen)."""
+    async with FakeShelly(events=events, keep_open=keep_open) as fake:
+        monkeypatch.setattr(shelly, "OtaChannel", lambda _origin, *a: REAL_CHANNEL(fake.origin, *a))
+        dev = install_device(mgr)
+        answers, phases = ["1.4.0", *versions], []  # first: the pre-check of the installation
+
+        async def device_info(*_args, **_kwargs):
+            phases.append(dev.get("ota_phase"))
+            version = answers.pop(0) if len(answers) > 1 else answers[0]
+            if version is None:
+                raise shelly.ShellyError("not reachable")
+            return {"mac": "AA", "build": "b-old", "version": version}
+
+        monkeypatch.setattr(shelly, "device_info", device_info)
+        try:
+            result = await mgr._install(A, dev, "s")
+        except shelly.ShellyError as err:
+            result = err
+        fake.release.set()
+    return result, dev, phases
+
+
+async def test_ota_success_restart_and_new_version(mgr, ota_install, monkeypatch):
+    """100 % / ota_success, the WebSocket closes (restart): "Restarting", then the
+    new version is confirmed; no polling limit of the fallback is involved."""
+    result, dev, phases = await ota_run(mgr, monkeypatch, DONE, [None, "1.5.0"])
+    assert result == (True, None) and dev["status"] == manager_core.STATUS_CURRENT
+    assert "restarting" in phases and "ota_phase" not in dev and ota_install["http"] == 0
+
+
+async def test_ota_old_version_after_restart_is_an_error(mgr, ota_install, monkeypatch):
+    result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, ["1.4.0"])
+    assert isinstance(result, shelly.ShellyError) and "still reports 1.4.0" in str(result)
+
+
+async def test_ota_no_answer_after_restart_is_an_error(mgr, ota_install, monkeypatch):
+    started = time.monotonic()
+    result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, [None])
+    assert isinstance(result, shelly.ShellyError) and "No answer from the Shelly within" in str(result)
+    assert time.monotonic() - started < 2
+
+
+async def test_ota_no_restart_is_an_error(mgr, ota_install, monkeypatch):
+    """Applied, but the WebSocket stays open and the device keeps answering the old version."""
+    result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, ["1.4.0"], keep_open=True)
+    assert isinstance(result, shelly.ShellyError) and "did not restart" in str(result)
+
+
+async def test_ota_restart_seen_by_polling(mgr, ota_install, monkeypatch):
+    """WebSocket still open, the device stops answering: restart; then the new version."""
+    result, dev, phases = await ota_run(mgr, monkeypatch, DONE, [None, None, "1.5.0"], keep_open=True)
+    assert result == (True, None) and "restarting" in phases
+
+
+async def test_ota_stall_without_progress_is_an_error(mgr, ota_install, monkeypatch):
+    events = [{"event": "ota_progress", "msg": "", "progress_percent": 40}]
+    result, dev, _phases = await ota_run(mgr, monkeypatch, events, ["1.4.0"], keep_open=True)
+    assert isinstance(result, shelly.ShellyError) and "stopped at 40 %" in str(result)
+
+
+async def test_ota_websocket_lost_before_applied_falls_back_to_polling(mgr, ota_install, monkeypatch):
+    events = [{"event": "ota_progress", "msg": "", "progress_percent": 40}]
+    result, _dev, phases = await ota_run(mgr, monkeypatch, events, ["1.4.0", "1.4.0", "1.5.0"])
+    assert result == (True, None) and "restarting" not in phases
 
 
 async def test_no_websocket_falls_back_to_http(mgr, ota_install, monkeypatch):

@@ -62,7 +62,7 @@ the Home Assistant theme (colours, light/dark) and works on phones.
   help with larger installations. A device you just updated stays on top as "Updated"
   (or "Unconfirmed" if the target version was not confirmed, or "Error" if the
   installation failed – then with checkbox and **Install** for another attempt) until
-  you check it again or the next full check runs.
+  you check it again or the next full check runs (it stays there while it is checked).
 - The action icons show and change power-on action, eco mode, password protection,
   access point, Bluetooth, actions and schedules, and restart the device. A "?" means
   the value is currently unknown. Colours: power-on action green = every output
@@ -133,10 +133,25 @@ and kept with the stored firmware; it is not requested again afterwards.
    changelog (security entries and entries for this model are highlighted).
 3. **Approve installation.** The Shelly downloads the firmware from the app and restarts.
 
-The app then checks every 10 seconds until the device reports exactly the target
-version (at most 3 minutes). If that does not happen, the status becomes "Unconfirmed"
-with a diagnosis – see [Troubleshooting](#troubleshooting). Scheduled checks create a
+Gen2+ devices report their progress over the device connection (the status label shows
+the percentage). An error reported by the Shelly ends the installation at once. Without
+a download request after 2 minutes, or without new progress for 60 seconds, the
+installation fails. After 100 % the Shelly must restart within 30 seconds (the label
+shows "Restarting") and report exactly the target version within 30 seconds after the
+restart; the old version, another version or no answer is an error.
+
+Devices without this connection (Gen1, or when it is not available) are checked every
+10 seconds until they report exactly the target version (at most 5 minutes). If that
+does not happen, the status becomes "Unconfirmed" with a diagnosis – see
+[Troubleshooting](#troubleshooting). A failed installation can be retried from the
+updates card. Scheduled checks create a
 Home Assistant notification when they find new updates.
+
+While a device is installed or checked, other devices can be checked and installed.
+The device itself cannot be checked during its installation, nor installed during its
+check. **Check all** runs alone: it cannot start while single checks, installations or
+Reload Device Info run, and it blocks all of them while it runs. A scheduled check that
+is due while other work runs is cancelled and logged; the next date counts.
 
 No check runs after an installation. The next stored version – or the offer of the
 Shelly server – is provided when you check the device again (row menu ⋮ → Check for
@@ -165,8 +180,8 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
 - Firmware is **never deleted automatically**. Delete files you no longer need with the
   bin icon (two confirmations). A file that is provided to devices can be deleted too:
   the dialog names them, they lose the provided update and show "Available" until they
-  are checked again. Only a file that is being installed, and every file during a
-  check, cannot be deleted. To skip a stored version (Gen1: the store comes first),
+  are checked again. A file that is being installed cannot be deleted, nor every file
+  during **Check all** and the files of the checked device's type during a single check. To skip a stored version (Gen1: the store comes first),
   delete it.
 - **Upload firmware** adds a version you have from another source:
   1. Choose the file (`.zip`, `.bin` or `.gbl`, max. 64 MB).

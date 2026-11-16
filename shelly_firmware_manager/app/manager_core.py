@@ -10,12 +10,14 @@ provide; the complete object is manager.Manager.
 State lives in /data/state.json, firmware in /data/firmware, device passwords in
 /data/credentials.json, changelogs in /data/changelog.json and the activity log in
 /data/events.json (all private to the app, paths in data_paths).
-Checks – the full check and the single-device check – run exclusively (asyncio.Lock)
-and are reserved synchronously before they start
-(reserve_check); checks and installations exclude each other.
+The full check ("check all") runs exclusively (asyncio.Lock): it starts only while no
+single-device check, installation or Reload Device Info runs, and blocks all of them
+while it runs. Single-device checks and installations of different devices run in
+parallel; one device is checked, installed or reloaded at most once at a time. Every
+check is reserved synchronously before it starts (reserve_check).
 
-Progress of a running check is kept in memory only (self.progress, self.activity):
-the UI shows it while polling, nothing of it is persisted.
+Progress is kept in memory only (self.progress of the full check, self.activity per
+device): the UI shows it while polling, nothing of it is persisted.
 """
 
 import asyncio
@@ -155,25 +157,27 @@ class ManagerCore:
         self.firmware: dict[str, FirmwareMeta] = {}  # file name -> metadata of the stored firmware
         self.ui: dict[str, Any] = {}  # table settings (sort order, hidden columns) for all users
         self.activity: dict[str, str] = {}  # HA device ID -> ACTIVITY_* while a check runs
-        self.progress: dict[str, Any] | None = None  # running check: {"kind", "total", "done", "errors", "phase"}
+        self.progress: dict[str, Any] | None = None  # running full check: {"kind", "total", "done", "errors", "phase"}
+        self.device_checks: dict[str, str] = {}  # HA device ID -> "queued"/"running" (single-device checks)
         self.storage_error: str | None = None  # last failure writing state.json (shown in the UI)
         self.schedule: dict[str, Any] = {}  # automatic check schedule (see schedule.py), persisted
         self.reloading: set[str] = set()  # device IDs whose Reload Device Info is running
         # (firmware ID, version) -> running provide task (single flight)
         self._provisions: dict[tuple[str, str], asyncio.Future[tuple[str, str, int]]] = {}
         self._downloads_running = 0  # for the progress phase of a parallel check
-        # Running check only (cleared when it ends, see _end_check):
+        # Running checks only (cleared when no check runs anymore, see _release_check_state):
         # file name -> shared checksum verification of a stored file (single flight)
         self._verifying: dict[str, asyncio.Future[bool]] = {}
         # file name -> manufacturer URL of a firmware downloaded by this check
         self._fresh: dict[str, str] = {}
-        # User shown in the log for the downloads of this check ("Schedule" for
-        # scheduled checks)
-        self._check_user: str | None = None
-        # Reference request of the running check: does the manufacturer's server still
-        # answer with the next step for an installed version (see Checks)?
+        # User shown in the log for the downloads: of the full check ("Schedule" for
+        # scheduled checks) and per device of a single-device check
+        self._scan_user: str | None = None
+        self._check_users: dict[str, str] = {}
+        # Reference request of the running checks (shared by parallel single-device
+        # checks): does the manufacturer's server still answer with the next step for
+        # an installed version (see Checks)?
         self._header_check: asyncio.Future[bool | None] | None = None
-        self._header_ignored: bool | None = None  # result of the running check (None: not asked)
         self._header_got = ""  # version the reference request was answered with
         # Devices that installed an intermediate version: checked again at once
         self._step_checks: set[str] = set()
@@ -401,75 +405,95 @@ class ManagerCore:
         """Ask the Supervisor to restart this app so new options take effect."""
         await self._supervisor_post("/addons/self/restart", None)
 
-    # ------------------------------------- Check slot (shared by checks, installations and device actions)
+    # ------------------------------------- Check slots (full check exclusive, single checks per device)
 
     @property
     def checking(self) -> bool:
-        """True while a check runs or has been reserved by a request (see reserve_check)."""
+        """True while the full check runs or has been reserved by a request (see
+        reserve_check). Single-device checks: device_checks."""
         return self.lock.locked() or self.progress is not None
 
     def reserve_check(self, kind: str = "all", device_id: str | None = None) -> None:
-        """Reserve the check slot synchronously, before the background task starts.
+        """Reserve a check synchronously, before the background task starts.
 
-        Two quick requests (double tap, two browsers) can therefore never start two
-        checks, and an approval arriving in between is refused. Raises ShellyError
-        if a check or an installation is running."""
+        Two quick requests (double tap, two browsers) can therefore never start the
+        same check twice, and an approval arriving in between is refused.
+        kind "all": only while nothing else runs (no single-device check, installation
+        or Reload Device Info). kind "device": not during the full check, and not for
+        a device that is being checked, installed or reloaded – other devices may be
+        checked or installed at the same time. Raises ShellyError otherwise."""
         if self.checking:
             raise ShellyError("Check in progress – please try again afterwards")
-        if self.installing:
-            raise ShellyError(f"Not possible – installations running: {len(self.installing)}")
-        if self.reloading:
+        if self.reloading and (kind != "device" or device_id in self.reloading):
             raise ShellyError("Device info is being reloaded – please try again in a moment")
         if kind == "device":
             if device_id is None:
                 raise ValueError("device_id required for a single-device check")
-            self.progress = {
-                "kind": "device",
-                "device": self.devices[device_id].get("name"),
-                "total": 1,
-                "done": 0,
-                "errors": 0,
-                "phase": "queued",
-            }
+            if device_id in self.device_checks:
+                raise ShellyError("This device is already being checked")
+            dev = self.devices.get(device_id, {})
+            if device_id in self.installing or dev.get("status") == STATUS_INSTALLING:
+                raise ShellyError("Installation of this device in progress – please try again afterwards")
+            self.device_checks[device_id] = "queued"
             self.activity[device_id] = ACTIVITY_WAITING
-        else:  # "all"
-            self.progress = {"kind": kind, "total": 0, "done": 0, "errors": 0, "phase": "queued"}
+            return
+        if self.device_checks:
+            raise ShellyError(f"Not possible – single-device checks running: {len(self.device_checks)}")
+        if self.installing:
+            raise ShellyError(f"Not possible – installations running: {len(self.installing)}")
+        self.progress = {"kind": kind, "total": 0, "done": 0, "errors": 0, "phase": "queued"}
 
     def _reserved(self, kind: str, device_id: str | None = None) -> bool:
-        """True if the slot was reserved for exactly this check and it has not started."""
+        """True if exactly this check was reserved and has not started yet."""
+        if kind == "device":
+            return device_id is not None and self.device_checks.get(device_id) == "queued"
         p = self.progress
-        return (
-            not self.lock.locked()
-            and p is not None
-            and p.get("kind") == kind
-            and p.get("phase") == "queued"
-            and (device_id is None or self.activity.get(device_id) == ACTIVITY_WAITING)
-        )
+        return not self.lock.locked() and p is not None and p.get("kind") == kind and p.get("phase") == "queued"
 
     @property
     def busy(self) -> str | None:
-        """Text for the UI while a check or installations are running."""
+        """Text for the UI while a check or installations are running (the full
+        check button is blocked while this is set)."""
         if self.checking:
-            if self.progress and self.progress.get("kind") == "device":
-                return f"Checking {self.progress.get('device') or 'device'}"
             return "Check in progress"
+        parts = []
+        if self.device_checks:
+            names = [str(self.devices.get(i, {}).get("name") or "device") for i in self.device_checks]
+            parts.append(f"Checking {names[0]}" if len(names) == 1 else f"Checking {len(names)} devices")
         if self.installing:
-            return f"Installations running: {len(self.installing)}"
-        return None
+            parts.append(f"Installations running: {len(self.installing)}")
+        if self.reloading:
+            parts.append("Reloading device info")
+        return " · ".join(parts) or None
 
     def _progress(self) -> dict[str, Any]:
-        """Progress of the running check; set by reserve_check before every check."""
+        """Progress of the running full check; set by reserve_check before it starts."""
         if self.progress is None:
             raise ShellyError("No check reserved")
         return self.progress
 
     def _end_check(self) -> None:
-        """Clear the memory-only state of a finished or cancelled check."""
+        """Clear the memory-only state of a finished or cancelled full check."""
         self.activity.clear()
         self.progress = None
+        self._scan_user = None
+        self._release_check_state()
+
+    def _end_device_check(self, device_id: str) -> None:
+        """Clear the state of a finished or cancelled single-device check."""
+        self.device_checks.pop(device_id, None)
+        self.activity.pop(device_id, None)
+        self._check_users.pop(device_id, None)
+        self._release_check_state()
+
+    def _release_check_state(self) -> None:
+        """Shared caches of the running checks end with the last of them (called
+        after progress was cleared, so a full check ending inside its lock counts as
+        finished)."""
+        if self.progress is not None or self.device_checks:
+            return
         self._verifying.clear()
         self._fresh.clear()
-        self._check_user = None
         if self._header_check is not None and not self._header_check.done():
             self._header_check.cancel()
         self._header_check = None
