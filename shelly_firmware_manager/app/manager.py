@@ -51,10 +51,14 @@ class Manager(Installs):
             "source_url",
             "offer_source",
             "updated",
+            "install_failed",
+            "store_fallback",
+            "step_target",
             "info_refreshed",
             "settings_error",
             "error_level",
             "ota_progress",
+            "ota_phase",
             "downgrade",
         )
         devices: list[dict[str, Any]] = []

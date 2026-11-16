@@ -1,8 +1,8 @@
 """Local demo server with fake data for UI tests (no network access).
 
-Usage: python demo.py <app_dir> <port> <scenario: idle|busy|legacy|missing|rc7>
+Usage: python demo.py <app_dir> <port> <scenario: idle|busy|legacy|missing|features>
 legacy: download_base_url is the former example value (not confirmed) and one device
-installs with device progress; missing: download_base_url not set; rc7: idle
+installs with device progress; missing: download_base_url not set; features: idle
 plus stored older versions (one of them uploaded) for downgrade and upload checks.
 Serves the UI app below /ui/ and a same-origin wrapper /wrap that embeds it in an
 iframe (like the HA Ingress panel)."""
@@ -62,7 +62,7 @@ for i, n in enumerate(names):
         "message": "Device not reachable" if st == "error" else "", "origin": f"http://192.168.1.{10 + i}",
         "last_check": now - 3600, "last_success": now - (90000 if st == "error" else 3600),
         "last_update": now - 86400 * 3 if i % 3 == 0 else None, "ntp": "time.local", "eco": i % 2 == 0,
-        # power-on action: "restore_last" (green icon) or another value (red icon, 3.1.1); every 4th device has no output
+        # power-on action: "restore_last" (green icon) or another value (red icon); every 4th device has no output
         "outputs": [{"key": "switch:0", "name": None, "aop": "restore_last" if i % 8 < 4 else "off", "options": ["off", "on", "restore_last"]}] if i % 4 else [],
         "file": f"{sha}.zip" if st == "ready" else None, "sha256": sha if st == "ready" else None, "size": len(content),
         "pending_version": "1.5.0" if st == "ready" else None,
@@ -74,7 +74,7 @@ for i, n in enumerate(names):
         "actions": [False, True, None][i % 3], "schedules": [True, False, "unsupported", None][i % 4],
         "auth_enabled": [False, True, None][i % 3], "ignored": i in (3, 12),
     }
-if scenario == "rc7":  # older versions for the downgrade list, one uploaded
+if scenario == "features":  # older versions for the downgrade list, one uploaded
     for version, source in (("1.3.1", "download"), ("1.3.0", "download"), ("1.2.0", "upload")):
         older = f"Plus1 {version} ".encode() * 6000
         older_sha = hashlib.sha256(older).hexdigest()
@@ -103,6 +103,24 @@ m.devices[f"{4:032x}"]["settings_error"] = {"message": "Device not reachable", "
 m.devices[f"{6:032x}"]["updated"] = True
 # An unconfirmed installation also stays in the updates card (status "Unconfirmed", no checkbox)
 m.devices[f"{5:032x}"]["updated"] = True
+# A failed installation stays there with checkbox and Install (retry with the provided file)
+m.devices[f"{14:032x}"].update(install_failed=True, file=f"{sha}.zip", sha256=sha, pending_version="1.5.0", offer_version="1.5.0",
+                                offer_source="store", message="The Shelly reports an update error: error. It downloaded the firmware "
+                                "but rejected it – the installed version may be too old for a direct update to 1.5.0")
+# The update server could not be asked: a stored version is offered for a manual installation
+m.devices[f"{16:032x}"].update(status="error", store_fallback=True, error_level="warning", file=f"{sha}.zip", sha256=sha,
+                                pending_version="1.5.0", offer_version="1.5.0", offer_source="store",
+                                message="408, 'Request Timeout', 'https://updates.shelly.cloud/update/Plus1'. Stored version 1.5.0 is "
+                                "ready and can be installed manually – at your own risk: without the answer of the Shelly update "
+                                "server it cannot be verified whether an intermediate version is required first.")
+# An intermediate version on the way to the newest one
+m.devices[f"{7:032x}"].update(step_target="1.7.0", message="Provided, not installed – intermediate version on the way to 1.7.0; "
+                               "the device is checked again after its installation")
+m.events.add("install", event="confirmed", ok=True, unverified=True, device="Entrance", type="Plus1", old="1.4.0", new="1.5.0",
+             user="demo")
+m.events.add("check", trigger="step", devices=1, duration=1.4, updates=1, warnings=0, errors=0,
+             result="1 update(s), 0 warning(s), 0 error(s)", user="demo",
+             findings=[{"device": "Heat pump 3EM", "version": "1.5.0", "offer": "1.7.0", "severity": "success"}])
 m.credentials.entries[f"{1:032x}"] = {"gen": 2, "realm": "shelly-1", "ha1": "0" * 64}
 # three consecutive log entries of one device (grouped by a side bar) and a check with mixed findings
 m.events.add("setting", device="Pool pump", changes=[{"setting": "Eco mode", "old": "on", "new": "off"}], user="demo")

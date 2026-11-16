@@ -1,5 +1,5 @@
 """Feature UI checks (Playwright) against the demo servers – one file for all
-feature suites (3.0.1; formerly lan_hint_test.py, rc6_ui_test.py, rc7_ui_test.py).
+feature suites.
 
 Suites, in this order (the last two change the demo state in their last case):
 - download_url_hint   Settings: hints for download_base_url (LAN IP, public IP,
@@ -10,7 +10,10 @@ Suites, in this order (the last two change the demo state in their last case):
                       Install button behind a device and the changelog icon in the
                       Firmware tab; 3.1.1: Install button and "Updated" in the device
                       list, state colours of the action icons, log grouping and
-                      deleting log entries. Demo "rc7" on 8805 (and "idle" on 8801).
+                      deleting log entries; 3.2.0: failed installation in the updates
+                      card, dialog sections, phone tile layout, no tooltip after a tap,
+                      user in the log tile; devices stay in the updates card while
+                      checked, Ignored label size on phones. Demo "features" on 8805 (and "idle" on 8801).
 Usage: python qa/ui_features.py <shots-dir> [suite ...]   (qa/run_ui.py starts the demos)
 Every suite checks: no horizontal overflow, no console errors; screenshots go to
 <shots-dir>."""
@@ -25,7 +28,7 @@ from types import SimpleNamespace
 from common import launch
 from playwright.sync_api import sync_playwright
 
-IDLE, LEGACY, MISSING, RC7 = (f"http://127.0.0.1:{p}" for p in (8801, 8803, 8804, 8805))
+IDLE, LEGACY, MISSING, FEATURES = (f"http://127.0.0.1:{p}" for p in (8801, 8803, 8804, 8805))
 OVERFLOW_JS = "document.documentElement.scrollWidth - document.documentElement.clientWidth"
 results = []  # (suite: name, ok, detail)
 SUITE = [""]  # name of the running suite (prefix of the result names)
@@ -167,7 +170,8 @@ def _device_list(c):
     # Device list – Install button next to "Ready", "Updated" stays on top, icon colours
     card = f.locator("#dev-cards .card").first
     install = card.locator(".status-cell button.install")
-    check(f"{case}: Install button for every ready device", install.count() == 5 and install.first.is_enabled(), str(install.count()))
+    check(f"{case}: Install button for every ready device, the failed installation and the store fallback", install.count() == 7
+          and install.first.is_enabled(), str(install.count()))
     check(f"{case}: Install button is red", "danger" in install.first.get_attribute("class"))
     updated = card.locator("tr", has_text="Bedroom shutter")
     check(f"{case}: updated device stays in the updates card", updated.count() == 1
@@ -192,6 +196,121 @@ def _device_list(c):
           ap: document.querySelectorAll('.act.alert.s-on[aria-label^="Access point"]').length})""")
         check(f"{case}: power-on action green and red, lock yellow, access point red",
               all(counts[k] > 0 for k in ("good", "alert", "warn", "ap")), str(counts))
+
+
+def _keep_listed(c):
+    """Devices of the updates card stay there while they are checked again (the check
+    resets their markers); phone tiles: the Ignored label as high as the status pill."""
+    case, f, page = c.case, c.f, c.page
+    checked = ("Fridge", "Office desk")
+
+    def checking(route):
+        headers = {k: v for k, v in route.request.headers.items() if k.lower() != "if-none-match"}  # no 304
+        state = route.fetch(headers=headers).json()
+        for d in state["devices"]:
+            if d["name"] in checked:   # what a running single check reports
+                d.update(activity="checking", install_failed=None, updated=None, last_update=None)
+        route.fulfill(json=state)
+
+    page.route("**/api/state", checking)
+    f.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
+    page.wait_for_timeout(400)
+    card = f.locator("#dev-cards .card").first
+    for name in checked:
+        row = card.locator("tr", has_text=name)
+        check(f"{case}: {name} stays in the updates card while checked", row.count() == 1
+              and row.locator(".pill").first.inner_text().startswith("Checking"))
+    card.locator("tr", has_text="Fridge").screenshot(path=c.out / f"{case}-checking-kept.png")
+    page.unroute("**/api/state")
+    f.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
+    page.wait_for_timeout(400)
+    if c.width < 700:
+        sizes = f.evaluate("""() => { const t = [...document.querySelectorAll('#dev-cards .status-cell')]
+          .find(e => e.querySelector('.p-ignored') && e.querySelector('button.pill'));
+          if (!t) return null; const r = e => e.getBoundingClientRect().height;
+          return {ignored: r(t.querySelector('.p-ignored')), pill: r(t.querySelector('button.pill'))}; }""")
+        f.locator("#dev-cards tr.ignored").first.screenshot(path=c.out / f"{case}-ignored-tile.png")
+        check(f"{case}: Ignored label as high as the status pill", sizes and abs(sizes["ignored"] - sizes["pill"]) < 1,
+              str(sizes))
+
+
+def _next_steps(c):
+    """Stored version offered on a server error (risk acknowledgment) and the hint of
+    an intermediate version in the installation dialog."""
+    case, f = c.case, c.f
+    card = f.locator("#dev-cards .card").first
+    fallback = card.locator("tr", has_text="Entrance")
+    check(f"{case}: store fallback in the updates card with checkbox and Install", fallback.count() == 1
+          and fallback.locator(".pill").first.inner_text() == "Error"
+          and fallback.locator("input[type=checkbox]:not(.ghost)").count() == 1 and fallback.locator("button.install").is_enabled())
+    fallback.locator("button.install").click()
+    d = dialog(f)
+    approve = [b for b in d["buttons"] if b[0] == "Approve installation"]
+    check(f"{case}: store fallback needs the risk acknowledgment", "at your own risk" in d["body"]
+          and approve == [["Approve installation", True]], str(d["buttons"]))
+    f.locator("#dlg-body label.check input").check()
+    check(f"{case}: acknowledgment enables the approval",
+          f.locator("#dlg-btns button", has_text="Approve installation").is_enabled())
+    c.page.screenshot(path=c.out / f"{case}-install-store-fallback.png")
+    f.locator("#dlg-btns button", has_text="Cancel").click()
+    step = card.locator("tr", has_text="Heat pump 3EM")
+    step.locator("button.install").click()
+    d = dialog(f)
+    check(f"{case}: intermediate version named in the installation dialog",
+          "1.5.0 is an intermediate version on the way to 1.7.0" in d["body"], d["body"][-300:])
+    c.page.screenshot(path=c.out / f"{case}-install-intermediate.png")
+    f.locator("#dlg-btns button", has_text="Cancel").click()
+
+
+def _layout(c):
+    """Failed installation in the updates card, status dialog, installation dialog
+    sections, tooltips on touch, phone tile alignment and the user in the log tile."""
+    case, f, page, out, width = c.case, c.f, c.page, c.out, c.width
+    card = f.locator("#dev-cards .card").first
+    failed = card.locator("tr", has_text="Fridge")
+    check(f"{case}: failed installation stays in the updates card with checkbox and Install", failed.count() == 1
+          and failed.locator(".pill").first.inner_text() == "Error" and failed.locator("input[type=checkbox]:not(.ghost)").count() == 1
+          and failed.locator("button.install").is_enabled())
+    failed.locator("button.pill").click()
+    pos = f.evaluate("""() => { const r = e => e.getBoundingClientRect(), m = document.querySelector('#dlg .dmsg'),
+      p = document.querySelector('#dlg .dstatus .pill'); return {mid: Math.abs((r(m).top + r(m).height / 2) - (r(p).top + r(p).height / 2)),
+      right: r(p).left >= r(m).right, title: document.getElementById('dlg-title').textContent,
+      sections: [...document.querySelectorAll('#dlg .dsec h3')].map(h => h.textContent)}; }""")
+    check(f"{case}: status dialog – message left, status right, sections", pos["right"] and pos["title"] == "Fridge"
+          and pos["sections"] == ["Firmware", "History"], str(pos))
+    page.screenshot(path=out / f"{case}-status-failed.png")
+    f.locator("#dlg-x").click()
+    tip_after_tap = None
+    if width < 700:   # touch: a tap shows no tooltip
+        card.locator("button.pill").first.tap()
+        tip_after_tap = f.evaluate("document.getElementById('tip').hidden")
+        f.locator("#dlg-x").click()
+        check(f"{case}: no tooltip after a tap", tip_after_tap is True)
+    card.locator("button.install").first.click()
+    heads = f.evaluate("[...document.querySelectorAll('#dlg .dsec h3')].map(h => h.textContent)")
+    check(f"{case}: installation dialog in sections", heads == ["Device", "Firmware", "Changelog"], str(heads))
+    page.screenshot(path=out / f"{case}-install-dialog.png")
+    f.locator("#dlg-btns button", has_text="Cancel").click()
+    if width < 700:   # phone tile: lines, flush button rows, chevron
+        row = card.locator("tr", has_text="Attic fan")
+        if not row.locator("td.c-details details").evaluate("d => d.open"):
+            row.locator("td.c-details summary").click()
+        row.locator(".act-strip.labeled").wait_for()
+        geo = row.evaluate("""tr => { const r = e => e.getBoundingClientRect(), mid = e => r(e).top + r(e).height / 2;
+          const q = s => tr.querySelector(s), strip = q('.act-strip.labeled'), buttons = [...strip.children];
+          const rows = {}; buttons.forEach(b => { const t = Math.round(r(b).top); rows[t] = Math.max(rows[t] || 0, r(b).right); });
+          return {check: Math.abs(mid(q('td.c-select input')) - mid(q('.name'))), menu: Math.abs(mid(q('td.c-menu button svg')) - mid(q('.name'))),
+            status: Math.abs(mid(q('.status-cell .pill')) - mid(q('.shelly-name'))),
+            flush: Object.values(rows).map(x => Math.round(r(strip).right - x)),
+            chevron: getComputedStyle(q('td.c-details summary'), '::after').borderRightStyle,
+            top: Math.round(r(q('.name')).top - r(tr).top), bottom: Math.round(r(tr).bottom - r(q('dl.tile-kv')).bottom)}; }""")
+        check(f"{case}: tile – checkbox and menu on the name line, status on the Shelly-name line",
+              geo["check"] < 2 and geo["menu"] < 2 and geo["status"] < 2, str(geo))
+        check(f"{case}: tile – every button row flush with the content width", all(x <= 1 for x in geo["flush"]), str(geo["flush"]))
+        check(f"{case}: tile – details chevron, padding top = bottom", geo["chevron"] == "solid" and abs(geo["top"] - geo["bottom"]) <= 3,
+              str(geo))
+        row.screenshot(path=out / f"{case}-tile.png")
+        row.locator("td.c-details summary").click()
 
 
 def _downgrade(c):
@@ -226,7 +345,7 @@ def _downgrade(c):
     # Step 2: installation dialog with the older target
     f.locator("#dlg-btns button", has_text="Continue").click()
     d = dialog(f)
-    check(f"{case}: install dialog with older target", d["title"] == "Downgrade?" and "Target (older)" in d["body"]
+    check(f"{case}: install dialog with older target", d["title"] == "Downgrade?" and "Version (older)" in d["body"]
           and "1.3.0" in d["body"] and "A downgrade installs an older firmware" in d["body"], d["body"][:200])
     page.screenshot(path=out / f"{case}-downgrade-install.png")
 
@@ -258,8 +377,14 @@ def _firmware_tab(c):
         "els => els.map(e => { const r = e.getBoundingClientRect(); return Math.round(r.top + r.height / 2); })")
     check(f"{case}: changelog, download and delete icons on one line", len(centers) == 3 and max(centers) - min(centers) <= 1, str(centers))
     first_del = rows.first.locator("button[aria-label], button.red").last
-    check(f"{case}: provided file locked with reason", first_del.is_disabled()
-          and first_del.get_attribute("title") == "Locked: provided as pending update", str(first_del.get_attribute("title")))
+    check(f"{case}: provided file can be deleted", first_del.is_enabled() and first_del.get_attribute("title") == "Delete",
+          str(first_del.get_attribute("title")))
+    first_del.click()
+    d = dialog(f)
+    check(f"{case}: delete dialog names the devices that lose the provided update",
+          "lose the provided update" in d["body"] or "loses the provided update" in d["body"], d["body"][:200])
+    c.page.screenshot(path=c.out / f"{case}-delete-provided.png")
+    f.locator("#dlg-btns button", has_text="Cancel").click()
     check(f"{case}: upload tag in the list", f.locator(".fw-row .tag.warn", has_text="Uploaded").count() == 1)
     check(f"{case}: no overflow (firmware)", f.evaluate(OVERFLOW_JS) <= 0)
     page.screenshot(path=out / f"{case}-firmware.png", full_page=True)
@@ -269,7 +394,9 @@ def _firmware_tab(c):
     rows.first.locator(".fw-dev summary").click()
     entries = rows.first.locator(".fw-dev li")
     buttons = rows.first.locator(".fw-dev li button")
-    check(f"{case}: one Install button per device", entries.count() == 5 and buttons.count() == 5,
+    # 5 ready devices + the failed installation (its file stays provided for a retry)
+    # + the stored version offered while the update server could not be asked
+    check(f"{case}: one Install button per device", entries.count() == 7 and buttons.count() == 7,
           f"{entries.count()} / {buttons.count()}")
     names = [t.replace("Install", "").strip() for t in entries.all_inner_texts()]
     check(f"{case}: devices ordered by name", names == sorted(names, key=str.lower) and "Kitchen light" in names, str(names))
@@ -359,11 +486,20 @@ def _logs(c):
     check(f"{case}: three consecutive entries of one device grouped", f.locator("#log-list .grp").count() == 3
           and f.locator("#log-list .grp-first").count() == 1 and f.locator("#log-list .grp-last").count() == 1)
     check(f"{case}: delete icon per entry", f.locator("#log-list .log-del").count() == total, str(total))
+    if c.width > 700:   # new log texts: check after an intermediate version, unverified installation
+        text = f.locator("#log-list").inner_text()
+        check(f"{case}: check after an intermediate version and unverified installation in the log",
+              "After-intermediate-version check" in text and "Not verified by the update server" in text)
     if c.width > 700:   # desktop rows: user name and delete icon on one line
         offsets = f.evaluate("""() => [...document.querySelectorAll('#log-list .log')].filter(r => r.querySelector('.user').textContent)
           .map(r => { const m = e => { const b = e.getBoundingClientRect(); return b.top + b.height / 2; };
             const icon = r.querySelector('.log-del svg'); return Math.abs(m(r.querySelector('.user')) - m(icon)); })""")
         check(f"{case}: user name and delete icon on one line", offsets and max(offsets) < 1.5, str(offsets[:5]))
+    else:   # phone tiles: user top right, beside the first summary line
+        pos = f.evaluate("""() => { const t = document.querySelector('#log-list .log-m summary .first'), r = e => e.getBoundingClientRect();
+          const u = t.querySelector('.user'), x = t.firstChild, tile = t.closest('.log-m');
+          return {line: Math.abs(r(u).bottom - r(x).bottom) < 4, right: r(tile).right - r(u).right < 20, user: u.textContent}; }""")
+        check(f"{case}: log tile – user top right beside the first line", pos["line"] and pos["right"] and pos["user"], str(pos))
     scheduled = f.locator("#log-list .log, #log-list .log-m", has_text="Firmware downloaded").first
     check(f"{case}: download names the user of its check", "Schedule" in scheduled.inner_text() if c.width > 700 else True)
     f.locator("#log-list summary", has_text="30.7 s").first.click()
@@ -396,17 +532,20 @@ def firmware_store(browser, out):
     cases = ((360, "light", True), (430, "dark", False), (1440, "dark", False), (1440, "light", False))
     for index, (width, scheme, embedded) in enumerate(cases):
         last = index == len(cases) - 1
-        case = f"rc7-{width}-{scheme}{'-embedded' if embedded else ''}"
+        case = f"features-{width}-{scheme}{'-embedded' if embedded else ''}"
         entry = "Downgrade"
         if index == 0:   # No stored older version (demo "idle") -> entry disabled, no dialog
             ctx, page, f, errors = open_page(browser, IDLE, width, scheme, embedded)
             items = dict(menu_items(f, "Hall"))
             check(f"{case}: downgrade disabled without a stored older version", items.get(entry) is True, str(items))
             ctx.close()
-        ctx, page, f, errors = open_page(browser, RC7, width, scheme, embedded, ignore=("/upload/confirm",))
+        ctx, page, f, errors = open_page(browser, FEATURES, width, scheme, embedded, ignore=("/upload/confirm",))
 
         c = SimpleNamespace(case=case, f=f, page=page, out=out, width=width, index=index, last=last)
         _device_list(c)
+        _layout(c)
+        _keep_listed(c)
+        _next_steps(c)
         _downgrade(c)
         rows = _firmware_tab(c)
         _firmware_delete_and_upload(c, rows)

@@ -21,7 +21,7 @@ def hdr(c):
 async def wait_idle(mgr):
     """Wait until background checks finished."""
     for _ in range(200):
-        if not mgr.checking:
+        if not mgr.checking and not mgr.device_checks:
             return
         await asyncio.sleep(0.01)
     raise AssertionError("check did not finish")
@@ -41,21 +41,22 @@ async def test_check_device_endpoint(client, mgr, net):
 
 
 async def test_double_tap_gets_409(client, mgr, net):
-    """Two quick requests: the second is refused synchronously (no double check)."""
+    """Two quick requests for one device: the second is refused synchronously (no
+    double check), as is the full check; another device is checked in parallel."""
     await mgr.scan()
     net.gate = asyncio.Event()
     r1 = await client.post(f"/api/devices/{A}/check", json={}, headers=hdr(client))
     r2 = await client.post(f"/api/devices/{A}/check", json={}, headers=hdr(client))
     r3 = await client.post("/api/scan", json={}, headers=hdr(client))
     r4 = await client.post(f"/api/devices/{B}/check", json={}, headers=hdr(client))
-    assert (r1.status, r2.status, r3.status, r4.status) == (200, 409, 409, 409)
+    assert (r1.status, r2.status, r3.status, r4.status) == (200, 409, 409, 200)  # B: in parallel
     state = await (await client.get("/api/state")).json()
-    assert state["scanning"] and state["progress"]["kind"] == "device"
-    assert "Checking Kitchen" in state["busy"]
+    assert not state["scanning"] and state["progress"] is None
+    assert state["busy"] == "Checking 2 devices"
     net.gate.set()
     await wait_idle(mgr)
     checks = [e for e in mgr.events.entries if e["kind"] == "check" and e.get("trigger") == "device"]
-    assert len(checks) == 1
+    assert len(checks) == 2
 
 
 async def test_double_scan_gets_409(client, mgr, net):
@@ -235,9 +236,33 @@ async def test_http_downgrade_and_delete_need_acknowledgment(client, mgr, net):
     r = await client.post(f"/api/firmware/{name}/delete", json={"confirm": True, "acknowledged": True}, headers=hdr)
     assert r.status == 200 and name not in mgr.firmware
     provided = mgr.devices[A]["file"]
+    mgr.devices[A]["status"] = "installing"  # a file being installed stays locked
     r = await client.post(f"/api/firmware/{provided}/delete", json={"confirm": True, "acknowledged": True},
                           headers=hdr)
     assert r.status == 409
+
+
+async def test_http_install_of_a_store_fallback_needs_acknowledgment(client, mgr, net, monkeypatch):
+    """A stored version offered while the server could not be asked is installed only
+    with the risk acknowledgment."""
+    store(mgr, "Plus1", "1.6.0")
+    net.offer_error = shelly.ShellyError("408, 'Request Timeout'")
+    await mgr.scan()
+    started = []
+
+    async def install(device_id, sha, approved_by, downgrade=False):
+        started.append(device_id)
+        return True
+
+    monkeypatch.setattr(mgr, "install", install)
+    sha, hdr = mgr.devices[A]["sha256"], {"X-CSRF-Token": client.csrf}
+    r = await client.post(f"/api/devices/{A}/install", json={"sha256": sha, "confirm": True}, headers=hdr)
+    assert r.status == 400 and not started
+    r = await client.post(f"/api/devices/{A}/install", json={"sha256": sha, "confirm": True, "acknowledged": True},
+                          headers=hdr)
+    assert r.status == 200
+    await asyncio.sleep(0)
+    assert started == [A]
 
 
 async def test_log_entries_can_be_deleted_over_http(client, mgr, net):

@@ -23,13 +23,16 @@ const PASSWORD_ACTIONS = {stored: "password stored", enabled: "password protecti
 const optionLabel = key => (OPTION_FIELDS.find(f => f[0] === key) || [key, key])[1];
 const INSTALL_EVENTS = {started: "started", confirmed: "confirmed", unconfirmed: "not confirmed", failed: "failed"};
 // "install": check after installations, only in entries of 3.1.0-rc2 to 3.1.1-rc2
-const TRIGGER_LABELS = {manual: "Manual", scheduled: "Scheduled", device: "Single-device", install: "After-installation"};
+const TRIGGER_LABELS = {manual: "Manual", scheduled: "Scheduled", device: "Single-device", install: "After-installation",
+  step: "After-intermediate-version"};
 const arrow = (a, b) => `${a ?? "–"} → ${b ?? "–"}`;
 
 /** Main line and optional details of one log entry. */
 function logContent(e) {
   switch (e.kind) {
     case "check": {
+      // A scheduled check that could not start (other work running): cancelled, not repeated
+      if (e.skipped) return [el("div", `Scheduled check cancelled · ${e.skipped}`)];
       const line = el("div", `${TRIGGER_LABELS[e.trigger] || "Scheduled"} check · ${e.devices} device${e.devices === 1 ? "" : "s"} · ${e.duration} s · ${e.result}`);
       if (!e.findings || !e.findings.length) return [line];
       const ul = checkFindings(e);
@@ -39,9 +42,11 @@ function logContent(e) {
       return [box("div", null, `Firmware downloaded: ${e.type} ${e.version} · ${mb(e.size || 0)} · SHA ${(e.sha256 || "").slice(0, 12)}… `,
         e.https === false ? el("span", "HTTP only", "tag warn") : null)];
     case "install":
-      return [el("div", `${e.device}: ${e.downgrade ? "downgrade" : "installation"} ${INSTALL_EVENTS[e.event] || e.event} · ${arrow(e.old, e.new)}`), e.detail ? el("div", e.detail, "sub") : null].filter(Boolean);
+      return [box("div", null, `${e.device}: ${e.downgrade ? "downgrade" : "installation"} ${INSTALL_EVENTS[e.event] || e.event} · ${arrow(e.old, e.new)} `,
+        e.unverified ? el("span", "Not verified by the update server", "tag warn") : null), e.detail ? el("div", e.detail, "sub") : null].filter(Boolean);
     case "delete":
-      return [el("div", `Firmware deleted: ${e.type} ${e.version}${e.source === "upload" ? " (uploaded)" : ""}`)];
+      return [el("div", `Firmware deleted: ${e.type} ${e.version}${e.source === "upload" ? " (uploaded)" : ""}`),
+        e.released?.length ? el("div", `No longer provided for: ${e.released.join(", ")}`, "sub") : null].filter(Boolean);
     case "upload":
       return [el("div", `Firmware uploaded: ${e.type} ${e.version} · ${mb(e.size || 0)} · SHA ${(e.sha256 || "").slice(0, 12)}… · ${e.sha_checked ? "SHA-256 checked" : "SHA-256 not checked"}`)];
     case "setting":
@@ -73,6 +78,7 @@ function checkFindings(e) {
 function logSummary(e) {
   switch (e.kind) {
     case "check": {
+      if (e.skipped) return ["Scheduled check cancelled", e.skipped];
       const first = `${TRIGGER_LABELS[e.trigger] || "Scheduled"} · ${e.devices} device${e.devices === 1 ? "" : "s"} · ${e.duration} s`;
       const counts = typeof e.updates === "number"
         ? `${e.updates} update${e.updates === 1 ? "" : "s"} · ${e.warnings || 0} warning${e.warnings === 1 ? "" : "s"} · ${e.errors || 0} error${e.errors === 1 ? "" : "s"}`
@@ -124,12 +130,13 @@ function logTile(e, d, group) {
   const sev = severity(e), summary = logSummary(e);
   const head = box("div", "log-head", el("span", `${pad(d.getHours())}:${pad(d.getMinutes())}`, "mono sub"),
     el("span", KIND_LABELS[e.kind] || e.kind, "tag"), el("span", SEVERITY_LABELS[sev], `tag sev-${sev}`), el("span", null, "spacer"), logDelete(e));
-  const body = box("div", "log-details", ...(e.kind === "check" ? (e.findings && e.findings.length ? [checkFindings(e)] : [el("div", e.result, "sub")]) : logContent(e)),
-    e.user ? el("div", `By ${e.user}`, "sub") : null);
+  const body = box("div", "log-details", ...(e.kind === "check" ? (e.findings && e.findings.length ? [checkFindings(e)] : [el("div", e.result, "sub")]) : logContent(e)));
   const det = el("details"), key = `logm-${e.ts}-${e.kind}`;
   det.open = openDetails.has(key);
   det.ontoggle = () => { det.open ? openDetails.add(key) : openDetails.delete(key); };
-  const sum = el("summary"); sum.append(...summary.map(t => el("div", t)));
+  // The user stands top right, beside the first summary line
+  const sum = el("summary");
+  sum.append(...summary.map((t, i) => i === 0 && e.user ? box("div", "first", el("span", t), el("span", e.user, "user")) : el("div", t)));
   det.append(sum, body);
   return box("div", "log-m" + (group ? ` grp grp-${group}` : ""), head, det);
 }

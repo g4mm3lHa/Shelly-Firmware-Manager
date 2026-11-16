@@ -1,7 +1,7 @@
 // Devices tab: status and action icons, the device table / phone tiles and the row menu.
 import {
   $, api, attachTip, box, collator, devUrl, el, fmt, icon, iconButton, message, modal, openDetails, selected,
-  tip, toast, ui, valueList,
+  section, tip, toast, ui, valueList,
 } from "./core.js";
 import {OFFER_SOURCES, openDowngrade, openInstall} from "./install.js";
 import {aopLabel, editAop, editEco, editPassword, editSwitch, editValue, restartDevice} from "./device-settings.js";
@@ -15,21 +15,26 @@ const STATUS_LABELS = {"up-to-date": "Up-To-Date", available: "Available", ready
 // available" card (without checkbox) until the next full check or a single check of
 // this device; a confirmed one is shown as "Updated", an unconfirmed one keeps its status
 const installedRecently = d => !!d.updated && ["up-to-date", "unconfirmed"].includes(d.status);
+// A failed installation also stays there until that check – with checkbox and
+// "Install" for a retry (its file stays provided); so does a stored version offered
+// for a manual installation while the Shelly update server could not be asked
+const failedInstall = d => d.status === "error" && !!(d.install_failed || d.store_fallback);
 const justUpdated = d => installedRecently(d) && d.status === "up-to-date";
 const shownStatus = d => d.installing && d.status === "ready" ? "queued" : justUpdated(d) ? "updated" : d.status;
 const hasUpdate = d => ["available", "ready", "installing"].includes(d.status);
 // Ignored devices are not installable until they are resumed; nothing is installable
 // while the download base URL is missing or the unconfirmed former example
-export const installable = (d, s) => d.status === "ready" && !d.installing && !d.ignored && !s.scanning &&
+export const installable = (d, s) => (d.status === "ready" || failedInstall(d)) && !d.installing && !d.ignored && !s.scanning && !d.activity &&
   !(s.download_base && s.download_base.issue);
 /** Why "Install" is not possible for a device right now (tooltip of the disabled button). */
 export function installBlocker(d, s) {
   if (!d) return "Device is not known anymore";
   if (d.installing || d.status === "installing") return "Installation is running";
   if (s.scanning) return "Check in progress";
+  if (d.activity) return "Device is being checked";
   if (d.ignored) return "Device is ignored";
   if (s.download_base && s.download_base.issue) return s.download_base.message || "Download base URL is not set";
-  return d.status === "ready" ? null : "Not provided for this device anymore";
+  return d.status === "ready" || failedInstall(d) ? null : "Not provided for this device anymore";
 }
 // A downgrade needs a reached Gen2+ device, no check/installation and a valid download URL
 const downgradable = (d, s) => d.gen >= 2 && !!d.ip && !d.installing && d.status !== "installing" && !s.scanning &&
@@ -50,12 +55,17 @@ function statusText(d) {
   return [d.message, `Installed: ${d.version || "–"}`, d.offer_version ? `Available: ${d.offer_version}` : null,
     `Last check: ${fmt(d.last_check)}`, lastSuccess(d) && `Last successful check: ${lastSuccess(d)}`].filter(Boolean).join("\n");
 }
-/** Popup with all status details of a device. */
+/** Popup with all status details of a device: message left, status right on one line. */
 function showStatus(d) {
-  modal(`Status – ${d.name}`, [valueList([["Status", STATUS_LABELS[shownStatus(d)] || d.status], ["Details", d.message],
-    ["Installed", d.version], ["Available", d.offer_version], ["Source", hasUpdate(d) ? OFFER_SOURCES[d.offer_source] : null],
-    ["Last check", fmt(d.last_check)], ["Last successful check", d.last_success ? fmt(d.last_success) : "never"],
-    ["Last update", d.last_update ? fmt(d.last_update) : null]])],
+  const key = shownStatus(d), bad = ["error", "unconfirmed"].includes(d.status);
+  const head = box("div", "dstatus", el("p", d.message || "", "dmsg" + (bad ? " bad" : "")),
+    el("span", STATUS_LABELS[key] || d.status, "pill p-" + (key || "").replace(/[^a-z]/g, "")));
+  const provided = hasUpdate(d) || failedInstall(d);
+  modal(d.name, [head,
+    section("Firmware", valueList([["Installed", d.version], ["Available", d.offer_version],
+      ["Source", provided ? OFFER_SOURCES[d.offer_source] : null]])),
+    section("History", valueList([["Last check", fmt(d.last_check)], ["Last success", d.last_success ? fmt(d.last_success) : "never"],
+      ["Last update", d.last_update ? fmt(d.last_update) : "–"]]))],
     // Ready (and installable): red button right of Close opens the existing install dialog
     installable(d, ui.state) ? [{text: "Close"}, {text: "Install update", kind: "danger", action: () => openInstall([d])}] : undefined);
 }
@@ -154,8 +164,10 @@ function statusCell(d) {
     return chip;
   }
   const key = shownStatus(d);
-  // Gen2+ installations report the device's own download progress
-  const label = (STATUS_LABELS[key] || key || "–") + (key === "installing" && typeof d.ota_progress === "number" ? ` ${d.ota_progress} %` : "");
+  // Gen2+ installations report the device's own download progress, then its restart
+  const restarting = key === "installing" && d.ota_phase === "restarting";
+  const label = restarting ? "Restarting" :
+    (STATUS_LABELS[key] || key || "–") + (key === "installing" && typeof d.ota_progress === "number" ? ` ${d.ota_progress} %` : "");
   const p = el("button", label, "pill p-" + (key || "").replace(/[^a-z]/g, ""));
   p.onclick = () => showStatus(d); attachTip(p, () => statusText(d));
   return p;
@@ -165,9 +177,10 @@ function statusCell(d) {
  *  possible (same conditions as "Install update"). Not shown while a check runs for
  *  the device or its installation is queued. */
 function installButton(d) {
-  if (d.status !== "ready" || d.activity || d.installing) return null;
+  if (!(d.status === "ready" || failedInstall(d)) || d.activity || d.installing) return null;
   const blocker = installBlocker(d, ui.state), go = el("button", "Install", "danger small install");
-  go.disabled = !!blocker; go.title = blocker || "Install the provided update";
+  go.disabled = !!blocker;
+  go.title = blocker || (d.store_fallback ? "Install the stored version (not verified by the Shelly update server)" : "Install the provided update");
   go.setAttribute("aria-label", `Install update on ${d.name}`);
   go.onclick = () => { if (installable(d, ui.state)) openInstall([d]); };
   return go;
@@ -179,8 +192,9 @@ function detailsCell(d) {
   const key = "dev:" + d.id, det = el("details");
   const fill = () => {
     const controls = box("div", "detail-actions", actionStrip(d, true));
-    const list = valueList([["Generation", d.gen], ["Model", d.model], ["Firmware ID", d.type], ["NTP", d.ntp], ["Last check", fmt(d.last_check)],
-      ["Last successful check", d.last_success ? fmt(d.last_success) : "never"], ["Last update", d.last_update ? fmt(d.last_update) : null]]);
+    const list = valueList([["Model", [d.model, d.gen ? `Gen ${d.gen}` : null].filter(Boolean).join(" · ")], ["Firmware ID", d.type], ["NTP", d.ntp],
+      ["Last check", fmt(d.last_check)], ["Last success", d.last_success ? fmt(d.last_success) : "never"],
+      ["Last update", d.last_update ? fmt(d.last_update) : "–"]], "tile-kv");
     det.replaceChildren(det.firstChild, box("div", "detail-body", controls, list));
   };
   det.append(el("summary", "Details"));
@@ -333,6 +347,8 @@ function deviceCard(title, rows, head, headExtra) {
   card.append(h, table);
   return card;
 }
+// Devices shown in "Updates available" at the last render (kept there while checked)
+const shownUpdates = new Set();
 /** Device tab: "Updates available" card on top, "All other devices" below. */
 export function renderDevices() {
   const s = ui.state, q = $("dev-search").value.trim().toLowerCase();
@@ -349,7 +365,12 @@ export function renderDevices() {
   const rows = found.filter(FILTERS[ui.devFilter][1]);
   // Ignored devices form their own group, always last (known update stays visible there)
   const ignored = rows.filter(d => d.ignored), active = rows.filter(d => !d.ignored);
-  const updates = active.filter(d => hasUpdate(d) || shownStatus(d) === "queued" || installedRecently(d)), others = active.filter(d => !updates.includes(d));
+  // A device listed here stays while it is checked again (its markers are reset by
+  // the check); the result of the check decides at the next render without activity
+  const listed = d => hasUpdate(d) || shownStatus(d) === "queued" || installedRecently(d) || failedInstall(d) ||
+    (!!d.activity && shownUpdates.has(d.id));
+  const updates = active.filter(listed), others = active.filter(d => !updates.includes(d));
+  for (const d of s.devices) if (listed(d)) shownUpdates.add(d.id); else shownUpdates.delete(d.id);
   const cards = [];
   if (updates.length) {
     const sel = updates.filter(d => ok.has(d.id));
@@ -394,14 +415,17 @@ function openRowMenu(d, anchor) {
     const b = el("button", text, cls); b.role = "menuitem"; b.disabled = !enabled;
     b.onclick = () => { closeRowMenu(); fn(); }; items.push(b);
   };
-  const busy = ui.state && ui.state.busy;
-  add("Check for updates", () => checkDevice(d), !busy && !d.installing);
+  // The full check blocks everything; otherwise only work on this device itself
+  const s = ui.state || {}, running = d.installing || d.status === "installing";
+  const blocked = s.scanning ? s.busy || "Check in progress" : running ? "Installation is running" :
+    d.activity ? (d.activity === "reloading" ? "Device info is being reloaded" : "Device is being checked") : null;
+  add("Check for updates", () => checkDevice(d), !blocked);
   if (installable(d, ui.state)) add("Install update", () => openInstall([d]), true);   // only for Ready
   // Downgrade to a stored older version – Gen2+ only, also up to date / ignored devices
   // Disabled (no dialog) while no older version is stored or something blocks it
   if (d.gen >= 2) add("Downgrade", () => openDowngrade(d), downgradable(d, ui.state) && d.downgrades > 0);
-  add("Reload device info", () => reloadDevice(d), !busy && !d.installing && !d.activity && !!d.ip);
-  if (busy) items.push(el("div", `Not available – ${busy}`, "menu-hint"));   // reason, also for touch
+  add("Reload device info", () => reloadDevice(d), !blocked && !!d.ip);
+  if (blocked) items.push(el("div", `Not available – ${blocked}`, "menu-hint"));   // reason, also for touch
   add(d.ignored ? "Resume device" : "Ignore device", () => setIgnored(d, !d.ignored), !d.installing);
   items.push(el("hr"));
   const url = webUrl(d);

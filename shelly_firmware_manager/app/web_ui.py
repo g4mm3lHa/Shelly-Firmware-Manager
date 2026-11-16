@@ -224,8 +224,13 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Applic
             raise web.HTTPConflict(text=DOWNLOAD_BASE_MESSAGES[mgr.download_base_issue])
         if device_id in mgr.installing:
             raise web.HTTPConflict(text="Installation for this device is already running")
+        if device_id in mgr.device_checks:
+            raise web.HTTPConflict(text="Device is being checked – please try again afterwards")
         if not mgr.approval_matches(device_id, sha):
             raise web.HTTPConflict(text="Approval does not match the provided update (anymore)")
+        # A stored version offered without the server's answer needs the risk acknowledgment
+        if mgr.devices[device_id].get("store_fallback") and body.get("acknowledged") is not True:
+            raise web.HTTPBadRequest(text="Confirmation incomplete")
         background(mgr.install(device_id, sha, approved_by=user_from(request.headers)))
         return web.json_response({"started": True})
 

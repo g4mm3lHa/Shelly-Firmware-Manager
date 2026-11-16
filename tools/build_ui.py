@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Build the minified UI files from the readable sources (development only).
 
-  shelly_firmware_manager/ui-src/js/*.js    readable, commented ES modules (edit these;
+  ui-src/js/*.js                            readable, commented ES modules (edit these;
                                             entry module: main.js)
-  shelly_firmware_manager/ui-src/style.css  readable, commented styles (edit this)
+  ui-src/style.css                          readable, commented styles (edit this)
   shelly_firmware_manager/app/static/{app.js,style.css}  minified build output (shipped)
 
 Runs esbuild locally (pinned version, via npx; nothing is uploaded, the image needs no
@@ -21,8 +21,9 @@ import sys
 from pathlib import Path
 
 ESBUILD = "esbuild@0.28.2"
-ROOT = Path(__file__).resolve().parents[1] / "shelly_firmware_manager"
-SRC = ROOT / "ui-src"
+REPO = Path(__file__).resolve().parents[1]
+ROOT = REPO / "shelly_firmware_manager"
+SRC = REPO / "ui-src"
 OUT = ROOT / "app" / "static"
 FILES = ("app.js", "style.css")
 JS_DIR = SRC / "js"  # ES modules bundled into app.js

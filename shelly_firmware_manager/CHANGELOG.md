@@ -1,5 +1,128 @@
 # Changelog
 
+## 3.2.0
+
+Released 2026-11-16. Clearer dialogs and phone tiles, failed installations can be
+retried from the updates card, a clearer message when a Shelly rejects a firmware, and
+fewer warnings in the app log for rejected download requests. rc2: Gen2+ devices get
+the update step the Shelly update server intends for their installed version, required
+intermediate versions included. rc3: provided firmware can be deleted. rc4: single
+checks and installations of different devices run in parallel, a new wait logic after
+the installation.
+
+Final release (same app code as rc4)
+- Version 3.2.0. No functional change compared with rc4 (live-tested).
+  rc1 to rc4 were never released; their changes are listed below.
+- Repository clean-up: the UI sources (`ui-src/`) moved from the app folder to the
+  repository root, so the app folder `shelly_firmware_manager` holds only what Home
+  Assistant needs for the installation. The built UI files are byte-identical.
+- Security review before the release: no known vulnerability (CVE/GHSA) in the pinned
+  packages (aiohttp 3.14.5 – the advisories published on 2026-11-13 are fixed since
+  3.14.4 – and aiosignal, attrs, frozenlist, idna, multidict, propcache, yarl,
+  aiohappyeyeballs, typing-extensions) or in Python 3.12.16. Dependencies, wheels and
+  base image are unchanged.
+
+Changes in rc4
+- Parallel work: an installation or a single-device check no longer blocks single
+  checks or installations of other devices. A device that is being installed cannot be
+  checked, and a device that is being checked cannot be installed or reloaded. Single
+  checks have no limit. "Check all" stays exclusive: it locks everything while it runs
+  and cannot start while single checks, installations or Reload Device Info run (the
+  button stays disabled, the reason is shown).
+- Scheduled check: if it is due while other work runs, it is cancelled and written to
+  the log ("Scheduled check cancelled" with the reason); it is not repeated, the next
+  date counts. Before, it waited and was retried every minute.
+- The check after a confirmed intermediate version starts at once, even while other
+  installations run.
+- Firmware tab: during a single check only the files of the checked device's firmware
+  ID are locked for deletion (during "Check all" all files, as before).
+- Installation wait (Gen2+ with OTA events over the device WebSocket): an ota_error is
+  an error at once. Without a download request after 2 min, or without new progress
+  for 60 s, the installation fails. After 100 % or ota_success the Shelly must restart
+  within 30 s (WebSocket closed or no answer); the status label then shows
+  "Restarting". Within 30 s after the restart it must report the new version; the old
+  version, another version or no answer is an error. The device is polled every 5 s.
+  Such errors behave like a failed installation (retry from the updates card).
+- Installation wait without OTA events (Gen1, HTTP fallback, WebSocket lost before the
+  update was applied): polling as before, limit 5 min instead of 3 min.
+- Devices: a device in "Updates available" (e.g. failed installation, "Unconfirmed" or
+  "Updated") stays there while it is checked again; the result of the check decides
+  afterwards. Before, it moved to "All other devices" as soon as the check started.
+- Phone tiles: the yellow "Ignored" label (and the "Checking…" label) is as high as
+  the status label.
+
+Changes in rc3
+- Firmware tab: a stored file that is provided to devices can now be deleted (two
+  confirmations as before). The dialog names the devices; they lose the provided update
+  and show "Available" until they are checked again (a retry of a failed installation,
+  a manual installation option or an intermediate-version mark ends as well). The log
+  entry names them. Deleting stays locked during a check and while the file is being
+  installed. Before, a provided file could not be deleted – with "firmware store first"
+  (Gen1) a check provided it again, so it could not be removed at all.
+- Code comment of the device check updated (no change of behaviour).
+
+Changes in rc2
+- Gen2+ checks: the Shelly update server is asked per device with its firmware ID and
+  installed version – the way a Shelly asks itself (header `Shelly-Info` with only
+  `app` and `ver`, no other device data). The server answers with the next allowed
+  step, e.g. a required intermediate version (Plus1 1.0.7 → 1.3.3) instead of the
+  newest version, which such a device would reject. Requests are shared by devices
+  with the same firmware ID and installed version.
+- Gen2+: the server decides, the firmware store serves. A stored file (download or
+  upload) of exactly the offered version is used instead of a download; a newer stored
+  version is no longer provided on its own ("firmware store first" now applies to Gen1
+  only).
+- Gen2+: if the server cannot be asked, the device shows the error as before; if a
+  newer version is stored, the error details say that it can be installed manually,
+  at your own risk (whether an intermediate version is needed first cannot be
+  verified). The device stays in "Updates available" with checkbox and "Install"; the
+  installation dialog requires an acknowledgment of the risk, and the log marks the
+  installation as not verified by the update server.
+- Intermediate versions: an offer below the newest version (or with several steps) is
+  marked as intermediate version (status details, installation dialog). After its
+  confirmed installation the device is checked again at once and the next step is
+  provided – installed only after a new approval. Log: "After-intermediate-version
+  check". Otherwise no check follows an installation (unchanged).
+- Downloads: a firmware file whose checksum differs from the SHA-256 named in the
+  manufacturer's download URL is not stored.
+- Every check that asks the server makes one reference request with fixed values
+  (Plus1 1.0.7, which must be offered 1.3.3) – no data of your devices. If the server
+  answers differently, the check reports a warning: the server no longer evaluates the
+  installed version, so required intermediate versions cannot be detected. A failed
+  reference request gives no warning.
+- Offers with several steps (`nsteps`) are no longer refused.
+- No repetition of failed server requests (unchanged).
+
+Changes in rc1
+- Devices: a device whose installation failed ("Error") stays in the "Updates
+  available" card – with checkbox and "Install" for a retry, as long as its firmware is
+  still provided – until the device is checked again (single check or full check). A
+  failed downgrade is not offered again.
+- Installation (Gen2+): if the Shelly reports an update error after it downloaded the
+  firmware, the message now says that the Shelly rejected the file and that an
+  intermediate version may be needed (e.g. a device on a very old firmware). The hint
+  to check the download base URL is only shown when the Shelly did not download the
+  file.
+- Download server: a rejected request is logged as a warning only once per client
+  address and 10 minutes; further rejections are counted and named in one line when
+  the 10 minutes are over. At most 64 addresses are tracked, more are counted together
+  ("other clients"). Accepted downloads are logged as before.
+- Dialogs: title and buttons are separated by lines; the content is grouped in titled
+  sections (e.g. Device, Firmware, Changelog); value lists have a fixed label column,
+  thin row lines and no empty rows; installed and target version are on one line
+  ("1.4.0 → 1.5.0"), the generation is shown with the model; the SHA-256 is smaller.
+  The buttons are unchanged.
+- Status dialog: titled with the device name; the message and the status label are on
+  one line (label right), followed by "Firmware" and "History".
+- Phone tiles: checkbox and ⋮ on the line of the device name, status and "Install" on
+  the line of the Shelly name, the same space at the top and the bottom. The feature
+  buttons are smaller and every row fills the width of the tile. The detail list shows
+  the values right-aligned with thin row lines. "Details" has an arrow on its right.
+- Logs (phones): the user stands top right, beside the first line of an entry.
+- Phones: tapping a status label (or another element with a tooltip) no longer leaves
+  the tooltip over the tile; tooltips are shown for mouse and keyboard only.
+- AppArmor profile: the version mark in the header comment is removed.
+
 ## 3.1.1
 
 Released 2026-11-11. Contains everything of 3.1.0 (which was never released) plus the

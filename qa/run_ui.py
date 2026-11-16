@@ -15,7 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "shelly_firmware_manager" / "app"
-DEMOS = {8801: "idle", 8802: "busy", 8803: "legacy", 8804: "missing", 8805: "rc7"}
+DEMOS = {8801: "idle", 8802: "busy", 8803: "legacy", 8804: "missing", 8805: "features"}
 MOBILE_DEMO = {8711: "idle"}
 
 

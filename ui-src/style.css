@@ -238,17 +238,32 @@ dialog{width:min(640px,calc(100vw - 32px));max-height:calc(100vh - 48px);padding
   background:var(--card-background-color);color:var(--primary-text-color);border:0;
   border-radius:var(--ha-dialog-border-radius,var(--ha-card-border-radius,12px));box-shadow:0 8px 32px rgba(0,0,0,.4)}
 dialog::backdrop{background:rgba(0,0,0,.5)}
-.dlg-head{display:flex;align-items:center;gap:8px;padding:14px 16px 8px}
+/* Head and button area separated by divider lines; content in titled sections */
+.dlg-head{display:flex;align-items:center;gap:8px;padding:16px 20px 12px;border-bottom:1px solid var(--divider-color)}
 .dlg-head h2{flex:1;font-size:1.15em}
-#dlg-body{padding:4px 20px 8px;overflow:auto;max-height:calc(100vh - 200px)}
-.btns{display:flex;justify-content:flex-end;gap:8px;padding:12px 16px 16px}
+#dlg-body{padding:4px 20px 12px;overflow:auto;max-height:calc(100vh - 200px)}
+#dlg-body>p.hint{margin:14px 0 2px}
+.btns{display:flex;justify-content:flex-end;gap:8px;padding:12px 20px 16px;border-top:1px solid var(--divider-color)}
 .btns:empty{display:none}
 dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;margin:4px 0}
 dt{color:var(--secondary-text-color)}dd{margin:0;overflow-wrap:anywhere}
+/* Value lists: fixed label column, thin row dividers */
+dl.kv{grid-template-columns:minmax(96px,34%) minmax(0,1fr);gap:0;margin:0}
+dl.kv>dt,dl.kv>dd{padding:4px 0;border-bottom:1px solid color-mix(in srgb,var(--primary-text-color) 8%,transparent)}
+dl.kv>dt:last-of-type,dl.kv>dd:last-of-type{border-bottom:0}
+dl.kv>dt{padding-right:12px}
+dl.kv>dd.sha{font-size:.8em;word-break:break-all;color:var(--secondary-text-color);line-height:1.5}
+dl.kv>dd.ver{font-weight:600;white-space:pre}
+dl.kv>dd.src{font-size:.9em}
+.dsec{margin:14px 0 4px}
+.dsec>h3{margin:0 0 4px;font-size:.75em;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--secondary-text-color)}
+/* Status dialog: message left, status pill right */
+.dstatus{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:12px}
+.dmsg{margin:0;line-height:1.45}
 .warnbox{border-left:3px solid var(--warning-color);padding:8px 12px;margin:10px 0;
   background:color-mix(in srgb,var(--warning-color) 10%,transparent)}
-.cl-version{margin:12px 0 4px;font-weight:600}
-.cl-list{margin:0;padding-left:18px}.cl-list li{margin:3px 0}
+.cl-version{margin:4px 0;font-weight:600}
+.cl-list{margin:0;padding-left:18px}.cl-list li{margin:6px 0;line-height:1.4}
 .cl-list li.this{font-weight:600}
 dialog table th,dialog table td{padding:6px 8px}
 .field{display:flex;flex-direction:column;gap:6px;margin:8px 0;color:var(--secondary-text-color)}
@@ -285,6 +300,7 @@ dialog table th,dialog table td{padding:6px 8px}
   #cols{display:none}   /* fixed card layout: no column chooser */
   button,.chip,input[type=search],select{min-height:44px}
   button.pill{min-height:32px}   /* status details are also in the ⋮ menu */
+  .pill.p-ignored,.pill.p-activity{min-height:32px}   /* same size as the status pill */
   button.install{min-height:32px;padding:2px 10px;border-radius:12px;font-size:.85em;font-weight:500}   /* same size as the status pill */
   button.icon{min-width:44px;min-height:44px}
   thead{display:none}
@@ -293,25 +309,46 @@ dialog table th,dialog table td{padding:6px 8px}
      firmware cards, with their own card background and a border of at least 3:1
      contrast (the theme's divider colour is too faint, about 1.5:1 in dark themes). */
   tbody{padding:10px;background:var(--primary-background-color);border-radius:0 0 12px 12px}
-  tr{display:grid;grid-template-columns:auto 1fr auto auto;column-gap:8px;align-items:center;
-    padding:8px 12px 0;margin-bottom:10px;background:var(--card-background-color);
+  dialog{width:calc(100vw - 16px);max-height:calc(100vh - 24px)}
+  /* Tile: checkbox, HA name and ⋮ on line 1; Shelly name with status/Install on line 2;
+     firmware and IP on line 3; details below. Same padding at top and bottom. */
+  tr{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;column-gap:8px;row-gap:2px;align-items:center;
+    padding:12px;margin-bottom:10px;background:var(--card-background-color);
     border:1px solid color-mix(in srgb,var(--primary-text-color) 50%,var(--card-background-color));border-radius:10px}
   tr:last-child{margin-bottom:0}
   tbody tr:hover>td{background:none}
   td{display:block;border:0;padding:2px 0;min-width:0}
-  td.c-select{grid-column:1;grid-row:1;width:auto}
+  td.c-select{grid-column:1;grid-row:1;width:auto;align-self:center}
   .card:has(td.c-select input) td.c-select{width:20px}   /* aligned names in the updates card */
-  td.c-device{grid-column:2;grid-row:1}
-  td.c-status{grid-column:3;grid-row:1}
-  td.c-menu{grid-column:4;grid-row:1;width:auto}
-  td.c-firmware{grid-column:2;grid-row:2}
+  td.c-device{grid-column:2;grid-row:1/3;display:grid;grid-template-rows:subgrid;align-self:stretch}
+  td.c-device>*{align-self:center}
+  td.c-status{grid-column:3/5;grid-row:2;align-self:center}
+  td.c-menu{grid-column:4;grid-row:1;width:auto;align-self:center}
+  td.c-menu button.icon{margin:-12px 0}   /* 44 px touch target, 20 px (one text line) in the layout */
+  td.c-firmware{grid-column:2;grid-row:3;padding-top:6px}
   /* right edge of the IP in line with the dots of the ⋮ button (18 px icon in a 44 px button) */
-  td.c-ip{grid-column:3/5;grid-row:2;text-align:right;padding-right:13px}
-  td.c-details{grid-column:2/5;grid-row:3}
+  td.c-ip{grid-column:3/5;grid-row:3;text-align:right;padding-right:13px;padding-top:6px}
+  td.c-details{grid-column:2/5;grid-row:4}
   td.c-firmware .sub{display:none}   /* firmware ID is listed in the details */
   td.c-gen,td.c-action,td.c-last_update,td.c-ntp{display:none}
-  td.c-details summary{cursor:pointer;color:var(--primary-color);padding:12px 0;min-height:44px}
-  .detail-actions{margin-bottom:8px}   /* labeled buttons side by side, wrapping */
+  /* "Details" with a chevron right of the text: right when closed, down when open */
+  /* 44 px touch target; negative margins keep the compact layout */
+  td.c-details summary{cursor:pointer;color:var(--primary-color);list-style:none;display:flex;align-items:center;gap:8px;
+    min-height:44px;margin:-6px 0 -12px}
+  td.c-details summary::-webkit-details-marker{display:none}
+  td.c-details summary::after{content:"";width:6px;height:6px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;
+    transform:rotate(-45deg);transition:transform .15s}
+  td.c-details details[open] summary{margin-bottom:-4px}
+  td.c-details details[open] summary::after{transform:rotate(45deg)}
+  .detail-body{padding-top:4px}
+  .detail-actions{margin-bottom:10px}
+  /* Feature buttons: natural width, every row stretched to the full content width */
+  .act-strip.labeled .act{flex:1 1 auto;min-height:36px;padding:4px 10px;gap:5px;font-size:.9em;border-radius:16px}
+  .act-strip.labeled .act svg{width:16px;height:16px}
+  /* Detail list: label left, value right */
+  dl.tile-kv{border-top:1px solid color-mix(in srgb,var(--primary-text-color) 12%,transparent)}
+  dl.tile-kv>dt,dl.tile-kv>dd{padding:6px 0}
+  dl.tile-kv>dd{text-align:right}
   td.c-status .status-cell{justify-content:flex-end}
   /* Logs: entries as separated tiles with a 5 px gap (like the device tiles) */
   #log-list .card:has(>.log-m){background:none;border:0;box-shadow:none;overflow:visible}
@@ -338,6 +375,12 @@ dialog table th,dialog table td{padding:6px 8px}
   .log .user{grid-column:2}
   .log-head .spacer{flex:1}
   .log-head .log-del{margin:-8px -6px -8px 0}
+  /* User top right, beside the first summary line */
+  .log-m summary div.first{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .log-m summary div.first>.user{color:var(--secondary-text-color);font-size:.85em;white-space:nowrap}
+  .log-m summary div.first:last-child::after{content:none}
+  .log-m summary div.first:last-child>span:first-child::after{content:" ▾";color:var(--secondary-text-color)}
+  .log-m details[open] summary div.first:last-child>span:first-child::after{content:" ▴"}
   /* Settings: each option is one block (label, control, help) with a separator */
   .form{display:block}
   .set-field{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;padding:14px 0;

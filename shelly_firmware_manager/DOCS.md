@@ -60,8 +60,9 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 - Devices with updates are listed on top, then all other devices, ignored devices at
   the end. Search, filters (Updates, Errors, Up to date, Ignored) and a column chooser
   help with larger installations. A device you just updated stays on top as "Updated"
-  (or "Unconfirmed" if the target version was not confirmed) until you check it again
-  or the next full check runs.
+  (or "Unconfirmed" if the target version was not confirmed, or "Error" if the
+  installation failed – then with checkbox and **Install** for another attempt) until
+  you check it again or the next full check runs (it stays there while it is checked).
 - The action icons show and change power-on action, eco mode, password protection,
   access point, Bluetooth, actions and schedules, and restart the device. A "?" means
   the value is currently unknown. Colours: power-on action green = every output
@@ -76,13 +77,13 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 
 | Status | Meaning |
 |---|---|
-| Up-To-Date | Nothing newer is stored and the Shelly server offers no newer stable firmware |
+| Up-To-Date | No newer stable firmware is offered (Gen2+: by the Shelly server; Gen1: neither stored nor by the Shelly server) |
 | Available | An update exists, the firmware is provided at the next check |
 | Ready | Firmware provided (from the firmware store or downloaded), waiting for your approval – "Install" next to the status opens the installation dialog |
 | Updated | The installation was confirmed; shown until the next check of the device |
 | Queued / Installing | Installation waiting for a free slot / running (with progress for Gen2+) |
 | Unconfirmed | The installation ran, but the target version was not confirmed (see the details); stays on top until the next check of the device |
-| Error | Check, download or installation failed |
+| Error | Check, download or installation failed; after a failed installation – or with a stored version while the Shelly server could not be asked – the device stays on top and can be installed (again) |
 | Skipped | Gen1 device while Gen1 updates are disabled |
 | Unregistered | Device is no longer in the Home Assistant device registry |
 
@@ -91,20 +92,35 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 A check (all devices, a single device or the schedule) works in this order:
 
 1. Every device is asked in your network for its firmware ID and installed version.
-2. **The firmware store comes first.** If the store holds a newer stable version for
-   the device's firmware ID, it is provided – downloaded and uploaded files alike,
-   after a SHA-256 check. If several newer versions are stored, the **next higher**
-   one is provided, so a device is updated step by step through the stored versions.
-   The Shelly update server is not asked for this device. A newer version on the Shelly
-   server therefore shows up only once the device has reached the newest stored version.
-3. Only for devices without a newer stored version the Shelly update server is asked –
-   once per firmware ID, however many devices share it (Gen1: one request for all
-   types). A newer version is downloaded once and stored.
+2. **Gen2+ devices: the Shelly update server decides.** It is asked with the firmware ID
+   and the installed version – the way a Shelly asks itself; only these two values are
+   sent. The server answers with the next allowed step for this version. Devices with
+   the same firmware ID and version share one request.
+   - If the firmware store already holds exactly the offered version (downloaded or
+     uploaded, SHA-256 checked), it is used; otherwise it is downloaded once and stored.
+     A download must match the SHA-256 named in Shelly's download address.
+   - **Intermediate versions:** some old firmware versions must be updated to an
+     intermediate version first (e.g. Plus1 1.0.7 → 1.3.3 → 1.7.x). Such an offer is
+     marked as intermediate version. After its installation is confirmed, the device is
+     checked again at once and the next step is provided – it is installed only after
+     you approve it.
+   - **Server not reachable:** the device shows the error. If a newer version is
+     stored, the error details say so: you can install it manually (checkbox and
+     **Install** stay available), but at your own risk – without the server's answer it
+     cannot be verified whether an intermediate version is needed first. The dialog asks
+     you to accept this risk.
+3. **Gen1 devices: the firmware store comes first.** If the store holds a newer stable
+   version for the device's type, the **next higher** one is provided (step by step
+   through the stored versions); the Shelly list is only asked for devices without
+   one – one request for all Gen1 types.
 
-An update that was already provided is replaced if the store holds a version closer to
-the installed one. The status details, the installation dialog and the log name the
-source of an update: Shelly update server, firmware store, or an uploaded file. To skip
-a stored version, delete it in the **Firmware** tab.
+Every check that asks the Shelly update server also makes one reference request with
+fixed values (Plus1 1.0.7, which must be offered 1.3.3 – no data of your devices). If
+the server answers differently, the check reports a warning: the server no longer
+evaluates the installed version, so required intermediate versions cannot be detected.
+
+The status details, the installation dialog and the log name the source of an update:
+Shelly update server, firmware store, or an uploaded file.
 
 The changelog of a provided version is requested once from the Shelly documentation
 and kept with the stored firmware; it is not requested again afterwards.
@@ -117,10 +133,25 @@ and kept with the stored firmware; it is not requested again afterwards.
    changelog (security entries and entries for this model are highlighted).
 3. **Approve installation.** The Shelly downloads the firmware from the app and restarts.
 
-The app then checks every 10 seconds until the device reports exactly the target
-version (at most 3 minutes). If that does not happen, the status becomes "Unconfirmed"
-with a diagnosis – see [Troubleshooting](#troubleshooting). Scheduled checks create a
+Gen2+ devices report their progress over the device connection (the status label shows
+the percentage). An error reported by the Shelly ends the installation at once. Without
+a download request after 2 minutes, or without new progress for 60 seconds, the
+installation fails. After 100 % the Shelly must restart within 30 seconds (the label
+shows "Restarting") and report exactly the target version within 30 seconds after the
+restart; the old version, another version or no answer is an error.
+
+Devices without this connection (Gen1, or when it is not available) are checked every
+10 seconds until they report exactly the target version (at most 5 minutes). If that
+does not happen, the status becomes "Unconfirmed" with a diagnosis – see
+[Troubleshooting](#troubleshooting). A failed installation can be retried from the
+updates card. Scheduled checks create a
 Home Assistant notification when they find new updates.
+
+While a device is installed or checked, other devices can be checked and installed.
+The device itself cannot be checked during its installation, nor installed during its
+check. **Check all** runs alone: it cannot start while single checks, installations or
+Reload Device Info run, and it blocks all of them while it runs. A scheduled check that
+is due while other work runs is cancelled and logged; the next date counts.
 
 No check runs after an installation. The next stored version – or the offer of the
 Shelly server – is provided when you check the device again (row menu ⋮ → Check for
@@ -147,7 +178,11 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
   It is greyed out while none is stored: the changelog is stored when a check provides
   the file to a device (see [How a check works](#how-a-check-works)).
 - Firmware is **never deleted automatically**. Delete files you no longer need with the
-  bin icon (two confirmations). Files that are waiting to be installed cannot be deleted.
+  bin icon (two confirmations). A file that is provided to devices can be deleted too:
+  the dialog names them, they lose the provided update and show "Available" until they
+  are checked again. A file that is being installed cannot be deleted, nor every file
+  during **Check all** and the files of the checked device's type during a single check. To skip a stored version (Gen1: the store comes first),
+  delete it.
 - **Upload firmware** adds a version you have from another source:
   1. Choose the file (`.zip`, `.bin` or `.gbl`, max. 64 MB).
   2. Device type and version are filled in from the file where possible – check them.
@@ -210,6 +245,11 @@ Gen2+ firmware is downloaded over HTTPS only.
 | The Shelly never requested the firmware / Connection error -14 | The download base URL is wrong or blocked: it must be the IP of Home Assistant, port 8098 must be reachable from the Shelly |
 | Download rejected: request came from 172.30.x.x | Docker hides the device address – turn off "Serve downloads only to known Shellys" |
 | The Shelly downloaded the firmware but still reports … | The device did not install it – check the log in the Shelly web UI |
+| The Shelly reports an update error … It downloaded the firmware but rejected it | The installed firmware may be too old for a direct update to this version: check the device again – the Shelly update server names the required intermediate version (or install one via the web interface of the Shelly or an upload) |
+| Check warning: the Shelly update server no longer answers with the next step | Shelly changed its update server: required intermediate versions cannot be detected. Prefer the web interface of the Shelly for devices on very old firmware |
+| Error … Stored version X is ready and can be installed manually | The Shelly server could not be asked. Check again later, or install the stored version at your own risk |
+| Download does not match the SHA-256 named by the manufacturer's URL | The download was damaged or altered and was not stored – check again |
+| Many "Download rejected" lines in the app log | Only the first rejected request per address and 10 minutes is logged; the others are counted in one line |
 | The Shelly reports X instead of the target version Y | Check the device; run "Check for updates" again |
 | Certificate of … is not publicly trusted | See [Certificate pinning](#certificate-pinning) |
 | The Shelly requires a password | Store the device password (see [Device passwords](#device-passwords)) |
@@ -277,6 +317,7 @@ server interfaces are not officially guaranteed.
   to its new storage format at the first start. 3.1.1 adds a watchdog: check that the
   **Watchdog** switch on the app page is on. Log entries get an internal ID at the
   first start of 3.1.1 (needed to delete single entries).
+- **From 3.1.1:** nothing to do.
 - **From 2.x or 1.x:** since 3.0.1 the conversion code of these versions is no longer
   included. Update to 3.0.0 first and start it once (it removes the former shared Shelly
   password from the stored options and converts the table settings), then update to

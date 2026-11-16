@@ -45,6 +45,7 @@ MAX_FW_SIZE = 64 * 1024 * 1024  # upper limit for a firmware file
 MIN_FW_SIZE = 1024  # anything smaller is certainly no firmware
 FW_EXTENSIONS = (".zip", ".bin", ".gbl")
 FW_NAME_RE = re.compile(r"^[0-9a-f]{64}\.(zip|bin|gbl)$")
+SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _ERROR_LABEL_RE = re.compile(r"\b(?:message|url)=(?=['\"])")  # labels of aiohttp's ClientResponseError
 VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)(\d+))?")
 
@@ -64,6 +65,8 @@ OTA_EVENTS = ("ota_begin", "ota_progress", "ota_success", "ota_error")
 WS_HA2_INPUT = "dummy_method:dummy_uri"  # fixed HA2 input of the WebSocket Digest auth
 
 GEN2_META_URL = "https://updates.shelly.cloud/update/{app}"
+# Request header of a Shelly's own update check (JSON); only "app" and "ver" are sent
+SHELLY_INFO_HEADER = "Shelly-Info"
 GEN1_META_URL = "https://api.shelly.cloud/files/firmware"
 
 # Device settings that can be edited in the UI
@@ -868,14 +871,20 @@ async def read_limited(resp: aiohttp.ClientResponse, limit: int, message: str) -
 
 
 async def _cloud_get(
-    session: aiohttp.ClientSession, url: str, pins: CertificatePins | None, limit: int, too_large: str
+    session: aiohttp.ClientSession,
+    url: str,
+    pins: CertificatePins | None,
+    limit: int,
+    too_large: str,
+    headers: dict[str, str] | None = None,
 ) -> tuple[bytes, str | None]:
     """Body of a GET on the manufacturer's server: HTTPS only, redirects only within
     shelly.cloud (every hop checked again), certificate pinning, size limit.
+    headers are sent with every hop (all within shelly.cloud).
     Returns (body bytes, charset or None)."""
     for _ in range(4):
         check_download_url(url, https_only=True)
-        async with _CloudRequest(session, url, pins, CLOUD_TIMEOUT) as resp:
+        async with _CloudRequest(session, url, pins, CLOUD_TIMEOUT, headers) as resp:
             if resp.status in (301, 302, 303, 307, 308):
                 url = urljoin(url, resp.headers.get("Location", ""))
                 continue
@@ -884,9 +893,13 @@ async def _cloud_get(
     raise ShellyError("Too many redirects from the manufacturer's server")
 
 
-async def _cloud_json(session: aiohttp.ClientSession, url: str, pins: CertificatePins | None) -> Any:
+async def _cloud_json(
+    session: aiohttp.ClientSession, url: str, pins: CertificatePins | None, headers: dict[str, str] | None = None
+) -> Any:
     """JSON from the manufacturer's server (see _cloud_get)."""
-    raw, _ = await _cloud_get(session, url, pins, MAX_CLOUD_JSON, "Response from the manufacturer's server too large")
+    raw, _ = await _cloud_get(
+        session, url, pins, MAX_CLOUD_JSON, "Response from the manufacturer's server too large", headers
+    )
     try:
         return json.loads(raw.decode("utf-8", "replace"))
     except ValueError as err:
@@ -898,12 +911,17 @@ class _CloudRequest:
     translates TLS errors into a readable message including the fingerprint."""
 
     def __init__(
-        self, session: aiohttp.ClientSession, url: str, pins: CertificatePins | None, timeout: aiohttp.ClientTimeout
+        self,
+        session: aiohttp.ClientSession,
+        url: str,
+        pins: CertificatePins | None,
+        timeout: aiohttp.ClientTimeout,
+        headers: dict[str, str] | None = None,
     ) -> None:
         """Prepare the request; nothing is sent before 'async with'."""
         self.url = url
         ssl_param: aiohttp.Fingerprint | bool = pins.ssl_for(url) if pins else True
-        self.request = session.get(url, ssl=ssl_param, allow_redirects=False, timeout=timeout)
+        self.request = session.get(url, ssl=ssl_param, allow_redirects=False, timeout=timeout, headers=headers)
 
     async def __aenter__(self) -> aiohttp.ClientResponse:
         """Send the request and return the response (TLS errors explained)."""
@@ -930,16 +948,25 @@ async def fetch_cloud_text(
 
 
 async def fetch_offer(
-    session: aiohttp.ClientSession, fw_type: str, pins: CertificatePins | None = None
+    session: aiohttp.ClientSession, fw_type: str, pins: CertificatePins | None = None, version: str | None = None
 ) -> dict[str, str] | None:
-    """Stable firmware offer {'version', 'url'} of a Gen2+ firmware ID, or None."""
-    meta = await _cloud_json(session, GEN2_META_URL.format(app=quote(fw_type, safe="")), pins)
+    """Stable firmware offer {'version', 'url', 'steps'} of a Gen2+ firmware ID, or None.
+
+    version: installed version of the device. It is sent the way a Shelly asks for
+    updates itself – header Shelly-Info with only the firmware ID ("app") and the
+    version ("ver"), nothing else – and the server then answers with the next
+    allowed step (e.g. a required intermediate version) instead of the newest
+    version. Without version the answer is the newest version. 'steps' is the number
+    of update steps the server reports ("1" if it reports none)."""
+    headers = None
+    if version is not None:
+        headers = {SHELLY_INFO_HEADER: json.dumps({"app": fw_type, "ver": version}, separators=(",", ":"))}
+    meta = await _cloud_json(session, GEN2_META_URL.format(app=quote(fw_type, safe="")), pins, headers)
     stable = meta.get("stable") if isinstance(meta, dict) else None
     if not isinstance(stable, dict) or not stable.get("url"):
         return None
-    if _int_field(stable, "nsteps", 1) > 1:
-        raise ShellyError("Multi-step update offered – please check manually as described by Shelly")
-    return {"version": clip(stable.get("version"), 64), "url": str(stable["url"])}
+    steps = max(1, _int_field(stable, "nsteps", 1))
+    return {"version": clip(stable.get("version"), 64), "url": str(stable["url"]), "steps": str(steps)}
 
 
 async def fetch_gen1_offers(session: aiohttp.ClientSession, pins: CertificatePins | None = None) -> dict[str, Any]:
@@ -971,6 +998,13 @@ def check_download_url(url: str, https_only: bool = False) -> None:
         raise ShellyError(f"Download source not allowed: {clip(url)}")
 
 
+def url_sha256(url: str) -> str | None:
+    """SHA-256 named by a firmware URL: the manufacturer's Gen2+ download URLs end in
+    the SHA-256 of the file (fwcdn.shelly.cloud/…/<sha256>). None for other URLs."""
+    last = urlsplit(url).path.rsplit("/", 1)[-1].lower()
+    return last if SHA256_RE.fullmatch(last) else None
+
+
 async def download_firmware(
     session: aiohttp.ClientSession,
     url: str,
@@ -981,7 +1015,10 @@ async def download_firmware(
     """Downloads the firmware to target_dir. Returns (file name, sha256, size, https).
 
     https_only: required for Gen2+ (every hop must be HTTPS). https in the result
-    tells whether the whole transfer was protected by TLS."""
+    tells whether the whole transfer was protected by TLS. If the offered URL names
+    a SHA-256 (see url_sha256), the file must have exactly this checksum, else it is
+    not stored."""
+    expected = url_sha256(url)
     secure = True
     for _ in range(5):  # at most 4 redirects
         check_download_url(url, https_only=https_only)  # check every hop again
@@ -991,12 +1028,15 @@ async def download_firmware(
                 url = urljoin(url, resp.headers.get("Location", ""))
                 continue
             resp.raise_for_status()
-            return (*await _store(resp, url, target_dir), secure)
+            return (*await _store(resp, url, target_dir, expected), secure)
     raise ShellyError("Too many redirects during download")
 
 
-async def _store(resp: aiohttp.ClientResponse, url: str, target_dir: Path) -> tuple[str, str, int]:
-    """Stores the response size-limited and atomically as <sha256>.<ext>."""
+async def _store(
+    resp: aiohttp.ClientResponse, url: str, target_dir: Path, expected: str | None = None
+) -> tuple[str, str, int]:
+    """Stores the response size-limited and atomically as <sha256>.<ext>.
+    expected: required SHA-256 (from the offered URL); a different file is discarded."""
     ext = Path(urlsplit(url).path).suffix.lower()
     ext = ext if ext in FW_EXTENSIONS else ".bin"
     temp = target_dir / f".part-{secrets.token_hex(8)}"
@@ -1012,6 +1052,8 @@ async def _store(resp: aiohttp.ClientResponse, url: str, target_dir: Path) -> tu
                 await asyncio.to_thread(handle.write, chunk)
         if size < MIN_FW_SIZE:
             raise ShellyError("Firmware file implausibly small")
+        if expected and digest.hexdigest() != expected:
+            raise ShellyError("Download does not match the SHA-256 named by the manufacturer's URL – not stored")
         name = digest.hexdigest() + ext
         temp.replace(target_dir / name)  # atomic: never a half-written file visible
         return name, digest.hexdigest(), size

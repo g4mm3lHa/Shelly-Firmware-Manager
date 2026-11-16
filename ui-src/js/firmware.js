@@ -1,7 +1,7 @@
 // Firmware tab: stored files, changelog, Install button per device, delete and upload.
 import {
   $, api, box, closeModal, collator, copyText, el, fmt, icon, iconButton, keptDetails, mb, message, modal,
-  toast, ui, uploadFile, valueList,
+  shaRow, toast, ui, uploadFile, valueList,
 } from "./core.js";
 import {installable, installBlocker} from "./devices.js";
 import {changelogNodes, fwSource, openInstall, UPLOAD_HINT} from "./install.js";
@@ -69,9 +69,12 @@ function firmwareRow(f, latest) {
 /** Delete a stored firmware: dialog, then a second confirmation with
  *  acknowledgment (as for the device password). Nothing is deleted automatically. */
 function deleteFirmware(f) {
-  const title = "Delete firmware?", details = valueList([["Firmware ID", f.type], ["Version", f.version], ["Source", fwSource(f)], ["SHA-256", f.sha256]]);
-  modal(title, [details, el("p", f.source === "upload" ? "An uploaded file can only be restored by uploading it again." :
-    "Only versions that Shelly still offers can be downloaded again; older versions are gone for good.", "hint")],
+  const title = "Delete firmware?", details = valueList([["Firmware ID", f.type], ["Version", f.version], ["Source", fwSource(f)], shaRow(f.sha256)]);
+  // A file provided to devices may be deleted: they lose the provided update
+  const held = (f.devices || []).map(d => d.name);
+  modal(title, [details, held.length ? el("div", `Provided for ${held.join(", ")}: ${held.length === 1 ? "this device loses" : "these devices lose"} the provided update and ${held.length === 1 ? "is" : "are"} shown as "Available" until ${held.length === 1 ? "it is" : "they are"} checked again.`, "warnbox") : null,
+    el("p", f.source === "upload" ? "An uploaded file can only be restored by uploading it again." :
+    "Only versions that Shelly still offers can be downloaded again; older versions are gone for good.", "hint")].filter(Boolean),
   [{text: "Cancel"}, {text: "Continue", kind: "primary", action: () => {
     const ack = el("input"); ack.type = "checkbox";
     modal(title, [el("p", `Delete ${f.type} ${f.version} permanently?`), box("label", "check", ack, " I understand that this file cannot be restored by the app")],
@@ -107,7 +110,7 @@ function uploadConfirm(r) {
   const detected = r.detected.type || r.detected.version
     ? `Read from the file: ${r.detected.type || "no firmware ID"} · ${r.detected.version || "no version"} – please check.`
     : "The file contains no readable firmware ID or version – please enter them.";
-  const content = [valueList([["File", r.filename], ["Size", mb(r.size)], ["SHA-256", r.sha256]]), el("p", detected, "hint"),
+  const content = [valueList([["File", r.filename], ["Size", mb(r.size)], shaRow(r.sha256)]), el("p", detected, "hint"),
     box("label", "field", "Firmware ID", type), box("label", "field", "Version (stable, X.Y.Z)", version), box("label", "field", "Expected SHA-256", sha)];
   if (r.duplicate) content.push(el("div", `This file is already stored as ${r.duplicate}.`, "warnbox"));
   const error = el("p", null, "bad"); error.hidden = true; error.setAttribute("role", "alert"); content.push(error);

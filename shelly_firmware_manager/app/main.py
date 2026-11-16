@@ -21,13 +21,12 @@ from manager import Manager
 from tls import CertificatePins
 from web_ui import build_ui_app
 
-VERSION = "3.1.1"  # must match config.yaml
+VERSION = "3.2.0"  # must match config.yaml
 
 OPTIONS_FILE = Path("/data/options.json")
 UI_PORT = 8099  # Ingress (internal)
 DOWNLOAD_PORT = 8098  # Shelly downloads (published via "ports")
 STARTUP_DELAY_S = 30  # let Home Assistant settle before the first check
-RETRY_S = 60  # wait time while installations or a running check block a due check
 # Graceful stop: the Supervisor sends SIGTERM and kills the app after its stop timeout
 # (default 10 s). Open UI connections get at most this long to finish, so the whole
 # shutdown (cancelling checks/installations, saving the state) stays well inside it.
@@ -136,10 +135,9 @@ async def run_schedule(mgr: Manager) -> None:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(mgr.schedule_changed.wait(), timeout=min(due, MAX_IDLE_WAIT_S))
             continue
-        # Running installations or checks postpone the due check instead of
-        # skipping it; the attempt is recorded when it starts (no tight loop)
-        while not await mgr.scan(automatic=True):  # noqa: ASYNC110 – retry while busy
-            await asyncio.sleep(RETRY_S)
+        # The attempt is recorded when it is due; a check that cannot start
+        # (other work running) is cancelled and logged, not repeated
+        await mgr.scan(automatic=True)
 
 
 if __name__ == "__main__":

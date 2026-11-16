@@ -1,6 +1,6 @@
 #include <tunables/global>
 
-# AppArmor profile of the Shelly Firmware Manager (3.1.0).
+# AppArmor profile of the Shelly Firmware Manager.
 #
 # Loaded by the Supervisor when the host supports AppArmor; the profile name is
 # replaced by the app's full slug when it is loaded. Only what the app needs:

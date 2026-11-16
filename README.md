@@ -1,4 +1,4 @@
-# Shelly Firmware Manager 3.1.1
+# Shelly Firmware Manager 3.2.0
 
 Home Assistant app that keeps your Shelly devices (Gen1 to Gen4) up to date – locally
 and under your control. It finds all Shellys of the Shelly integration, checks for new
@@ -40,11 +40,13 @@ To update the app, replace the folder, run "Check for updates" and then "Update"
 
 ## Development
 
-Not part of the app image. The UI sources are in `shelly_firmware_manager/ui-src/`
-(ES modules in `js/`, `style.css`); `tools/build_ui.py` bundles and minifies them into
-the shipped files in `app/static/` (pinned esbuild 0.28.2, `--check` verifies them). Tests mock all network access. One command runs the checks
-in the efficient order (lint, build check, version match, backend tests, optionally
-the Playwright UI checks against demo servers with fake data):
+Everything outside `shelly_firmware_manager/` is for development only and is not
+needed for the installation. The UI sources are in `ui-src/` (ES modules in `js/`,
+`style.css`); `tools/build_ui.py` bundles and minifies them into the shipped files in
+`shelly_firmware_manager/app/static/` (pinned esbuild 0.28.2, `--check` verifies them).
+Tests mock all network access. One command runs the checks in the efficient order
+(lint, type check, build check, version match, backend tests, optionally the Playwright
+UI checks against demo servers with fake data):
 
 ```
 tools/dev/check.sh          # lint + build check + backend tests (seconds)
@@ -57,7 +59,8 @@ tools/dev/check.sh build    # rebuild app/static from ui-src first
 A map of modules, stored data, API routes and tests is in `docs/CODEMAP.md`. Tool
 settings (ruff, mypy, pytest) are in `pyproject.toml`.
 
-Layout: `shelly_firmware_manager/` (app definition, `README.md`/`DOCS.md` for the app
-store, Dockerfile, pinned wheels, `app/` Python sources, `ui-src/`), `tests/` (by area),
-`qa/` (UI checks, demo server, screenshots of the current version), `tools/`, `docs/`,
-`candidates/` (current test report).
+Layout: `shelly_firmware_manager/` (only what Home Assistant needs: app definition,
+`README.md`/`DOCS.md`/`CHANGELOG.md` for the app store, Dockerfile, AppArmor profile,
+pinned wheels, `app/` with the Python sources and the built UI), `ui-src/` (UI sources),
+`tests/` (by area), `qa/` (UI checks, demo server, screenshots of the current version),
+`tools/`, `docs/`, `candidates/` (current test report).

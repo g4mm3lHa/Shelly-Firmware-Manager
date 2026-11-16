@@ -4,10 +4,16 @@ Within a check up to CHECK_PARALLEL devices are queried at the same time; offers
 firmware downloads are shared (single flight), so parallelism never duplicates a
 request or a file. Ignored devices are left out of the full check (an explicit
 single-device check is still possible).
-The firmware store comes first: a check provides the next higher stored version of the
-device's firmware ID (downloads and uploads); the manufacturer's server is only asked
-for devices without such a file, once per firmware ID (Gen1: once for all types). A
-check never installs anything, and no check follows an installation.
+Gen2+: the manufacturer's server decides. It is asked per firmware ID and installed
+version the way a Shelly asks itself (header Shelly-Info, see shelly.fetch_offer), so
+it answers with the next allowed step – a required intermediate version first. A stored
+file of exactly the offered version is used instead of a download (downloads and
+uploads). If the server cannot be asked, a newer stored version is only offered for a
+manual installation at the user's risk (marker store_fallback). After a confirmed
+intermediate version the device is checked again at once (see manager_installs).
+Gen1: the firmware store comes first – the next higher stored version is provided; the
+manufacturer's list is only asked for devices without such a file, once per check.
+A check never installs anything.
 """
 
 import asyncio
@@ -25,18 +31,49 @@ from events import worst
 from shelly import ShellyError, clip, error_text
 
 from manager_core import (
-    ACTIVITY_CHECKING, ACTIVITY_DOWNLOADING, ACTIVITY_WAITING, Device, PENDING, SOURCE_UPLOAD, STATUS_AVAILABLE,
-    STATUS_CURRENT, STATUS_ERROR, STATUS_READY, STATUS_SKIPPED, STATUS_UNREGISTERED, severity_of,
+    ACTIVITY_CHECKING,
+    ACTIVITY_DOWNLOADING,
+    ACTIVITY_WAITING,
+    Device,
+    SOURCE_UPLOAD,
+    STATUS_AVAILABLE,
+    STATUS_CURRENT,
+    STATUS_ERROR,
+    STATUS_READY,
+    STATUS_SKIPPED,
+    STATUS_UNREGISTERED,
+    holds_file,
+    severity_of,
 )
 from manager_devices import DeviceSettings
 
 log = logging.getLogger("sfm.manager")
 
-# Shared manufacturer requests of one check (single flight): (gen, firmware ID) -> offer
-# of a Gen2+ firmware ID, GEN1_OFFERS -> firmware list of all Gen1 types
-OfferTasks = dict[tuple[int, str], "asyncio.Future[Any]"]
+# Shared manufacturer requests of one check (single flight): ("step", firmware ID,
+# installed version) -> next step for this version, ("newest", firmware ID) -> newest
+# version, GEN1_OFFERS -> firmware list of all Gen1 types
+OfferTasks = dict[tuple[Any, ...], "asyncio.Future[Any]"]
 
-GEN1_OFFERS = (1, "")
+GEN1_OFFERS: tuple[Any, ...] = ("gen1",)
+
+# Reference request: does the server still answer with the next step for an installed
+# version? Verified on 2026-11-13: a Plus1 with 1.0.7 is offered the
+# required intermediate version 1.3.3 (without the version: the newest). Only these
+# fixed values are sent – no data of the user's devices.
+HEADER_CHECK = ("Plus1", "1.0.7", "1.3.3")
+
+HEADER_WARNING = (
+    "The Shelly update server no longer answers with the next step for an installed "
+    "version (reference: Plus1 1.0.7 should be offered 1.3.3, got {got}). Required "
+    "intermediate versions cannot be detected – an offered update may not be installable."
+)
+
+# Error detail of a device whose server request failed while a newer version is stored
+STORE_FALLBACK_HINT = (
+    "Stored version {version} is ready and can be installed manually – at your own risk: "
+    "without the answer of the Shelly update server it cannot be verified whether an "
+    "intermediate version is required first."
+)
 
 # Where the update provided for a device comes from (device field offer_source)
 OFFER_MANUFACTURER = "manufacturer"  # offered by the manufacturer's server in this check
@@ -60,6 +97,7 @@ SCHEDULE_USER = "Schedule"
 # Wi-Fi and Home Assistant load low. Internal constant, not a setting.
 CHECK_PARALLEL = 4
 
+
 class Checks(DeviceSettings):
     """Full check and single-device check."""
 
@@ -73,28 +111,34 @@ class Checks(DeviceSettings):
         return schedule.seconds_until(self.schedule, now, self.tz)
 
     async def scan(self, automatic: bool = False, user: str | None = None) -> bool:
-        """Check all Shellys. Returns False if a check or installation is running.
-        Automatic checks report newly found updates as a notification in HA and
-        record their scheduled date when they start (one attempt per date).
+        """Check all Shellys. Returns False if it could not start (another check,
+        single-device checks, installations or Reload Device Info running).
+        Automatic checks record their scheduled date when they are due (one attempt
+        per date); one that cannot start is cancelled and logged (no retry) and
+        report newly found updates as a notification in HA.
         Every check is written to the activity log with the user, "Schedule" for
         automatic checks; its firmware downloads carry the same user."""
-        if not self._reserved("all"):
-            try:
-                self.reserve_check("all")
-            except ShellyError:
-                return False
         if automatic:
             due, _ = schedule.status(self.schedule, time.time(), self.tz)
             if due:
                 self.schedule = {**self.schedule, "last_date": due.isoformat()}
+        if not self._reserved("all"):
+            try:
+                self.reserve_check("all")
+            except ShellyError as err:
+                if automatic:
+                    self._skip_scheduled(str(err))
+                return False
         async with self.lock:
             started = time.monotonic()
             failure: str | None = None
             checked: list[str] = []
-            self._check_user = SCHEDULE_USER if automatic else user or "unknown"
+            header_ignored: bool | None = None
+            self._scan_user = SCHEDULE_USER if automatic else user or "unknown"
             self._progress()["phase"] = "registry"
             try:
                 checked = await self._scan_all()
+                header_ignored = await self._finish_header_check()
                 self._progress()["phase"] = "changelog"
                 await self._store_changelogs(self.devices.values())
             except Exception as err:  # report overall errors (e.g. registry), do not crash
@@ -108,54 +152,77 @@ class Checks(DeviceSettings):
                 self.cleanup_firmware()
                 self.save()
                 self.schedule_changed.set()
-            self._log_check(checked, automatic, user, time.monotonic() - started, failure)
+            self._log_check(
+                checked, automatic, user, time.monotonic() - started, failure, header_ignored=header_ignored
+            )
         if automatic:
             await self._notify_new_updates()
         return True
 
-    async def check_device(self, device_id: str, user: str | None = None) -> dict[str, Any]:
+    def _skip_scheduled(self, reason: str) -> None:
+        """A scheduled check that cannot start (other work running) is cancelled –
+        not repeated – and written to the activity log and the app log."""
+        log.warning("Scheduled check cancelled: %s", reason)
+        self.events.add(
+            "check",
+            severity="warning",
+            trigger="scheduled",
+            devices=0,
+            skipped=reason,
+            result=f"Cancelled: {reason}",
+            user=SCHEDULE_USER,
+        )
+        self.save()
+        self.schedule_changed.set()
+
+    async def check_device(self, device_id: str, user: str | None = None, trigger: str = "device") -> dict[str, Any]:
         """Check a single device without starting the full check.
 
         Same steps as the full check for this one device (device info, firmware
         store first, else offer and download of missing firmware) – never an
         installation, a restart or a settings change. The time of the last full
-        check (last_scan) and the schedule stay unchanged. Raises ShellyError if a
-        check or an installation is running."""
+        check (last_scan) and the schedule stay unchanged. Raises ShellyError during
+        the full check or while this device is checked, installed or reloaded;
+        other devices may be checked or installed at the same time. trigger: log
+        value ("device", or "step" for the check after an intermediate version)."""
         if device_id not in self.devices:
             raise KeyError(device_id)
         if not self._reserved("device", device_id):
             self.reserve_check("device", device_id)
-        async with self.lock:
-            dev = self.devices[device_id]
-            dev.pop("updated", None)  # Checked again by the user, no longer "just updated"
-            self._check_user = user or "unknown"
-            started = time.monotonic()
-            failure = None
-            progress = self._progress()
-            try:
-                progress["phase"] = "registry"
-                entry = self._shelly_entries(await self._registry()).get(device_id)
-                if entry is None:
-                    dev.update(status=STATUS_UNREGISTERED, message="")
-                    failure = "Device is no longer in the Home Assistant device registry"
-                else:
-                    progress["phase"] = "devices"
-                    if not await self._check_entry(device_id, entry, {}):
-                        progress["errors"] = 1
-                    progress["done"] = 1
-                    if dev.get("status") == STATUS_READY:
-                        progress["phase"] = "changelog"
-                        await self._store_changelogs([dev])
-            except Exception as err:  # registry failure etc.: report, do not crash
-                log.exception("Device check failed")
-                failure = error_text(err, 500) or type(err).__name__
-            finally:
-                self._end_check()
-                self.cleanup_firmware()
-                self.save()
-            self._log_check(
-                [device_id], False, user, time.monotonic() - started, failure, trigger="device"
-            )
+        self.device_checks[device_id] = "running"
+        dev = self.devices[device_id]
+        dev.pop("updated", None)  # Checked again by the user, no longer "just updated"
+        dev.pop("install_failed", None)  # nor a failed installation to retry
+        self._check_users[device_id] = user or "unknown"
+        started = time.monotonic()
+        failure = None
+        header_ignored: bool | None = None
+        try:
+            entry = self._shelly_entries(await self._registry()).get(device_id)
+            if entry is None:
+                dev.update(status=STATUS_UNREGISTERED, message="")
+                failure = "Device is no longer in the Home Assistant device registry"
+            else:
+                await self._check_entry(device_id, entry, {})
+                header_ignored = await self._finish_header_check()
+                if dev.get("status") == STATUS_READY:
+                    await self._store_changelogs([dev])
+        except Exception as err:  # registry failure etc.: report, do not crash
+            log.exception("Device check failed")
+            failure = error_text(err, 500) or type(err).__name__
+        finally:
+            self._end_device_check(device_id)
+            self.cleanup_firmware()
+            self.save()
+        self._log_check(
+            [device_id],
+            False,
+            user,
+            time.monotonic() - started,
+            failure,
+            trigger=trigger,
+            header_ignored=header_ignored,
+        )
         return {"status": dev.get("status"), "error": failure}
 
     async def _scan_all(self) -> list[str]:
@@ -164,7 +231,8 @@ class Checks(DeviceSettings):
         offers: OfferTasks = {}  # shared manufacturer requests: one per firmware ID
         entries = self._shelly_entries(await self._registry())
         for dev in self.devices.values():  # A full check ends the "just updated" display
-            dev.pop("updated", None)
+            dev.pop("updated", None)  # and the retry of a failed installation
+            dev.pop("install_failed", None)
         # Ignored devices count as registered (seen) but are not contacted
         seen = set(entries)
         for device_id in seen & set(self.devices):
@@ -246,7 +314,7 @@ class Checks(DeviceSettings):
         finally:
             self.activity.pop(device_id, None)
 
-    # ------------------------------------- One device: firmware store first, then the manufacturer's offer
+    # ------------------------------------- One device: Gen2+ next step of the server, Gen1 firmware store first
 
     async def _scan_device(
         self, device_id: str, dev: Device, configuration_url: str | None, offers: OfferTasks
@@ -276,33 +344,19 @@ class Checks(DeviceSettings):
         if info["gen"] == 1 and info["type"] not in self.gen1_allowed:
             raise ShellyError(f"Gen1 type {info['type']} is not in the list of allowed types")
 
-        # The firmware store comes first. The next higher stored version is
-        # provided – also instead of an update provided before – and the
-        # manufacturer's server is not asked for this device.
-        stored = await self._store_offer(info)
-        if stored:
-            name, meta = stored
-            # A file downloaded by this very check is the manufacturer's current offer
-            fresh_url = self._fresh.get(name)
-            if fresh_url:
-                source = OFFER_MANUFACTURER
-            else:
-                source = OFFER_UPLOAD if self._source(meta) == SOURCE_UPLOAD else OFFER_STORE
-            dev.update(
-                status=STATUS_READY,
-                offer_version=meta["version"],
-                offer_source=source,
-                file=name,
-                sha256=meta["sha256"],
-                size=meta["size"],
-                pending_version=meta["version"],
-                pending_build=info["build"],
-                source_url=fresh_url,
-                message=OFFER_MESSAGES[source],
-            )
-            return
-
-        offer = await self._manufacturer_offer(info, offers)
+        dev.pop("store_fallback", None)  # set again below if it still applies
+        dev.pop("step_target", None)
+        if info["gen"] == 1:
+            # Gen1: the firmware store comes first. The next higher stored version is
+            # provided – also instead of an update provided before – and the
+            # manufacturer's list is not asked for this device.
+            stored = await self._store_offer(info)
+            if stored:
+                self._provide_stored(dev, info, *stored)
+                return
+            offer = await self._manufacturer_offer(info, offers)
+        else:
+            offer = await self._step_offer(dev, info, offers)
         dev["offer_version"] = offer["version"] if offer else None
         if not offer or shelly.parse_version(offer["version"]) <= shelly.parse_version(info["version"]):
             dev.update(
@@ -321,42 +375,154 @@ class Checks(DeviceSettings):
             and dev.get("pending_build") == info["build"]
             and (data_paths.FW_DIR / str(dev.get("file"))).is_file()
         )
-        if already:
-            dev.update(offer_source=OFFER_MANUFACTURER, message=OFFER_MESSAGES[OFFER_MANUFACTURER])
-            return
+        if not already:
+            # One provide task per firmware ID and version: a parallel device of the
+            # same type waits for it instead of downloading the file a second time
+            fw_key = (info["type"], offer["version"])
+            task = self._provisions.get(fw_key)
+            if task is None:
+                task = self._provisions[fw_key] = asyncio.ensure_future(self._provide(device_id, dev, info, offer))
+                task.add_done_callback(functools.partial(self._provision_done, fw_key))
+            name, sha, size = await task
+            dev.update(
+                file=name,
+                sha256=sha,
+                size=size,
+                pending_version=offer["version"],
+                pending_build=info["build"],
+                source_url=clip(offer["url"], 500),
+            )
+        source = self._offer_source(str(dev.get("file")))
+        message = OFFER_MESSAGES[source]
+        if dev.get("step_target") is not None:
+            towards = f" on the way to {dev['step_target']}" if dev["step_target"] else ""
+            message += f" – intermediate version{towards}; the device is checked again after its installation"
+        dev.update(status=STATUS_READY, offer_source=source, message=message)
 
-        # One provide task per firmware ID and version: a parallel device of the same
-        # type waits for it instead of downloading the file a second time
-        fw_key = (info["type"], offer["version"])
-        task = self._provisions.get(fw_key)
-        if task is None:
-            task = self._provisions[fw_key] = asyncio.ensure_future(self._provide(device_id, dev, info, offer))
-            task.add_done_callback(functools.partial(self._provision_done, fw_key))
-        name, sha, size = await task
+    def _offer_source(self, name: str) -> str:
+        """Source of the file provided for the manufacturer's offer: downloaded by this
+        check (manufacturer), or a stored download or upload of exactly that version."""
+        if name in self._fresh:
+            return OFFER_MANUFACTURER
+        meta = self.firmware.get(name)
+        return OFFER_UPLOAD if meta and self._source(meta) == SOURCE_UPLOAD else OFFER_STORE
+
+    def _provide_stored(self, dev: Device, info: dict[str, Any], name: str, meta: dict[str, Any]) -> None:
+        """Gen1: provide the next higher stored version (firmware store first)."""
+        # A file downloaded by this very check is the manufacturer's current offer
+        fresh_url = self._fresh.get(name)
+        if fresh_url:
+            source = OFFER_MANUFACTURER
+        else:
+            source = OFFER_UPLOAD if self._source(meta) == SOURCE_UPLOAD else OFFER_STORE
         dev.update(
             status=STATUS_READY,
-            offer_source=OFFER_MANUFACTURER,
+            offer_version=meta["version"],
+            offer_source=source,
             file=name,
-            sha256=sha,
-            size=size,
-            pending_version=offer["version"],
+            sha256=meta["sha256"],
+            size=meta["size"],
+            pending_version=meta["version"],
             pending_build=info["build"],
-            source_url=clip(offer["url"], 500),
-            message=OFFER_MESSAGES[OFFER_MANUFACTURER],
+            source_url=fresh_url,
+            message=OFFER_MESSAGES[source],
         )
 
-    async def _manufacturer_offer(self, info: dict[str, Any], offers: OfferTasks) -> dict[str, str] | None:
-        """Stable offer of the manufacturer's server for the device's firmware ID.
+    async def _step_offer(self, dev: Device, info: dict[str, Any], offers: OfferTasks) -> dict[str, str] | None:
+        """Gen2+: the manufacturer's next step for the installed version (one request
+        per firmware ID and version and check, shared by parallel devices).
 
-        One request per firmware ID and check: parallel devices of the same type
-        await the same request (single flight). Gen1: the manufacturer serves one
-        list for all types, so it is fetched once per check for all of them."""
-        if info["gen"] >= 2:
-            key = (int(info["gen"]), str(info["type"]))
-            if key not in offers:
-                offers[key] = asyncio.ensure_future(shelly.fetch_offer(self.session, info["type"], self.pins))
+        An offer below the newest version (or with several steps) is an intermediate
+        version: dev["step_target"] = newest version ("" if unknown). If the server
+        cannot be asked, a newer stored version is offered for a manual installation
+        (see _store_fallback) and the error is raised with a hint."""
+        key = ("step", str(info["type"]), str(info["version"]))
+        if key not in offers:
+            offers[key] = asyncio.ensure_future(
+                shelly.fetch_offer(self.session, info["type"], self.pins, str(info["version"]))
+            )
+            self._start_header_check()
+        try:
             offer: dict[str, str] | None = await offers[key]
-            return offer
+        except (TimeoutError, ShellyError, aiohttp.ClientError, OSError) as err:
+            await self._store_fallback(dev, info, err)
+            raise
+        if offer and shelly.parse_version(offer["version"]) > shelly.parse_version(info["version"]):
+            newest = await self._newest_version(info, offers)
+            later = newest is not None and shelly.parse_version(newest) > shelly.parse_version(offer["version"])
+            if later or int(offer.get("steps") or 1) > 1:
+                dev["step_target"] = newest if later else ""
+        return offer
+
+    async def _newest_version(self, info: dict[str, Any], offers: OfferTasks) -> str | None:
+        """Newest version of a Gen2+ firmware ID (request without installed version,
+        once per check and firmware ID); None if the server could not be asked."""
+        key = ("newest", str(info["type"]))
+        if key not in offers:
+            offers[key] = asyncio.ensure_future(shelly.fetch_offer(self.session, info["type"], self.pins))
+        try:
+            newest: dict[str, str] | None = await offers[key]
+        except (TimeoutError, ShellyError, aiohttp.ClientError, OSError) as err:
+            log.warning("Newest version of %s not available: %s", info["type"], err)
+            return None
+        return newest["version"] if newest else None
+
+    async def _store_fallback(self, dev: Device, info: dict[str, Any], err: BaseException) -> None:
+        """The manufacturer's server could not be asked for a Gen2+ device: a newer
+        stored version is offered for a manual installation (marker store_fallback,
+        the device stays in the error state) and the error is raised with a hint."""
+        stored = await self._store_offer(info)
+        if not stored:
+            return
+        name, meta = stored
+        dev.update(
+            offer_version=meta["version"],
+            offer_source=OFFER_UPLOAD if self._source(meta) == SOURCE_UPLOAD else OFFER_STORE,
+            file=name,
+            sha256=meta["sha256"],
+            size=meta["size"],
+            pending_version=meta["version"],
+            pending_build=info["build"],
+            source_url=None,
+            store_fallback=True,
+        )
+        hint = STORE_FALLBACK_HINT.format(version=meta["version"])
+        raise ShellyError(f"{error_text(err, 300) or type(err).__name__}. {hint}") from err
+
+    def _start_header_check(self) -> None:
+        """Start the reference request of this check once (see HEADER_CHECK)."""
+        if self._header_check is None:
+            self._header_check = asyncio.ensure_future(self._header_check_request())
+
+    async def _header_check_request(self) -> bool | None:
+        """True if the server answers the reference request with the expected step,
+        False if not, None if it could not be asked (no conclusion)."""
+        app, version, expected = HEADER_CHECK
+        try:
+            offer = await shelly.fetch_offer(self.session, app, self.pins, version)
+        except (TimeoutError, ShellyError, aiohttp.ClientError, OSError) as err:
+            log.info("Reference request of the update server failed: %s", err)
+            return None
+        got = offer["version"] if offer else "nothing"
+        if got != expected:
+            log.warning(HEADER_WARNING.format(got=got))
+            self._header_got = got
+            return False
+        return True
+
+    async def _finish_header_check(self) -> bool | None:
+        """Result of the reference request of the running checks: True if the server
+        ignored the installed version, False if not, None if no request was made or
+        it gave no answer."""
+        task = self._header_check
+        if task is None:
+            return None
+        result = await asyncio.shield(task)  # shared by parallel single-device checks
+        return None if result is None else not result
+
+    async def _manufacturer_offer(self, info: dict[str, Any], offers: OfferTasks) -> dict[str, str] | None:
+        """Gen1 offer: the manufacturer serves one list for all types, so it is fetched
+        once per check for all of them (single flight)."""
         if GEN1_OFFERS not in offers:
             offers[GEN1_OFFERS] = asyncio.ensure_future(shelly.fetch_gen1_offers(self.session, self.pins))
         return shelly.gen1_offer(await offers[GEN1_OFFERS], info["type"])
@@ -371,7 +537,7 @@ class Checks(DeviceSettings):
         """The firmware offered by the manufacturer's server: an already downloaded
         file of exactly this version (after checksum verification) or a new download.
         Returns (file name, sha256, size)."""
-        stored = await self._stored_firmware(info["type"], offer["version"])
+        stored = await self._stored_firmware(info["type"], offer["version"], uploads=info["gen"] >= 2)
         if stored:
             name, meta = stored
             log.info("%s: using stored firmware %s %s", dev["name"], info["type"], offer["version"])
@@ -393,8 +559,13 @@ class Checks(DeviceSettings):
         self._register_firmware(name, info["type"], info["gen"], offer["version"], sha, size, https)
         self._fresh[name] = clip(offer["url"], 500)  # later devices of this check: same offer
         self.events.add(
-            "download", type=info["type"], version=offer["version"], size=size, sha256=sha, https=https,
-            user=self._check_user,
+            "download",
+            type=info["type"],
+            version=offer["version"],
+            size=size,
+            sha256=sha,
+            https=https,
+            user=self._check_users.get(device_id, self._scan_user),
         )
         return name, sha, size
 
@@ -408,10 +579,13 @@ class Checks(DeviceSettings):
         duration: float,
         failure: str | None,
         trigger: str | None = None,
+        header_ignored: bool | None = None,
     ) -> None:
         """One log entry per check; findings = devices with an update, a warning or
         an error. trigger overrides the derived value ("device" for single-device
-        checks). Automatic checks name SCHEDULE_USER as user.
+        checks, "step" after an intermediate version). Automatic checks name
+        SCHEDULE_USER as user. A server that ignored the installed version (reference
+        request, see HEADER_CHECK) is a warning finding.
         An update finding names its source (OFFER_*: manufacturer, store or upload).
         Every finding carries a severity; "error" holds the message of warnings
         and errors (key kept for historic entries). The entry gets the highest
@@ -442,6 +616,14 @@ class Checks(DeviceSettings):
                         "severity": problem["severity"],
                     }
                 )
+        if header_ignored:
+            findings.append(
+                {
+                    "device": "Shelly update server",
+                    "error": HEADER_WARNING.format(got=self._header_got),
+                    "severity": "warning",
+                }
+            )
         counts = {level: sum(1 for f in findings if f["severity"] == level) for level in ("warning", "error")}
         updates = sum(1 for f in findings if "offer" in f)
         self.events.add(
@@ -492,7 +674,7 @@ class Checks(DeviceSettings):
         dev = self.devices[device_id]
         if not dev.get("offer_version") or not dev.get("version"):
             return None
-        meta = self.firmware.get(str(dev.get("file"))) if dev.get("status") in PENDING else None
+        meta = self.firmware.get(str(dev.get("file"))) if holds_file(dev) else None
         return self.changelogs.between(
             dev.get("gen"), dev["version"], dev["offer_version"], dev.get("type"), (meta or {}).get("changelog")
         )
@@ -500,9 +682,7 @@ class Checks(DeviceSettings):
     async def _notify_new_updates(self) -> None:
         """One HA notification if an automatic check found versions not reported before.
         Lists all open updates so that a replaced notification loses nothing."""
-        open_updates = [
-            d for d in self.devices.values() if d.get("status") in (STATUS_READY, STATUS_AVAILABLE)
-        ]
+        open_updates = [d for d in self.devices.values() if d.get("status") in (STATUS_READY, STATUS_AVAILABLE)]
         new = [d for d in open_updates if d.get("notified_version") != d.get("offer_version")]
         if not new:
             return

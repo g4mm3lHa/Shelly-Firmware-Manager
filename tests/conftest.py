@@ -49,8 +49,14 @@ class FakeNet:
         }
         self.unreachable = set()
         self.downloads = 0
-        self.offer_calls = 0
+        self.offer_calls = 0  # requests with the installed version (next step)
         self.offer_version = "1.5.0"  # stable version offered by the manufacturer's server
+        self.steps = {}  # installed version -> next step offered for it (else offer_version)
+        self.newest_version = None  # answer without installed version (None: offer_version)
+        self.newest_calls = 0
+        self.offer_error = None  # exception raised by requests with the installed version
+        self.reference_answer = "1.3.3"  # answer to the reference request (Plus1 1.0.7)
+        self.reference_calls = 0
         self.gate = None  # asyncio.Event: device_info waits for it (simulates slow devices)
         self.download_gate = None
         self.info_calls = 0
@@ -115,17 +121,29 @@ def net(monkeypatch, tmp_path):
             raise fake.settings_error
         return {"shelly_name": "plus1", "ntp": "time.local", "eco": False, "ap": False, "ble": "unsupported", "outputs": []}
 
-    async def fetch_offer(_session, _fw_type, _pins=None):
-        fake.offer_calls += 1
-        return {"version": fake.offer_version, "url": "https://fw.example/Plus1.zip"}
+    def offer(version):
+        return {"version": version, "url": f"https://fw.example/Plus1-{version}.zip", "steps": "1"}
 
-    async def download_firmware(_session, _url, target_dir, _pins=None, https_only=False):
+    async def fetch_offer(_session, fw_type, _pins=None, version=None):
+        if (fw_type, version) == ("Plus1", "1.0.7"):  # reference request of every check
+            fake.reference_calls += 1
+            return offer(fake.reference_answer) if fake.reference_answer else None
+        if version is None:  # newest version
+            fake.newest_calls += 1
+            return offer(fake.newest_version or fake.offer_version)
+        fake.offer_calls += 1
+        if fake.offer_error is not None:
+            raise fake.offer_error
+        return offer(fake.steps.get(version, fake.offer_version))
+
+    async def download_firmware(_session, url, target_dir, _pins=None, https_only=False):
         fake.downloads += 1
         if fake.download_gate is not None:
             await fake.download_gate.wait()
+        version = url.rsplit("-", 1)[-1].removesuffix(".zip")
         content = b"x" * 70000
-        if fake.offer_version != "1.5.0":  # another offered version is another file
-            content = fake.offer_version.encode() + content
+        if version != "1.5.0":  # another offered version is another file
+            content = version.encode() + content
         import hashlib
 
         sha = hashlib.sha256(content).hexdigest()
