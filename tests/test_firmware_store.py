@@ -65,16 +65,37 @@ async def test_entries_before_rc7_count_as_downloads(mgr, net):
     assert mgr.firmware_list()[0]["source"] == "download"
 
 
-async def test_delete_locked_while_provided_or_installing(mgr, net):
+async def test_delete_locked_only_while_installing(mgr, net):
     await mgr.scan()
     provided = mgr.devices[A]["file"]
+    mgr.devices[A]["status"] = manager_core.STATUS_INSTALLING
     entry = next(f for f in mgr.firmware_list() if f["name"] == provided)
-    assert not entry["deletable"] and "pending update" in entry["locked"]
+    assert not entry["deletable"] and "installed" in entry["locked"]
     with pytest.raises(shelly.ShellyError):
         mgr.delete_firmware(provided, confirm=True, acknowledged=True)
-    mgr.devices[A]["status"] = manager_core.STATUS_INSTALLING
-    assert "installed" in next(f for f in mgr.firmware_list() if f["name"] == provided)["locked"]
     assert provided in mgr.firmware
+
+
+async def test_deleting_a_provided_file_releases_its_devices(mgr, net):
+    """A file only provided to devices can be deleted: they lose the provision (status
+    "Available", markers gone), the log entry names them, the next check decides
+    again."""
+    await mgr.scan()
+    provided = mgr.devices[A]["file"]
+    mgr.devices[A].update(status=manager_core.STATUS_ERROR, install_failed=True, step_target="1.7.0")
+    entry = next(f for f in mgr.firmware_list() if f["name"] == provided)
+    assert entry["deletable"] and entry["locked"] is None and {d["name"] for d in entry["devices"]} == {"Kitchen", "Garage"}
+    mgr.delete_firmware(provided, user="u", confirm=True, acknowledged=True)
+    assert provided not in mgr.firmware and not (data_paths.FW_DIR / provided).exists()
+    for dev in (mgr.devices[A], mgr.devices[C]):
+        assert dev["status"] == manager_core.STATUS_AVAILABLE and dev["file"] is None and dev["sha256"] is None
+        assert "install_failed" not in dev and "step_target" not in dev and not manager_core.holds_file(dev)
+        assert "check the device again" in dev["message"]
+    assert not mgr.approval_matches(A, entry["sha256"])
+    logged = mgr.events.entries[-1]
+    assert logged["kind"] == "delete" and logged["released"] == ["Garage", "Kitchen"]
+    await mgr.check_device(A)  # the next check provides the offer again (downloaded)
+    assert mgr.devices[A]["status"] == manager_core.STATUS_READY and net.downloads == 2
 
 
 async def test_delete_needs_second_confirmation(mgr, net):
@@ -303,7 +324,7 @@ async def test_uploaded_file_is_provided_as_update(mgr, net):
     assert net.downloads == downloads
     assert mgr.devices[A]["file"] == upload and mgr.devices[A]["offer_source"] == "upload"
     listed = next(f for f in mgr.firmware_list() if f["name"] == upload)
-    assert listed["devices"] == [{"id": A, "name": "Kitchen"}] and not listed["deletable"]
+    assert listed["devices"] == [{"id": A, "name": "Kitchen"}] and listed["deletable"]
 
 
 async def test_stored_changelog_is_available_for_the_firmware_tab(mgr, net):

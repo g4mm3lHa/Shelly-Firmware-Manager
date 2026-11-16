@@ -163,7 +163,11 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
   It is greyed out while none is stored: the changelog is stored when a check provides
   the file to a device (see [How a check works](#how-a-check-works)).
 - Firmware is **never deleted automatically**. Delete files you no longer need with the
-  bin icon (two confirmations). Files that are waiting to be installed cannot be deleted.
+  bin icon (two confirmations). A file that is provided to devices can be deleted too:
+  the dialog names them, they lose the provided update and show "Available" until they
+  are checked again. Only a file that is being installed, and every file during a
+  check, cannot be deleted. To skip a stored version (Gen1: the store comes first),
+  delete it.
 - **Upload firmware** adds a version you have from another source:
   1. Choose the file (`.zip`, `.bin` or `.gbl`, max. 64 MB).
   2. Device type and version are filled in from the file where possible – check them.

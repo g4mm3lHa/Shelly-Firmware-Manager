@@ -6,7 +6,17 @@ Not released yet. Clearer dialogs and phone tiles, failed installations can be r
 from the updates card, a clearer message when a Shelly rejects a firmware, and fewer
 warnings in the app log for rejected download requests. rc2: Gen2+ devices get the
 update step the Shelly update server intends for their installed version, required
-intermediate versions included.
+intermediate versions included. rc3: provided firmware can be deleted.
+
+Changes in rc3
+- Firmware tab: a stored file that is provided to devices can now be deleted (two
+  confirmations as before). The dialog names the devices; they lose the provided update
+  and show "Available" until they are checked again (a retry of a failed installation,
+  a manual installation option or an intermediate-version mark ends as well). The log
+  entry names them. Deleting stays locked during a check and while the file is being
+  installed. Before, a provided file could not be deleted – with "firmware store first"
+  (Gen1) a check provided it again, so it could not be removed at all.
+- Code comment of the device check updated (no change of behaviour).
 
 Changes in rc2
 - Gen2+ checks: the Shelly update server is asked per device with its firmware ID and

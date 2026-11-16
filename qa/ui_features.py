@@ -340,8 +340,14 @@ def _firmware_tab(c):
         "els => els.map(e => { const r = e.getBoundingClientRect(); return Math.round(r.top + r.height / 2); })")
     check(f"{case}: changelog, download and delete icons on one line", len(centers) == 3 and max(centers) - min(centers) <= 1, str(centers))
     first_del = rows.first.locator("button[aria-label], button.red").last
-    check(f"{case}: provided file locked with reason", first_del.is_disabled()
-          and first_del.get_attribute("title") == "Locked: provided as pending update", str(first_del.get_attribute("title")))
+    check(f"{case}: provided file can be deleted", first_del.is_enabled() and first_del.get_attribute("title") == "Delete",
+          str(first_del.get_attribute("title")))
+    first_del.click()
+    d = dialog(f)
+    check(f"{case}: delete dialog names the devices that lose the provided update",
+          "lose the provided update" in d["body"] or "loses the provided update" in d["body"], d["body"][:200])
+    c.page.screenshot(path=c.out / f"{case}-delete-provided.png")
+    f.locator("#dlg-btns button", has_text="Cancel").click()
     check(f"{case}: upload tag in the list", f.locator(".fw-row .tag.warn", has_text="Uploaded").count() == 1)
     check(f"{case}: no overflow (firmware)", f.evaluate(OVERFLOW_JS) <= 0)
     page.screenshot(path=out / f"{case}-firmware.png", full_page=True)

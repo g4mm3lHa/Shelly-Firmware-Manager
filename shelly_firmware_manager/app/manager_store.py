@@ -29,7 +29,7 @@ from shelly import ShellyError, clip
 
 from manager_core import (
     DOWNLOAD_BASE_MESSAGES, Device, FirmwareMeta, ManagerCore, PART_PREFIX, SOURCE_DOWNLOAD,
-    SOURCE_UPLOAD, STATUS_INSTALLING, STATUS_READY, holds_file,
+    SOURCE_UPLOAD, STATUS_AVAILABLE, STATUS_INSTALLING, holds_file,
 )
 
 log = logging.getLogger("sfm.manager")
@@ -182,16 +182,33 @@ class FirmwareStore(ManagerCore):
         return None
 
     def _delete_lock(self, name: str) -> str | None:
-        """Reason why a stored firmware cannot be deleted now, else None."""
+        """Reason why a stored firmware cannot be deleted now, else None. A file that
+        is only provided to devices can be deleted (see delete_firmware)."""
         if self.checking:
             return "Locked during a check"
         holders = [d for d in self.devices.values() if d.get("file") == name]
         installing = {self.devices.get(i, {}).get("file") for i in self.installing}
         if name in installing or any(d.get("status") == STATUS_INSTALLING for d in holders):
             return "Locked: being installed"
-        if any(d.get("status") == STATUS_READY or holds_file(d) for d in holders):
-            return "Locked: provided as pending update"
         return None
+
+    def _release_file(self, name: str) -> list[str]:
+        """Devices that hold the file lose it: the update is no longer provided
+        (status "Available" – the next check of the device decides again; markers of
+        a retry, a store fallback or an intermediate version end). Returns their
+        names."""
+        released = []
+        for dev in self.devices.values():
+            if dev.get("file") != name:
+                continue
+            if holds_file(dev):
+                released.append(str(dev.get("name") or "?"))
+                dev.update(status=STATUS_AVAILABLE, message="Provided firmware deleted – check the device again")
+                dev.pop("error_level", None)
+            for key in ("install_failed", "store_fallback", "step_target"):
+                dev.pop(key, None)
+            dev.update(file=None, sha256=None, size=None, source_url=None)
+        return sorted(released, key=str.lower)
 
     def firmware_list(self) -> list[dict[str, Any]]:
         """Stored firmwares for the "Firmware" tab."""
@@ -242,9 +259,10 @@ class FirmwareStore(ManagerCore):
         """Delete a stored firmware – only manually, with a second confirmation
         (confirm and acknowledged, as for the device password).
 
-        Refused during a check and for a file that is installed right now or held
-        as pending update for a device (the device must be checked or installed
-        first). Devices that may later need it download it again at a check."""
+        Refused during a check and for a file that is being installed. A file that
+        is only provided to devices can be deleted: they lose the provided update
+        (see _release_file; named in the log entry). Devices that may later need the
+        version download it again at a check."""
         if name not in self.firmware:
             raise KeyError(name)
         lock = self._delete_lock(name)
@@ -254,7 +272,10 @@ class FirmwareStore(ManagerCore):
             raise ValueError("Deletion not confirmed")
         meta = self.firmware.pop(name)
         (data_paths.FW_DIR / name).unlink(missing_ok=True)
-        log.info("Firmware %s deleted by %s", name, user)
+        released = self._release_file(name)
+        note = f" (no longer provided: {', '.join(released)})" if released else ""
+        log.info("Firmware %s deleted by %s%s", name, user, note)
+        extra: dict[str, Any] = {"released": released} if released else {}
         self.events.add(
             "delete",
             type=meta.get("type"),
@@ -262,6 +283,7 @@ class FirmwareStore(ManagerCore):
             sha256=meta.get("sha256"),
             source=self._source(meta),
             user=user,
+            **extra,
         )
         self.save()
 

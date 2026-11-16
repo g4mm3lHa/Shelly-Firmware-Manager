@@ -235,6 +235,7 @@ async def test_http_downgrade_and_delete_need_acknowledgment(client, mgr, net):
     r = await client.post(f"/api/firmware/{name}/delete", json={"confirm": True, "acknowledged": True}, headers=hdr)
     assert r.status == 200 and name not in mgr.firmware
     provided = mgr.devices[A]["file"]
+    mgr.devices[A]["status"] = "installing"  # a file being installed stays locked
     r = await client.post(f"/api/firmware/{provided}/delete", json={"confirm": True, "acknowledged": True},
                           headers=hdr)
     assert r.status == 409

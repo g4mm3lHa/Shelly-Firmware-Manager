@@ -428,7 +428,7 @@ async def test_failed_installation_stays_provided_for_a_retry(mgr, net, updating
     assert await mgr.install(A, sha, "alice") is False
     assert dev["status"] == manager_core.STATUS_ERROR and dev["install_failed"] is True
     assert {d["id"]: d for d in mgr.public_state()["devices"]}[A]["install_failed"] is True
-    assert mgr.approval_matches(A, sha) and mgr._delete_lock(dev["file"])
+    assert mgr.approval_matches(A, sha) and dev["file"] in mgr._in_use()
     assert {"id": A, "name": dev["name"]} in next(f for f in mgr.firmware_list() if f["name"] == dev["file"])["devices"]
     assert not mgr.may_download(dev["file"], "192.168.1.10")  # served only while installing
     monkeypatch.setattr(shelly, "trigger_update", real_trigger)

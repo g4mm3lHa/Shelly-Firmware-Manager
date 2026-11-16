@@ -70,8 +70,11 @@ function firmwareRow(f, latest) {
  *  acknowledgment (as for the device password). Nothing is deleted automatically. */
 function deleteFirmware(f) {
   const title = "Delete firmware?", details = valueList([["Firmware ID", f.type], ["Version", f.version], ["Source", fwSource(f)], shaRow(f.sha256)]);
-  modal(title, [details, el("p", f.source === "upload" ? "An uploaded file can only be restored by uploading it again." :
-    "Only versions that Shelly still offers can be downloaded again; older versions are gone for good.", "hint")],
+  // A file provided to devices may be deleted: they lose the provided update
+  const held = (f.devices || []).map(d => d.name);
+  modal(title, [details, held.length ? el("div", `Provided for ${held.join(", ")}: ${held.length === 1 ? "this device loses" : "these devices lose"} the provided update and ${held.length === 1 ? "is" : "are"} shown as "Available" until ${held.length === 1 ? "it is" : "they are"} checked again.`, "warnbox") : null,
+    el("p", f.source === "upload" ? "An uploaded file can only be restored by uploading it again." :
+    "Only versions that Shelly still offers can be downloaded again; older versions are gone for good.", "hint")].filter(Boolean),
   [{text: "Cancel"}, {text: "Continue", kind: "primary", action: () => {
     const ack = el("input"); ack.type = "checkbox";
     modal(title, [el("p", `Delete ${f.type} ${f.version} permanently?`), box("label", "check", ack, " I understand that this file cannot be restored by the app")],

@@ -279,7 +279,7 @@ class Checks(DeviceSettings):
         finally:
             self.activity.pop(device_id, None)
 
-    # ------------------------------------- One device: firmware store first, then the manufacturer's offer
+    # ------------------------------------- One device: Gen2+ next step of the server, Gen1 firmware store first
 
     async def _scan_device(
         self, device_id: str, dev: Device, configuration_url: str | None, offers: OfferTasks
