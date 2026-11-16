@@ -262,8 +262,10 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Applic
         device_id = device_id_from(request)
         body = await json_body(request)
         user = user_from(request.headers)
-        settings, restart, verified = await guarded(mgr.change_settings(device_id, body, user))
-        return web.json_response({**settings, "restart_required": restart, "verified": verified})
+        settings, restart, verified, not_applied = await guarded(mgr.change_settings(device_id, body, user))
+        return web.json_response(
+            {**settings, "restart_required": restart, "verified": verified, "not_applied": not_applied}
+        )
 
     async def restart(request: web.Request) -> web.StreamResponse:
         """Restart the Shelly."""

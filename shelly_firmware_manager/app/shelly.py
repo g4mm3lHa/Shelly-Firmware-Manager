@@ -83,6 +83,9 @@ GEN2_OUTPUTS = {
 # Gen1: "default_state" values; "switch" (follow input) only where the device has an input
 GEN1_STATES = ("off", "on", "last")
 GEN1_OUTPUT_KINDS = ("relay", "light", "color", "white")  # /settings/<kind>/<index>
+# Gen1 types (prefixes) that report mode "white" but have only /settings/light/<i>:
+# Dimmer 1/2, Duo, Vintage. RGBW2 and the Bulbs use /settings/color|white/<i> by mode.
+GEN1_LIGHT_ONLY = ("SHDM", "SHBDUO", "SHVIN")
 
 
 class ShellyError(RuntimeError):
@@ -709,8 +712,9 @@ async def read_settings(
                 if isinstance(relay, dict) and "default_state" in relay:
                     states = GEN1_STATES + (("switch",) if "btn_type" in relay else ())
                     outputs.append(_output(f"relay:{i}", relay.get("name"), relay["default_state"], states))
-        # RGBW2/Bulb use /settings/color|white/<i>, dimmers and others /settings/light/<i>
-        kind = mode if mode in ("color", "white") else "light"
+        # RGBW2/Bulb use /settings/color|white/<i> by mode, all others /settings/light/<i>
+        light_only = str(fw_type).startswith(GEN1_LIGHT_ONLY)
+        kind = mode if mode in ("color", "white") and not light_only else "light"
         dimmer = str(fw_type).startswith("SHDM")  # Shelly Dimmer 1/2 also support "switch"
         for i, light in enumerate(settings.get("lights") or []):
             if isinstance(light, dict) and "default_state" in light:

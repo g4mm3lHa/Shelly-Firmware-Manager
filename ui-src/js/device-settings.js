@@ -6,8 +6,9 @@ import {$, api, box, closeModal, devUrl, el, message, modal, valueList} from "./
 // old -> new) -> send. NTP and AOP are saved directly; the dialog only stays open
 // for errors, "nothing changed" or a restart notice.
 const FIELDS = {name: {label: "Shelly name", prop: "shelly_name"}, ntp: {label: "NTP server", prop: "ntp"}};
-const AOP_LABELS = {off: "Off", on: "On", restore_last: "Restore last state", last: "Restore last state",
-  match_input: "Match input", switch: "Match input", toggle: "Toggle"};
+// Gen1 values (last, switch) carry the names of the Gen1 web interface
+const AOP_LABELS = {off: "Off", on: "On", restore_last: "Restore last state", last: "Restore last mode",
+  match_input: "Match input", switch: "Switch", toggle: "Toggle"};
 export const aopLabel = v => AOP_LABELS[v] || v || "–";
 
 /** Read the live settings, then continue with next(live); errors are shown. */
@@ -22,6 +23,9 @@ async function saveSettings(d, title, changes, quiet) {
     const r = await api(`${devUrl(d)}/settings`, changes);
     if (r.verified === false) {   // written, but the read-back failed: state unknown
       message(title, "Sent to the Shelly, but the new value could not be read back – please check the device.", "warnbox"); return;
+    }
+    if (r.not_applied?.length) {  // accepted, but the read-back shows another value
+      message(title, `The Shelly accepted the request but did not apply: ${r.not_applied.join(", ")}. The value read back is shown.`, "warnbox"); return;
     }
     if (quiet && !r.restart_required) { closeModal(); return; }
     message(title, r.restart_required ? "Saved. The Shelly reports that a restart is required to apply the change." : "Saved and read back from the Shelly.");

@@ -1,5 +1,22 @@
 # Changelog
 
+## 3.2.1
+
+Power-on action of Gen1 dimmers, Duo and Vintage can be changed again; settings the
+Shelly accepts but does not apply are reported.
+
+Changes in rc1
+- Fix: Shelly Dimmer 1/2, Duo and Vintage (Gen1) report the mode "white" but have only
+  `/settings/light/<i>`. The app derived the output `white:<i>` from the mode and sent
+  the power-on action to `/settings/white/<i>`; the device answered without applying
+  it, the icon stayed red. These devices now use `light:<i>` and
+  `/settings/light/<i>`; RGBW2 and the Bulbs keep `color`/`white` by their mode.
+- Every settings change is compared with the value read back from the Shelly. A value
+  the device accepted but did not apply is shown as a warning naming the setting, and
+  the activity log entry is marked as failed ("Not applied by the Shelly: …").
+- Gen1 power-on values use the names of the Gen1 web interface: "Restore last mode"
+  (`last`) and "Switch" (`switch`). Gen2+ keeps "Restore last state" and "Match input".
+
 ## 3.2.0
 
 Released 2026-11-16. Clearer dialogs and phone tiles, failed installations can be

@@ -85,6 +85,59 @@ async def test_ap_and_ble_writes(device_api):
         await shelly.write_settings(None, 1, "http://1.2.3.4", {"ap": True})
 
 
+@pytest.mark.parametrize(
+    ("fw_type", "mode", "key", "with_switch"),
+    [
+        ("SHDM-2", "white", "light:0", True),  # Dimmer reports mode "white", has only /settings/light/0
+        ("SHDM-1", "white", "light:0", True),
+        ("SHBDUO-1", "white", "light:0", False),
+        ("SHVIN-1", "white", "light:0", False),
+        ("SHRGBW2", "white", "white:0", False),
+        ("SHRGBW2", "color", "color:0", False),
+        ("SHBLB-1", "color", "color:0", False),
+    ],
+)
+async def test_gen1_light_endpoint_by_type(device_api, fw_type, mode, key, with_switch):
+    """Gen1 light outputs: color/white by mode only for RGBW2/Bulbs; Dimmer, Duo and
+    Vintage report mode "white" but are read and written via /settings/light/<i>."""
+    calls, answers = device_api
+    answers["/settings"] = {"mode": mode, "lights": [{"default_state": "switch" if with_switch else "off"}]}
+    got = await shelly.read_settings(None, 1, "http://1.2.3.4", fw_type, None)
+    (output,) = got["outputs"]
+    assert output["key"] == key and ("switch" in output["options"]) is with_switch
+    calls.clear()
+    await shelly.write_settings(None, 1, "http://1.2.3.4", {"aop": {key: "last"}})
+    assert calls == [(f"/settings/{key.replace(':', '/')}", {"default_state": "last"})]
+
+
+async def test_value_not_applied_is_reported_and_logged(client, mgr, net, monkeypatch):
+    """The device accepts a change but reads back another value: not_applied names it,
+    the activity log entry is failed; an applied change reports nothing."""
+    await mgr.scan()
+    stored = {"aop": "switch", "ntp": "time.local"}
+
+    async def write(*_args, **_kwargs):
+        return False
+
+    async def read(*_args, **_kwargs):
+        outputs = [{"key": "light:0", "name": "light:0", "aop": stored["aop"], "options": ["off", "on", "last", "switch"]}]
+        return {"shelly_name": "dimmer", "ntp": stored["ntp"], "eco": False, "ap": False, "ble": "unsupported", "outputs": outputs}
+
+    monkeypatch.setattr(shelly, "write_settings", write)
+    monkeypatch.setattr(shelly, "read_settings", read)
+    mgr.devices[A]["outputs"] = (await read())["outputs"]
+    settings, restart, verified, not_applied = await mgr.change_settings(A, {"aop": {"light:0": "last"}}, "u")
+    assert (restart, verified, not_applied) == (False, True, ["Power-on action light:0"])
+    assert settings["outputs"][0]["aop"] == "switch"
+    entry = mgr.events.entries[-1]
+    assert entry["kind"] == "setting" and entry["ok"] is False and "Not applied by the Shelly" in entry["error"]
+    stored["ntp"] = "pool.ntp.org"
+    _settings, _restart, verified, not_applied = await mgr.change_settings(A, {"ntp": "pool.ntp.org"}, "u")
+    assert (verified, not_applied) == (True, []) and mgr.events.entries[-1]["ok"] is True
+    r = await client.post(f"/api/devices/{A}/settings", json={"aop": {"light:0": "off"}}, headers={"X-CSRF-Token": client.csrf})
+    assert r.status == 200 and (await r.json())["not_applied"] == ["Power-on action light:0"]
+
+
 async def test_gen2_identity_from_shelly_endpoint(device_api):
     """Complete /shelly answer: no second GetDeviceInfo request."""
     calls, answers = device_api

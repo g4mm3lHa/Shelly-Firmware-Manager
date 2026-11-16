@@ -68,7 +68,10 @@ the Home Assistant theme (colours, light/dark) and works on phones.
   the value is currently unknown. Colours: power-on action green = every output
   restores its last state, red = another value; lock green = protected and the password
   is stored in the app, yellow = protected but the password is not stored here; access
-  point, actions and schedules red = active.
+  point, actions and schedules red = active. Gen1 devices show the power-on values with
+  the names of their own web interface ("Restore last mode", "Switch"). Every change is
+  read back from the device; a value the device accepted but did not apply is reported
+  as a warning and logged as failed.
 - The row menu ⋮ offers: Check for updates (this device only), Install update,
   Downgrade, Reload device info, Ignore / Resume device, Open web UI, device settings,
   Status details and Restart.
