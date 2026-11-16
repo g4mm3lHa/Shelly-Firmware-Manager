@@ -1,4 +1,4 @@
-# Code map (3.2.0)
+# Code map
 
 Orientation for changes: where things are, what is stored, which test covers what.
 Names, not line numbers – search for the function name. All app modules carry type
@@ -113,7 +113,7 @@ the changelog page lists it; never requested again).
 Download server (port 8098): `GET|HEAD /<sha256>.<zip|bin|gbl>` → `may_download`,
 `record_download` (GET only).
 
-## UI (`ui-src/js/*.js`, `ui-src/style.css` → built into `app/static/`)
+## UI (`ui-src/js/*.js`, `ui-src/style.css` in the repository root → built into `shelly_firmware_manager/app/static/`)
 
 Single page, `textContent` only. Polls `api/state` (30 s idle, 3 s busy, paused when
 hidden, ETag). ES modules, bundled by `tools/build_ui.py` (esbuild, entry `main.js`)
@@ -158,7 +158,7 @@ paths in tmp via `data_paths`), `mgr`, `client` (UI test client with CSRF token)
 |---|---|---|
 | `run_ui.py quick\|full` | starts all demos | one command; prints one line per suite |
 | `ui_test.py [--full]` | 8801 idle, 8802 busy | layout, menus, dialogs, contrast; quick = 5 cases, full = 13 |
-| `ui_features.py` | 8801, 8803 legacy, 8804 missing, 8805 rc7 | download URL hints/notice, downgrade, upload, delete, Install button and changelog icon in the Firmware tab, failed installation in the updates card, dialog sections, phone tile layout, no tooltip on touch, user in the log tile |
+| `ui_features.py` | 8801, 8803 legacy, 8804 missing, 8805 features | download URL hints/notice, downgrade, upload, delete, Install button and changelog icon in the Firmware tab, failed installation in the updates card, dialog sections, phone tile layout, no tooltip on touch, user in the log tile |
 | `mobile_capture.py` | 8711 idle | screenshots + overflow, full only |
 
 `tools/dev/check.sh [tests|ui|full|build]` runs everything in order: ruff → mypy (strict,

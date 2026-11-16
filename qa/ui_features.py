@@ -1,5 +1,5 @@
 """Feature UI checks (Playwright) against the demo servers – one file for all
-feature suites (3.0.1; formerly lan_hint_test.py, rc6_ui_test.py, rc7_ui_test.py).
+feature suites.
 
 Suites, in this order (the last two change the demo state in their last case):
 - download_url_hint   Settings: hints for download_base_url (LAN IP, public IP,
@@ -13,7 +13,7 @@ Suites, in this order (the last two change the demo state in their last case):
                       deleting log entries; 3.2.0: failed installation in the updates
                       card, dialog sections, phone tile layout, no tooltip after a tap,
                       user in the log tile; devices stay in the updates card while
-                      checked, Ignored label size on phones. Demo "rc7" on 8805 (and "idle" on 8801).
+                      checked, Ignored label size on phones. Demo "features" on 8805 (and "idle" on 8801).
 Usage: python qa/ui_features.py <shots-dir> [suite ...]   (qa/run_ui.py starts the demos)
 Every suite checks: no horizontal overflow, no console errors; screenshots go to
 <shots-dir>."""
@@ -28,7 +28,7 @@ from types import SimpleNamespace
 from common import launch
 from playwright.sync_api import sync_playwright
 
-IDLE, LEGACY, MISSING, RC7 = (f"http://127.0.0.1:{p}" for p in (8801, 8803, 8804, 8805))
+IDLE, LEGACY, MISSING, FEATURES = (f"http://127.0.0.1:{p}" for p in (8801, 8803, 8804, 8805))
 OVERFLOW_JS = "document.documentElement.scrollWidth - document.documentElement.clientWidth"
 results = []  # (suite: name, ok, detail)
 SUITE = [""]  # name of the running suite (prefix of the result names)
@@ -532,14 +532,14 @@ def firmware_store(browser, out):
     cases = ((360, "light", True), (430, "dark", False), (1440, "dark", False), (1440, "light", False))
     for index, (width, scheme, embedded) in enumerate(cases):
         last = index == len(cases) - 1
-        case = f"rc7-{width}-{scheme}{'-embedded' if embedded else ''}"
+        case = f"features-{width}-{scheme}{'-embedded' if embedded else ''}"
         entry = "Downgrade"
         if index == 0:   # No stored older version (demo "idle") -> entry disabled, no dialog
             ctx, page, f, errors = open_page(browser, IDLE, width, scheme, embedded)
             items = dict(menu_items(f, "Hall"))
             check(f"{case}: downgrade disabled without a stored older version", items.get(entry) is True, str(items))
             ctx.close()
-        ctx, page, f, errors = open_page(browser, RC7, width, scheme, embedded, ignore=("/upload/confirm",))
+        ctx, page, f, errors = open_page(browser, FEATURES, width, scheme, embedded, ignore=("/upload/confirm",))
 
         c = SimpleNamespace(case=case, f=f, page=page, out=out, width=width, index=index, last=last)
         _device_list(c)

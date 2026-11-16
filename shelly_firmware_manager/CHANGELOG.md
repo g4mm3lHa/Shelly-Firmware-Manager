@@ -2,13 +2,25 @@
 
 ## 3.2.0
 
-Not released yet. Clearer dialogs and phone tiles, failed installations can be retried
-from the updates card, a clearer message when a Shelly rejects a firmware, and fewer
-warnings in the app log for rejected download requests. rc2: Gen2+ devices get the
-update step the Shelly update server intends for their installed version, required
+Released 2026-11-16. Clearer dialogs and phone tiles, failed installations can be
+retried from the updates card, a clearer message when a Shelly rejects a firmware, and
+fewer warnings in the app log for rejected download requests. rc2: Gen2+ devices get
+the update step the Shelly update server intends for their installed version, required
 intermediate versions included. rc3: provided firmware can be deleted. rc4: single
 checks and installations of different devices run in parallel, a new wait logic after
 the installation.
+
+Final release (same app code as rc4)
+- Version 3.2.0. No functional change compared with rc4 (live-tested).
+  rc1 to rc4 were never released; their changes are listed below.
+- Repository clean-up: the UI sources (`ui-src/`) moved from the app folder to the
+  repository root, so the app folder `shelly_firmware_manager` holds only what Home
+  Assistant needs for the installation. The built UI files are byte-identical.
+- Security review before the release: no known vulnerability (CVE/GHSA) in the pinned
+  packages (aiohttp 3.14.5 – the advisories published on 2026-11-13 are fixed since
+  3.14.4 – and aiosignal, attrs, frozenlist, idna, multidict, propcache, yarl,
+  aiohappyeyeballs, typing-extensions) or in Python 3.12.16. Dependencies, wheels and
+  base image are unchanged.
 
 Changes in rc4
 - Parallel work: an installation or a single-device check no longer blocks single

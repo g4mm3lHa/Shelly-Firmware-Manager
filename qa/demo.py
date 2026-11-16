@@ -1,8 +1,8 @@
 """Local demo server with fake data for UI tests (no network access).
 
-Usage: python demo.py <app_dir> <port> <scenario: idle|busy|legacy|missing|rc7>
+Usage: python demo.py <app_dir> <port> <scenario: idle|busy|legacy|missing|features>
 legacy: download_base_url is the former example value (not confirmed) and one device
-installs with device progress; missing: download_base_url not set; rc7: idle
+installs with device progress; missing: download_base_url not set; features: idle
 plus stored older versions (one of them uploaded) for downgrade and upload checks.
 Serves the UI app below /ui/ and a same-origin wrapper /wrap that embeds it in an
 iframe (like the HA Ingress panel)."""
@@ -62,7 +62,7 @@ for i, n in enumerate(names):
         "message": "Device not reachable" if st == "error" else "", "origin": f"http://192.168.1.{10 + i}",
         "last_check": now - 3600, "last_success": now - (90000 if st == "error" else 3600),
         "last_update": now - 86400 * 3 if i % 3 == 0 else None, "ntp": "time.local", "eco": i % 2 == 0,
-        # power-on action: "restore_last" (green icon) or another value (red icon, 3.1.1); every 4th device has no output
+        # power-on action: "restore_last" (green icon) or another value (red icon); every 4th device has no output
         "outputs": [{"key": "switch:0", "name": None, "aop": "restore_last" if i % 8 < 4 else "off", "options": ["off", "on", "restore_last"]}] if i % 4 else [],
         "file": f"{sha}.zip" if st == "ready" else None, "sha256": sha if st == "ready" else None, "size": len(content),
         "pending_version": "1.5.0" if st == "ready" else None,
@@ -74,7 +74,7 @@ for i, n in enumerate(names):
         "actions": [False, True, None][i % 3], "schedules": [True, False, "unsupported", None][i % 4],
         "auth_enabled": [False, True, None][i % 3], "ignored": i in (3, 12),
     }
-if scenario == "rc7":  # older versions for the downgrade list, one uploaded
+if scenario == "features":  # older versions for the downgrade list, one uploaded
     for version, source in (("1.3.1", "download"), ("1.3.0", "download"), ("1.2.0", "upload")):
         older = f"Plus1 {version} ".encode() * 6000
         older_sha = hashlib.sha256(older).hexdigest()
