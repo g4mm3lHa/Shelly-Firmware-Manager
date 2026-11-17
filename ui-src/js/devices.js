@@ -1,10 +1,13 @@
 // Devices tab: status and action icons, the device table / phone tiles and the row menu.
 import {
-  $, api, attachTip, box, collator, devUrl, el, fmt, icon, iconButton, message, modal, openDetails, selected,
-  section, tip, toast, ui, valueList,
+  $, api, attachTip, box, collator, devUrl, el, fmt, hideTip, icon, iconButton, message, modal, openDetails, selected,
+  section, toast, ui, valueList, webUrl,
 } from "./core.js";
 import {OFFER_SOURCES, openDowngrade, openInstall} from "./install.js";
-import {aopLabel, editAop, editEco, editPassword, editSwitch, editValue, restartDevice} from "./device-settings.js";
+import {
+  aopLabel, aopSummary, aopTone, editAop, editDebug, editEco, editPassword, editSwitch, editValue, featureStrip,
+  restartDevice,
+} from "./device-settings.js";
 import {load, queued, render} from "./main.js";
 
 // ---------------------------------------------------------------- Devices
@@ -69,31 +72,29 @@ function showStatus(d) {
     // Ready (and installable): red button right of Close opens the existing install dialog
     installable(d, ui.state) ? [{text: "Close"}, {text: "Install update", kind: "danger", action: () => openInstall([d])}] : undefined);
 }
-/** Current power-on action of all outputs as one short text ("Mixed" if they differ). */
-function aopSummary(d) {
-  const values = [...new Set(d.outputs.map(o => aopLabel(o.aop)))];
-  return values.length === 1 ? values[0] : "Mixed";
-}
 const AOP_NOTE = "Power-on action: not available – this device has no switchable output.";
+/** Popup of a greyed-out action icon: status strip with the reason as pill, explanation below. */
+function notePopup(iconName, label, pill, text) {
+  modal(label, [featureStrip(iconName, label, "off", pill), el("p", text, "hint")]);
+}
 /** Power-on action (AOP) in the action column: flash icon with state – green
  *  if every output restores its last state, red if an output has another value, "?"
  *  if the settings could not be read; opens the same dialog as the row menu. Mobile
  *  (labeled): the current value is shown on the button next to the icon. Devices
  *  without switchable outputs get a disabled icon with an explanation. */
-const AOP_RESTORE = ["restore_last", "last"];
 function aopButton(d, labeled) {
   const outputs = d.outputs || [];
-  const state = !outputs.length ? "restart" : d.settings_error ? "s-unknown" : outputs.every(o => AOP_RESTORE.includes(o.aop)) ? "c-good" : "c-alert";
+  const state = !outputs.length ? "restart" : d.settings_error ? "s-unknown" : aopTone(outputs) === "good" ? "c-good" : "c-alert";
   const b = el("button", null, `act ${state}`);
   b.append(icon("aop"));
-  if (!d.outputs || !d.outputs.length) {
+  if (!outputs.length) {
     if (labeled) b.append(el("span", "Power-on action"));
     b.setAttribute("aria-label", AOP_NOTE); attachTip(b, () => AOP_NOTE);
-    b.setAttribute("aria-disabled", "true"); b.onclick = () => message("Power-on action", AOP_NOTE);
+    b.setAttribute("aria-disabled", "true"); b.onclick = () => notePopup("aop", "Power-on action", "Not available", AOP_NOTE);
     return b;
   }
-  if (labeled) b.append(el("span", `Power-on: ${aopSummary(d)}`));
-  const text = "Power-on action – " + (d.settings_error ? `unknown – ${d.settings_error.message}` : d.outputs.map(o => `${o.name || o.key}: ${aopLabel(o.aop)}`).join(", "));
+  if (labeled) b.append(el("span", `Power-on: ${aopSummary(outputs)}`));
+  const text = "Power-on action – " + (d.settings_error ? `unknown – ${d.settings_error.message}` : outputs.map(o => `${o.name || o.key}: ${aopLabel(o.aop)}`).join(", "));
   b.setAttribute("aria-label", `${text} (${d.name})`); attachTip(b, () => text);
   b.disabled = !editable(d); b.onclick = () => editAop(d);
   return b;
@@ -104,6 +105,7 @@ function aopButton(d, labeled) {
 // the last read failed) – unknown is shown distinctly ("?"), never as "off".
 const UNSUPPORTED = "unsupported";
 const GEN1_AP_NOTE = "Not available on Gen1: enabling the access point turns off the Wi-Fi client mode, the device would leave your network.";
+const GEN1_DEBUG_NOTE = "Gen1 devices have no websocket debug log.";
 const ACTION_ITEMS = [
   {key: "eco", icon: "eco", label: "Eco mode", on: "on", off: "off", edit: d => editEco(d)},
   {key: "auth_enabled", icon: "lock", label: "Password protection", on: "protected", off: "not protected", edit: d => editPassword(d), always: true},
@@ -111,11 +113,13 @@ const ACTION_ITEMS = [
   {key: "ble", icon: "ble", label: "Bluetooth", on: "on", off: "off", edit: d => editSwitch(d, "ble")},
   {key: "actions", icon: "actions", label: "Actions", on: "at least one active", off: "none active", alert: true, link: true},
   {key: "schedules", icon: "schedules", label: "Schedules", on: "at least one active", off: "none active", alert: true, link: true},
+  // Debug output costs resources and may expose details: yellow while on
+  {key: "debug_ws", icon: "bug", label: "Websocket debug log", on: "on", off: "off", warn: true, edit: d => editDebug(d)},
 ];
 /** State of one feature: "on" | "off" | "unknown" | "unsupported". */
 function featureState(d, key) {
   const v = d[key];
-  if (v === UNSUPPORTED) return "unsupported";
+  if (v === UNSUPPORTED || (key === "debug_ws" && d.gen === 1)) return "unsupported";
   if (typeof v !== "boolean" || (d.settings_error && key !== "auth_enabled")) return "unknown";
   return v ? "on" : "off";
 }
@@ -126,20 +130,23 @@ function actionButton(d, item, labeled) {
   let text = `${item.label}: ${state === "on" ? item.on : state === "off" ? item.off : state === "unsupported" ? "not supported by this device" : "unknown"}`;
   if (state === "unknown" && d.settings_error) text += ` – ${d.settings_error.message}`;
   if (gen1Ap) text += ` – ${GEN1_AP_NOTE}`;
+  if (item.key === "debug_ws" && d.gen === 1) text += ` – ${GEN1_DEBUG_NOTE}`;
   // Protected without a password stored in this app = warning (the app cannot
   // read or update the device); green only if protection is on and the password is stored
   const unstored = item.key === "auth_enabled" && state === "on" && !d.password_set;
   if (unstored) text += " – password not stored in this app";
   const url = item.link ? webUrl(d) : null;
   const node = item.link && url && state !== "unsupported" ? el("a") : el("button");
-  node.className = `act s-${state}${item.alert ? " alert" : ""}${unstored ? " c-warn" : ""}`;
+  node.className = `act s-${state}${item.alert ? " alert" : ""}${unstored || (item.warn && state === "on") ? " c-warn" : ""}`;
   node.setAttribute("aria-label", text); attachTip(node, () => text);
   node.append(icon(item.icon)); if (labeled) node.append(el("span", item.label));
   if (node.tagName === "A") {   // opens the device web UI (root, no route probing)
     node.href = url; node.target = "_blank"; node.rel = "noopener noreferrer";
   } else if (state === "unsupported" || gen1Ap || (item.link && !url)) {
     // aria-disabled keeps hover/focus/tap for the explanation
-    node.setAttribute("aria-disabled", "true"); node.onclick = () => message(item.label, text);
+    node.setAttribute("aria-disabled", "true");
+    const pill = state === "unsupported" ? "Not supported" : "Not available";
+    node.onclick = () => notePopup(item.icon, item.label, pill, text);
   } else {
     node.disabled = !(item.always ? !!d.ip && !!d.gen : editable(d)); node.onclick = () => item.edit(d);
   }
@@ -205,10 +212,6 @@ function detailsCell(d) {
   };
   return det;
 }
-// Link to the Shelly web UI. The server only sends checked private IP addresses;
-// the format is checked here once more.
-const WEB_URL_RE = /^http:\/\/(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-fA-F:]+\])(:\d{1,5})?\/$/;
-const webUrl = d => WEB_URL_RE.test(d.web_url || "") ? d.web_url : null;
 
 // Gen1 version strings ("20230913-112003/v1.14.0-gcb84623") are shortened to the
 // version number ("1.14.0") in the Firmware column only; Gen2+ stays unchanged
@@ -231,7 +234,11 @@ const COLUMNS = {
   device: {label: "Device", sort: d => d.name, cell: d => {
     // Shelly name + pencil: opens the existing Shelly-name dialog (no HA rename)
     const pen = iconButton("pencil", `Edit Shelly name of ${d.name}`, () => editValue(d, "name"), "pen"); pen.disabled = !editable(d);
-    return [Object.assign(el("div", d.name, "name"), {title: d.name}), box("div", "sub shelly-name", el("span", d.shelly_name || "–"), pen)];
+    // Tooltips name both names (mouse hover, touch tap)
+    const ha = el("div", d.name, "name"), shellyName = el("span", d.shelly_name || "–");
+    attachTip(ha, () => `Home Assistant device name: ${d.name}`, true);
+    attachTip(shellyName, () => `Shelly device name: ${d.shelly_name || "–"}`, true);
+    return [ha, box("div", "sub shelly-name", shellyName, pen)];
   }},
   ip: {label: "IP", sort: d => (d.ip || "").split(".").map(n => n.padStart(3, "0")).join("."), cell: d => {
     if (!d.ip) return ["–"];
@@ -247,7 +254,7 @@ const COLUMNS = {
     // Gen1: the full version strings stay available as tooltip (and in the status details)
     if (d.gen === 1 && (d.version || offer)) {
       const full = [`Installed: ${d.version || "–"}`, offer ? `Available: ${d.offer_version}` : null].filter(Boolean).join(" · ");
-      line.tabIndex = 0; attachTip(line, () => full);
+      line.tabIndex = 0; attachTip(line, () => full, true);
     }
     return [line, el("div", d.type || "–", "sub")];
   }},
@@ -466,5 +473,5 @@ function setIgnored(d, ignored) {
 /** Close the row menu. */
 export function closeRowMenu() { rowmenu.hidden = true; }
 document.addEventListener("click", e => { if (!rowmenu.hidden && !rowmenu.contains(e.target) && !e.target.closest("td.c-menu")) closeRowMenu(); });
-document.addEventListener("keydown", e => { if (e.key === "Escape") { closeRowMenu(); tip.hidden = true; } });
+document.addEventListener("keydown", e => { if (e.key === "Escape") { closeRowMenu(); hideTip(); } });
 addEventListener("scroll", closeRowMenu, true);

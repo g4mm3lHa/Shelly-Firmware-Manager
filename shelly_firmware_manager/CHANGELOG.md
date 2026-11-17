@@ -1,5 +1,87 @@
 # Changelog
 
+## 3.2.1
+
+Released 2026-11-17. Power-on action of Gen1 dimmers, Duo and Vintage can be changed
+again; settings the Shelly accepts but does not apply are reported. rc2: setting help
+as tooltips, tooltips on touch devices, websocket debug log switch, clearer action
+popups and Firmware tab. rc3: shorter action popups, centred table columns, column
+titles in the Firmware tab.
+
+Final release (same functions as rc3)
+- Version 3.2.1. No functional change compared with rc3 (live-tested).
+  rc1 to rc3 were never released; their changes are listed below.
+- Clean-up without visible effect: two UI module variables are no longer exported
+  (only used inside their own module).
+- Development (not part of the image): the screenshots of the release are in
+  `qa/screenshots/3.2.1/`.
+
+Changes in rc3
+- Popups of the action icons eco mode, access point, Bluetooth and websocket debug log:
+  no question any more – the status strip shows the current state, the button names
+  the action ("Turn on" / "Turn off"). Restart popup: no question, the hint reads "The
+  device will be unavailable for a few seconds.", button "Restart".
+- Devices table (wide screens): titles and content of all columns except "Device" are
+  centred; IP and firmware versions use digits of equal width. Phone tiles unchanged.
+- Firmware tab: column titles (Version, Size, Stored, SHA-256, Devices) over the
+  version rows of every card, centred except "Version" like the Devices table; on
+  phones small labels (Size, Stored, SHA-256) inside the version tile instead. The
+  label "intermediate" explains itself as tooltip (mouse hover, touch tap). The
+  "Upload firmware" button shows the upload icon of its dialog after the text.
+- Development (not part of the image): older test reports, session handovers and
+  backlogs in `docs/history/`; approved UI decisions in `docs/UI_DECISIONS.md`; new
+  `qa/capture.py` (screenshots of chosen views at 1440 px and 412 px for reports and
+  mockups, every shot checked for page errors and horizontal overflow; `--gate`
+  replaces `qa/mobile_capture.py` in the final gate); UI quick check about 40 s instead
+  of 75 s (`qa/ui_features.py` checks the Firmware/Devices/Logs flows in two viewports,
+  all four with `--full`; fixed waits replaced by waiting for the expected state).
+
+Changes in rc2
+- Settings tab: the help texts are no longer shown under the fields. A small i-icon
+  next to each setting name shows the help as tooltip (mouse over the name or the
+  icon, keyboard focus of the icon; on touch devices a tap on the name or the icon
+  shows it, a tap elsewhere or scrolling hides it – a tap on the name then does not
+  change the setting). Screen readers still read the help as description of the field.
+  The live warning for the download base URL stays visible under the field.
+- Tooltips on touch devices: a tap shows the tooltip of an element that has no action
+  of its own (e.g. device names, the Gen1 version, the check schedule, the SHA-256 and
+  the "Uploaded" label in the Firmware tab) and of a disabled button (the reason why it
+  is disabled). A tap that opens a popup or does something else is unchanged.
+- Device names: tooltips "Home Assistant device name: …" and "Shelly device name: …"
+  (table and phone tiles) instead of the browser's own tooltip.
+- New action icon "Websocket debug log" (bug icon, Gen2+): shows whether the Shelly
+  streams its debug log over a websocket (grey off, yellow on, "?" unknown) and turns it
+  on or off (`Sys.SetConfig` `debug.websocket.enable`, read back and logged like other
+  settings). The popup explains the debug log, links the Diagnostics page of the Shelly
+  web UI (`/#/diagnostics`) and warns for firmware below 1.0.0 (the stream is not
+  protected by the device password). Gen1 devices have no websocket debug log (icon
+  greyed out with explanation). The action column shows two rows of five icons.
+- Access point icon: access-point symbol instead of the Wi-Fi fan.
+- Popups of the action icons (power-on action, eco mode, password, access point,
+  Bluetooth, websocket debug log, restart) and the notes of greyed-out icons start with
+  a status strip: the icon in the colour of the action column, the feature name and the
+  state (On/Off, Protected, Not available, Not supported). The question is shorter
+  ("Turn it off for …?").
+- Dialog titles with an icon: changelog, delete (red) and upload in the Firmware tab,
+  the installation dialog (red firmware chip).
+- Firmware tab: labels 12 px after the version and vertically centred; new outlined
+  label "intermediate" for a file a check provided as an intermediate version (stored
+  with the file from now on, not determined for older files); on phones the date is
+  right-aligned in the size line. The first step of the delete dialog has a red
+  "Continue" like "Delete".
+
+Changes in rc1
+- Fix: Shelly Dimmer 1/2, Duo and Vintage (Gen1) report the mode "white" but have only
+  `/settings/light/<i>`. The app derived the output `white:<i>` from the mode and sent
+  the power-on action to `/settings/white/<i>`; the device answered without applying
+  it, the icon stayed red. These devices now use `light:<i>` and
+  `/settings/light/<i>`; RGBW2 and the Bulbs keep `color`/`white` by their mode.
+- Every settings change is compared with the value read back from the Shelly. A value
+  the device accepted but did not apply is shown as a warning naming the setting, and
+  the activity log entry is marked as failed ("Not applied by the Shelly: …").
+- Gen1 power-on values use the names of the Gen1 web interface: "Restore last mode"
+  (`last`) and "Switch" (`switch`). Gen2+ keeps "Restore last state" and "Match input".
+
 ## 3.2.0
 
 Released 2026-11-16. Clearer dialogs and phone tiles, failed installations can be

@@ -15,7 +15,7 @@ Typical use (repository root):
 tools/dev/check.sh            # after any backend change (seconds)
 tools/dev/check.sh build      # after a ui-src change: rebuild, then check
 tools/dev/check.sh ui         # after a UI change: + quick UI matrix and feature checks
-tools/dev/check.sh full       # final gate: + full UI matrix and mobile captures
+tools/dev/check.sh full       # final gate: + full UI matrix, all feature viewports and the layout gate
 ```
 
 Limits of the offline mode: Python of the host instead of 3.12.16 and no C

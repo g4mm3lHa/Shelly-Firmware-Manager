@@ -1,5 +1,5 @@
 // Entry module: rendering, tabs and polling. Importing it loads all other modules.
-import {$, api, attachTip, closeModal, el, fmt, getState, message, modal, tip, ui} from "./core.js";
+import {$, api, attachTip, closeModal, el, fmt, getState, hideTip, message, modal, ui} from "./core.js";
 import {adoptPrefs, buildChooser, closeRowMenu, renderDevices, syncChooser} from "./devices.js";
 import {renderFirmware} from "./firmware.js";
 import {mobileQuery, renderLogs} from "./logs.js";
@@ -20,7 +20,7 @@ export function render(force) {
   $("scan").disabled = !!s.busy;   // blocked during a check or installations
   const key = JSON.stringify([ui.view, mobileQuery.matches, s, ui.view === "firmware" ? ui.firmware : ui.view === "logs" ? ui.logs : null]);
   if (!force && key === ui.rendered) return;
-  ui.rendered = key; tip.hidden = true;
+  ui.rendered = key; hideTip();
   if (ui.view === "devices") renderDevices();
   else if (ui.view === "firmware") renderFirmware();
   else if (ui.view === "logs") renderLogs();
@@ -33,7 +33,7 @@ function renderMeta(s) {
   try { next = new Date(sc.next * 1000).toLocaleString("en-GB", {timeZone: sc.timezone, dateStyle: "medium", timeStyle: "short"}); }
   catch (e) { next = fmt(sc.next); }
   const cycle = el("span", `Every ${days} · ${sc.time}`, "pill meta-pill");
-  attachTip(cycle, () => `Next automatic check: ${next} (${sc.timezone})`); cycle.tabIndex = 0;
+  attachTip(cycle, () => `Next automatic check: ${next} (${sc.timezone})`, true); cycle.tabIndex = 0;
   $("meta").replaceChildren(el("span", `Last checked: ${fmt(s.last_scan)}`, "pill meta-pill"), cycle);
 }
 /** Notice while installations are disabled by the download base URL: not set,
@@ -87,7 +87,8 @@ function showView(v) {
 }
 for (const v of VIEWS) $("tab-" + v).onclick = () => showView(v);
 
-export let timer = 0, inflight = false, queued = false;
+let timer = 0, inflight = false;
+export let queued = false;   // read by devices.js
 const POLL_IDLE_MS = 30000, POLL_BUSY_MS = 3000;
 /** Next refresh: fast while something runs, slow when idle, none while the page is hidden. */
 function schedule() {

@@ -435,6 +435,23 @@ async def test_installed_version_is_sent_and_intermediate_versions_are_marked(mg
     assert net.newest_calls == 1 and mgr.public_state()["devices"][0].get("step_target") in ("1.7.0", None)
 
 
+async def test_file_provided_as_intermediate_version_keeps_a_store_marker(mgr, net):
+    """A file provided as intermediate version is marked in the store for good
+    (Firmware tab label); a file provided as the newest version is not."""
+    net.steps = {"1.4.0": "1.5.0"}
+    net.offer_version = "1.7.0"
+    await mgr.scan()
+    a, b = mgr.devices[A], mgr.devices[B]
+    assert mgr.firmware[a["file"]].get("intermediate") is True
+    assert "intermediate" not in mgr.firmware[b["file"]]
+    listed = {f["name"]: f["intermediate"] for f in mgr.firmware_list()}
+    assert listed == {a["file"]: True, b["file"]: False}
+    step_file = a["file"]
+    net.steps = {}
+    await mgr.check_device(A)  # the next check provides the newest version: marker stays
+    assert a["file"] != step_file and mgr.firmware[step_file].get("intermediate") is True
+
+
 async def test_several_steps_without_newer_version_are_an_intermediate_version(mgr, net, monkeypatch):
     fake = shelly.fetch_offer
 

@@ -73,6 +73,8 @@ for i, n in enumerate(names):
         "ap": [False, True, None, "unsupported"][i % 4], "ble": "unsupported" if gen == 1 else [True, False, None][i % 3],
         "actions": [False, True, None][i % 3], "schedules": [True, False, "unsupported", None][i % 4],
         "auth_enabled": [False, True, None][i % 3], "ignored": i in (3, 12),
+        # websocket debug log: off (grey), on (yellow), unknown; Gen1 has none
+        "debug_ws": "unsupported" if gen == 1 else [False, True, False, None][i % 4],
     }
 if scenario == "features":  # older versions for the downgrade list, one uploaded
     for version, source in (("1.3.1", "download"), ("1.3.0", "download"), ("1.2.0", "upload")):
@@ -113,7 +115,8 @@ m.devices[f"{16:032x}"].update(status="error", store_fallback=True, error_level=
                                 message="408, 'Request Timeout', 'https://updates.shelly.cloud/update/Plus1'. Stored version 1.5.0 is "
                                 "ready and can be installed manually – at your own risk: without the answer of the Shelly update "
                                 "server it cannot be verified whether an intermediate version is required first.")
-# An intermediate version on the way to the newest one
+# An intermediate version on the way to the newest one (its file keeps the store marker)
+m.firmware[f"{sha}.zip"]["intermediate"] = True
 m.devices[f"{7:032x}"].update(step_target="1.7.0", message="Provided, not installed – intermediate version on the way to 1.7.0; "
                                "the device is checked again after its installation")
 m.events.add("install", event="confirmed", ok=True, unverified=True, device="Entrance", type="Plus1", old="1.4.0", new="1.5.0",

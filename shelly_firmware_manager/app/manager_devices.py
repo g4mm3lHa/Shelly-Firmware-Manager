@@ -138,15 +138,23 @@ class DeviceSettings(FirmwareStore):
 
     async def change_settings(
         self, device_id: str, changes: dict[str, Any], user: str = "unknown"
-    ) -> tuple[dict[str, Any], bool, bool]:
-        """Validate, send to the Shelly, read back. Returns (settings, restart_required, verified).
-        verified is False if the read-back failed (the change is then unconfirmed).
-        Every attempt that reaches the device is written to the activity log."""
+    ) -> tuple[dict[str, Any], bool, bool, list[str]]:
+        """Validate, send to the Shelly, read back.
+
+        Returns (settings, restart_required, verified, not_applied). verified is False
+        if the read-back failed (the change is then unconfirmed); not_applied names the
+        settings the device accepted but reports with another value afterwards. Every
+        attempt that reaches the device is written to the activity log – as failed if
+        a value was not applied."""
         dev = self._settings_device(device_id)
         clean = shelly.validate_settings(changes, dev.get("outputs") or [])
         if "ap" in clean and dev.get("gen") == 1:
             raise ValueError(shelly.GEN1_AP_NOTE)
-        for key, label in (("ap", "an access point switch"), ("ble", "a global Bluetooth switch")):
+        for key, label in (
+            ("ap", "an access point switch"),
+            ("ble", "a global Bluetooth switch"),
+            ("debug_ws", "websocket debug log"),
+        ):
             if key in clean and dev.get(key) == UNSUPPORTED:
                 raise ValueError(f"This device/firmware has no {label}")
         diff = self._settings_diff(dev, clean)
@@ -158,13 +166,47 @@ class DeviceSettings(FirmwareStore):
             error = error_text(err, 300) or type(err).__name__
             self.events.add("setting", ok=False, device=dev.get("name"), changes=diff, user=user, error=error)
             raise
-        log.info("%s: settings changed by %s (%s)", dev.get("name"), user, ", ".join(sorted(clean)))
-        self.events.add("setting", device=dev.get("name"), changes=diff, user=user)
         if "eco" in clean:  # the device may restart and miss the read-back
             dev["eco"] = clean["eco"]
         verified = await self._read_settings(device_id, dev)  # show what the device really stored
+        not_applied = self._not_applied(dev, clean) if verified else []
+        if not_applied:
+            error = "Not applied by the Shelly: " + ", ".join(not_applied)
+            log.warning("%s: %s (changed by %s)", dev.get("name"), error, user)
+            self.events.add("setting", ok=False, device=dev.get("name"), changes=diff, user=user, error=error)
+        else:
+            log.info("%s: settings changed by %s (%s)", dev.get("name"), user, ", ".join(sorted(clean)))
+            self.events.add("setting", device=dev.get("name"), changes=diff, user=user)
         self.save()
-        return {k: dev.get(k) for k in ("shelly_name", "ntp", "eco", "ap", "ble", "outputs")}, restart, verified
+        settings = {k: dev.get(k) for k in ("shelly_name", "ntp", "eco", "ap", "ble", "debug_ws", "outputs")}
+        return settings, restart, verified, not_applied
+
+    @staticmethod
+    def _not_applied(dev: Device, clean: dict[str, Any]) -> list[str]:
+        """Labels of written settings whose read-back value differs from the written one."""
+        labels: list[str] = []
+        for key, prop, label in (
+            ("name", "shelly_name", "Shelly name"),
+            ("ntp", "ntp", "NTP server"),
+            ("eco", "eco", "Eco mode"),
+            ("ap", "ap", "Access point"),
+            ("ble", "ble", "Bluetooth"),
+            ("debug_ws", "debug_ws", "Websocket debug log"),
+        ):
+            if key not in clean:
+                continue
+            wanted, stored = clean[key], dev.get(prop)
+            if isinstance(wanted, str):
+                stored = stored or ""  # no name reported = empty name
+            if stored != wanted:
+                labels.append(label)
+        outputs = {o["key"]: o for o in dev.get("outputs") or []}
+        for key, value in clean.get("aop", {}).items():
+            output = outputs.get(key, {})
+            if output.get("aop") != value:
+                name = output.get("name") if output.get("name") not in (None, key) else key
+                labels.append(f"Power-on action {clip(name, 64)}")
+        return labels
 
     @staticmethod
     def _settings_diff(dev: Device, clean: dict[str, Any]) -> list[dict[str, Any]]:
@@ -175,7 +217,12 @@ class DeviceSettings(FirmwareStore):
             diff.append({"setting": "Shelly name", "old": dev.get("shelly_name"), "new": clean["name"]})
         if "ntp" in clean:
             diff.append({"setting": "NTP server", "old": dev.get("ntp"), "new": clean["ntp"]})
-        for key, label in (("eco", "Eco mode"), ("ap", "Access point"), ("ble", "Bluetooth")):
+        for key, label in (
+            ("eco", "Eco mode"),
+            ("ap", "Access point"),
+            ("ble", "Bluetooth"),
+            ("debug_ws", "Websocket debug log"),
+        ):
             if key in clean:
                 diff.append({"setting": label, "old": onoff.get(dev.get(key)), "new": onoff[clean[key]]})
         outputs = {o["key"]: o for o in dev.get("outputs") or []}

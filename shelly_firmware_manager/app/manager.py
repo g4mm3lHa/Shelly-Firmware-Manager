@@ -44,6 +44,7 @@ class Manager(Installs):
             "eco",
             "ap",
             "ble",
+            "debug_ws",
             "actions",
             "schedules",
             "auth_enabled",

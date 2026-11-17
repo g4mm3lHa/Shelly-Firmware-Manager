@@ -1,4 +1,4 @@
-# Shelly Firmware Manager 3.2.0
+# Shelly Firmware Manager 3.2.1
 
 Home Assistant app that keeps your Shelly devices (Gen1 to Gen4) up to date – locally
 and under your control. It finds all Shellys of the Shelly integration, checks for new
@@ -10,8 +10,8 @@ in your network. Nothing is installed without your approval.
 - Stored firmware comes first: a check provides the next higher stored version before
   the Shelly update server is asked.
 - Older firmware versions stay stored and allow a downgrade (Gen2+).
-- Device settings such as name, NTP server, power-on action, eco mode and password
-  protection can be edited directly.
+- Device settings such as name, NTP server, power-on action, eco mode, password
+  protection and the websocket debug log can be edited directly.
 
 Requires Home Assistant 2026.10 or newer.
 
@@ -51,7 +51,7 @@ UI checks against demo servers with fake data):
 ```
 tools/dev/check.sh          # lint + build check + backend tests (seconds)
 tools/dev/check.sh ui       # ... + UI quick matrix and feature checks (under a minute)
-tools/dev/check.sh full     # ... + full UI matrix and mobile captures (final gate)
+tools/dev/check.sh full     # ... + full UI matrix, all feature viewports and the layout gate (final gate)
 tools/dev/check.sh build    # rebuild app/static from ui-src first
 ```
 
@@ -63,4 +63,4 @@ Layout: `shelly_firmware_manager/` (only what Home Assistant needs: app definiti
 `README.md`/`DOCS.md`/`CHANGELOG.md` for the app store, Dockerfile, AppArmor profile,
 pinned wheels, `app/` with the Python sources and the built UI), `ui-src/` (UI sources),
 `tests/` (by area), `qa/` (UI checks, demo server, screenshots of the current version),
-`tools/`, `docs/`, `candidates/` (current test report).
+`tools/`, `docs/` (code map, UI decisions), `candidates/` (current test report).

@@ -1,5 +1,5 @@
 // Settings tab: app options with validation hints and the download base URL notice.
-import {$, api, box, el, iconButton, message, modal, ui} from "./core.js";
+import {$, api, attachTip, box, el, icon, iconButton, message, modal, ui} from "./core.js";
 
 // ---------------------------------------------------------------- App settings
 // All app options, grouped into cards. Saving goes through the Supervisor and
@@ -56,10 +56,15 @@ export function renderSettings() {
       else if (type === "pins") input = pinsEditor(o[key] || []);
       else { input = el("input"); input.type = "text"; input.value = o[key] ?? ""; }
       input.id = id; settingsInputs[key] = input;
-      // One block per option: label, control and help text stay together. On wide
-      // screens the block is "display: contents", so the label/control grid is unchanged.
-      const help = el("div", desc, "desc"); help.id = id + "-help";
+      // One block per option: name with help icon, control (and the live warning of
+      // the download base URL). On wide screens the block is "display: contents", so the
+      // name/control grid is unchanged. The help text is a tooltip of the name and the
+      // icon; it stays in the page (visually hidden) as description of the control.
+      const help = el("div", desc, "sr-only"); help.id = id + "-help";
       input.setAttribute("aria-describedby", help.id);
+      const info = el("button", null, "icon help"); info.type = "button"; info.append(icon("info"));
+      info.setAttribute("aria-label", `Help: ${label}`); info.setAttribute("aria-describedby", help.id);
+      attachTip(lab, () => desc, true); attachTip(info, () => desc, true);
       let warn = null;
       if (key === "download_base_url") {   // live hint while typing, no blocking
         warn = el("div", null, "desc warnc"); warn.id = id + "-warn"; warn.setAttribute("role", "status");
@@ -67,7 +72,7 @@ export function renderSettings() {
         input.addEventListener("input", update); update();
         input.setAttribute("aria-describedby", `${help.id} ${warn.id}`);
       }
-      form.append(box("div", `set-field t-${type}`, lab, box("div", "set-control", input), help, warn));
+      form.append(box("div", `set-field t-${type}`, box("div", "set-name", lab, info), box("div", "set-control", input), help, warn));
     }
     return box("div", "card", box("div", "card-head", el("h2", group)), box("div", "card-body", form));
   });

@@ -238,6 +238,7 @@ class FirmwareStore(ManagerCore):
                     "sha_checked": bool(meta.get("sha_checked")) if source == SOURCE_UPLOAD else None,
                     "devices": holders,
                     "changelog": "changelog" in meta,  # flag only; text: firmware_changelog
+                    "intermediate": meta.get("intermediate") is True,  # once provided as an intermediate version
                     "deletable": lock is None,
                     "locked": lock,
                 }
