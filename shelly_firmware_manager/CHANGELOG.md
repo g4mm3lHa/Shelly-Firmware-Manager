@@ -5,9 +5,21 @@
 Power-on action of Gen1 dimmers, Duo and Vintage can be changed again; settings the
 Shelly accepts but does not apply are reported. rc2: setting help as tooltips,
 tooltips on touch devices, websocket debug log switch, clearer action popups and
+Firmware tab. rc3: shorter action popups, centred table columns, column titles in the
 Firmware tab.
 
 Changes in rc3
+- Popups of the action icons eco mode, access point, Bluetooth and websocket debug log:
+  no question any more – the status strip shows the current state, the button names
+  the action ("Turn on" / "Turn off"). Restart popup: no question, the hint reads "The
+  device will be unavailable for a few seconds.", button "Restart".
+- Devices table (wide screens): titles and content of all columns except "Device" are
+  centred; IP and firmware versions use digits of equal width. Phone tiles unchanged.
+- Firmware tab: column titles (Version, Size, Stored, SHA-256, Devices) over the
+  version rows of every card, centred except "Version" like the Devices table; on
+  phones small labels (Size, Stored, SHA-256) inside the version tile instead. The
+  label "intermediate" explains itself as tooltip (mouse hover, touch tap). The
+  "Upload firmware" button shows the upload icon of its dialog after the text.
 - Development (not part of the image): older test reports, session handovers and
   backlogs in `docs/history/`; approved UI decisions in `docs/UI_DECISIONS.md`; new
   `qa/capture.py` (screenshots of chosen views at 1440 px and 412 px for reports and

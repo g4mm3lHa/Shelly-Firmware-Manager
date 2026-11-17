@@ -36,12 +36,18 @@ not part of this file.
   back like other settings) grey off, yellow on, "?" unknown, Gen1 greyed out ("no
   websocket debug log").
 - Action column: `.act-strip` 170 px, two rows (5 + 4), column 190 px.
+- Wide screens (2026-11-17): titles and content of all columns except "Device"
+  centred (status cell and action strip too); IP and Firmware with
+  `font-variant-numeric: tabular-nums`. Phone tiles unchanged.
 - Popups opened by an action icon and the notes of greyed-out icons start with a
   **status strip** (32 px tinted icon circle in the action-column colour, feature name,
   state pill On/Off, Protected/Not protected/Unknown, Not available, Not supported;
-  restart without pill; power-on pill = current value "Restore last state" / "Mixed");
-  question "Turn it on/off for <device>?". The password popup keeps its value list
-  under the strip.
+  restart without pill; power-on pill = current value "Restore last state" / "Mixed").
+  Switch popups (eco, access point, Bluetooth, websocket debug log) ask no question:
+  strip + button, the button names the action ("Turn on" / "Turn off"). Restart popup:
+  no question, hint "The device will be unavailable for a few seconds.", button
+  "Restart" (2026-11-17). The password popup keeps its value list under the
+  strip.
 - Websocket debug popup: explanation, link `<web_url>#/diagnostics` (new tab,
   noopener), warning below firmware 1.0.0.
 
@@ -57,8 +63,17 @@ not part of this file.
   download and delete icon on one line, on phones in the head of the version tile;
   changelog icon shows the changelog stored with the file (no request).
 - Version labels 12 px after the version, centred (`.fw-ver` flex); label
-  "intermediate" outlined yellow ("Uploaded" stays filled); phones: date right-aligned
-  in the size line.
+  "intermediate" outlined yellow ("Uploaded" stays filled) with a tooltip without action
+  ("Intermediate version: required step before newer firmware can be installed
+  safely"); phones: date right-aligned in the size line.
+- Column titles (2026-11-17, variant A): one head per card over the version rows
+  (`.fw-head`, same grid, icon column 82 px without title): Version · Size · Stored ·
+  SHA-256 · Devices; "Version" left, all other titles and contents centred like the
+  Devices table, size and date with tabular digits, the opened device list centred as a
+  block with left-aligned lines. Phones: no head, small labels Size, Stored, SHA-256
+  inside the version tile (`data-label`).
+- "Upload firmware" button: upload icon of its dialog title after the text (16 px,
+  `aria-hidden`, vertically centred).
 - Delete dialog: both steps with red button.
 
 ## Dialogs (mockups approved 2026-11-12)
@@ -89,10 +104,8 @@ not part of this file.
   under the field.
 - **All other tooltips:** a touch tap shows the tooltip of elements without an own
   action (`attachTip(node, text, true)`: device names, Gen1 version, schedule pill,
-  SHA-256, "Uploaded") and the title of a disabled button (pointer events, no click); a
+  SHA-256, "Uploaded", "intermediate") and the title of a disabled button (pointer events, no click); a
   tap that opens a popup or triggers another action is unchanged; the Firmware-tab info
   icon stays as it is. Touch is detected by the last `pointerdown` type; a second tap
   hides only a tooltip shown by a tap.
 - Device names: "Home Assistant device name: …" / "Shelly device name: …".
-- Inventory with touch behaviour: test report of 3.2.1-rc2
-  (`docs/history/reports/` once archived).

@@ -20,13 +20,18 @@ export function renderFirmware() {
     const files = groups.get(type).sort((a, b) => collator.compare(b.version || "", a.version || ""));
     const head = box("div", "card-head", el("h2", type), el("span", `Gen ${files[0].gen ?? "?"}`, "tag"),
       files.some(f => f.source !== "upload" && !f.https) ? el("span", "HTTP only", "tag warn") : null);
-    const card = box("div", "card", head);
+    const card = box("div", "card", head, firmwareHead());
     files.forEach((f, i) => card.append(firmwareRow(f, i === 0)));
     return card;
   });
   if (!cards.length) cards.push(box("div", "card", el("div", ui.firmware.length ? "No firmware matches." : "No firmware stored.", "empty")));
   $("fw-cards").replaceChildren(...cards);
 }
+/** Column titles over the version rows (wide screens; phones label the values in the tile). */
+const FW_COLUMNS = ["Version", "Size", "Stored", "SHA-256", "Devices", ""];
+const firmwareHead = () => box("div", "fw-head", ...FW_COLUMNS.map(t => el("span", t)));
+/** Text of the "intermediate" label (tooltip without action, also on touch). */
+const INTERMEDIATE_TIP = "Intermediate version: required step before newer firmware can be installed safely";
 /** Device a firmware is provided for, with an "Install" button that opens the
  *  usual installation dialog (same conditions as "Install update" in the Devices tab). */
 function firmwareDevice(entry) {
@@ -65,8 +70,12 @@ function firmwareRow(f, latest) {
   if (uploaded) attachTip(uploaded, () => fwSource(f), true);
   // Once provided as an intermediate version by a check (permanent store marker)
   const step = f.intermediate ? el("span", "intermediate", "tag step") : null;
+  if (step) attachTip(step, () => INTERMEDIATE_TIP, true);
+  // Phones: small labels in the tile (data-label, shown by CSS only there)
+  const size = el("span", mb(f.size || 0), "nowrap fw-size"), date = el("span", fmt(f.downloaded), "nowrap sub fw-date");
+  size.dataset.label = "Size"; date.dataset.label = "Stored"; sha.dataset.label = "SHA-256";
   return box("div", "fw-row", box("div", "fw-ver", el("span", f.version, "name"), latest ? el("span", "latest", "tag primary") : null, uploaded, step),
-    el("span", mb(f.size || 0), "nowrap fw-size"), el("span", fmt(f.downloaded), "nowrap sub fw-date"), sha, devices, box("div", "actions", log, dl, del));
+    size, date, sha, devices, box("div", "actions", log, dl, del));
 }
 /** Delete a stored firmware: dialog, then a second confirmation with
  *  acknowledgment (as for the device password). Nothing is deleted automatically. */
@@ -128,5 +137,6 @@ function uploadConfirm(r) {
     }
   }}], "upload");
 }
+$("fw-upload").append(icon("upload"));   // same icon as the upload dialog title (aria-hidden)
 $("fw-upload").onclick = openUpload;
 $("fw-search").oninput = () => render(true);

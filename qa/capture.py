@@ -128,6 +128,12 @@ def long_settings(route):
     route.fulfill(response=r, body=json.dumps(d))
 
 
+def answer_json(body):
+    """Route handler answering with a fixed JSON body (one argument: Playwright passes the
+    request as second argument to handlers that accept two)."""
+    return lambda route: route.fulfill(json=body)
+
+
 def run_steps(page, f, steps, touch):
     """Apply the steps of one shot (f = app frame); returns True for a full-page shot."""
     full = False
@@ -201,7 +207,7 @@ def main():
                         page.route("**/api/firmware", long_firmware)
                         page.route("**/api/settings", long_settings)
                     for pat, body in routes:
-                        page.route(pat, lambda r, b=body: r.fulfill(json=b))
+                        page.route(pat, answer_json(body))
                     page.goto(f"http://127.0.0.1:{port}" + ("/wrap" if embedded else "/ui/"))
                     f = page.wait_for_selector("iframe").content_frame() if embedded else page
                     f.wait_for_selector("#dev-cards table")

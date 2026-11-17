@@ -282,6 +282,17 @@ def _device_list(c):
           return {button: r(b).height, pill: r(p).height, dy: Math.abs(r(b).top - r(p).top)}; }""")
         check(f"{case}: Install button as high as the status pill", abs(sizes["button"] - sizes["pill"]) < 1 and sizes["dy"] < 1,
               str(sizes))
+    if width > 700:   # every column except "Device": title and content centred; IP and firmware with tabular digits
+        align = f.evaluate("""() => { const t = document.querySelector('#dev-cards table'), cs = e => getComputedStyle(e);
+          const cells = [...t.querySelectorAll('th, tbody tr:first-child td')].filter(e => cs(e).display !== 'none');
+          const off = cells.filter(e => (cs(e).textAlign === 'center') === e.classList.contains('c-device')).map(e => e.className);
+          const mid = e => { const r = e.getBoundingClientRect(); return r.left + r.width / 2; };
+          const strip = t.querySelector('td.c-action .act-strip'), status = t.querySelector('td.c-status .status-cell > *');
+          return {off, strip: Math.abs(mid(strip) - mid(strip.parentElement)),
+            status: cs(status.parentElement).justifyContent,
+            nums: ['td.c-ip', 'td.c-firmware'].map(q => cs(t.querySelector(q)).fontVariantNumeric)}; }""")
+        check(f"{case}: devices table – columns except Device centred, tabular digits", not align["off"] and align["strip"] < 1
+              and align["status"] == "center" and align["nums"] == ["tabular-nums"] * 2, str(align))
     check(f"{case}: no overflow (devices)", f.evaluate(OVERFLOW_JS) <= 0)
     page.screenshot(path=out / f"{case}-devices.png")
     install.first.click()
@@ -349,18 +360,22 @@ def _action_popups(c):
               and labeled.nth(7).inner_text() == "Websocket debug log", str(labeled.all_inner_texts()))
         f.locator("#dev-cards tr", has_text="Hall").first.screenshot(path=out / f"{case}-tile-debug.png")
     # Popups opened by an action icon: strip under the title (icon circle 32 px, name, state)
-    expect = (("Hall", "Eco mode", "Eco mode – Hall", "On", "t-good", "Turn it off for Hall?"),
-              ("Hall", "Bluetooth", "Bluetooth – Hall", "On", "t-good", "Turn it off for Hall?"),
-              ("Hall", "Access point", "Access point – Hall", "Off", "t-off", "Turn it on for Hall?"),
-              ("Hall", "Power-on action", "Power-on action – Hall", "Restore last state", "t-good", "switch:0"),
-              ("Hall", "Websocket debug log", "Websocket debug log – Hall", "Off", "t-off", "Turn it on for Hall?"),
+    # Switch and restart popups: no question; the button names the action
+    expect = (("Hall", "Eco mode", "Eco mode – Hall", "On", "t-good", "Turn off"),
+              ("Hall", "Bluetooth", "Bluetooth – Hall", "On", "t-good", "Turn off"),
+              ("Hall", "Access point", "Access point – Hall", "Off", "t-off", "Turn on"),
+              ("Hall", "Power-on action", "Power-on action – Hall", "Restore last state", "t-good", None),
+              ("Hall", "Websocket debug log", "Websocket debug log – Hall", "Off", "t-off", "Turn on"),
               ("Living room", "Password protection", "Device password – Living room ceiling with a really long device name",
-               "Protected", "t-good", "Stored in this app"),
-              ("Hall", "Restart", "Restart – Hall", None, "t-neutral", "Restart Hall now?"))
-    for name, label, title, pill, tone, question in expect:
-        t, strip, body, _buttons = _popup(f, icon_of(name, label))
+               "Protected", "t-good", None),
+              ("Hall", "Restart", "Restart – Hall", None, "t-neutral", "Restart"))
+    for name, label, title, pill, tone, button in expect:
+        t, strip, body, buttons = _popup(f, icon_of(name, label))
         check(f"{case}: {label} popup with status strip", t == title and strip and strip["first"] and strip["pill"] == pill
-              and tone in strip["tone"] and strip["size"] == 32 and question in body, f"{t} {strip} {body[:120]}")
+              and tone in strip["tone"] and strip["size"] == 32, f"{t} {strip} {body[:120]}")
+        if button:
+            check(f"{case}: {label} popup without question, button \"{button}\"", "?" not in body and buttons[-1][0] == button
+                  and (label != "Restart" or "The device will be unavailable for a few seconds." in body), f"{body[:160]} {buttons}")
         if label == "Websocket debug log":
             link = f.locator("#dlg-body a", has_text="Open Diagnostics in the Shelly web UI")
             check(f"{case}: debug popup links the Diagnostics page", link.get_attribute("href") == "http://192.168.1.12/#/diagnostics"
@@ -638,6 +653,37 @@ def _firmware_tab(c):
       const n = v.querySelector('.name').getBoundingClientRect(), t = v.querySelector('.tag').getBoundingClientRect();
       return {gap: Math.round(t.left - n.right), dy: Math.abs((n.top + n.height / 2) - (t.top + t.height / 2))}; })""")
     check(f"{case}: labels 12 px after the version, centred", labels and all(x["gap"] == 12 and x["dy"] < 1.5 for x in labels), str(labels))
+    up = f.evaluate("""() => { const b = document.getElementById('fw-upload'), s = b.querySelector('svg'), r = e => e.getBoundingClientRect();
+      const t = document.createRange(); t.selectNodeContents(b.firstChild); const tr = t.getBoundingClientRect();
+      return {size: Math.round(r(s).width), hidden: s.getAttribute('aria-hidden'), after: r(s).left > tr.right,
+        dy: Math.abs((r(s).top + r(s).height / 2) - (tr.top + tr.height / 2)), name: b.textContent}; }""")
+    check(f"{case}: upload button with the upload icon after the text", up["size"] == 16 and up["hidden"] == "true" and up["after"]
+          and up["dy"] < 1.5 and up["name"] == "Upload firmware", str(up))
+    head = f.evaluate("""() => { const h = document.querySelector('#fw-cards .fw-head'), row = document.querySelector('#fw-cards .fw-row');
+      if (getComputedStyle(h).display === 'none') return {shown: false,
+        labels: [...row.querySelectorAll('[data-label]')].map(e => getComputedStyle(e, '::before').content)};
+      const mid = e => { const r = e.getBoundingClientRect(); return r.left + r.width / 2; };
+      const titles = [...h.children], cells = [...row.children];
+      return {shown: true, titles: titles.map(t => t.textContent), first: Math.round(titles[0].getBoundingClientRect().left - cells[0].getBoundingClientRect().left),
+        centred: titles.slice(1, 5).map((t, i) => getComputedStyle(t).textAlign === 'center' && Math.abs(mid(t) - mid(cells[i + 1])) < 1)}; }""")
+    if width > 700:
+        check(f"{case}: firmware table head – titles over the columns, centred except Version", head["shown"]
+              and head["titles"] == ["Version", "Size", "Stored", "SHA-256", "Devices", ""] and head["first"] == 0
+              and all(head["centred"]), str(head))
+    else:
+        check(f"{case}: phones – no table head, labels in the tile", not head["shown"]
+              and head["labels"] == ['"Size"', '"Stored"', '"SHA-256"'], str(head))
+    if width > 700:
+        step.first.hover()
+    else:
+        page.wait_for_timeout(300)   # a re-render after the previous state request hides every tooltip
+        step.first.tap()
+    check(f"{case}: intermediate label tooltip", tip_text(f) == "Intermediate version: required step before newer firmware can be installed safely",
+          str(tip_text(f)))
+    if width > 700:
+        page.mouse.move(5, 5)
+    else:
+        step.first.tap()   # second tap hides it
     if width < 700:
         dates = f.evaluate("""() => [...document.querySelectorAll('.fw-row')].map(r => { const g = s => r.querySelector(s).getBoundingClientRect();
           return {right: Math.round(g('.actions').right - g('.fw-date').right), line: Math.round(Math.abs(g('.fw-date').top - g('.fw-size').top)),

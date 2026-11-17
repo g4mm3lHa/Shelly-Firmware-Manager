@@ -88,13 +88,13 @@ export function editAop(d) {
     }}]);
   });
 }
-/** Eco mode: one confirmation. */
+/** Eco mode: one confirmation; the button names the action ("Turn on" / "Turn off"). */
 export function editEco(d) {
   const title = `Eco mode – ${d.name}`;
   withLive(d, title, live => {
     if (typeof live.eco !== "boolean") { message(title, "This device does not report an eco mode."); return; }
     const target = !live.eco, word = target ? "on" : "off";
-    modal(title, [switchStrip("eco", "Eco mode", live.eco, "good"), el("p", `Turn it ${word} for ${d.name}?`),
+    modal(title, [switchStrip("eco", "Eco mode", live.eco, "good"),
       el("p", "The Shelly may restart to apply the change.", "hint")],
     [{text: "Cancel"}, {text: `Turn ${word}`, kind: "primary", action: () => saveSettings(d, title, {eco: target}, true)}]);
   });
@@ -107,7 +107,7 @@ export function editSwitch(d, key) {
   withLive(d, title, live => {
     if (typeof live[key] !== "boolean") { message(title, `This device does not offer a ${label.toLowerCase()} switch.`); return; }
     const target = !live[key], word = target ? "on" : "off";
-    modal(title, [switchStrip(key, label, live[key], onTone), el("p", `Turn it ${word} for ${d.name}?`),
+    modal(title, [switchStrip(key, label, live[key], onTone),
       el("p", key === "ap" ? "Only the switch is changed; all other Wi-Fi settings stay as they are." : "Only the global Bluetooth switch is changed.", "hint")],
     [{text: "Cancel"}, {text: `Turn ${word}`, kind: "primary", action: () => saveSettings(d, title, {[key]: target}, true)}]);
   });
@@ -131,14 +131,13 @@ export function editDebug(d) {
       a.rel = "noopener noreferrer"; content.push(box("p", null, a));
     }
     if (belowOne(d.version)) content.push(el("div", DEBUG_UNPROTECTED, "warnbox"));
-    content.push(el("p", `Turn it ${word} for ${d.name}?`));
     modal(title, content, [{text: "Cancel"}, {text: `Turn ${word}`, kind: "primary", action: () => saveSettings(d, title, {debug_ws: target}, true)}]);
   });
 }
 /** Restart: one confirmation (not logged). */
 export function restartDevice(d) {
   const title = `Restart – ${d.name}`;
-  modal(title, [featureStrip("restart", "Restart", "neutral", null), el("p", `Restart ${d.name} now?`), el("p", "The device is unavailable for a few seconds.", "hint")], [{text: "Cancel"},
+  modal(title, [featureStrip("restart", "Restart", "neutral", null), el("p", "The device will be unavailable for a few seconds.", "hint")], [{text: "Cancel"},
     {text: "Restart", kind: "danger", action: async () => {
       try { await api(`${devUrl(d)}/restart`, {}); message(title, "Restart command sent."); }
       catch (e) { message(title, e.message, "error"); }
