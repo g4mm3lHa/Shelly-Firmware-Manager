@@ -2,11 +2,19 @@
 
 ## 3.2.1
 
-Power-on action of Gen1 dimmers, Duo and Vintage can be changed again; settings the
-Shelly accepts but does not apply are reported. rc2: setting help as tooltips,
-tooltips on touch devices, websocket debug log switch, clearer action popups and
-Firmware tab. rc3: shorter action popups, centred table columns, column titles in the
-Firmware tab.
+Released 2026-11-17. Power-on action of Gen1 dimmers, Duo and Vintage can be changed
+again; settings the Shelly accepts but does not apply are reported. rc2: setting help
+as tooltips, tooltips on touch devices, websocket debug log switch, clearer action
+popups and Firmware tab. rc3: shorter action popups, centred table columns, column
+titles in the Firmware tab.
+
+Final release (same functions as rc3)
+- Version 3.2.1. No functional change compared with rc3 (live-tested).
+  rc1 to rc3 were never released; their changes are listed below.
+- Clean-up without visible effect: two UI module variables are no longer exported
+  (only used inside their own module).
+- Development (not part of the image): the screenshots of the release are in
+  `qa/screenshots/3.2.1/`.
 
 Changes in rc3
 - Popups of the action icons eco mode, access point, Bluetooth and websocket debug log:

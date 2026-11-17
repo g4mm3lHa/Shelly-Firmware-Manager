@@ -149,7 +149,7 @@ export async function copyText(text) {
 }
 
 // ---------------------------------------------------------------- Tooltip
-export const tip = $("tip");
+const tip = $("tip");
 let tipOwner = null;              // node whose tooltip is shown
 let tipTapped = false;            // shown by a tap (a second tap hides it; hover does not count)
 // Type of the last pointerdown ("mouse", "touch", "pen"): a following click is a tap

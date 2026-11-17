@@ -87,7 +87,8 @@ function showView(v) {
 }
 for (const v of VIEWS) $("tab-" + v).onclick = () => showView(v);
 
-export let timer = 0, inflight = false, queued = false;
+let timer = 0, inflight = false;
+export let queued = false;   // read by devices.js
 const POLL_IDLE_MS = 30000, POLL_BUSY_MS = 3000;
 /** Next refresh: fast while something runs, slow when idle, none while the page is hidden. */
 function schedule() {
