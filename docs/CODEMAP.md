@@ -161,6 +161,7 @@ paths in tmp via `data_paths`), `mgr`, `client` (UI test client with CSRF token)
 | `ui_test.py [--full]` | 8801 idle, 8802 busy | layout, menus, dialogs, contrast; quick = 5 cases, full = 13 |
 | `ui_features.py` | 8801, 8803 legacy, 8804 missing, 8805 features | download URL hints/notice, setting help tooltips (mouse, keyboard, touch), downgrade, upload, delete, Install button, changelog icon, labels and dialog title icons in the Firmware tab, failed installation in the updates card, dialog sections, phone tile layout, tooltips on touch (tap with/without action, disabled buttons), action popups with status strip, websocket debug icon, device name tooltips, user in the log tile |
 | `mobile_capture.py` | 8711 idle | screenshots + overflow, full only |
+| `capture.py OUT [--shot NAME=STEPS]` | own demo, free port | screenshots of chosen views at 1440 px and 412 px @2x (touch) for test reports and mockups (`--root` = scratch copy); steps tab/click/tap/hover/fill/wait/full, `--route` for fake device answers |
 
 `tools/dev/check.sh [tests|ui|full|build]` runs everything in order: ruff → mypy (strict,
 app modules) → build check → version match → pytest → UI. Rules of ruff, mypy and pytest:

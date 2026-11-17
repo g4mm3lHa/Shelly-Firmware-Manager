@@ -63,4 +63,4 @@ Layout: `shelly_firmware_manager/` (only what Home Assistant needs: app definiti
 `README.md`/`DOCS.md`/`CHANGELOG.md` for the app store, Dockerfile, AppArmor profile,
 pinned wheels, `app/` with the Python sources and the built UI), `ui-src/` (UI sources),
 `tests/` (by area), `qa/` (UI checks, demo server, screenshots of the current version),
-`tools/`, `docs/`, `candidates/` (current test report).
+`tools/`, `docs/` (code map, UI decisions), `candidates/` (current test report).
