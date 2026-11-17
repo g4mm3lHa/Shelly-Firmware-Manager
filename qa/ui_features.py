@@ -19,13 +19,15 @@ Suites, in this order (the last two change the demo state in their last case):
                       websocket debug icon, tooltips of the device names and tooltips on
                       touch, Firmware-tab labels and dialog title icons. Demo "features"
                       on 8805 (and "idle" on 8801).
-Usage: python qa/ui_features.py <shots-dir> [suite ...]   (qa/run_ui.py starts the demos)
+Usage: python qa/ui_features.py <shots-dir> [--full] [suite ...]   (qa/run_ui.py starts
+the demos; --full: all viewports of firmware_store, final gate)
 Every suite checks: no horizontal overflow, no console errors; screenshots go to
 <shots-dir>."""
 
 import io
 import json
 import sys
+import time
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -37,6 +39,31 @@ IDLE, LEGACY, MISSING, FEATURES = (f"http://127.0.0.1:{p}" for p in (8801, 8803,
 OVERFLOW_JS = "document.documentElement.scrollWidth - document.documentElement.clientWidth"
 results = []  # (suite: name, ok, detail)
 SUITE = [""]  # name of the running suite (prefix of the result names)
+FULL = "--full" in sys.argv  # final gate: all viewports
+
+
+def wait_until(predicate, timeout=5.0):
+    """Poll predicate every 50 ms until it is true; returns its last result (no fixed
+    waits: a check fails only if the state is not reached within timeout)."""
+    deadline = time.monotonic() + timeout
+    while True:
+        result = predicate()
+        if result or time.monotonic() > deadline:
+            return result
+        time.sleep(0.05)
+
+
+def ui_frame(page, embedded):
+    """The frame of the app: the iframe of the HA-like wrapper or the page itself."""
+    return page.wait_for_selector("iframe").content_frame() if embedded else page
+
+
+def refresh_state(page, f):
+    """Make the app request /api/state now (as on returning to the tab) and wait for the
+    answer and the re-render."""
+    with page.expect_response("**/api/state"):
+        f.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
+    page.wait_for_timeout(100)  # render after the answer (same task queue, no event to wait for)
 
 
 def check(name, ok, detail=""):
@@ -57,8 +84,7 @@ def open_page(browser, base, width, scheme, embedded, ignore=()):
     page.on("console", lambda m, errs=errors: errs.append(m.text)
             if m.type == "error" and not m.text.startswith("Failed to load resource") else None)
     page.goto(base + ("/wrap" if embedded else "/ui/"))
-    page.wait_for_timeout(500)
-    frame = page.frames[1] if embedded else page
+    frame = ui_frame(page, embedded)
     frame.wait_for_selector("#dev-cards table")
     return ctx, page, frame, errors
 
@@ -75,7 +101,7 @@ def firmware_zip():
 def menu_items(f, name):
     """Open the row menu of a device; returns [(text, disabled)]."""
     f.locator(f'button[aria-label="Actions for {name}"]').first.click()
-    f.wait_for_timeout(150)
+    f.wait_for_selector("#rowmenu button")
     return f.evaluate("() => [...document.querySelectorAll('#rowmenu button')].map(b => [b.textContent, b.disabled])")
 
 
@@ -169,8 +195,7 @@ def download_url_hint(browser, out):
         page.on("console", lambda m, errs=errors: errs.append(m.text)
                 if m.type == "error" and not m.text.startswith("Failed to load resource") else None)
         page.goto(IDLE + ("/wrap" if embedded else "/ui/"))
-        page.wait_for_timeout(500)
-        f = page.frames[1] if embedded else page
+        f = ui_frame(page, embedded)
         f.click("#tab-settings")
         f.wait_for_selector("#opt-download_base_url")
         case = f"{width}-{scheme}{'-embedded' if embedded else ''}"
@@ -215,14 +240,11 @@ def download_url_notice(browser, out):
         check(f"{case}: no horizontal overflow", f.evaluate(OVERFLOW_JS) <= 0)
         page.screenshot(path=out / f"notice-legacy-{case}.png")
         f.locator("#notice button", has_text="Open settings").click()
-        page.wait_for_timeout(300)
-        check(f"{case}: settings opened", f.locator("#view-settings").is_visible())
+        check(f"{case}: settings opened", wait_until(f.locator("#view-settings").is_visible))
         if index == len(cases) - 1:  # changes the demo state: last case only
             f.locator("#notice button", has_text="This address is correct").click()
-            page.wait_for_timeout(200)
             f.locator("#dlg-btns button", has_text="Yes, this is correct").click()
-            page.wait_for_timeout(800)
-            check(f"{case}: confirmation removes the notice", notice.is_hidden())
+            check(f"{case}: confirmation removes the notice", wait_until(notice.is_hidden))
         check(f"{case}: no console errors (legacy)", not errors, str(errors[:2]))
         ctx.close()
         # Not set at all
@@ -371,16 +393,14 @@ def _action_popups(c):
         route.fulfill(json=state)
     page.route("**/api/state", old_firmware)
     page.route("**/settings/refresh", lambda r: r.fulfill(json=LIVE))
-    f.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
-    page.wait_for_timeout(400)
+    refresh_state(page, f)
     _t, _strip, body, _buttons = _popup(f, icon_of("Hall", "Websocket debug log"))
     check(f"{case}: debug popup warns below firmware 1.0.0", "not protected by the device password" in body, body[-200:])
     f.locator("#dlg-btns button", has_text="Cancel").click()
     page.wait_for_timeout(400)   # the state request of closing the dialog is answered first
     page.unroute("**/settings/refresh")
     page.unroute("**/api/state")
-    f.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
-    page.wait_for_timeout(400)
+    refresh_state(page, f)
     for row in opened:
         row.locator("td.c-details summary").click()
     f.evaluate("() => scrollTo(0, 0)")
@@ -437,8 +457,7 @@ def _keep_listed(c):
         route.fulfill(json=state)
 
     page.route("**/api/state", checking)
-    f.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
-    page.wait_for_timeout(400)
+    refresh_state(page, f)
     card = f.locator("#dev-cards .card").first
     for name in checked:
         row = card.locator("tr", has_text=name)
@@ -446,8 +465,7 @@ def _keep_listed(c):
               and row.locator(".pill").first.inner_text().startswith("Checking"))
     card.locator("tr", has_text="Fridge").screenshot(path=c.out / f"{case}-checking-kept.png")
     page.unroute("**/api/state")
-    f.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
-    page.wait_for_timeout(400)
+    refresh_state(page, f)
     if c.width < 700:
         sizes = f.evaluate("""() => { const t = [...document.querySelectorAll('#dev-cards .status-cell')]
           .find(e => e.querySelector('.p-ignored') && e.querySelector('button.pill'));
@@ -692,12 +710,11 @@ def _firmware_delete_and_upload(c, rows):
     page.screenshot(path=out / f"{case}-delete-confirm.png")
     if last:
         f.locator("#dlg-btns button", has_text="Delete").click()
-        f.wait_for_timeout(1200)
-        check(f"{case}: deleted", f.locator(".fw-row", has_text="1.3.0").count() == 0)
+        check(f"{case}: deleted", wait_until(lambda: f.locator(".fw-row", has_text="1.3.0").count() == 0))
     else:
         f.locator("#dlg-btns button", has_text="Cancel").click()
 
-    # Upload: pre-filled form; wrong SHA shows an inline error (430), store (last case)
+    # Upload: pre-filled form; wrong SHA shows an inline error (first case), store (last case)
     f.locator("#fw-upload").click()
     check(f"{case}: upload dialog with title icon", f.locator("#dlg-title svg.ti-upload").count() == 1)
     f.locator("#dlg-body input[type=file]").set_input_files(
@@ -708,22 +725,20 @@ def _firmware_delete_and_upload(c, rows):
     check(f"{case}: type pre-filled", f.locator("#dlg-body select").input_value() == "Plus1")
     check(f"{case}: version pre-filled", f.locator("#dlg-body input[type=text]").first.input_value() == "1.1.0")
     check(f"{case}: upload confirmation with title icon", f.locator("#dlg-title svg.ti-upload").count() == 1)
-    if index == 1:
+    if index == 0:
         f.locator("#dlg-body input[type=text]").nth(1).fill("a" * 64)
         f.locator("#dlg-btns button", has_text="Store").click()
-        f.wait_for_timeout(500)
         err = f.locator("#dlg-body .bad")
-        check(f"{case}: wrong SHA-256 shown inline", err.is_visible() and "does not match" in err.text_content())
+        check(f"{case}: wrong SHA-256 shown inline", wait_until(err.is_visible) and "does not match" in err.text_content())
         page.screenshot(path=out / f"{case}-upload-error.png")
     page.screenshot(path=out / f"{case}-upload-confirm.png")
     if last:
         f.locator("#dlg-btns button", has_text="Store").click()
-        f.wait_for_timeout(1200)
-        check(f"{case}: upload stored", f.locator(".fw-row", has_text="1.1.0").count() == 1)
+        check(f"{case}: upload stored", wait_until(lambda: f.locator(".fw-row", has_text="1.1.0").count() == 1))
         page.screenshot(path=out / f"{case}-firmware-after.png", full_page=True)
     else:
         f.locator("#dlg-btns button", has_text="Cancel").click()
-        f.wait_for_timeout(300)
+        f.wait_for_selector("#dlg", state="hidden")
 
 
 def _logs(c):
@@ -763,13 +778,12 @@ def _logs(c):
     check(f"{case}: delete entry asks first", dialog(f)["title"] == "Delete log entry?")
     if last:
         f.locator("#dlg-btns button", has_text="Delete").click()
-        f.wait_for_timeout(800)
-        check(f"{case}: entry deleted", entries.count() == total - 1, str(entries.count()))
+        check(f"{case}: entry deleted", wait_until(lambda: entries.count() == total - 1), str(entries.count()))
         f.locator("#log-clear").click()
         d = dialog(f)
         check(f"{case}: clear asks first", d["title"] == "Delete all logs?" and str(total - 1) in d["body"], d["body"][:120])
         f.locator("#dlg-btns button", has_text="Delete all").click()
-        f.wait_for_timeout(800)
+        wait_until(lambda: entries.count() == 1)
         check(f"{case}: log cleared, one entry names the user", entries.count() == 1 and "Log cleared" in entries.first.inner_text(),
               entries.first.inner_text()[:80])
         page.screenshot(path=out / f"{case}-logs-cleared.png")
@@ -778,9 +792,11 @@ def _logs(c):
 
 
 def firmware_store(browser, out):
-    """Device list, downgrade, Firmware tab and Logs tab in four viewports – one helper
-    per area (the last case changes the demo state)."""
-    cases = ((360, "light", True), (430, "dark", False), (1440, "dark", False), (1440, "light", False))
+    """Device list, downgrade, Firmware tab and Logs tab – one helper per area (the last
+    case changes the demo state). Quick: a phone (embedded) and a desktop viewport;
+    --full adds 430 px dark and 1440 px light."""
+    cases = (((360, "light", True), (430, "dark", False), (1440, "dark", False), (1440, "light", False)) if FULL
+             else ((360, "light", True), (1440, "dark", False)))
     for index, (width, scheme, embedded) in enumerate(cases):
         last = index == len(cases) - 1
         case = f"features-{width}-{scheme}{'-embedded' if embedded else ''}"
@@ -815,9 +831,10 @@ SUITES = {"download_url_hint": download_url_hint, "setting_help": setting_help, 
 
 def main():
     """Run the selected suites (default: all, in the documented order)."""
-    out = Path(sys.argv[1] if len(sys.argv) > 1 else "shots")
+    args = [a for a in sys.argv[1:] if a != "--full"]
+    out = Path(args[0] if args else "shots")
     out.mkdir(parents=True, exist_ok=True)
-    selected = sys.argv[2:] or list(SUITES)
+    selected = args[1:] or list(SUITES)
     with sync_playwright() as pw:
         browser = launch(pw)
         for name in selected:

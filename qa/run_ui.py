@@ -2,7 +2,7 @@
 
 Usage (repository root): python qa/run_ui.py [quick|full] [shots-dir]
   quick (default, per UI change): ui_test.py quick matrix + ui_features.py
-  full  (final gate):             ui_test.py --full + ui_features.py + mobile_capture.py
+  full  (final gate):             ui_test.py --full + ui_features.py --full + capture.py --gate
 The demos run with the same interpreter and environment (tools/dev/run.sh sets the
 pinned dependencies). Prints one result line per suite; exit code 1 if any failed."""
 
@@ -16,7 +16,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "shelly_firmware_manager" / "app"
 DEMOS = {8801: "idle", 8802: "busy", 8803: "legacy", 8804: "missing", 8805: "features"}
-MOBILE_DEMO = {8711: "idle"}
 
 
 def wait_for(port, timeout=30):
@@ -47,7 +46,7 @@ def main():
         raise SystemExit(__doc__)
     # An empty argument (e.g. from a shell wrapper) also means: temporary folder, never the current directory
     shots = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else tempfile.mkdtemp(prefix="sfm-shots-")
-    demos = {**DEMOS, **(MOBILE_DEMO if mode == "full" else {})}
+    demos = DEMOS
     procs = [
         subprocess.Popen([sys.executable, str(ROOT / "qa" / "demo.py"), str(APP), str(port), scenario],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -57,9 +56,10 @@ def main():
     try:
         for port in demos:
             wait_for(port)
-        suites = [("ui_test.py", shots, *(["--full"] if mode == "full" else [])), ("ui_features.py", shots)]
-        if mode == "full":
-            suites.append(("mobile_capture.py", shots))
+        full = ["--full"] if mode == "full" else []
+        suites = [("ui_test.py", shots, *full), ("ui_features.py", shots, *full)]
+        if mode == "full":  # own demo on a free port
+            suites.append(("capture.py", str(Path(shots) / "gate"), "--gate"))
         for script, *args in suites:
             print(script)
             code, _last = run(script, *args)

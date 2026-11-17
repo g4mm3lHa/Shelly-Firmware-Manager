@@ -3,7 +3,7 @@
 # stops at the first failing step. Usage (repository root):
 #   tools/dev/check.sh            lint + type check + build check + all backend tests
 #   tools/dev/check.sh ui         ... + UI quick matrix and feature suites
-#   tools/dev/check.sh full       ... + full UI matrix and mobile captures (final gate)
+#   tools/dev/check.sh full       ... + full UI matrix, all feature viewports and the layout gate (final gate)
 #   tools/dev/check.sh build      rebuild app/static from ui-src first, then as default
 # Uses the installed pytest/ruff/playwright and, offline, the helpers next to this
 # file (pinned wheels, asyncio shim if pytest-asyncio is missing, esbuild stand-in).

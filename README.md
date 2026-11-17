@@ -51,7 +51,7 @@ UI checks against demo servers with fake data):
 ```
 tools/dev/check.sh          # lint + build check + backend tests (seconds)
 tools/dev/check.sh ui       # ... + UI quick matrix and feature checks (under a minute)
-tools/dev/check.sh full     # ... + full UI matrix and mobile captures (final gate)
+tools/dev/check.sh full     # ... + full UI matrix, all feature viewports and the layout gate (final gate)
 tools/dev/check.sh build    # rebuild app/static from ui-src first
 ```
 

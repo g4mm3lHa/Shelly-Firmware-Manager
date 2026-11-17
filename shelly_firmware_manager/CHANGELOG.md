@@ -7,6 +7,15 @@ Shelly accepts but does not apply are reported. rc2: setting help as tooltips,
 tooltips on touch devices, websocket debug log switch, clearer action popups and
 Firmware tab.
 
+Changes in rc3
+- Development (not part of the image): older test reports, session handovers and
+  backlogs in `docs/history/`; approved UI decisions in `docs/UI_DECISIONS.md`; new
+  `qa/capture.py` (screenshots of chosen views at 1440 px and 412 px for reports and
+  mockups, every shot checked for page errors and horizontal overflow; `--gate`
+  replaces `qa/mobile_capture.py` in the final gate); UI quick check about 40 s instead
+  of 75 s (`qa/ui_features.py` checks the Firmware/Devices/Logs flows in two viewports,
+  all four with `--full`; fixed waits replaced by waiting for the expected state).
+
 Changes in rc2
 - Settings tab: the help texts are no longer shown under the fields. A small i-icon
   next to each setting name shows the help as tooltip (mouse over the name or the
