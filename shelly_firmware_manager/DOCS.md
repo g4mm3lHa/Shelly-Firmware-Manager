@@ -64,14 +64,23 @@ the Home Assistant theme (colours, light/dark) and works on phones.
   installation failed – then with checkbox and **Install** for another attempt) until
   you check it again or the next full check runs (it stays there while it is checked).
 - The action icons show and change power-on action, eco mode, password protection,
-  access point, Bluetooth, actions and schedules, and restart the device. A "?" means
+  access point, Bluetooth, actions and schedules and the websocket debug log, and
+  restart the device. Their popups start with a strip that shows the current state. A "?" means
   the value is currently unknown. Colours: power-on action green = every output
   restores its last state, red = another value; lock green = protected and the password
   is stored in the app, yellow = protected but the password is not stored here; access
-  point, actions and schedules red = active. Gen1 devices show the power-on values with
+  point, actions and schedules red = active; websocket debug log yellow = on. Gen1 devices show the power-on values with
   the names of their own web interface ("Restore last mode", "Switch"). Every change is
   read back from the device; a value the device accepted but did not apply is reported
   as a warning and logged as failed.
+- **Websocket debug log** (Gen2+, bug icon): turns on the debug log that the Shelly
+  streams over a websocket; the Diagnostics page of the Shelly web UI (linked in the
+  popup) shows it live. Turn it off afterwards – the log may contain network and
+  configuration details and streaming uses device resources. Below firmware 1.0.0 the
+  stream is not protected by the device password. Gen1 devices have no such log.
+- Hovering over a device name shows the Home Assistant and the Shelly device name. On
+  touch devices a tap shows a tooltip where the tap has no other function, and the
+  reason of a disabled button.
 - The row menu ⋮ offers: Check for updates (this device only), Install update,
   Downgrade, Reload device info, Ignore / Resume device, Open web UI, device settings,
   Status details and Restart.
@@ -191,7 +200,9 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
   2. Device type and version are filled in from the file where possible – check them.
   3. Optionally enter the expected SHA-256; the upload is refused if it does not match.
 
-  Uploaded files are marked "Uploaded". A version newer than the installed one is
+  Uploaded files are marked "Uploaded". A file that a check provided as an
+  intermediate version is marked "intermediate" (files provided before this app version
+  are not marked). A version newer than the installed one is
   provided as update by the next check (see [How a check works](#how-a-check-works)),
   an older one allows a downgrade. The app cannot verify where an uploaded file comes
   from, and the version is the one you confirmed – only use files you trust.
@@ -212,7 +223,8 @@ confirmation). After clearing, one entry remains that names who cleared the log.
 ### Settings
 
 All options from [Configuration](#configuration), grouped into cards with one Save
-button. A hint warns while typing if the download base URL is a host name or not in
+button. The i-icon next to a setting (or the setting name) shows its help – on touch
+devices with a tap. A hint warns while typing if the download base URL is a host name or not in
 your local network. While installations are disabled because of the download base URL,
 a notice above the tabs explains why.
 

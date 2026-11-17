@@ -647,8 +647,8 @@ async def read_settings(
     auth: DeviceAuth | None = None,
     extended: bool = False,
 ) -> dict[str, Any]:
-    """Shelly name, NTP server, eco mode, AP and Bluetooth switch and power-on action
-    of all outputs – one request (Gen2+ Shelly.GetConfig, Gen1 /settings).
+    """Shelly name, NTP server, eco mode, AP, Bluetooth and websocket debug switch and
+    power-on action of all outputs – one request (Gen2+ Shelly.GetConfig, Gen1 /settings).
 
     Switch values are True/False or UNSUPPORTED. extended=True (checks and Reload
     Device Info only) also reads whether actions/webhooks and schedules are active:
@@ -667,6 +667,7 @@ async def read_settings(
         # Only the legacy global switch counts; firmware 2.0+ removed it (Bluetooth
         # then runs on demand) and ble.rpc.enable is no global switch.
         extra["ble"] = _flag((config.get("ble") or {}).get("enable"))
+        extra["debug_ws"] = _flag(((system.get("debug") or {}).get("websocket") or {}).get("enable"))
         if extended:
             extra["actions"] = await _list_active(
                 lambda: _rpc(session, origin, "Webhook.List", auth=auth), "hooks", lambda e: e.get("enable") is True
@@ -693,6 +694,7 @@ async def read_settings(
         # docs), the device would leave the network – see GEN1_AP_NOTE.
         extra["ap"] = _flag((settings.get("wifi_ap") or {}).get("enabled"))
         extra["ble"] = UNSUPPORTED  # Gen1 devices have no Bluetooth switch
+        extra["debug_ws"] = UNSUPPORTED  # Gen1 devices have no websocket debug log
         if extended:
             channels = [
                 c for c in (settings.get("relays") or []) + (settings.get("lights") or []) if isinstance(c, dict)
@@ -742,7 +744,12 @@ def validate_settings(changes: dict[str, Any], outputs: list[dict[str, Any]]) ->
         if not isinstance(ntp, str) or not NTP_RE.match(ntp.strip()):
             raise ValueError("Invalid NTP server (host name or IP address, optional :port)")
         clean["ntp"] = ntp.strip()
-    for key, label in (("eco", "eco mode"), ("ap", "access point"), ("ble", "Bluetooth")):
+    for key, label in (
+        ("eco", "eco mode"),
+        ("ap", "access point"),
+        ("ble", "Bluetooth"),
+        ("debug_ws", "websocket debug log"),
+    ):
         if key in changes:
             if not isinstance(changes[key], bool):
                 raise ValueError(f"Invalid {label} (true or false)")
@@ -773,6 +780,8 @@ async def write_settings(
             system["device"] = device
         if "ntp" in changes:
             system["sntp"] = {"server": changes["ntp"]}
+        if "debug_ws" in changes:  # only debug.websocket.enable – other debug outputs stay
+            system["debug"] = {"websocket": {"enable": changes["debug_ws"]}}
         if system:
             result = await _rpc(session, origin, "Sys.SetConfig", {"config": system}, auth)
             restart |= bool(result.get("restart_required"))
@@ -790,8 +799,12 @@ async def write_settings(
         return restart
 
     # Gen1: settings are changed via GET with query parameters
-    if "ap" in changes or "ble" in changes:
-        raise ValueError(GEN1_AP_NOTE if "ap" in changes else "Gen1 devices have no Bluetooth switch")
+    if "ap" in changes:
+        raise ValueError(GEN1_AP_NOTE)
+    if "ble" in changes:
+        raise ValueError("Gen1 devices have no Bluetooth switch")
+    if "debug_ws" in changes:
+        raise ValueError(GEN1_DEBUG_WS_NOTE)
     query: dict[str, str] = {}
     if "name" in changes:
         query["name"] = changes["name"]
@@ -813,6 +826,7 @@ GEN1_AP_NOTE = (
     "Not available on Gen1: enabling the access point turns off the Wi-Fi client mode, "
     "the device would leave your network"
 )
+GEN1_DEBUG_WS_NOTE = "Gen1 devices have no websocket debug log"
 
 
 async def protection_status(session: aiohttp.ClientSession, origin: str) -> bool | None:

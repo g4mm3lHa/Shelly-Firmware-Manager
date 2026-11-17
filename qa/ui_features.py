@@ -4,6 +4,8 @@ feature suites.
 Suites, in this order (the last two change the demo state in their last case):
 - download_url_hint   Settings: hints for download_base_url (LAN IP, public IP,
                       localhost, host names). Demo "idle" on 8801.
+- setting_help        Settings: help texts as tooltips of the setting name and its
+                      i-icon (mouse, keyboard, touch). Demo "idle" on 8801.
 - download_url_notice notice for a missing / unconfirmed download base URL, device
                       progress of a Gen2+ installation. Demos "legacy" 8803, "missing" 8804.
 - firmware_store      downgrade from the device menu, upload, two-step delete, the
@@ -13,7 +15,10 @@ Suites, in this order (the last two change the demo state in their last case):
                       deleting log entries; 3.2.0: failed installation in the updates
                       card, dialog sections, phone tile layout, no tooltip after a tap,
                       user in the log tile; devices stay in the updates card while
-                      checked, Ignored label size on phones. Demo "features" on 8805 (and "idle" on 8801).
+                      checked, Ignored label size on phones; action popups with status strip,
+                      websocket debug icon, tooltips of the device names and tooltips on
+                      touch, Firmware-tab labels and dialog title icons. Demo "features"
+                      on 8805 (and "idle" on 8801).
 Usage: python qa/ui_features.py <shots-dir> [suite ...]   (qa/run_ui.py starts the demos)
 Every suite checks: no horizontal overflow, no console errors; screenshots go to
 <shots-dir>."""
@@ -79,6 +84,76 @@ def dialog(f):
     return f.evaluate("""() => ({title: document.getElementById('dlg-title').textContent,
       body: document.getElementById('dlg-body').innerText,
       buttons: [...document.querySelectorAll('#dlg-btns button')].map(b => [b.textContent, b.disabled])})""")
+
+
+def tip_text(f):
+    """Text of the shown tooltip, None if hidden."""
+    return f.evaluate("() => { const t = document.getElementById('tip'); return t.hidden ? null : t.textContent; }")
+
+
+def setting_help(browser, out):
+    """Settings tab: help texts only as tooltip of the name and the i-icon; touch tap on
+    the name toggles it without focusing the control; the live URL warning stays."""
+    for width, scheme, embedded in ((360, "light", True), (1440, "dark", False)):
+        case = f"{width}-{scheme}{'-embedded' if embedded else ''}"
+        ctx, page, f, errors = open_page(browser, IDLE, width, scheme, embedded)
+        f.click("#tab-settings")
+        f.wait_for_selector("#opt-check_interval_days")
+        help_box = f.locator("#opt-check_interval_days-help")
+        check(f"{case}: help text not shown under the field", help_box.evaluate("e => e.getBoundingClientRect().height") <= 1
+              and help_box.text_content() == "1–30 days")
+        described = f.get_attribute("#opt-check_interval_days", "aria-describedby")
+        check(f"{case}: help text stays the description of the field", described == "opt-check_interval_days-help", str(described))
+        icons = f.locator(".set-name button.help")
+        check(f"{case}: one i-icon per setting", icons.count() == 10, str(icons.count()))
+        name = f.locator("label[for=opt-check_interval_days]")
+        info = f.locator(".set-name", has=name).locator("button.help")
+        geo = f.evaluate("""() => { const l = document.querySelector('label[for=opt-check_interval_days]'), i = l.nextElementSibling;
+          const r = e => e.getBoundingClientRect(); return {dy: Math.abs((r(l).top + r(l).height / 2) - (r(i).top + r(i).height / 2)),
+          right: r(i).left >= r(l).right, size: r(i.querySelector('svg')).width}; }""")
+        check(f"{case}: i-icon (16 px) next to the name", geo["dy"] < 2 and geo["right"] and geo["size"] == 16, str(geo))
+        if width > 700:
+            name.hover()
+            check(f"{case}: hover over the name shows the help", tip_text(f) == "1–30 days", str(tip_text(f)))
+            page.mouse.move(5, 5)
+            check(f"{case}: leaving hides it", tip_text(f) is None)
+            info.hover()
+            check(f"{case}: hover over the icon shows the help", tip_text(f) == "1–30 days")
+            page.mouse.move(5, 5)
+            name.click()
+            check(f"{case}: desktop click on the name focuses the control (unchanged)",
+                  f.evaluate("document.activeElement.id") == "opt-check_interval_days")
+            info.focus()
+            f.locator("#opt-check_interval_days").focus()
+            page.keyboard.press("Shift+Tab")
+            check(f"{case}: keyboard focus of the icon shows the help", tip_text(f) == "1–30 days", str(tip_text(f)))
+            page.keyboard.press("Tab")
+        else:
+            bool_name = f.locator("label[for=opt-gen1_updates_enabled]")
+            before = f.is_checked("#opt-gen1_updates_enabled")
+            bool_name.tap()
+            check(f"{case}: tap on the name shows the help", tip_text(f) and tip_text(f).startswith("Gen1 firmware"), str(tip_text(f)))
+            check(f"{case}: tap on the name does not toggle the control", f.is_checked("#opt-gen1_updates_enabled") == before
+                  and f.evaluate("document.activeElement.id") != "opt-gen1_updates_enabled")
+            page.screenshot(path=out / f"setting-help-tap-{case}.png")
+            bool_name.tap()
+            check(f"{case}: second tap hides it", tip_text(f) is None)
+            name.tap()
+            check(f"{case}: tap on the name does not focus the field", f.evaluate("document.activeElement.id") != "opt-check_interval_days")
+            f.locator("#view-settings h2").first.tap()
+            check(f"{case}: tap elsewhere hides it", tip_text(f) is None)
+            info.tap()
+            check(f"{case}: tap on the icon shows the help", tip_text(f) == "1–30 days")
+            f.evaluate("() => window.dispatchEvent(new Event('scroll'))")
+            check(f"{case}: scrolling hides it", tip_text(f) is None)
+        f.fill("#opt-download_base_url", "http://203.0.113.10:8098")
+        check(f"{case}: live URL warning stays visible under the field", f.locator("#opt-download_base_url-warn").is_visible())
+        f.fill("#opt-download_base_url", "http://192.168.1.2:8098")
+        page.mouse.move(5, 5)
+        page.screenshot(path=out / f"setting-help-{case}.png", full_page=True)
+        check(f"{case}: no horizontal overflow", f.evaluate(OVERFLOW_JS) <= 0)
+        check(f"{case}: no console errors", not errors, str(errors[:2]))
+        ctx.close()
 
 
 def download_url_hint(browser, out):
@@ -196,6 +271,155 @@ def _device_list(c):
           ap: document.querySelectorAll('.act.alert.s-on[aria-label^="Access point"]').length})""")
         check(f"{case}: power-on action green and red, lock yellow, access point red",
               all(counts[k] > 0 for k in ("good", "alert", "warn", "ap")), str(counts))
+
+
+LIVE = {"shelly_name": "shelly-2", "ntp": "time.local", "eco": True, "ap": False, "ble": True, "debug_ws": False,
+        "outputs": [{"key": "switch:0", "name": "switch:0", "aop": "restore_last", "options": ["off", "on", "restore_last"]}]}
+
+
+def _popup(f, opener):
+    """Open an action popup; returns (title, strip, body, buttons)."""
+    opener.click(force=True)   # greyed-out icons are aria-disabled but open their note
+    f.wait_for_selector("#dlg-body .fstrip")   # after "Reading current values …"
+    d = dialog(f)
+    strip = f.evaluate("""() => { const s = document.querySelector('#dlg-body .fstrip'); if (!s) return null;
+      const p = s.querySelector('.fs-pill'), i = s.querySelector('.fs-icon');
+      return {name: s.querySelector('.fs-name').textContent, pill: p ? p.textContent : null, tone: s.className,
+        size: Math.round(i.getBoundingClientRect().width), first: s === document.getElementById('dlg-body').firstElementChild}; }""")
+    return d["title"], strip, d["body"], d["buttons"]
+
+
+def _action_popups(c):
+    """Action icons: websocket debug icon (colours, Gen1 unsupported), access-point icon,
+    status strip in every popup opened by an action icon, two icon rows of five."""
+    case, f, page, out, width = c.case, c.f, c.page, c.out, c.width
+    page.route("**/settings/refresh", lambda r: r.fulfill(json=LIVE))
+    opened = []   # phone tiles whose details were opened here (closed again at the end)
+
+    def icon_of(name, label):
+        row = f.locator("#dev-cards tr", has_text=name).first
+        if width < 700:
+            det = row.locator("td.c-details details")
+            if not det.evaluate("d => d.open"):
+                row.locator("td.c-details summary").click()
+                opened.append(row)
+            return row.locator(f".act-strip.labeled [aria-label^='{label}']")
+        return row.locator(f"td.c-action [aria-label^='{label}']")
+
+    living = icon_of("Living room", "Websocket debug log")
+    check(f"{case}: debug icon on = yellow", "c-warn" in living.get_attribute("class") and "s-on" in living.get_attribute("class"),
+          living.get_attribute("class"))
+    hall = icon_of("Hall", "Websocket debug log")
+    check(f"{case}: debug icon off = grey", "s-off" in hall.get_attribute("class"), hall.get_attribute("class"))
+    gen1 = icon_of("Garden plug", "Websocket debug log")
+    check(f"{case}: Gen1 debug icon greyed out with explanation", gen1.get_attribute("aria-disabled") == "true"
+          and "Gen1 devices have no websocket debug log" in gen1.get_attribute("aria-label"))
+    ap_path = icon_of("Hall", "Access point").locator("path").get_attribute("d")
+    check(f"{case}: access-point icon shape", ap_path.startswith("M4.93,4.93"), ap_path[:20])
+    if width > 700:
+        rows = f.evaluate("""() => { const s = document.querySelector('#dev-cards td.c-action .act-strip'); const tops = {};
+          for (const b of s.children) { const t = Math.round(b.getBoundingClientRect().top); tops[t] = (tops[t] || 0) + 1; }
+          return {width: s.getBoundingClientRect().width, rows: Object.values(tops)}; }""")
+        check(f"{case}: action strip 170 px, two rows of 5 + 4 icons", rows["width"] == 170 and rows["rows"] == [5, 4], str(rows))
+    else:
+        labeled = f.locator("#dev-cards tr", has_text="Hall").first.locator(".act-strip.labeled > *")
+        check(f"{case}: phone tile has the debug button", labeled.count() == 9
+              and labeled.nth(7).inner_text() == "Websocket debug log", str(labeled.all_inner_texts()))
+        f.locator("#dev-cards tr", has_text="Hall").first.screenshot(path=out / f"{case}-tile-debug.png")
+    # Popups opened by an action icon: strip under the title (icon circle 32 px, name, state)
+    expect = (("Hall", "Eco mode", "Eco mode – Hall", "On", "t-good", "Turn it off for Hall?"),
+              ("Hall", "Bluetooth", "Bluetooth – Hall", "On", "t-good", "Turn it off for Hall?"),
+              ("Hall", "Access point", "Access point – Hall", "Off", "t-off", "Turn it on for Hall?"),
+              ("Hall", "Power-on action", "Power-on action – Hall", "Restore last state", "t-good", "switch:0"),
+              ("Hall", "Websocket debug log", "Websocket debug log – Hall", "Off", "t-off", "Turn it on for Hall?"),
+              ("Living room", "Password protection", "Device password – Living room ceiling with a really long device name",
+               "Protected", "t-good", "Stored in this app"),
+              ("Hall", "Restart", "Restart – Hall", None, "t-neutral", "Restart Hall now?"))
+    for name, label, title, pill, tone, question in expect:
+        t, strip, body, _buttons = _popup(f, icon_of(name, label))
+        check(f"{case}: {label} popup with status strip", t == title and strip and strip["first"] and strip["pill"] == pill
+              and tone in strip["tone"] and strip["size"] == 32 and question in body, f"{t} {strip} {body[:120]}")
+        if label == "Websocket debug log":
+            link = f.locator("#dlg-body a", has_text="Open Diagnostics in the Shelly web UI")
+            check(f"{case}: debug popup links the Diagnostics page", link.get_attribute("href") == "http://192.168.1.12/#/diagnostics"
+                  and link.get_attribute("target") == "_blank" and "noopener" in link.get_attribute("rel")
+                  and "Turn it off afterwards" in body and "below 1.0.0" not in body, str(link.get_attribute("href")))
+            page.screenshot(path=out / f"{case}-popup-debug.png")
+        if label == "Eco mode":
+            page.screenshot(path=out / f"{case}-popup-eco.png")
+        f.locator("#dlg-btns button", has_text="Cancel").click()
+    # Notes of greyed-out icons: strip with the reason
+    for name, label, pill, text in (("Garden plug", "Websocket debug log", "Not supported", "no websocket debug log"),
+                                    ("Garden plug", "Access point", "Not available", "Not available on Gen1"),
+                                    ("Kitchen light", "Power-on action", "Not available", "no switchable output"),
+                                    ("Terrace", "Access point", "Not supported", "not supported")):
+        t, strip, body, _buttons = _popup(f, icon_of(name, label))
+        check(f"{case}: note of {label} ({name}) with status strip", t == label and strip and strip["pill"] == pill and text in body,
+              f"{t} {strip} {body[:120]}")
+        if label == "Websocket debug log":
+            page.screenshot(path=out / f"{case}-popup-debug-gen1.png")
+        f.locator("#dlg-btns button", has_text="Close").click()
+    page.unroute("**/settings/refresh")
+
+    # Firmware below 1.0.0: warning that the stream is not protected by the device password
+    def old_firmware(route):
+        headers = {k: v for k, v in route.request.headers.items() if k.lower() != "if-none-match"}
+        state = route.fetch(headers=headers).json()
+        for d in state["devices"]:
+            if d["name"] == "Hall":
+                d["version"] = "0.14.1"
+        route.fulfill(json=state)
+    page.route("**/api/state", old_firmware)
+    page.route("**/settings/refresh", lambda r: r.fulfill(json=LIVE))
+    f.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
+    page.wait_for_timeout(400)
+    _t, _strip, body, _buttons = _popup(f, icon_of("Hall", "Websocket debug log"))
+    check(f"{case}: debug popup warns below firmware 1.0.0", "not protected by the device password" in body, body[-200:])
+    f.locator("#dlg-btns button", has_text="Cancel").click()
+    page.wait_for_timeout(400)   # the state request of closing the dialog is answered first
+    page.unroute("**/settings/refresh")
+    page.unroute("**/api/state")
+    f.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
+    page.wait_for_timeout(400)
+    for row in opened:
+        row.locator("td.c-details summary").click()
+    f.evaluate("() => scrollTo(0, 0)")
+    page.wait_for_timeout(300)   # the scroll event (hides a touch tooltip) arrives before the next tap
+
+
+def _name_tips(c):
+    """Tooltips of the HA name and the Shelly name (mouse hover, touch tap) and the
+    touch behaviour of tooltips: shown on a tap without action, not on a tap with one."""
+    case, f, page, width = c.case, c.f, c.page, c.width
+    row = f.locator("#dev-cards tr", has_text="Hall").first
+    ha, shelly_name = row.locator("td.c-device .name"), row.locator(".shelly-name > span")
+    check(f"{case}: no native title on the names", ha.get_attribute("title") is None)
+    if width > 700:
+        ha.hover()
+        check(f"{case}: HA name tooltip on hover", tip_text(f) == "Home Assistant device name: Hall", str(tip_text(f)))
+        shelly_name.hover()
+        check(f"{case}: Shelly name tooltip on hover", tip_text(f) == "Shelly device name: shelly-2", str(tip_text(f)))
+        page.screenshot(path=c.out / f"{case}-name-tip.png")
+        page.mouse.move(5, 5)
+        return
+    page.wait_for_timeout(300)   # a re-render after the previous state request hides every tooltip
+    ha.tap()
+    check(f"{case}: HA name tooltip on tap", tip_text(f) == "Home Assistant device name: Hall", str(tip_text(f)))
+    page.screenshot(path=c.out / f"{case}-name-tip.png")
+    shelly_name.tap()
+    check(f"{case}: Shelly name tooltip on tap", tip_text(f) == "Shelly device name: shelly-2", str(tip_text(f)))
+    shelly_name.tap()
+    check(f"{case}: second tap hides it", tip_text(f) is None)
+    page.route("**/settings/refresh", lambda r: r.fulfill(json=LIVE))
+    row.locator(".pen").tap()
+    check(f"{case}: pencil unchanged (opens the dialog, no tooltip)", tip_text(f) is None and f.locator("#dlg").is_visible())
+    f.locator("#dlg-x").tap()
+    page.wait_for_timeout(300)
+    page.unroute("**/settings/refresh")
+    ha.tap()
+    f.locator("#dev-search").tap()
+    check(f"{case}: tap elsewhere hides the tooltip", tip_text(f) is None)
+    page.keyboard.press("Escape")
 
 
 def _keep_listed(c):
@@ -381,11 +605,29 @@ def _firmware_tab(c):
           str(first_del.get_attribute("title")))
     first_del.click()
     d = dialog(f)
+    check(f"{case}: delete dialog with red trash title icon and red Continue", f.locator("#dlg-title svg.ti-delete").count() == 1
+          and "danger" in f.locator("#dlg-btns button", has_text="Continue").get_attribute("class"))
     check(f"{case}: delete dialog names the devices that lose the provided update",
           "lose the provided update" in d["body"] or "loses the provided update" in d["body"], d["body"][:200])
     c.page.screenshot(path=c.out / f"{case}-delete-provided.png")
     f.locator("#dlg-btns button", has_text="Cancel").click()
     check(f"{case}: upload tag in the list", f.locator(".fw-row .tag.warn", has_text="Uploaded").count() == 1)
+    step = f.locator(".fw-row .tag.step")
+    style = step.first.evaluate("e => { const s = getComputedStyle(e); return [s.backgroundColor, s.borderTopStyle, s.borderTopWidth]; }")
+    check(f"{case}: intermediate label outlined", step.count() == 1 and step.first.inner_text() == "intermediate"
+          and style == ["rgba(0, 0, 0, 0)", "solid", "1px"], str(style))
+    labels = f.evaluate("""() => [...document.querySelectorAll('.fw-row .fw-ver')].filter(v => v.querySelector('.tag')).map(v => {
+      const n = v.querySelector('.name').getBoundingClientRect(), t = v.querySelector('.tag').getBoundingClientRect();
+      return {gap: Math.round(t.left - n.right), dy: Math.abs((n.top + n.height / 2) - (t.top + t.height / 2))}; })""")
+    check(f"{case}: labels 12 px after the version, centred", labels and all(x["gap"] == 12 and x["dy"] < 1.5 for x in labels), str(labels))
+    if width < 700:
+        dates = f.evaluate("""() => [...document.querySelectorAll('.fw-row')].map(r => { const g = s => r.querySelector(s).getBoundingClientRect();
+          return {right: Math.round(g('.actions').right - g('.fw-date').right), line: Math.round(Math.abs(g('.fw-date').top - g('.fw-size').top)),
+            x: Math.round(g('.fw-date').right)}; })""")
+        check(f"{case}: date right-aligned under the icons, same line as the size", all(d["right"] == 0 and d["line"] <= 1 for d in dates)
+              and len({d["x"] for d in dates}) == 1, str(dates))
+    else:
+        page.mouse.move(5, 5)
     check(f"{case}: no overflow (firmware)", f.evaluate(OVERFLOW_JS) <= 0)
     page.screenshot(path=out / f"{case}-firmware.png", full_page=True)
 
@@ -406,6 +648,7 @@ def _firmware_tab(c):
     page.screenshot(path=out / f"{case}-firmware-devices.png", full_page=True)
     kitchen.click()
     d = dialog(f)
+    check(f"{case}: installation dialog with the chip title icon", f.locator("#dlg-title svg.ti-chip").count() == 1)
     check(f"{case}: Install opens the installation dialog", d["title"] == "Install update?"
           and "Kitchen light" in d["body"] and "Firmware store (downloaded from Shelly earlier)" in d["body"], d["body"][:300])
     page.screenshot(path=out / f"{case}-firmware-install.png")
@@ -417,9 +660,15 @@ def _firmware_tab(c):
     check(f"{case}: one changelog icon per version", logs.count() == rows.count(), f"{logs.count()} / {rows.count()}")
     check(f"{case}: icon disabled without a stored changelog", logs.nth(1).is_disabled()
           and "No changelog stored" in logs.nth(1).get_attribute("title"), str(logs.nth(1).get_attribute("title")))
+    if width < 700:   # touch: a tap on a disabled button shows why it is disabled
+        logs.nth(1).tap(force=True)
+        check(f"{case}: tap on a disabled button shows its reason", (tip_text(f) or "").startswith("No changelog stored"), str(tip_text(f)))
+        f.locator("#fw-summary").tap()
+        check(f"{case}: tap elsewhere hides it (firmware)", tip_text(f) is None)
     logs.first.click()
     f.wait_for_selector("#dlg-body .cl-list")
     d = dialog(f)
+    check(f"{case}: changelog dialog with title icon", f.locator("#dlg-title svg.ti-changelog").count() == 1)
     check(f"{case}: changelog dialog of the stored version", d["title"] == "Changelog – Plus1 1.5.0"
           and "1.5.0 · 2026-10-01" in d["body"] and "Fixed a vulnerability" in d["body"] and "This model" in d["body"], d["body"][:300])
     check(f"{case}: changelog dialog fits", f.evaluate("() => { const r = document.getElementById('dlg').getBoundingClientRect();"
@@ -450,6 +699,7 @@ def _firmware_delete_and_upload(c, rows):
 
     # Upload: pre-filled form; wrong SHA shows an inline error (430), store (last case)
     f.locator("#fw-upload").click()
+    check(f"{case}: upload dialog with title icon", f.locator("#dlg-title svg.ti-upload").count() == 1)
     f.locator("#dlg-body input[type=file]").set_input_files(
         files=[{"name": "plüs1-1.1.0.zip", "mimeType": "application/zip", "buffer": firmware_zip()}])
     page.screenshot(path=out / f"{case}-upload-choose.png")
@@ -457,6 +707,7 @@ def _firmware_delete_and_upload(c, rows):
     f.wait_for_selector("#dlg-body select")
     check(f"{case}: type pre-filled", f.locator("#dlg-body select").input_value() == "Plus1")
     check(f"{case}: version pre-filled", f.locator("#dlg-body input[type=text]").first.input_value() == "1.1.0")
+    check(f"{case}: upload confirmation with title icon", f.locator("#dlg-title svg.ti-upload").count() == 1)
     if index == 1:
         f.locator("#dlg-body input[type=text]").nth(1).fill("a" * 64)
         f.locator("#dlg-btns button", has_text="Store").click()
@@ -545,6 +796,8 @@ def firmware_store(browser, out):
         _device_list(c)
         _layout(c)
         _keep_listed(c)
+        _action_popups(c)
+        _name_tips(c)
         _next_steps(c)
         _downgrade(c)
         rows = _firmware_tab(c)
@@ -556,7 +809,7 @@ def firmware_store(browser, out):
         ctx.close()
 
 
-SUITES = {"download_url_hint": download_url_hint, "download_url_notice": download_url_notice,
+SUITES = {"download_url_hint": download_url_hint, "setting_help": setting_help, "download_url_notice": download_url_notice,
           "firmware_store": firmware_store}
 
 

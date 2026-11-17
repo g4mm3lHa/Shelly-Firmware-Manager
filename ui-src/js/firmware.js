@@ -1,6 +1,6 @@
 // Firmware tab: stored files, changelog, Install button per device, delete and upload.
 import {
-  $, api, box, closeModal, collator, copyText, el, fmt, icon, iconButton, keptDetails, mb, message, modal,
+  $, api, attachTip, box, closeModal, collator, copyText, el, fmt, icon, iconButton, keptDetails, mb, message, modal,
   shaRow, toast, ui, uploadFile, valueList,
 } from "./core.js";
 import {installable, installBlocker} from "./devices.js";
@@ -41,14 +41,14 @@ function firmwareDevice(entry) {
  *  from Shelly; a check stores it when it provides the file). */
 async function openFirmwareChangelog(f) {
   const title = `Changelog – ${f.type} ${f.version}`;
-  try { modal(title, changelogNodes(await api(`api/firmware/${encodeURIComponent(f.name)}/changelog`))); }
-  catch (e) { message(title, e.message, "error"); }
+  try { modal(title, changelogNodes(await api(`api/firmware/${encodeURIComponent(f.name)}/changelog`)), undefined, "changelog"); }
+  catch (e) { message(title, e.message, "error", "changelog"); }
 }
 /** One version row with size, date, SHA (copy), devices and icon actions. */
 function firmwareRow(f, latest) {
   const sha = box("span", "nowrap fw-sha", el("span", (f.sha256 || "").slice(0, 12) + "…", "mono"),
     iconButton("copy", "Copy SHA-256", async () => { await copyText(f.sha256 || ""); }));
-  sha.title = f.sha256 || "";
+  attachTip(sha, () => f.sha256 || "", true);
   const devices = f.devices.length
     ? keptDetails(`fw-${f.name}`, `For ${f.devices.length} device${f.devices.length === 1 ? "" : "s"} ▾`, box("ul", null, ...f.devices.map(firmwareDevice)))
     : el("span", "–", "muted");
@@ -62,8 +62,10 @@ function firmwareRow(f, latest) {
   log.disabled = !f.changelog; log.setAttribute("aria-label", `Changelog of ${f.type} ${f.version}`);
   // Class names only place the cells on phones (grid areas); the desktop grid is unchanged
   const uploaded = f.source === "upload" ? el("span", "Uploaded", "tag warn") : null;
-  if (uploaded) uploaded.title = fwSource(f);
-  return box("div", "fw-row", box("div", "fw-ver", el("span", f.version, "name"), latest ? el("span", "latest", "tag primary") : null, uploaded),
+  if (uploaded) attachTip(uploaded, () => fwSource(f), true);
+  // Once provided as an intermediate version by a check (permanent store marker)
+  const step = f.intermediate ? el("span", "intermediate", "tag step") : null;
+  return box("div", "fw-row", box("div", "fw-ver", el("span", f.version, "name"), latest ? el("span", "latest", "tag primary") : null, uploaded, step),
     el("span", mb(f.size || 0), "nowrap fw-size"), el("span", fmt(f.downloaded), "nowrap sub fw-date"), sha, devices, box("div", "actions", log, dl, del));
 }
 /** Delete a stored firmware: dialog, then a second confirmation with
@@ -75,15 +77,15 @@ function deleteFirmware(f) {
   modal(title, [details, held.length ? el("div", `Provided for ${held.join(", ")}: ${held.length === 1 ? "this device loses" : "these devices lose"} the provided update and ${held.length === 1 ? "is" : "are"} shown as "Available" until ${held.length === 1 ? "it is" : "they are"} checked again.`, "warnbox") : null,
     el("p", f.source === "upload" ? "An uploaded file can only be restored by uploading it again." :
     "Only versions that Shelly still offers can be downloaded again; older versions are gone for good.", "hint")].filter(Boolean),
-  [{text: "Cancel"}, {text: "Continue", kind: "primary", action: () => {
+  [{text: "Cancel"}, {text: "Continue", kind: "danger", action: () => {
     const ack = el("input"); ack.type = "checkbox";
     modal(title, [el("p", `Delete ${f.type} ${f.version} permanently?`), box("label", "check", ack, " I understand that this file cannot be restored by the app")],
       [{text: "Cancel"}, {text: "Delete", kind: "danger", action: async () => {
         try { await api(`api/firmware/${encodeURIComponent(f.name)}/delete`, {confirm: true, acknowledged: ack.checked}); closeModal(); }
-        catch (e) { message("Delete firmware", e.message, "error"); }
-      }}]);
+        catch (e) { message("Delete firmware", e.message, "error", "delete"); }
+      }}], "delete");
     const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; };
-  }}]);
+  }}], "delete");
 }
 /** Upload a firmware file (a newer one is provided as update by the next check) –
  *  step 1 choose and transfer, step 2 confirm
@@ -94,15 +96,15 @@ function openUpload() {
     el("p", "Only for Gen2+ devices known to this app and stable versions. A version newer than the installed one is provided as update by the next check, an older one allows a downgrade. Use files from a source you trust.", "hint"), el("div", UPLOAD_HINT, "warnbox")],
   [{text: "Cancel"}, {text: "Upload", kind: "primary", action: async () => {
     const file = input.files && input.files[0];
-    if (!file) { message(title, "No file selected.", "error"); return; }
-    if (file.size > 64 * 1048576) { message(title, "Firmware larger than 64 MiB.", "error"); return; }
-    modal(title, [el("p", `Uploading ${file.name} …`, "hint")], []);
-    try { uploadConfirm(await uploadFile(file)); } catch (e) { message(title, e.message, "error"); }
-  }}]);
+    if (!file) { message(title, "No file selected.", "error", "upload"); return; }
+    if (file.size > 64 * 1048576) { message(title, "Firmware larger than 64 MiB.", "error", "upload"); return; }
+    modal(title, [el("p", `Uploading ${file.name} …`, "hint")], [], "upload");
+    try { uploadConfirm(await uploadFile(file)); } catch (e) { message(title, e.message, "error", "upload"); }
+  }}], "upload");
 }
 function uploadConfirm(r) {
   const title = "Upload firmware";
-  if (!r.types.length) { api("api/firmware/upload/cancel", {token: r.token}).catch(() => {}); message(title, "No Gen2+ device is known yet – run a check first.", "error"); return; }
+  if (!r.types.length) { api("api/firmware/upload/cancel", {token: r.token}).catch(() => {}); message(title, "No Gen2+ device is known yet – run a check first.", "error", "upload"); return; }
   const type = el("select"); type.setAttribute("aria-label", "Firmware ID");
   for (const t of r.types) { const o = el("option", t); o.value = t; o.selected = t.toLowerCase() === String(r.detected.type || "").toLowerCase(); type.append(o); }
   const version = el("input"); version.type = "text"; version.maxLength = 14; version.placeholder = "e.g. 1.4.4"; version.value = r.detected.version || "";
@@ -124,7 +126,7 @@ function uploadConfirm(r) {
       for (const b of $("dlg-btns").children) b.disabled = false;
       error.textContent = e.message; error.hidden = false;
     }
-  }}]);
+  }}], "upload");
 }
 $("fw-upload").onclick = openUpload;
 $("fw-search").oninput = () => render(true);

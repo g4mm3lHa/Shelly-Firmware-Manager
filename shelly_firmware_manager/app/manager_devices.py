@@ -150,7 +150,11 @@ class DeviceSettings(FirmwareStore):
         clean = shelly.validate_settings(changes, dev.get("outputs") or [])
         if "ap" in clean and dev.get("gen") == 1:
             raise ValueError(shelly.GEN1_AP_NOTE)
-        for key, label in (("ap", "an access point switch"), ("ble", "a global Bluetooth switch")):
+        for key, label in (
+            ("ap", "an access point switch"),
+            ("ble", "a global Bluetooth switch"),
+            ("debug_ws", "websocket debug log"),
+        ):
             if key in clean and dev.get(key) == UNSUPPORTED:
                 raise ValueError(f"This device/firmware has no {label}")
         diff = self._settings_diff(dev, clean)
@@ -174,7 +178,7 @@ class DeviceSettings(FirmwareStore):
             log.info("%s: settings changed by %s (%s)", dev.get("name"), user, ", ".join(sorted(clean)))
             self.events.add("setting", device=dev.get("name"), changes=diff, user=user)
         self.save()
-        settings = {k: dev.get(k) for k in ("shelly_name", "ntp", "eco", "ap", "ble", "outputs")}
+        settings = {k: dev.get(k) for k in ("shelly_name", "ntp", "eco", "ap", "ble", "debug_ws", "outputs")}
         return settings, restart, verified, not_applied
 
     @staticmethod
@@ -187,6 +191,7 @@ class DeviceSettings(FirmwareStore):
             ("eco", "eco", "Eco mode"),
             ("ap", "ap", "Access point"),
             ("ble", "ble", "Bluetooth"),
+            ("debug_ws", "debug_ws", "Websocket debug log"),
         ):
             if key not in clean:
                 continue
@@ -212,7 +217,12 @@ class DeviceSettings(FirmwareStore):
             diff.append({"setting": "Shelly name", "old": dev.get("shelly_name"), "new": clean["name"]})
         if "ntp" in clean:
             diff.append({"setting": "NTP server", "old": dev.get("ntp"), "new": clean["ntp"]})
-        for key, label in (("eco", "Eco mode"), ("ap", "Access point"), ("ble", "Bluetooth")):
+        for key, label in (
+            ("eco", "Eco mode"),
+            ("ap", "Access point"),
+            ("ble", "Bluetooth"),
+            ("debug_ws", "Websocket debug log"),
+        ):
             if key in clean:
                 diff.append({"setting": label, "old": onoff.get(dev.get(key)), "new": onoff[clean[key]]})
         outputs = {o["key"]: o for o in dev.get("outputs") or []}

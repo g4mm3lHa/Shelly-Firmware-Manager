@@ -89,8 +89,8 @@ export function openInstall(devs) {
         try { await api(`${devUrl(d)}/install`, body); selected.delete(d.id); }
         catch (e) { errors.push(`${d.name}: ${e.message}`); }
       }
-      errors.length ? message("Installation", errors.join("\n"), "error") : closeModal();
-    }}]);
+      errors.length ? message("Installation", errors.join("\n"), "error", "chip") : closeModal();
+    }}], "chip");
   if (unverified.length) { const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; }; }
 }
 // ---------------------------------------------------------------- Downgrade

@@ -3,7 +3,43 @@
 ## 3.2.1
 
 Power-on action of Gen1 dimmers, Duo and Vintage can be changed again; settings the
-Shelly accepts but does not apply are reported.
+Shelly accepts but does not apply are reported. rc2: setting help as tooltips,
+tooltips on touch devices, websocket debug log switch, clearer action popups and
+Firmware tab.
+
+Changes in rc2
+- Settings tab: the help texts are no longer shown under the fields. A small i-icon
+  next to each setting name shows the help as tooltip (mouse over the name or the
+  icon, keyboard focus of the icon; on touch devices a tap on the name or the icon
+  shows it, a tap elsewhere or scrolling hides it – a tap on the name then does not
+  change the setting). Screen readers still read the help as description of the field.
+  The live warning for the download base URL stays visible under the field.
+- Tooltips on touch devices: a tap shows the tooltip of an element that has no action
+  of its own (e.g. device names, the Gen1 version, the check schedule, the SHA-256 and
+  the "Uploaded" label in the Firmware tab) and of a disabled button (the reason why it
+  is disabled). A tap that opens a popup or does something else is unchanged.
+- Device names: tooltips "Home Assistant device name: …" and "Shelly device name: …"
+  (table and phone tiles) instead of the browser's own tooltip.
+- New action icon "Websocket debug log" (bug icon, Gen2+): shows whether the Shelly
+  streams its debug log over a websocket (grey off, yellow on, "?" unknown) and turns it
+  on or off (`Sys.SetConfig` `debug.websocket.enable`, read back and logged like other
+  settings). The popup explains the debug log, links the Diagnostics page of the Shelly
+  web UI (`/#/diagnostics`) and warns for firmware below 1.0.0 (the stream is not
+  protected by the device password). Gen1 devices have no websocket debug log (icon
+  greyed out with explanation). The action column shows two rows of five icons.
+- Access point icon: access-point symbol instead of the Wi-Fi fan.
+- Popups of the action icons (power-on action, eco mode, password, access point,
+  Bluetooth, websocket debug log, restart) and the notes of greyed-out icons start with
+  a status strip: the icon in the colour of the action column, the feature name and the
+  state (On/Off, Protected, Not available, Not supported). The question is shorter
+  ("Turn it off for …?").
+- Dialog titles with an icon: changelog, delete (red) and upload in the Firmware tab,
+  the installation dialog (red firmware chip).
+- Firmware tab: labels 12 px after the version and vertically centred; new outlined
+  label "intermediate" for a file a check provided as an intermediate version (stored
+  with the file from now on, not determined for older files); on phones the date is
+  right-aligned in the size line. The first step of the delete dialog has a red
+  "Continue" like "Delete".
 
 Changes in rc1
 - Fix: Shelly Dimmer 1/2, Duo and Vintage (Gen1) report the mode "white" but have only

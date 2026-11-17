@@ -395,6 +395,11 @@ class Checks(DeviceSettings):
         source = self._offer_source(str(dev.get("file")))
         message = OFFER_MESSAGES[source]
         if dev.get("step_target") is not None:
+            # Permanent marker of the stored file: provided as an intermediate version
+            # once, it stays labeled in the Firmware tab (never set retroactively)
+            meta = self.firmware.get(str(dev.get("file")))
+            if meta is not None:
+                meta["intermediate"] = True
             towards = f" on the way to {dev['step_target']}" if dev["step_target"] else ""
             message += f" – intermediate version{towards}; the device is checked again after its installation"
         dev.update(status=STATUS_READY, offer_source=source, message=message)

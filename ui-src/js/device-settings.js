@@ -1,5 +1,6 @@
-// Dialogs for the settings of a single Shelly: name, NTP, power-on action, eco mode, switches, password.
-import {$, api, box, closeModal, devUrl, el, message, modal, valueList} from "./core.js";
+// Dialogs for the settings of a single Shelly: name, NTP, power-on action, eco mode, switches,
+// websocket debug log, password, restart.
+import {$, api, box, closeModal, devUrl, el, icon, message, modal, valueList, webUrl} from "./core.js";
 
 // ---------------------------------------------------------------- Device settings
 // Flow: read live values from the Shelly -> input -> (Shelly name: confirmation
@@ -10,6 +11,24 @@ const FIELDS = {name: {label: "Shelly name", prop: "shelly_name"}, ntp: {label: 
 const AOP_LABELS = {off: "Off", on: "On", restore_last: "Restore last state", last: "Restore last mode",
   match_input: "Match input", switch: "Switch", toggle: "Toggle"};
 export const aopLabel = v => AOP_LABELS[v] || v || "–";
+const AOP_RESTORE = ["restore_last", "last"];
+/** Colour of the power-on action: green if every output restores its last state. */
+export const aopTone = outputs => outputs.every(o => AOP_RESTORE.includes(o.aop)) ? "good" : "alert";
+/** Current power-on action of all outputs as one short text ("Mixed" if they differ). */
+export function aopSummary(outputs) {
+  const values = [...new Set(outputs.map(o => aopLabel(o.aop)))];
+  return values.length === 1 ? values[0] : "Mixed";
+}
+
+/** Status strip under the title of the popups opened by an action icon: the icon in a
+ *  tinted circle (colour of the action column), the feature name and the state pill.
+ *  tone: good | alert | warn | off | unknown | neutral; pill: state text or null. */
+export function featureStrip(iconName, label, tone, pill) {
+  const circle = box("span", "fs-icon", icon(iconName));
+  return box("div", `fstrip t-${tone}`, circle, el("span", label, "fs-name"), pill ? el("span", pill, "pill fs-pill") : null);
+}
+/** Strip of an on/off switch; onTone = colour while it is on (action column colours). */
+const switchStrip = (iconName, label, on, onTone) => featureStrip(iconName, label, on ? onTone : "off", on ? "On" : "Off");
 
 /** Read the live settings, then continue with next(live); errors are shown. */
 async function withLive(d, title, next) {
@@ -61,7 +80,8 @@ export function editAop(d) {
       selects.push([o, sel]);
       t.append(box("tr", null, el("td", o.name === o.key ? o.key : `${o.name} (${o.key})`), box("td", null, sel)));
     }
-    modal(title, [t], [{text: "Cancel"}, {text: "Save", kind: "primary", action: () => {
+    const strip = featureStrip("aop", "Power-on action", aopTone(live.outputs), aopSummary(live.outputs));
+    modal(title, [strip, t], [{text: "Cancel"}, {text: "Save", kind: "primary", action: () => {
       const changed = selects.filter(([o, sel]) => sel.value !== o.aop);
       if (!changed.length) { message(title, "Nothing changed.", "error"); return; }
       saveSettings(d, title, {aop: Object.fromEntries(changed.map(([o, sel]) => [o.key, sel.value]))}, true);
@@ -74,27 +94,51 @@ export function editEco(d) {
   withLive(d, title, live => {
     if (typeof live.eco !== "boolean") { message(title, "This device does not report an eco mode."); return; }
     const target = !live.eco, word = target ? "on" : "off";
-    modal(title, [el("p", `Eco mode is currently ${live.eco ? "on" : "off"}. Turn it ${word} for ${d.name}?`),
+    modal(title, [switchStrip("eco", "Eco mode", live.eco, "good"), el("p", `Turn it ${word} for ${d.name}?`),
       el("p", "The Shelly may restart to apply the change.", "hint")],
     [{text: "Cancel"}, {text: `Turn ${word}`, kind: "primary", action: () => saveSettings(d, title, {eco: target}, true)}]);
   });
 }
-/** Access point / Bluetooth: only the on/off switch, no further configuration. */
-const SWITCHES = {ap: "Access point", ble: "Bluetooth"};
+/** Access point / Bluetooth: only the on/off switch, no further configuration.
+ *  [label, colour while on] – an active access point is shown red like in the action column. */
+const SWITCHES = {ap: ["Access point", "alert"], ble: ["Bluetooth", "good"]};
 export function editSwitch(d, key) {
-  const label = SWITCHES[key], title = `${label} – ${d.name}`;
+  const [label, onTone] = SWITCHES[key], title = `${label} – ${d.name}`;
   withLive(d, title, live => {
     if (typeof live[key] !== "boolean") { message(title, `This device does not offer a ${label.toLowerCase()} switch.`); return; }
     const target = !live[key], word = target ? "on" : "off";
-    modal(title, [el("p", `${label} is currently ${live[key] ? "on" : "off"}. Turn it ${word} for ${d.name}?`),
+    modal(title, [switchStrip(key, label, live[key], onTone), el("p", `Turn it ${word} for ${d.name}?`),
       el("p", key === "ap" ? "Only the switch is changed; all other Wi-Fi settings stay as they are." : "Only the global Bluetooth switch is changed.", "hint")],
     [{text: "Cancel"}, {text: `Turn ${word}`, kind: "primary", action: () => saveSettings(d, title, {[key]: target}, true)}]);
+  });
+}
+// Websocket debug log (Gen2+): the device streams its debug log over a websocket,
+// shown live on the Diagnostics page of its web UI. Below firmware 1.0.0 the stream
+// is not protected by the device password (Shelly API documentation).
+const DEBUG_TEXT = "The Shelly streams its debug log over a websocket; the Diagnostics page of the Shelly web UI shows it live. Turn it off afterwards: the log may contain network and configuration details, and streaming uses device resources.";
+const DEBUG_UNPROTECTED = "Firmware below 1.0.0: the debug stream is not protected by the device password.";
+/** Major version below 1 ("0.14.1") – the unprotected debug stream. */
+const belowOne = v => /^0\./.test(String(v || ""));
+export function editDebug(d) {
+  const label = "Websocket debug log", title = `${label} – ${d.name}`;
+  withLive(d, title, live => {
+    if (typeof live.debug_ws !== "boolean") { message(title, "This device does not offer a websocket debug log."); return; }
+    const target = !live.debug_ws, word = target ? "on" : "off", content = [switchStrip("bug", label, live.debug_ws, "warn"),
+      el("p", DEBUG_TEXT, "hint")];
+    const url = webUrl(d);
+    if (url) {   // Diagnostics page of the device web UI (Gen2+: /#/diagnostics), new tab
+      const a = el("a", "Open Diagnostics in the Shelly web UI ↗"); a.href = url + "#/diagnostics"; a.target = "_blank";
+      a.rel = "noopener noreferrer"; content.push(box("p", null, a));
+    }
+    if (belowOne(d.version)) content.push(el("div", DEBUG_UNPROTECTED, "warnbox"));
+    content.push(el("p", `Turn it ${word} for ${d.name}?`));
+    modal(title, content, [{text: "Cancel"}, {text: `Turn ${word}`, kind: "primary", action: () => saveSettings(d, title, {debug_ws: target}, true)}]);
   });
 }
 /** Restart: one confirmation (not logged). */
 export function restartDevice(d) {
   const title = `Restart – ${d.name}`;
-  modal(title, [el("p", `Restart ${d.name} now?`), el("p", "The device is unavailable for a few seconds.", "hint")], [{text: "Cancel"},
+  modal(title, [featureStrip("restart", "Restart", "neutral", null), el("p", `Restart ${d.name} now?`), el("p", "The device is unavailable for a few seconds.", "hint")], [{text: "Cancel"},
     {text: "Restart", kind: "danger", action: async () => {
       try { await api(`${devUrl(d)}/restart`, {}); message(title, "Restart command sent."); }
       catch (e) { message(title, e.message, "error"); }
@@ -138,7 +182,11 @@ export function editPassword(d) {
     const r = el("input"); r.type = "radio"; r.name = "pw-mode"; r.value = mode; r.checked = i === 0; r.onchange = update;
     radios.append(box("label", "check", r, " " + PASSWORD_MODES[mode].label));
   });
+  // Colours of the lock icon: green = protected and stored, yellow = protected without
+  // stored password, grey = not protected
+  const tone = d.auth_enabled === true ? (d.password_set ? "good" : "warn") : d.auth_enabled === false ? "off" : "unknown";
   modal(title, [
+    featureStrip("lock", "Password protection", tone, d.auth_enabled === true ? "Protected" : d.auth_enabled === false ? "Not protected" : "Unknown"),
     valueList([["Device protection", prot], ["Stored in this app", d.password_set ? "yes" : "no"]]),
     radios, hint, pwField, pw2Field,
     el("p", d.gen === 1 ? "Gen1: the password is stored in plain text in the app's private storage (needed for Basic Auth); 1–50 characters." :

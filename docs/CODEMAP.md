@@ -21,7 +21,7 @@ both servers in parallel (cancels checks/installations, saves the state), exit 0
 | `main.py` | start, servers, scheduler loop, clean stop | `main`, `run_schedule`, `start_site`, `VERSION` (= config.yaml) |
 | `manager*.py` | all workflows and the state: one object in six layers | see "The manager" below |
 | `data_paths.py` | paths below `/data` – always read as `data_paths.NAME` (tests and the demo redirect them) | `DATA_DIR`, `STATE_FILE`, `FW_DIR`, `CREDENTIALS_FILE`, `CHANGELOG_FILE`, `EVENTS_FILE` |
-| `shelly.py` | device and manufacturer access, auth, SSRF/redirect/size guards | `device_info`, `read_settings`, `write_settings`, `validate_settings`, `set_protection`, `protection_status`, `restart`, `trigger_update`, `OtaChannel`, `fetch_offer` (Gen2+; with the installed version: header `Shelly-Info` {app, ver} → next step, `steps`), `url_sha256` (SHA-256 named by a download URL, checked by `download_firmware`), `fetch_gen1_offers` / `gen1_offer` (one list for all Gen1 types), `download_firmware`, `fetch_cloud_text`, `_cloud_get`, `check_download_url`, `resolve_device_origin`, `DeviceAuth`, `parse_version`, `clip`, `error_text` |
+| `shelly.py` | device and manufacturer access, auth, SSRF/redirect/size guards | `device_info`, `read_settings` (incl. `debug_ws`), `write_settings`, `validate_settings`, `set_protection`, `protection_status`, `restart`, `trigger_update`, `OtaChannel`, `fetch_offer` (Gen2+; with the installed version: header `Shelly-Info` {app, ver} → next step, `steps`), `url_sha256` (SHA-256 named by a download URL, checked by `download_firmware`), `fetch_gen1_offers` / `gen1_offer` (one list for all Gen1 types), `download_firmware`, `fetch_cloud_text`, `_cloud_get`, `check_download_url`, `resolve_device_origin`, `DeviceAuth`, `parse_version`, `clip`, `error_text` |
 | `web_ui.py` | Ingress UI + JSON API, CSRF/JSON/size middleware | `build_ui_app` (all handlers inside), `security`, `guarded`, `SECURITY_HEADERS` |
 | `download_server.py` | GET/HEAD `<sha256>.<ext>` for the Shellys; warnings for rejected requests limited per client and 10 min | `build_download_app`, `strip_server_header`, `RejectLog` (`REJECT_WINDOW_S`, `REJECT_MAX_CLIENTS`) |
 | `schedule.py` | every N days at HH:MM, HA time zone, DST, catch-up | `configure`, `status`, `seconds_until`, `next_run`, `local_zone` |
@@ -65,7 +65,7 @@ Device entry (`state.devices[<HA device id>]`): identity `name`, `shelly_name`,
 `info_refreshed`, `offer_version`, `notified_version`; provided update `file`,
 `sha256`, `size`, `pending_version`, `pending_build`, `source_url`, `offer_source`
 (`manufacturer|store|upload`); settings `ntp`,
-`eco`, `ap`, `ble`, `outputs`, `actions`, `schedules`, `auth_enabled`,
+`eco`, `ap`, `ble`, `debug_ws` (websocket debug log, Gen1 unsupported), `outputs`, `actions`, `schedules`, `auth_enabled`,
 `settings_error`; flags `ignored`; runtime only (not trusted after a restart)
 `ota_progress`, `ota_phase` ("restarting"), `downgrade`; `updated` (confirmed or unconfirmed installation, until the next full
 check or single check of the device), `install_failed` (failed installation, not a downgrade: file stays
@@ -78,7 +78,8 @@ newer stored version offered for a manual installation; cleared by the next chec
 Firmware entry (`state.firmware[<file name>]`): `type`, `gen`, `version`, `sha256`,
 `size`, `downloaded`, `https` (downloads), `source` (`download|upload`),
 `sha_checked` (uploads), `changelog` (`{"date", "entries"}` of this version, set once
-the changelog page lists it; never requested again).
+the changelog page lists it; never requested again), `intermediate` (true once a check
+provided the file as an intermediate version; never set for older files).
 
 ## HTTP API (`web_ui.py`, Ingress only; writes need `X-CSRF-Token` + JSON ≤ 32 KB)
 
@@ -122,23 +123,23 @@ by hand. A module exports only what another module imports.
 
 | Module | Content |
 |---|---|
-| `core.js` | shared state `ui`, `selected`, `openDetails`; HA theme; `api`, `getState`, `uploadFile`; DOM helpers `$`, `el`, `box`, `icon`, `iconButton`, `valueList` (no empty rows), `section` (titled dialog block), `shaRow`, `fmt`; tooltip (`attachTip`: mouse hover and keyboard focus only); `modal`, `message`, `toast` |
-| `devices.js` | status (`STATUS_LABELS`, `shownStatus`, `installedRecently`, `failedInstall`, `installable`, `installBlocker`, `statusCell`, `installButton`, `showStatus`), action icons (`aopButton`, `ACTION_ITEMS`, `actionButton`), table / phone tiles (`COLUMNS`, `renderDevices`, column chooser), row menu (`openRowMenu`: blocked by the full check or work on this device); `shownUpdates` keeps devices in the updates card while checked |
+| `core.js` | shared state `ui`, `selected`, `openDetails`; HA theme; `api`, `getState`, `uploadFile`; DOM helpers `$`, `el`, `box`, `icon`, `iconButton`, `valueList` (no empty rows), `section` (titled dialog block), `shaRow`, `fmt`; tooltip (`attachTip`: mouse hover and keyboard focus; `tap` = touch/pen tap toggles it for nodes without an action, touch detected by the last `pointerdown` type; a tap on a disabled button shows its title; `hideTip`); `webUrl`; `modal` (optional title icon), `message`, `toast` |
+| `devices.js` | status (`STATUS_LABELS`, `shownStatus`, `installedRecently`, `failedInstall`, `installable`, `installBlocker`, `statusCell`, `installButton`, `showStatus`), action icons (`aopButton`, `ACTION_ITEMS` incl. websocket debug log, `actionButton`, `notePopup` of greyed-out icons), table / phone tiles (`COLUMNS`, `renderDevices`, column chooser), row menu (`openRowMenu`: blocked by the full check or work on this device); `shownUpdates` keeps devices in the updates card while checked |
 | `install.js` | `openInstall` (source of the update, changelog), `openDowngrade`, `changelogNodes`, `OFFER_SOURCES` |
-| `device-settings.js` | dialogs `editValue`, `editAop`, `editEco`, `editSwitch`, `editPassword`, `restartDevice` |
+| `device-settings.js` | dialogs `editValue`, `editAop`, `editEco`, `editSwitch`, `editDebug`, `editPassword`, `restartDevice`; `featureStrip` (status strip of the action popups), `aopTone`, `aopSummary` |
 | `firmware.js` | `renderFirmware`, `firmwareRow`, `firmwareDevice` (Install button per device), `openFirmwareChangelog`, `deleteFirmware`, `openUpload` |
 | `logs.js` | `renderLogs` (grouping per device), `logContent` (cancelled scheduled check: `skipped`), `checkFindings`, `deleteLogEntry`, "Delete all logs" |
-| `app-settings.js` | `renderSettings`, `OPTION_FIELDS`, hints for the download base URL |
+| `app-settings.js` | `renderSettings`, `OPTION_FIELDS` (help text as tooltip of the name and its i-icon, visually hidden description), hints for the download base URL |
 | `main.js` | entry: `render`, header (`renderMeta`, `renderProgress`), download base URL notice (`renderNotice`), tabs (`showView`), polling (`load`) |
 
 ## Tests (`tests/`, all network mocked; fixtures in `conftest.py`, helpers in `helpers.py`)
 
 | File | Covers |
 |---|---|
-| `test_check.py` | full/single check, reservation, progress, single flight, cancellation, ignored, Reload Device Info, log severity, Gen2+ server first (installed version sent, stored file of the offered version, intermediate versions, store fallback, reference request, SHA-256 of the URL), Gen1 store first and list, changelog kept with the firmware, manufacturer server access, user of checks and downloads |
+| `test_check.py` | full/single check, reservation, progress, single flight, cancellation, ignored, Reload Device Info, log severity, Gen2+ server first (installed version sent, stored file of the offered version, intermediate versions and their store marker, store fallback, reference request, SHA-256 of the URL), Gen1 store first and list, changelog kept with the firmware, manufacturer server access, user of checks and downloads |
 | `test_install.py` | target version verification, OTA WebSocket channel, HTTP fallback, download diagnosis, no check after installations except after an intermediate version, store fallback installation, "Updated" mark (also unconfirmed), failed installation and retry, `ota_error` text, limited warnings for rejected downloads |
 | `test_firmware_store.py` | store housekeeping, delete, downgrade, upload |
-| `test_device_settings.py` | device identity (incomplete answers), settings/capabilities, Gen1 light endpoints, not-applied values, AP/BLE, password workflow, no secrets |
+| `test_device_settings.py` | device identity (incomplete answers), settings/capabilities, Gen1 light endpoints, not-applied values, AP/BLE, websocket debug log, password workflow, no secrets |
 | `test_schedule.py` | schedule, DST, catch-up, deferral |
 | `test_options.py` | option bounds, unknown keys, `download_base_url` missing/unconfirmed |
 | `test_state.py` | state.json, activity log storage, entry IDs, delete/clear, credentials, UI settings |
@@ -158,7 +159,7 @@ paths in tmp via `data_paths`), `mgr`, `client` (UI test client with CSRF token)
 |---|---|---|
 | `run_ui.py quick\|full` | starts all demos | one command; prints one line per suite |
 | `ui_test.py [--full]` | 8801 idle, 8802 busy | layout, menus, dialogs, contrast; quick = 5 cases, full = 13 |
-| `ui_features.py` | 8801, 8803 legacy, 8804 missing, 8805 features | download URL hints/notice, downgrade, upload, delete, Install button and changelog icon in the Firmware tab, failed installation in the updates card, dialog sections, phone tile layout, no tooltip on touch, user in the log tile |
+| `ui_features.py` | 8801, 8803 legacy, 8804 missing, 8805 features | download URL hints/notice, setting help tooltips (mouse, keyboard, touch), downgrade, upload, delete, Install button, changelog icon, labels and dialog title icons in the Firmware tab, failed installation in the updates card, dialog sections, phone tile layout, tooltips on touch (tap with/without action, disabled buttons), action popups with status strip, websocket debug icon, device name tooltips, user in the log tile |
 | `mobile_capture.py` | 8711 idle | screenshots + overflow, full only |
 
 `tools/dev/check.sh [tests|ui|full|build]` runs everything in order: ruff → mypy (strict,
