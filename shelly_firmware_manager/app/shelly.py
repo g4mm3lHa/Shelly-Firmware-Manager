@@ -624,6 +624,18 @@ def _positive(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
 
 
+async def _battery_status(session: aiohttp.ClientSession, origin: str, auth: DeviceAuth | None) -> dict[str, bool]:
+    """{"battery": bool} from the Gen2+ sys status (wakeup_period, reported by battery
+    devices only); {} if it could not be read – the stored value then stays."""
+    try:
+        status = await _rpc(session, origin, "Sys.GetStatus", auth=auth)
+    except UnsupportedError:
+        return {"battery": False}
+    except (TimeoutError, ShellyError, aiohttp.ClientError):
+        return {}
+    return {"battery": _positive(status.get("wakeup_period"))}
+
+
 async def _list_active(
     read: Callable[[], Awaitable[dict[str, Any]]], key: str, active: Callable[[dict[str, Any]], bool]
 ) -> bool | str | None:
@@ -657,8 +669,10 @@ async def read_settings(
     Shelly.GetConfig, Gen1 /settings).
 
     battery is True for a battery device that sleeps between wake-ups (Gen2+
-    sys.wakeup_period > 0, Gen1 sleep_mode.period > 0) – such a device answers only
-    while it is awake, so it is only ever detected from the device itself.
+    wakeup_period > 0 in the sys status – read with Sys.GetStatus only when extended –
+    or in the sys config; Gen1 sleep_mode.period > 0) – such a device answers only
+    while it is awake, so it is only ever detected from the device itself. Gen2+
+    leaves battery out (stored value kept) when it could not be read.
 
     Switch values are True/False or UNSUPPORTED. extended=True (checks and Reload
     Device Info only) also reads whether actions/webhooks and schedules are active:
@@ -678,8 +692,11 @@ async def read_settings(
         # then runs on demand) and ble.rpc.enable is no global switch.
         extra["ble"] = _flag((config.get("ble") or {}).get("enable"))
         extra["debug_ws"] = _flag(((system.get("debug") or {}).get("websocket") or {}).get("enable"))
-        extra["battery"] = _positive(system.get("wakeup_period"))
+        if _positive(system.get("wakeup_period")):
+            extra["battery"] = True
         if extended:
+            if "battery" not in extra:
+                extra.update(await _battery_status(session, origin, auth))
             extra["actions"] = await _list_active(
                 lambda: _rpc(session, origin, "Webhook.List", auth=auth), "hooks", lambda e: e.get("enable") is True
             )

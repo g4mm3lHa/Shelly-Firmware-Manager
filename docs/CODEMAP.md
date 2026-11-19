@@ -21,7 +21,7 @@ both servers in parallel (cancels checks/installations, saves the state), exit 0
 | `main.py` | start, servers, scheduler loop, clean stop | `main`, `run_schedule`, `start_site`, `VERSION` (= config.yaml) |
 | `manager*.py` | all workflows and the state: one object in six layers | see "The manager" below |
 | `data_paths.py` | paths below `/data` – always read as `data_paths.NAME` (tests and the demo redirect them) | `DATA_DIR`, `STATE_FILE`, `FW_DIR`, `CREDENTIALS_FILE`, `CHANGELOG_FILE`, `EVENTS_FILE` |
-| `shelly.py` | device and manufacturer access, auth, SSRF/redirect/size guards | `device_info`, `read_settings` (incl. `debug_ws`, `battery`), `write_settings`, `validate_settings`, `set_protection`, `protection_status`, `restart`, `trigger_update`, `OtaChannel`, `fetch_offer` (Gen2+; with the installed version: header `Shelly-Info` {app, ver} → next step, `steps`), `url_sha256` (SHA-256 named by a download URL, checked by `download_firmware`), `fetch_gen1_offers` / `gen1_offer` (one list for all Gen1 types), `download_firmware`, `fetch_cloud_text`, `_cloud_get`, `check_download_url`, `resolve_device_origin`, `DeviceAuth`, `parse_version`, `clip`, `error_text` |
+| `shelly.py` | device and manufacturer access, auth, SSRF/redirect/size guards | `device_info`, `read_settings` (incl. `debug_ws`, `battery` via `_battery_status`), `write_settings`, `validate_settings`, `set_protection`, `protection_status`, `restart`, `trigger_update`, `OtaChannel`, `fetch_offer` (Gen2+; with the installed version: header `Shelly-Info` {app, ver} → next step, `steps`), `url_sha256` (SHA-256 named by a download URL, checked by `download_firmware`), `fetch_gen1_offers` / `gen1_offer` (one list for all Gen1 types), `download_firmware`, `fetch_cloud_text`, `_cloud_get`, `check_download_url`, `resolve_device_origin`, `DeviceAuth`, `parse_version`, `clip`, `error_text` |
 | `web_ui.py` | Ingress UI + JSON API, CSRF/JSON/size middleware | `build_ui_app` (all handlers inside), `security`, `guarded`, `SECURITY_HEADERS` |
 | `download_server.py` | GET/HEAD `<sha256>.<ext>` for the Shellys; warnings for rejected requests limited per client and 10 min | `build_download_app`, `strip_server_header`, `RejectLog` (`REJECT_WINDOW_S`, `REJECT_MAX_CLIENTS`) |
 | `schedule.py` | every N days at HH:MM, HA time zone, DST, catch-up | `configure`, `status`, `seconds_until`, `next_run`, `local_zone` |
@@ -67,7 +67,7 @@ Device entry (`state.devices[<HA device id>]`): identity `name`, `shelly_name`,
 `sha256`, `size`, `pending_version`, `pending_build`, `source_url`, `offer_source`
 (`manufacturer|store|upload`); settings `ntp`,
 `eco`, `ap`, `ble`, `debug_ws` (websocket debug log, Gen1 unsupported), `outputs`, `actions`, `schedules`, `auth_enabled`,
-`battery` (sleeping battery device, read from the device while awake: Gen2+ `sys.wakeup_period` > 0, Gen1
+`battery` (sleeping battery device, read from the device while awake: Gen2+ `wakeup_period` > 0 in `Sys.GetStatus` (checks and reloads) or the sys config, Gen1
 `sleep_mode.period` > 0; kept while the device does not answer), `settings_error`; flags `ignored`; runtime only (not trusted after a restart)
 `ota_progress`, `ota_phase` ("restarting"), `downgrade`; `updated` (confirmed or unconfirmed installation, until the next full
 check or single check of the device), `install_failed` (failed installation, not a downgrade: file stays
