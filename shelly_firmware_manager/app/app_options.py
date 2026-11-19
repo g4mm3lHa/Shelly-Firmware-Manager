@@ -18,6 +18,7 @@ INT_RANGES = {
     "max_parallel_installs": (1, 20),
     "log_retention_days": (1, 365),
     "log_entry_limit": (100, 3000),
+    "import_max_mb": (1, 2048),
 }
 BOOLS = ("restrict_downloads_to_devices", "gen1_updates_enabled", "allow_downgrade")
 DEFAULTS = {
@@ -26,6 +27,7 @@ DEFAULTS = {
     "gen1_updates_enabled": True,
     "log_retention_days": 90,
     "log_entry_limit": 1000,
+    "import_max_mb": 100,
 }
 # All option keys of config.yaml. Anything else in options.json is ignored everywhere,
 # so an unknown (e.g. removed) key can never reach the UI, the log or a save request.

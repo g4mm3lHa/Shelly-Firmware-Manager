@@ -1,5 +1,10 @@
-// Settings tab: app options with validation hints and the download base URL notice.
-import {$, api, attachTip, box, el, icon, iconButton, message, modal, ui} from "./core.js";
+// Settings tab: app options with validation hints and the download base URL notice;
+// cards "Firmware store" (export / import) and "Device passwords" (several devices).
+import {
+  $, api, attachTip, box, closeModal, copyText, el, fmt, icon, iconButton, mb, message, messageBody, modal, section, ui,
+  uploadFile, valueList,
+} from "./core.js";
+import {bulkPasswords} from "./device-settings.js";
 
 // ---------------------------------------------------------------- App settings
 // All app options, grouped into cards. Saving goes through the Supervisor and
@@ -12,6 +17,7 @@ export const OPTION_FIELDS = [
   ["restrict_downloads_to_devices", "Serve downloads only to known Shellys", "bool", "Switch off if downloads are rejected from 172.30.x.x", "Firmware & storage"],
   ["gen1_updates_enabled", "Enable Gen1 updates", "bool", "Gen1 firmware is only available via plain HTTP without a checksum", "Firmware & storage"],
   ["gen1_allowed_types", "Allowed Gen1 types", "list", "Comma-separated, e.g. SHSW-1, SHSW-PM", "Firmware & storage"],
+  ["import_max_mb", "Max. import size (MB)", "number", "Largest file accepted by “Import store” (Settings → Firmware store); 1–2048, default 100", "Firmware & storage"],
   ["allow_downgrade", "Allow downgrades", "bool", "Installing an older stored firmware on Gen2+ devices (device menu and Firmware tab); off by default", "Firmware & storage"],
   ["log_entry_limit", "Log size (max. entries)", "number", "100–3000", "Logs"],
   ["log_retention_days", "Log retention (days)", "number", "1–365", "Logs"],
@@ -77,6 +83,7 @@ export function renderSettings() {
     }
     return box("div", "card", box("div", "card-head", el("h2", group)), box("div", "card-body", form));
   });
+  cards.push(storeCard(), passwordsCard());
   const save = el("button", "Save settings", "primary"); save.onclick = saveOptions;
   const dirty = el("span", "Unsaved changes", "unsaved"); dirty.hidden = true;
   const markDirty = () => { dirty.hidden = !Object.keys(optionChanges()).length; };
@@ -144,4 +151,111 @@ function waitForRestart() {
     setTimeout(probe, 2000);
   };
   setTimeout(probe, 2000);
+}
+
+// ---------------------------------------------------------------- Firmware store: export / import
+// The whole store moves to another Home Assistant instance as one ZIP file (readable
+// folders per generation and firmware ID, manifest.json, SHA256SUMS.txt). The app
+// generates the export password and shows it once; it seals the file (HMAC over the
+// manifest with every SHA-256): the import checks that nothing was changed.
+/** Settings card with the Export and Import buttons. */
+function storeCard() {
+  const ex = el("button"); ex.append(icon("exportIcon"), " Export store …"); ex.id = "store-export"; ex.onclick = exportDialog;
+  const im = el("button"); im.append(icon("importIcon"), " Import store …"); im.id = "store-import"; im.onclick = importDialog;
+  return box("div", "card", box("div", "card-head", el("h2", "Firmware store")), box("div", "card-body",
+    el("p", "Move the complete firmware store to another Home Assistant instance: export it as one ZIP file (sealed with a password) and import it there. Device passwords are not exported.", "hint"),
+    box("div", "store-btns", ex, im)));
+}
+/** Settings card that opens the dialog for passwords of several devices. */
+function passwordsCard() {
+  const pw = el("button"); pw.append(icon("lock"), " Device passwords …"); pw.id = "set-passwords"; pw.onclick = bulkPasswords;
+  return box("div", "card", box("div", "card-head", el("h2", "Device passwords")), box("div", "card-body",
+    el("p", "Store the existing password or set a new one on several devices in one step (each device is set, verified and stored on its own).", "hint"),
+    box("div", "store-btns", pw)));
+}
+const EXPORT_TITLE = "Export firmware store", IMPORT_TITLE = "Import firmware store";
+/** Export: the server generates the password (shown only here) and a single-use
+ *  download link; "Export" is enabled after "I have saved the password". */
+async function exportDialog() {
+  let x;
+  try { x = await api("api/firmware/export", {}); } catch (e) { message(EXPORT_TITLE, e.message, "error", "exportIcon"); return; }
+  const out = el("input"); out.type = "text"; out.readOnly = true; out.value = x.password; out.className = "mono";
+  out.setAttribute("aria-label", "Export password");
+  const copy = iconButton("copy", "Copy password", () => copyText(x.password));
+  const ack = el("input"); ack.type = "checkbox";
+  const files = `${x.files} (${x.downloads} downloaded, ${x.uploads} uploaded)`;
+  modal(EXPORT_TITLE, [
+    valueList([["Files", files], ["Size", mb(x.size)], ["File", x.filename]]),
+    box("label", "field", "Export password (generated, shown only now)", box("div", "pw-row", out, copy)),
+    el("p", "The password seals the file: the import checks that no file and no entry was changed. It is not stored anywhere – the file cannot be imported without it.", "hint"),
+    box("label", "check", ack, " I have saved the password")],
+  [{text: "Cancel"}, {text: "Export", kind: "primary", action: () => {
+    // Download through a link: the file is streamed to disk by the browser, never held in memory
+    const a = el("a"); a.href = `api/firmware/export/${encodeURIComponent(x.token)}`; a.download = x.filename;
+    document.body.append(a); a.click(); a.remove();
+    modal(EXPORT_TITLE, [messageBody("The export is being created – your browser downloads it in a moment. Damaged stored files are left out (see the log).", "success")],
+      undefined, "exportIcon");
+  }}], "exportIcon");
+  const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; };
+}
+/** Import step 1: export file and its password; the file is uploaded and checked
+ *  completely (seal, every file) before anything is stored. */
+export function importDialog() {
+  const max = (ui.state && ui.state.import_max_mb) || 100;
+  const file = el("input"); file.type = "file"; file.accept = ".zip,application/zip";
+  const pw = el("input"); pw.type = "text"; pw.className = "mono"; pw.placeholder = "XXXX-XXXX-XXXX-XXXX-XXXX";
+  pw.autocomplete = "off"; pw.spellcheck = false; pw.maxLength = 64;
+  modal(IMPORT_TITLE, [
+    el("p", "Choose a file created by “Export store” of this app and enter its export password. The file is checked completely before anything is stored.", "hint"),
+    box("label", "field", `Export file (.zip, max. ${max} MB – see “Max. import size”)`, file),
+    box("label", "field", "Export password", pw)],
+  [{text: "Cancel"}, {text: "Check file", kind: "primary", action: async () => {
+    const f = file.files[0];
+    if (!f) { message(IMPORT_TITLE, "No file chosen.", "error", "importIcon"); return; }
+    if (f.size > max * 1048576) { message(IMPORT_TITLE, `The file is larger than the maximum import size (${max} MB). Raise “Max. import size” in the settings first.`, "error", "importIcon"); return; }
+    if (!pw.value.trim()) { message(IMPORT_TITLE, "Enter the export password.", "error", "importIcon"); return; }
+    await checkImport(f, pw.value);
+  }}], "importIcon");
+}
+/** Upload and check; shows the summary or the error (the staged file is discarded). */
+async function checkImport(f, password) {
+  modal(IMPORT_TITLE, [el("p", `Uploading and checking ${f.name} (${mb(f.size)}) …`, "hint")], [], "importIcon");
+  let token = null;
+  try {
+    token = (await uploadFile(f, "api/firmware/import")).token;
+    importSummary(token, f.name, await api("api/firmware/import/check", {token, password}));
+  } catch (e) {
+    if (token) api("api/firmware/import/cancel", {token}).catch(() => {});
+    message(IMPORT_TITLE, e.message, "error", "importIcon");
+  }
+}
+const IMPORT_GROUPS = [["new", "new – will be stored", "p-uptodate"], ["same", "already stored – data added if missing", ""],
+  ["conflict", "conflict – stored file kept", "p-available"]];
+/** Import step 2: result of the check as counts; every group can be expanded,
+ *  conflicts are expanded from the start. Nothing is stored before "Import". */
+function importSummary(token, name, r) {
+  const line = e => `${e.type} ${e.version}${e.gen === 1 ? " (Gen1)" : ""} – ${e.source === "upload" ? "uploaded" : "downloaded"}` +
+    (e.note ? ` – ${e.note}` : "");
+  const groups = IMPORT_GROUPS.map(([key, label, cls]) => {
+    const rows = r[key] || [], d = el("details");
+    d.open = key === "conflict" && rows.length > 0;
+    d.append(box("summary", "imp-sum", el("span", String(rows.length), "pill " + cls), " " + label),
+      rows.length ? box("ul", "imp-list", ...rows.map(e => el("li", line(e)))) : el("p", "none", "hint"));
+    return d;
+  });
+  const n = r.new.length, label = n ? `Import ${n} file${n === 1 ? "" : "s"}` : "Finish import";
+  const cancel = async () => { await api("api/firmware/import/cancel", {token}).catch(() => {}); closeModal(); };
+  modal(IMPORT_TITLE, [
+    messageBody(`Seal and ${r.files === 1 ? "the file" : `all ${r.files} files`} checked – nothing was changed since the export.`, "success"),
+    valueList([["File", name], ["Exported", r.exported ? fmt(r.exported) : "unknown"], ["Size", mb(r.size)]]),
+    section("Result", box("div", "imp-groups", ...groups))],
+  [{text: "Cancel", action: cancel}, {text: label, kind: "primary", action: async () => {
+    try {
+      const c = await api("api/firmware/import/confirm", {token});
+      const parts = [`${c.stored} new file${c.stored === 1 ? "" : "s"} stored`];
+      if (c.updated) parts.push(`data added to ${c.updated} stored file${c.updated === 1 ? "" : "s"}`);
+      if (c.conflicts) parts.push(`${c.conflicts} conflict${c.conflicts === 1 ? "" : "s"} – the stored files were kept`);
+      message(IMPORT_TITLE, parts.join(", ") + ".", c.conflicts ? "warning" : "success", "importIcon");
+    } catch (e) { message(IMPORT_TITLE, e.message, "error", "importIcon"); }
+  }}], "importIcon");
 }

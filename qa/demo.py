@@ -1,6 +1,6 @@
 """Local demo server with fake data for UI tests (no network access).
 
-Usage: python demo.py <app_dir> <port> <scenario: idle|busy|legacy|missing|features>
+Usage: python demo.py <app_dir> <port> <scenario: idle|busy|legacy|missing|features|first>
 legacy: download_base_url is the former example value (not confirmed) and one device
 installs with device progress; missing: download_base_url not set; features: idle
 plus stored older versions (one of them uploaded) for downgrade and upload checks.
@@ -29,7 +29,7 @@ for name, value in {"STATE_FILE": data / "state.json", "FW_DIR": data / "fw", "C
 
 opts = {"check_interval_days": 7, "check_time": "02:45", "download_base_url": "http://192.168.1.2:8098", "restrict_downloads_to_devices": True,
         "gen1_updates_enabled": True, "gen1_allowed_types": ["SHSW-1"], "max_parallel_installs": 2,
-        "log_retention_days": 30, "log_entry_limit": 1000, "allow_downgrade": True}
+        "log_retention_days": 30, "log_entry_limit": 1000, "allow_downgrade": True, "import_max_mb": 100}
 if scenario == "legacy":
     import app_options
     opts["download_base_url"] = app_options.LEGACY_DOWNLOAD_BASE
@@ -37,6 +37,8 @@ elif scenario == "missing":   # also shows downgrades switched off
     del opts["download_base_url"]
     del opts["allow_downgrade"]
 m = manager.Manager(opts, session=None, token="t")
+# Fresh installation: only the "first" demo shows the first-start question
+m.first_start_open = scenario == "first"
 now = int(time.time())
 names = ["Kitchen light", "Living room ceiling with a really long device name", "Hall", "Garage door", "Pool pump",
          "Office desk", "Bedroom shutter", "Heat pump 3EM", "Garden plug", "Basement", "Attic fan", "Terrace",

@@ -16,6 +16,7 @@ Assistant). Version history: `CHANGELOG.md` (Changelog tab).
   - [Logs](#logs)
   - [Settings](#settings)
 - [Device passwords](#device-passwords)
+- [Moving the firmware store](#moving-the-firmware-store)
 - [Gen1 firmware](#gen1-firmware)
 - [Troubleshooting](#troubleshooting)
 - [Certificate pinning](#certificate-pinning)
@@ -36,6 +37,10 @@ knows). Only original Shelly firmware is supported for now.
 3. If you use a firewall: allow the Shellys to reach Home Assistant on TCP port 8098.
 4. Turn on the **Watchdog** switch on the app page (if it is off): Home Assistant then restarts
    the app if it stops unexpectedly (it only checks that port 8098 accepts connections).
+5. On a fresh installation the app asks once whether to import a firmware store from
+   another Home Assistant instance (see [Moving the firmware store](#moving-the-firmware-store)).
+   No check runs until you choose **Import store …** or **Skip**; a notice above the
+   tabs and a Home Assistant notification remind you. Updates of the app never ask.
 
 ## Configuration
 
@@ -50,6 +55,7 @@ the app page). Saving restarts the app.
 | Parallel installations | How many installations run at the same time (1–20, default 5) |
 | Enable Gen1 updates / Allowed Gen1 types | Gen1 support and the Gen1 models to check (see [Gen1 firmware](#gen1-firmware)) |
 | Allow downgrades | Installing an older stored firmware on Gen2+ devices (see [Downgrade](#downgrade-gen2)). Off unless switched on, also after an update of the app |
+| Max. import size (MB) | Largest file accepted by **Import store** (1–2048, default 100) |
 | Log size / Log retention | Activity log limits (100–3000 entries, 1–365 days) |
 | Pinned certificates | Certificate fingerprints for Shelly servers (see [Certificate pinning](#certificate-pinning)) |
 
@@ -225,8 +231,8 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
 ### Logs
 
 The activity log records checks, downloads, uploads, installations and downgrades,
-deleted firmware, setting and password changes on devices and changes of the app
-settings – each with time, user and result (success, warning, error). A download names
+deleted firmware, setting and password changes on devices, store exports and imports
+and changes of the app settings – each with time, user and result (success, warning, error). A download names
 the user of the check that fetched it; scheduled checks and their downloads name
 "Schedule". Filters and a
 device search help to find entries. Passwords never appear in the log. Consecutive
@@ -241,7 +247,9 @@ All options from [Configuration](#configuration), grouped into cards with one Sa
 button. The i-icon next to a setting (or the setting name) shows its help – on touch
 devices with a tap. A hint warns while typing if the download base URL is a host name or not in
 your local network. While installations are disabled because of the download base URL,
-a notice above the tabs explains why.
+a notice above the tabs explains why. Below the options, the cards **Firmware store**
+(export and import, see [Moving the firmware store](#moving-the-firmware-store)) and
+**Device passwords** (several devices at once, see [Device passwords](#device-passwords)).
 
 ## Device passwords
 
@@ -261,10 +269,56 @@ password**, or the lock icon):
 After enabling, changing or removing the protection, change the password in the Home
 Assistant Shelly integration as well.
 
+**Several devices at once:** Settings tab → **Device passwords …**. Choose the action –
+**Store the existing device password in this app** or **Set password** (enables the
+protection of unprotected devices, changes it on protected devices whose password is
+stored) – tick the devices ("All devices that fit") and enter one password for all of
+them. Devices the action does not fit are greyed out with the reason (e.g. protected
+without stored password: store the current password first; state unknown: reload the
+device info). Each device is still set, verified, stored and logged on its own, as in
+the single-device dialog; up to **Parallel installations** devices at the same time. A
+failure on one device does not stop the others; busy devices are skipped. The result
+lists every device (done, failed, skipped). Removing the protection and forgetting a
+password stay in the single-device dialog.
+
 Passwords are stored only in the app's private storage. For Gen2+ only a hash bound to
 the device is stored. Gen1 devices need the password itself (Basic Auth): it is stored
 in plain text and is part of Home Assistant backups, and Basic Auth sends it almost
 unprotected through your network.
+
+## Moving the firmware store
+
+To move to another Home Assistant instance (or keep a copy), export the whole firmware
+store in the Settings tab → **Firmware store** → **Export store …**:
+
+- The app generates an **export password** and shows it once (copy icon). Save it –
+  it is stored nowhere, and the file cannot be imported without it. **Export** is
+  enabled after "I have saved the password"; the browser downloads one ZIP file.
+- The password **seals** the file: the list of all files with their SHA-256 and data
+  (source, date, changelog) is protected by an HMAC-SHA256 whose key is derived from
+  the password (scrypt). The file is **not encrypted**: unpacked, it shows the folders
+  `Gen2+/<firmware ID>/` and `Gen1/<firmware ID>/` with readable file names (uploads
+  end in `-upload`), plus `manifest.json` and `SHA256SUMS.txt`. An archive that was
+  unpacked and packed again is accepted as long as no file changed.
+- Stored files whose SHA-256 no longer matches are left out (warning in the log).
+  Device passwords are never exported.
+
+On the other instance: **Import store …**, choose the file and enter the export
+password. The file is checked completely – seal, every file – before anything is
+stored; then the result shows how many files are new, already stored or in conflict
+(each group can be expanded; conflicts are expanded). **Import** stores the new files:
+
+- Each file keeps its source ("downloaded" from Shelly or "uploaded") and its original
+  date, changelog and intermediate marker. Gen1 files are imported even if Gen1 updates
+  are off or the type is not allowed.
+- Already stored (same SHA-256): not stored twice; missing data is added, and an upload
+  becomes "downloaded" if the export holds it as a download.
+- Conflict (same firmware ID and version, different file): the stored file is kept.
+
+The largest accepted file is set by **Max. import size (MB)**; the import also needs
+about twice the file size of free disk space. Not possible during a check. The import is
+logged with user and counts. Uninstalling the app in Home Assistant removes its private
+storage including the firmware store – export it first if you want to keep it.
 
 ## Gen1 firmware
 
@@ -330,6 +384,8 @@ The user interface loads nothing from the internet. No telemetry.
   protected against cross-site requests.
 - Every approval is bound to the SHA-256 of the exact file. Downgrades, deleting
   firmware and password changes need a second confirmation.
+- A store import is refused if the seal or any file does not match; the export
+  password is shown once and stored nowhere.
 - The download server (port 8098) only serves files of a running installation, by
   default only to the device being updated. It has no login, because Shellys cannot
   authenticate.

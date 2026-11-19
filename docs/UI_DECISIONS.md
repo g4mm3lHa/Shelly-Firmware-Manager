@@ -119,6 +119,33 @@ not part of this file.
   text, at most the width minus 16 px on each side.
 - Settings tab design approved.
 
+## Firmware store and device passwords (approved 2026-11-19, 3.4.0)
+- **Entry points (8a B, 7a B):** Settings tab, below the option cards: card "Firmware
+  store" (buttons "Export store …" / "Import store …" with export/import icons) and
+  card "Device passwords" (button "Device passwords …" with lock icon).
+- **Export (8b B):** dialog with value list (files with downloaded/uploaded, size, file
+  name), the generated password in a read-only field with copy icon (shown only here),
+  hint that it seals and is stored nowhere, checkbox "I have saved the password";
+  "Export" is enabled only after it and starts the browser download.
+- **Import (8c A):** step 1 file + password + "Check file" (the hint names the maximum
+  import size). Step 2: success icon, value list (file, exported, size), section
+  "Result" with counts new / already stored – data added if missing / conflict – stored
+  file kept; each group expandable, conflicts expanded; button "Import N files"
+  ("Finish import" without new files). Errors as error message.
+- **First start (8d both):** dialog "Welcome – import a firmware store?" (Skip /
+  Import store …) once per browser; then the yellow notice bar with the same buttons
+  until answered (it takes precedence over the download base URL notice). "Check now"
+  is disabled with a tooltip; empty device list: "they are found by the first check".
+- **Device passwords for several devices (7b, mockup `Passwoerter_Dialog_final`):**
+  sections Action (store existing / set password, set preselected), Devices ("All
+  devices that fit (n of m)", one row per device with name, "Gen · protection state"
+  and the step "→ enable protection" / "→ change password"; devices that do not fit are
+  greyed out with the reason), Password (+ repeat for set), "Store in this app"
+  (unchecked → red box), yellow "Keep the password safe" box. Red button "Set on n
+  devices …" → second confirmation with "I have stored the password securely" →
+  result per device (green check / red X / yellow "!" skipped) plus the yellow HA
+  Shelly integration reminder.
+
 ## Phone tiles (mockups approved 2026-11-12)
 - Checkbox and ⋮ on the name line, status/Install on the Shelly-name line, 12 px
   padding top and bottom, feature buttons 36 px with natural width and every row (incl.

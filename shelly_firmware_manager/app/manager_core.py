@@ -106,6 +106,9 @@ DOWNLOAD_BASE_MESSAGES = {
     "really is the address of Home Assistant.",
 }
 
+# No check before the first-start question is answered (fresh installation)
+FIRST_START_BLOCK = "Not before the first-start question is answered: import a firmware store or skip it"
+
 def severity_of(err: BaseException) -> str:
     """Log severity of a device error: authentication and internal errors are
     errors; unreachable devices, timeouts and temporary/missing data warnings."""
@@ -137,6 +140,7 @@ class ManagerCore:
         self.gen1_allowed = frozenset(options.get("gen1_allowed_types", []))
         self.gen1_enabled = bool(options["gen1_updates_enabled"])
         self.allow_downgrade = options.get("allow_downgrade") is True  # optional, missing = off
+        self.import_max = int(options["import_max_mb"]) * 1024 * 1024  # bytes; largest store import
         self.session = session
         self.token = token
         self.pins = pins  # certificate pins for shelly.cloud
@@ -174,6 +178,13 @@ class ManagerCore:
         self._step_checks: set[str] = set()
         self._upload: dict[str, Any] | None = None  # staged manual upload (see stage_upload), memory only
         self._upload_lock = asyncio.Lock()  # one upload transfer at a time
+        self._export: dict[str, Any] | None = None  # prepared store export (see prepare_export), memory only
+        self._import: dict[str, Any] | None = None  # staged store import (see stage_import), memory only
+        self._import_lock = asyncio.Lock()  # one import transfer / check / confirmation at a time
+        # First start of a fresh installation (no state.json): no check runs until the
+        # user answered the import question (import a store or skip); persisted
+        self.first_start_open = False
+        self.first_start_notified = False  # the HA notification about the question was sent
         # Set whenever the schedule changes (check finished): wakes the scheduler in
         # main.py instead of letting it poll every minute.
         self.schedule_changed = asyncio.Event()
@@ -203,7 +214,10 @@ class ManagerCore:
             self.schedule = data["schedule"] if isinstance(data.get("schedule"), dict) else {}
             confirmed = data.get("download_base_confirmed")
             self.download_base_confirmed = confirmed if isinstance(confirmed, str) else None
+            self.first_start_open = data.get("first_start_open") is True
+            self.first_start_notified = data.get("first_start_notified") is True
         except FileNotFoundError:
+            self.first_start_open = True  # fresh installation (also after an uninstall)
             return
         except (ValueError, OSError) as err:
             log.warning("State file unreadable, starting fresh: %s", err)
@@ -235,6 +249,8 @@ class ManagerCore:
             "firmware": self.firmware,
             "schedule": self.schedule,
             "download_base_confirmed": self.download_base_confirmed,
+            "first_start_open": self.first_start_open,
+            "first_start_notified": self.first_start_notified,
         }
         try:
             temp.write_text(json.dumps(state, separators=(",", ":")))
@@ -381,6 +397,8 @@ class ManagerCore:
         or Reload Device Info). kind "device": not during the full check, and not for
         a device that is being checked, installed or reloaded – other devices may be
         checked or installed at the same time. Raises ShellyError otherwise."""
+        if self.first_start_open:
+            raise ShellyError(FIRST_START_BLOCK)
         if self.checking:
             raise ShellyError("Check in progress – please try again afterwards")
         if self.reloading and (kind != "device" or device_id in self.reloading):

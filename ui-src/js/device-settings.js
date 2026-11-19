@@ -1,6 +1,6 @@
 // Dialogs for the settings of a single Shelly: name, NTP, power-on action, eco mode, switches,
-// websocket debug log, password, restart.
-import {$, api, box, closeModal, devUrl, el, icon, message, messageBody, modal, valueList, webUrl} from "./core.js";
+// websocket debug log, password, restart; passwords of several devices in one step.
+import {$, api, box, closeModal, devUrl, el, icon, message, messageBody, modal, section, ui, valueList, webUrl} from "./core.js";
 
 // ---------------------------------------------------------------- Device settings
 // Flow: read live values from the Shelly -> input -> (Shelly name: confirmation
@@ -234,4 +234,111 @@ function passwordConfirm(d, title, mode, password, keep) {
   if (m.risky) {
     const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; };
   }
+}
+
+// ---------------------------------------------------------------- Passwords of several devices
+// One password for all selected devices; each device is still set, verified, stored and
+// logged on its own (same server path as the single-device dialog). Only "store" and
+// "set" – removing and forgetting stay in the single-device dialog. "set" enables the
+// protection of unprotected devices and changes it on protected ones whose current
+// password is stored; other devices are greyed out with the reason.
+const BULK_TITLE = "Device passwords";
+const BULK_MODES = [["store", "Store the existing device password in this app"], ["set", "Set password (enable protection or change it)"]];
+/** [step text, fits] of a device for the action (mirrors the server check). */
+function bulkStep(d, mode) {
+  if (!d.ip || !d.gen || d.installing || d.status === "installing" || d.activity) return ["busy or not reachable – try again later", false];
+  if (d.auth_enabled == null) return ["state unknown – reload device info", false];
+  if (mode === "store") return d.auth_enabled ? ["test and store", true] : ["not protected", false];
+  if (!d.auth_enabled) return ["enable protection", true];
+  return d.password_set ? ["change password", true] : ["store the current password first", false];
+}
+/** First step: action, devices, password (+ repeat), storage choice. */
+export function bulkPasswords() {
+  const devices = [...((ui.state && ui.state.devices) || [])].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  const modes = el("div", null, "modes"), list = el("div", null, "bulk-list"), storage = el("div");
+  const pw = el("input"), pw2 = el("input");
+  for (const i of [pw, pw2]) { i.type = "password"; i.autocomplete = "new-password"; i.maxLength = 128; }
+  const pw2Field = box("label", "field", "Repeat password", pw2);
+  const keep = el("input"); keep.type = "checkbox"; keep.checked = true;
+  const keepLabel = box("label", "check", keep, " Store in this app");
+  let boxes = [];
+  const mode = () => modes.querySelector("input:checked").value;
+  const chosen = () => boxes.filter(([cb]) => cb.checked).map(([, d]) => d);
+  const update = () => {
+    const set = mode() === "set", n = chosen().length;
+    pw2Field.hidden = !set; keepLabel.hidden = !set;
+    const stored = "Gen2+: only a SHA-256 hash bound to each device is stored. Gen1: plain text in the app's private storage (1–50 characters).";
+    const ha = "After setting it, also enter the password for these devices in the Home Assistant Shelly integration.";
+    if (!set) storage.replaceChildren(el("p", stored, "hint"));
+    else if (keep.checked) storage.replaceChildren(el("div", `${stored} ${ha}`, "warnbox"));
+    else storage.replaceChildren(el("div", `${NOT_STORED} ${ha}`, "warnbox danger"));
+    const go = $("dlg-btns").lastChild;
+    if (go) { go.textContent = set ? `Set on ${n} device${n === 1 ? "" : "s"} …` : `Store for ${n} device${n === 1 ? "" : "s"} …`;
+      go.className = set ? "danger" : "primary"; go.disabled = !n; }
+  };
+  const fill = () => {
+    const m = mode(), fits = devices.filter(d => bulkStep(d, m)[1]);
+    const all = el("input"); all.type = "checkbox"; all.checked = fits.length > 0; all.disabled = !fits.length;
+    boxes = devices.map(d => {
+      const [text, ok] = bulkStep(d, m), cb = el("input"); cb.type = "checkbox"; cb.checked = ok; cb.disabled = !ok;
+      cb.onchange = () => { all.checked = boxes.every(([c]) => c.disabled || c.checked); update(); };
+      return [cb, d, text, ok];
+    });
+    all.onchange = () => { for (const [cb] of boxes) if (!cb.disabled) cb.checked = all.checked; update(); };
+    const state = d => d.auth_enabled === true ? (d.password_set ? "protected · stored" : "protected · not stored") :
+      d.auth_enabled === false ? "not protected" : "unknown";
+    list.replaceChildren(box("label", "check bulk-all", all, ` All devices that fit (${fits.length} of ${devices.length})`),
+      ...boxes.map(([cb, d, text, ok]) => box("div", "bulk-row" + (ok ? "" : " off"),
+        box("label", "check", cb, box("span", "bulk-dev", el("span", d.name || "?", "name"), el("span", `Gen${d.gen || "?"} · ${state(d)}`, "sub"))),
+        el("span", (ok ? "→ " : "") + text, ok ? "bulk-step" : "sub"))));
+    update();
+  };
+  BULK_MODES.forEach(([k, label]) => {
+    const r = el("input"); r.type = "radio"; r.name = "bulk-mode"; r.value = k; r.checked = k === "set"; r.onchange = fill;
+    modes.append(box("label", "check", r, " " + label));
+  });
+  keep.onchange = update;
+  modal(BULK_TITLE, [section("Action", modes), section("Devices", devices.length ? list : el("p", "No devices yet – they are found by the check.", "hint")),
+    section("Password (every selected device gets it)", box("div", null, box("label", "field", "Password (user “admin”)", pw), pw2Field)),
+    keepLabel, storage, el("div", PASSWORD_WARNING, "warnbox")],
+  [{text: "Cancel"}, {text: "Continue", kind: "danger", action: () => {
+    const m = mode(), set = m === "set", picked = chosen(), password = pw.value;
+    if (!picked.length) { message(BULK_TITLE, "No device selected.", "error", "lock"); return; }
+    if (!password) { message(BULK_TITLE, "No password entered.", "error", "lock"); return; }
+    if (set && password !== pw2.value) { message(BULK_TITLE, "The passwords do not match.", "error", "lock"); return; }
+    if (password.length > 50 && picked.some(d => d.gen === 1)) { message(BULK_TITLE, "Gen1 devices accept 1–50 characters – choose a shorter password or leave the Gen1 devices out.", "error", "lock"); return; }
+    bulkConfirm(m, picked, password, !set || keep.checked);
+  }}], "lock");
+  fill();
+}
+/** Second step: explicit confirmation ("set" also needs "stored securely"). */
+function bulkConfirm(mode, picked, password, keep) {
+  const set = mode === "set", ack = el("input"); ack.type = "checkbox";
+  const names = picked.map(d => d.name || "?").join(", ");
+  const content = [el("p", `${set ? "Set the password on" : "Test and store the password for"} ${picked.length} device${picked.length === 1 ? "" : "s"}?`),
+    el("p", names, "hint"), el("div", PASSWORD_WARNING, "warnbox")];
+  if (set) content.push(box("label", "check", ack, " I have stored the password securely"));
+  const send = async () => {
+    modal(BULK_TITLE, [el("p", `Working on ${picked.length} device${picked.length === 1 ? "" : "s"} …`, "hint")], [], "lock");
+    try {
+      const r = await api("api/devices/passwords", {mode, devices: picked.map(d => d.id), password, confirm: true, acknowledged: set ? ack.checked : false, keep});
+      bulkResult(mode, r.results, keep);
+    } catch (e) { message(BULK_TITLE, e.message, "error", "lock"); }
+  };
+  modal(BULK_TITLE, content, [{text: "Cancel"}, {text: set ? `Set on ${picked.length} device${picked.length === 1 ? "" : "s"}` : "Test & save", kind: set ? "danger" : "primary", action: send}], "lock");
+  if (set) { const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; }; }
+}
+const BULK_ICONS = {ok: ["check", "msg-success"], error: ["close", "msg-error"], skipped: ["alert", "msg-warning"]};
+/** Result per device: green check, red X, yellow "!" (skipped). */
+function bulkResult(mode, results, keep) {
+  const count = k => results.filter(r => r.result === k).length;
+  const text = r => r.result === "ok" ? (PASSWORD_DONE[r.action] || "Done.") + (keep || r.action === "store" ? "" : " Not stored in this app.") :
+    r.result === "skipped" ? `Skipped: ${r.message}` : `${r.message} – nothing changed`;
+  const done = count("ok") > 0 && mode === "set";
+  modal(`${BULK_TITLE} – result`, [
+    el("p", `${count("ok")} done · ${count("error")} failed · ${count("skipped")} skipped`, "hint"),
+    box("div", "bulk-res", ...results.map(r => box("div", "bulk-res-row " + BULK_ICONS[r.result][1],
+      box("span", "msg-icon sm", icon(BULK_ICONS[r.result][0])), box("span", "bulk-dev", el("span", r.name, "name"), el("span", text(r), "sub"))))),
+    done ? el("div", "Also enter the new password for these devices in the Home Assistant Shelly integration.", "warnbox") : null].filter(Boolean),
+  [{text: "Close", kind: "primary"}], "lock");
 }

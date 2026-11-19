@@ -347,3 +347,101 @@ async def test_public_state_fields(mgr, net):
     assert state["schedule"]["days"] == 7 and state["schedule"]["timezone"] == "Europe/Berlin"
     dev = next(d for d in state["devices"] if d["id"] == C)
     assert dev["ap"] is False and dev["ble"] == "unsupported" and dev["ignored"] is False
+
+
+@pytest.fixture
+async def several(mgr, net, monkeypatch):
+    """Checked devices A, B, C, each with its own fake protection state."""
+    await mgr.scan()
+    boxes = {f"http://{d[1]}": {"protected": False, "ha1": None, "fail": None} for d in net.devices.values()}
+    running = {"now": 0, "max": 0}
+
+    async def status(_session, origin):
+        return boxes[origin]["protected"]
+
+    async def protect(_session, gen, origin, realm, new_auth, auth=None):
+        running["now"] += 1
+        running["max"] = max(running["max"], running["now"])
+        await asyncio.sleep(0.02)
+        running["now"] -= 1
+        box = boxes[origin]
+        if box["fail"]:
+            raise box["fail"]
+        box["protected"], box["ha1"] = (True, new_auth.ha1) if new_auth else (False, None)
+
+    async def read(_session, gen, origin, _type, auth=None, extended=False):
+        box = boxes[origin]
+        if box["protected"] and (auth is None or auth.ha1 != box["ha1"]):
+            raise shelly.AuthError("The Shelly rejected the password")
+        return {}
+
+    monkeypatch.setattr(shelly, "protection_status", status)
+    monkeypatch.setattr(shelly, "set_protection", protect)
+    monkeypatch.setattr(shelly, "read_settings", read)
+    for dev_id in (A, B, C):
+        mgr.devices[dev_id]["auth_enabled"] = False
+    return {"boxes": boxes, "running": running, "origin": {i: f"http://{d[1]}" for i, d in net.devices.items()}}
+
+
+async def test_bulk_set_enables_and_changes_per_device(mgr, several):
+    """One password for several devices: unprotected ones get protection, protected ones
+    with a stored password get the new one; each device is verified, stored and logged
+    on its own; parallel up to max_parallel_installs."""
+    await mgr.set_device_password(B, "enable", "old-pw", confirm=True, acknowledged=True)
+    assert mgr.bulk_password_step(A, "set") == ("enable", "")
+    assert mgr.bulk_password_step(B, "set") == ("change", "")
+    results = await mgr.set_passwords("set", [A, B, C], "New-Pw-1", confirm=True, acknowledged=True, user="u")
+    assert {r["id"]: (r["result"], r["action"]) for r in results} == {
+        A: ("ok", "enable"), B: ("ok", "change"), C: ("ok", "enable"),
+    }
+    assert all(mgr.credentials.has_device_password(i) for i in (A, B, C))
+    assert several["running"]["max"] == mgr.options["max_parallel_installs"] == 2
+    actions = [e["action"] for e in mgr.events.entries if e["kind"] == "password"]
+    assert sorted(actions[-3:]) == ["changed", "enabled", "enabled"]
+
+
+async def test_bulk_skips_unfit_devices_and_continues_after_errors(mgr, several):
+    """Protected without stored password and unknown state: skipped with a reason; a
+    failing device does not stop the others."""
+    several["boxes"][several["origin"][B]].update(protected=True, ha1="x")
+    mgr.devices[B]["auth_enabled"] = True
+    mgr.devices[C]["auth_enabled"] = None
+    assert mgr.bulk_password_step(B, "set") == (None, "Store the current password first")
+    assert mgr.bulk_password_step(C, "set")[0] is None
+    assert mgr.bulk_password_step(A, "store") == (None, "Not password protected")
+    several["boxes"][several["origin"][A]]["fail"] = shelly.ShellyError("Device refused")
+    results = {r["id"]: r for r in await mgr.set_passwords(
+        "set", [A, B, C], "New-Pw-1", confirm=True, acknowledged=True)}
+    assert results[A]["result"] == "error" and "refused" in results[A]["message"]
+    assert results[B]["result"] == "skipped" and results[C]["result"] == "skipped"
+    assert not any(mgr.credentials.has_device_password(i) for i in (A, B, C))
+
+
+async def test_bulk_store_existing_password(mgr, several):
+    """Store: the existing password is verified per device; a wrong one is an error."""
+    for dev_id in (A, B):
+        mgr.devices[dev_id]["auth_enabled"] = True
+        several["boxes"][several["origin"][dev_id]].update(
+            protected=True, ha1=shelly.gen2_ha1(mgr.devices[dev_id]["shelly_id"], "shared"))
+    several["boxes"][several["origin"][B]]["ha1"] = "other"
+    results = {r["id"]: r["result"] for r in await mgr.set_passwords("store", [A, B, C], "shared", confirm=True)}
+    assert results == {A: "ok", B: "error", C: "skipped"}
+    assert mgr.credentials.has_device_password(A) and not mgr.credentials.has_device_password(B)
+
+
+async def test_bulk_validation(mgr, several):
+    """Mode, confirmations, password, selection and storage choice are checked."""
+    good = {"confirm": True, "acknowledged": True}
+    for args, kwargs, match in (
+        (("remove", [A], "pw"), good, "Unknown password action"),
+        (("set", [A], "pw"), {"confirm": True}, "stored securely"),
+        (("set", [A], "pw"), {"acknowledged": True}, "Confirmation"),
+        (("set", [A], ""), good, "No password"),
+        (("set", [], "pw"), good, "at least one"),
+        (("set", [A, "x"], "pw"), good, "Unknown device"),
+        (("store", [A], "pw"), {"confirm": True, "keep": False}, "storage choice"),
+    ):
+        with pytest.raises(ValueError, match=match):
+            await mgr.set_passwords(*args, **kwargs)
+    results = await mgr.set_passwords("set", [A, A], "pw", keep=False, **good)
+    assert len(results) == 1 and results[0]["result"] == "ok" and not mgr.credentials.has_device_password(A)

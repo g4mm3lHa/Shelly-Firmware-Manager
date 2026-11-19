@@ -21,7 +21,7 @@ from manager import Manager
 from tls import CertificatePins
 from web_ui import build_ui_app
 
-VERSION = "3.3.0"  # must match config.yaml
+VERSION = "3.4.0-rc1"  # must match config.yaml
 
 OPTIONS_FILE = Path("/data/options.json")
 UI_PORT = 8099  # Ingress (internal)
@@ -78,7 +78,7 @@ async def main() -> None:
     async with aiohttp.ClientSession(headers={"User-Agent": USER_AGENT}, trust_env=False) as session:
         mgr = Manager(options, session, token, pins)
         runners = [
-            await start_site(build_ui_app(mgr), UI_PORT),
+            await start_site(build_ui_app(mgr, app_version=VERSION), UI_PORT),
             await start_site(build_download_app(mgr), DOWNLOAD_PORT),
         ]
         log.info(
@@ -103,6 +103,7 @@ async def main() -> None:
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, stop.set)
+        await mgr.announce_first_start()   # fresh installation: one HA notification about the import question
         scheduler = asyncio.create_task(run_schedule(mgr))
         stopper = asyncio.create_task(stop.wait())
         results: tuple[object, ...] = (None, None)
@@ -130,6 +131,10 @@ async def run_schedule(mgr: Manager) -> None:
         # MAX_IDLE_WAIT_S at a time so DST and wall-clock jumps are picked
         # up; schedule_changed (set after every check) wakes it early.
         mgr.schedule_changed.clear()
+        if mgr.first_start_open:   # fresh installation: no check before the import question is answered
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(mgr.schedule_changed.wait(), timeout=MAX_IDLE_WAIT_S)
+            continue
         due = mgr.scan_due_in(time.time())
         if due > 0:
             with contextlib.suppress(TimeoutError):

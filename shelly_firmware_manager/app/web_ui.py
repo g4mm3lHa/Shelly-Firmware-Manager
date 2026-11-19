@@ -6,11 +6,13 @@ Protection layers:
    panel (panel_admin) are available to administrators only.
 2. Every write request – and every request that contacts a Shelly – needs a CSRF
    token (only visible in the delivered page) and Content-Type JSON. The only
-   exception to JSON is the firmware upload: Content-Type
-   application/octet-stream, streamed to disk with its own limit of 64 MiB; the
-   32 KB body limit stays for every other request.
+   exceptions to JSON are the firmware upload and the store import: Content-Type
+   application/octet-stream, streamed to disk with their own limits (upload 64 MiB,
+   import: option import_max_mb); the 32 KB body limit stays for every other request.
 3. Strict Content Security Policy; the frontend uses textContent only.
-4. Secrets are write-only: no endpoint ever returns a password or hash.
+4. Secrets are write-only: no endpoint ever returns a stored password or hash. The
+   only password in an answer is a newly generated export password, returned once
+   by /api/firmware/export and kept nowhere.
 5. Device-side password changes, deleting stored firmware and downgrades need
    explicit confirmation flags (confirm + acknowledged), deleting log entries the
    flag confirm – checked on the server (never inferred from the UI alone).
@@ -47,7 +49,10 @@ STATIC_DIR = Path(__file__).parent / "static"
 DEVICE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 RESTART_DELAY_S = 1  # let the answer reach the browser before the app restarts
-UPLOAD_ROUTE = "firmware-upload"  # the one route that takes a binary body
+UPLOAD_ROUTE = "firmware-upload"  # routes that take a binary body: firmware upload …
+IMPORT_ROUTE = "store_import"  # … and store import
+BINARY_ROUTES = (UPLOAD_ROUTE, IMPORT_ROUTE)
+EXPORT_TOKEN_RE = re.compile(r"^[0-9a-f]{32}$")
 UPLOAD_TYPE = "application/octet-stream"
 UPLOAD_CHUNK = 128 * 1024
 
@@ -73,8 +78,9 @@ def asset_version() -> str:
     return digest.hexdigest()[:16]
 
 
-def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Application:
-    """aiohttp application with the UI page, static files and the JSON API."""
+def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: str = "") -> web.Application:
+    """aiohttp application with the UI page, static files and the JSON API
+    (app_version: written into store exports)."""
     csrf_token = secrets.token_hex(32)  # new on every app start
     version = asset_version()
     index_html = (
@@ -104,7 +110,7 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Applic
         if request.method not in ("GET", "HEAD"):
             if not hmac.compare_digest(request.headers.get("X-CSRF-Token", ""), csrf_token):
                 return web.Response(status=403, text="Invalid CSRF token")
-            upload = request.match_info.route.name == UPLOAD_ROUTE
+            upload = request.match_info.route.name in BINARY_ROUTES
             if request.content_type != (UPLOAD_TYPE if upload else "application/json"):
                 return web.Response(status=415, text="Binary file expected" if upload else "JSON expected")
         try:
@@ -395,6 +401,99 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Applic
             raise web.HTTPConflict(text=str(err)) from None
         return web.json_response({"stored": entry["name"], "type": entry["type"], "version": entry["version"]})
 
+    async def store_export(request: web.Request) -> web.StreamResponse:
+        """Step 1 of a store export: generate the export password (returned once) and
+        a single-use token for the download."""
+        await json_body(request)
+        try:
+            return web.json_response(mgr.prepare_export(user_from(request.headers)))
+        except ShellyError as err:
+            raise web.HTTPConflict(text=str(err)) from None
+
+    async def store_export_download(request: web.Request) -> web.StreamResponse:
+        """Step 2: the export ZIP as download (token from step 1, single use). The
+        temporary file is deleted after sending, also when the transfer breaks."""
+        token = request.match_info["token"]
+        if not EXPORT_TOKEN_RE.match(token):
+            raise web.HTTPNotFound(text="Unknown export")
+        try:
+            path, filename = await mgr.build_export(token, app_version)
+        except ShellyError as err:
+            raise web.HTTPConflict(text=str(err)) from None
+        try:
+            response = web.StreamResponse(
+                headers={
+                    "Content-Type": "application/zip",
+                    "Content-Disposition": f'attachment; filename="{filename}"',
+                    "Content-Length": str(path.stat().st_size),
+                    **SECURITY_HEADERS,
+                }
+            )
+            await response.prepare(request)
+            with path.open("rb") as handle:
+                while chunk := await asyncio.to_thread(handle.read, UPLOAD_CHUNK * 8):
+                    await response.write(chunk)
+            await response.write_eof()
+            return response
+        finally:
+            path.unlink(missing_ok=True)
+
+    async def store_import(request: web.Request) -> web.StreamResponse:
+        """Step 1 of a store import: the export file as body, streamed to disk; its
+        size is limited by the option import_max_mb."""
+        length = request.content_length
+        if length is None:
+            raise web.HTTPLengthRequired(text="Content-Length required")
+        if length > mgr.import_max:
+            raise web.HTTPRequestEntityTooLarge(
+                max_size=mgr.import_max, actual_size=length,
+                text=f"File larger than the maximum import size ({mgr.import_max // 1048576} MB, Settings)",
+            )
+        return web.json_response(await guarded(mgr.stage_import(request.content.iter_chunked(UPLOAD_CHUNK), length)))
+
+    async def store_import_check(request: web.Request) -> web.StreamResponse:
+        """Step 2: check the staged export with its password; returns the summary."""
+        body = await json_body(request)
+        return web.json_response(await guarded(mgr.check_import(body.get("token"), body.get("password"))))
+
+    async def store_import_confirm(request: web.Request) -> web.StreamResponse:
+        """Step 3: store the checked import (new files, missing data)."""
+        body = await json_body(request)
+        try:
+            counts = await mgr.confirm_import(body.get("token"), user_from(request.headers))
+        except ValueError as err:
+            raise web.HTTPBadRequest(text=str(err)) from None
+        except (ShellyError, OSError) as err:
+            raise web.HTTPConflict(text=str(err)) from None
+        return web.json_response(counts)
+
+    async def store_import_cancel(request: web.Request) -> web.StreamResponse:
+        """Discard the staged import."""
+        mgr.cancel_import((await json_body(request)).get("token"))
+        return web.json_response({"ok": True})
+
+    async def first_start_skip(request: web.Request) -> web.StreamResponse:
+        """First-start question of a fresh installation answered with "Skip"."""
+        await json_body(request)
+        mgr.skip_first_start(user_from(request.headers))
+        return web.json_response({"ok": True})
+
+    async def devices_passwords(request: web.Request) -> web.StreamResponse:
+        """Password action for several devices (mode: store | set), each device on
+        its own; returns the result per device. The password is never returned."""
+        body = await json_body(request)
+        password = body.get("password")
+        keep = body.get("keep", True)
+        if (password is not None and not isinstance(password, str)) or not isinstance(keep, bool):
+            raise web.HTTPBadRequest(text="Invalid password request")
+        results = await guarded(
+            mgr.set_passwords(
+                str(body.get("mode")), body.get("devices"), password, confirm=body.get("confirm"),
+                acknowledged=body.get("acknowledged"), user=user_from(request.headers), keep=keep,
+            )
+        )
+        return web.json_response({"results": results})
+
     async def firmware_upload_cancel(request: web.Request) -> web.StreamResponse:
         """Discard the staged upload."""
         mgr.cancel_upload((await json_body(request)).get("token"))
@@ -475,6 +574,14 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Applic
     app.router.add_post("/api/firmware/upload", firmware_upload, name=UPLOAD_ROUTE)
     app.router.add_post("/api/firmware/upload/confirm", firmware_upload_confirm)
     app.router.add_post("/api/firmware/upload/cancel", firmware_upload_cancel)
+    app.router.add_post("/api/firmware/export", store_export)
+    app.router.add_get("/api/firmware/export/{token}", store_export_download)
+    app.router.add_post("/api/firmware/import", store_import, name=IMPORT_ROUTE)
+    app.router.add_post("/api/firmware/import/check", store_import_check)
+    app.router.add_post("/api/firmware/import/confirm", store_import_confirm)
+    app.router.add_post("/api/firmware/import/cancel", store_import_cancel)
+    app.router.add_post("/api/first-start/skip", first_start_skip)
+    app.router.add_post("/api/devices/passwords", devices_passwords)
     app.router.add_get("/api/firmware/{name}/changelog", firmware_changelog)
     app.router.add_get("/api/firmware/{name}/download", firmware_download)
     app.router.add_post("/api/firmware/{name}/delete", firmware_delete)

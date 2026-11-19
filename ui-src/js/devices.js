@@ -399,7 +399,8 @@ export function renderDevices() {
   }
   if (others.length) cards.push(deviceCard(updates.length ? "All other devices" : "Devices", others));
   if (ignored.length) cards.push(deviceCard("Ignored", ignored));
-  if (!cards.length) cards.push(box("div", "card", el("div", s.devices.length ? "No devices match." : "No devices yet – run “Check now”.", "empty")));
+  if (!cards.length) cards.push(box("div", "card", el("div", s.devices.length ? "No devices match." :
+    s.first_start_open ? "No devices yet – they are found by the first check." : "No devices yet – run “Check now”.", "empty")));
   $("dev-cards").replaceChildren(...cards);
 }
 // Column chooser: built once, checkbox state follows prefs

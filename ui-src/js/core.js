@@ -60,9 +60,10 @@ export async function api(path, body) {
   if (!r.ok) throw new Error(await r.text() || r.status);
   return r.json();
 }
-/** Send a firmware file as raw body (the only non-JSON write); errors throw with the server text. */
-export async function uploadFile(file) {
-  const r = await fetch("api/firmware/upload", {method: "POST", body: file,
+/** Send a file as raw body (firmware upload, store import – the only non-JSON
+ *  writes); errors throw with the server text. */
+export async function uploadFile(file, path = "api/firmware/upload") {
+  const r = await fetch(path, {method: "POST", body: file,
     // Header values must be ASCII: other characters of the file name are replaced (display only)
     headers: {"Content-Type": "application/octet-stream", "X-CSRF-Token": CSRF,
       "X-Filename": file.name.replace(/[^\x20-\x7e]/g, "_").slice(0, 200)}});
@@ -129,6 +130,9 @@ const ICONS = {
   schedules: "M19,19H5V8H19M16,1V3H8V1H6V3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3H18V1M17,12H12V17H17V12Z",
   // Changelog of a stored firmware (same document shape as the Logs tab icon)
   changelog: "M5,3C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3H5M5,5H19V19H5V5M7,7V9H17V7H7M7,11V13H17V11H7M7,15V17H14V15H7Z",
+  // Settings tab, Firmware store card: export / import
+  exportIcon: "M23,12L19,8V11H10V13H19V16M1,18V6C1,4.89 1.9,4 3,4H15A2,2 0 0,1 17,6V9H15V6H3V18H15V15H17V18A2,2 0 0,1 15,20H3A2,2 0 0,1 1,18Z",
+  importIcon: "M14,12L10,8V11H2V13H10V16M20,18V6C20,4.89 19.1,4 18,4H6A2,2 0 0,0 4,6V9H6V6H18V18H6V15H4V18A2,2 0 0,0 6,20H18A2,2 0 0,0 20,18Z",
   pencil: "M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z",
 };
 /** Inline SVG icon from a path. */

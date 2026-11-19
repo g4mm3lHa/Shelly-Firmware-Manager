@@ -1,5 +1,5 @@
 name: Shelly Firmware Manager
-version: "3.3.0"
+version: "3.4.0-rc1"
 slug: shelly_firmware_manager
 description: >-
   Downloads Shelly firmware via Home Assistant, provides it through its own
@@ -50,6 +50,7 @@ options:
   gen1_updates_enabled: true
   log_retention_days: 90
   log_entry_limit: 1000
+  import_max_mb: 100
   gen1_allowed_types:
     - SHSW-1
     - SHSW-PM
@@ -72,6 +73,7 @@ schema:
   allow_downgrade: "bool?"
   log_retention_days: "int(1,365)"
   log_entry_limit: "int(100,3000)"
+  import_max_mb: "int(1,2048)"
   gen1_allowed_types:
     - "match(^[A-Za-z0-9-]{1,32}$)"
   # Certificate pinning for Shelly servers with an in-house CA (O=Allterco)

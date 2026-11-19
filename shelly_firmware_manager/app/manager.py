@@ -95,6 +95,8 @@ class Manager(Installs):
             "storage_error": self.storage_error,
             "gen1_enabled": self.gen1_enabled,
             "allow_downgrade": self.allow_downgrade,
+            "first_start_open": self.first_start_open,  # import question of a fresh installation
+            "import_max_mb": self.import_max // 1048576,
             "download_base": {
                 "url": self.download_base,
                 "issue": self.download_base_issue,
