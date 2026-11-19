@@ -3,6 +3,7 @@ archives, new / already stored / conflicting entries, limits, first-start questi
 
 All HA/Shelly/vendor traffic is mocked (conftest.FakeNet); no network is used."""
 
+import hashlib
 import io
 import json
 import zipfile
@@ -283,3 +284,67 @@ def test_password_format_and_normalization():
     password = store_transfer.generate_password()
     assert len(password.split("-")) == 5 and all(len(p) == 4 for p in password.split("-"))
     assert store_transfer.normalize_password(f"  {password.lower()} ") == password
+
+
+async def send_parts(stage, data, size, **kwargs):
+    """Send data in parts of size through stage(chunks, length, total, offset,
+    transfer, ...); returns the answers of all parts."""
+    answers, transfer = [], None
+    for offset in range(0, len(data), size):
+        part = data[offset : offset + size]
+        answer = await stage(chunks(part), len(part), len(data), offset, transfer, **kwargs)
+        transfer = answer.get("transfer")
+        answers.append(answer)
+    return answers
+
+
+async def test_import_in_parts(mgr, net, monkeypatch):
+    """Files above the Ingress body limit arrive in parts: the import continues at the
+    received size and is staged after the last part."""
+    monkeypatch.setattr(manager_store, "PART_MAX", 4096)
+    store(mgr, "Plus1", "1.3.0")
+    data, password = await export_bytes(mgr)
+    forget_store(mgr)
+    answers = await send_parts(mgr.stage_import_part, data, 4096)
+    assert len(answers) > 2 and answers[0]["received"] == 4096 and "token" not in answers[-2]
+    token = answers[-1]["token"]
+    assert len((await mgr.check_import(token, password))["new"]) == 1
+    assert not mgr._receiving
+
+
+async def test_upload_in_parts(mgr, net, monkeypatch):
+    """A firmware upload in parts gets the same SHA-256 and manifest data as in one piece."""
+    from helpers import firmware_zip
+
+    monkeypatch.setattr(manager_store, "PART_MAX", 8192)
+    await mgr.scan()
+    data = firmware_zip({"name": "Plus1", "version": "1.3.0"}, size=30000)
+
+    async def stage(chunks_, length, total, offset, transfer):
+        return await mgr.stage_upload_part(chunks_, "fw.zip", length, total, offset, transfer, "u")
+
+    answers = await send_parts(stage, data, 8192)
+    final = answers[-1]
+    assert final["sha256"] == hashlib.sha256(data).hexdigest() and final["detected"]["version"] == "1.3.0"
+
+
+async def test_parts_out_of_order_or_unknown(mgr, net, monkeypatch):
+    """A part must name the transfer and continue exactly at the received size; any
+    error drops the transfer and its temporary file."""
+    monkeypatch.setattr(manager_store, "PART_MAX", 100)
+    data = b"x" * 300
+    first = await mgr.stage_import_part(chunks(data[:100]), 100, 300, 0, None)
+    with pytest.raises(ShellyError, match="interrupted"):
+        await mgr.stage_import_part(chunks(data[100:200]), 100, 300, 100, "0" * 32)
+    with pytest.raises(ShellyError, match="interrupted"):
+        await mgr.stage_import_part(chunks(data[100:200]), 100, 400, 100, first["transfer"])
+    with pytest.raises(ShellyError, match="out of order"):
+        await mgr.stage_import_part(chunks(data[200:]), 100, 300, 200, first["transfer"])
+    assert not mgr._receiving and not any(n.startswith(manager_store.IMPORT_PREFIX) for n in os_listdir())
+    with pytest.raises(ValueError, match="Invalid part"):
+        await mgr.stage_import_part(chunks(b"x" * 101), 101, 300, 0, None)
+    first = await mgr.stage_import_part(chunks(data[:100]), 100, 300, 0, None)
+    monkeypatch.setattr(manager_store, "PART_TTL_S", -1)
+    with pytest.raises(ShellyError, match="interrupted"):
+        await mgr.stage_import_part(chunks(data[100:200]), 100, 300, 100, first["transfer"])
+    assert not any(n.startswith(manager_store.IMPORT_PREFIX) for n in os_listdir())

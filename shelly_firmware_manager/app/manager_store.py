@@ -50,6 +50,13 @@ UPLOAD_PREFIX = PART_PREFIX + "upload-"
 
 UPLOAD_TTL_S = 900  # a staged upload that is not confirmed within 15 min is dropped
 
+# Files arrive in parts: Home Assistant Ingress refuses request bodies above 16 MiB, so
+# the UI sends larger files as consecutive parts (offset, total size, transfer ID).
+# A transfer that receives no part for PART_TTL_S is dropped.
+PART_MAX = 8 * 1024 * 1024  # largest part per request (bytes); the UI sends exactly this
+PART_TTL_S = 300  # seconds without a part before an incomplete transfer is dropped
+TRANSFER_ID_RE = re.compile(r"^[0-9a-f]{32}$")  # ID of a transfer in parts
+
 MAX_MANIFEST = 64 * 1024  # upper limit for a manifest.json read from an uploaded ZIP
 
 STABLE_VERSION_RE = re.compile(r"^\d{1,4}\.\d{1,4}\.\d{1,4}$")  # stable Gen2+ versions only
@@ -414,6 +421,85 @@ class FirmwareStore(ManagerCore):
             return "Device has not been checked successfully yet"
         return None
 
+    # --------------------------------------------------------------------------------------- Transfers in parts
+
+    def _drop_receiving(self, kind: str) -> None:
+        """Forget an incomplete transfer of this kind and remove its temporary file."""
+        part = self._receiving.pop(kind, None)
+        if part:
+            part["path"].unlink(missing_ok=True)
+
+    async def _receive_part(
+        self,
+        kind: str,
+        prefix: str,
+        chunks: AsyncIterator[bytes],
+        length: int,
+        total: int,
+        offset: int,
+        transfer: object,
+        space: int = 0,
+    ) -> dict[str, Any] | None:
+        """Append one part of a file transfer (kind "upload" or "import") to its
+        temporary file. The first part (offset 0, no transfer ID) starts a new
+        transfer and replaces an incomplete one of the same kind; every further part
+        must name the transfer and continue exactly at the received size. space: free
+        bytes the transfer needs (checked at the start).
+
+        Returns None while parts are missing, else {"path", "size"} of the complete
+        file (no longer tracked here). Raises ValueError for invalid parts and
+        ShellyError for an unknown or expired transfer; the transfer is dropped on
+        any error inside a part."""
+        if not 0 < length <= PART_MAX or offset < 0 or offset + length > total:
+            self._drop_receiving(kind)
+            raise ValueError("Invalid part of the file transfer")
+        part = self._receiving.get(kind)
+        if part and time.monotonic() - part["active"] > PART_TTL_S:
+            self._drop_receiving(kind)
+            part = None
+        if offset == 0 and transfer is None:
+            self._drop_receiving(kind)
+            if space and self._free_space() < space + SPACE_MARGIN:
+                raise ShellyError("Not enough free disk space for this file")
+            part = {
+                "id": secrets.token_hex(16),
+                "path": data_paths.FW_DIR / f"{prefix}{secrets.token_hex(8)}",
+                "total": total,
+                "size": 0,
+            }
+            self._receiving[kind] = part
+        elif (
+            not part
+            or not isinstance(transfer, str)
+            or not hmac.compare_digest(part["id"], transfer)
+            or part["total"] != total
+        ):
+            raise ShellyError("Transfer interrupted – please choose the file again")
+        elif offset != part["size"]:
+            self._drop_receiving(kind)
+            raise ShellyError("Transfer interrupted (part out of order) – please choose the file again")
+        part["active"] = time.monotonic()
+        received = 0
+        try:
+            with part["path"].open("ab") as handle:
+                async for chunk in chunks:
+                    received += len(chunk)
+                    if received > length:
+                        raise ValueError("Part larger than announced")
+                    # Worker thread: a slow disk never blocks the event loop
+                    await asyncio.to_thread(handle.write, chunk)
+            if received != length:
+                raise ValueError("Transfer incomplete")
+        except BaseException:
+            self._drop_receiving(kind)
+            raise
+        part["size"] += received
+        part["active"] = time.monotonic()
+        if part["size"] < total:
+            return None
+        del self._receiving[kind]
+        return {"path": part["path"], "size": part["size"]}
+
     # --------------------------------------------------------------------------------------- Manual upload
 
     def _drop_upload(self) -> None:
@@ -477,46 +563,61 @@ class FirmwareStore(ManagerCore):
     async def stage_upload(
         self, chunks: AsyncIterator[bytes], filename: str, length: int | None, user: str = "unknown"
     ) -> dict[str, Any]:
-        """Step 1 of a manual upload: store the file under a temporary name.
+        """Step 1 of a manual upload in one request (the whole file as one part)."""
+        if not isinstance(length, int) or length < 1:
+            raise ValueError("Firmware file implausibly small")
+        result = await self.stage_upload_part(chunks, filename, length, length, 0, None, user)
+        if "token" not in result:
+            raise ValueError("Upload incomplete")
+        return result
 
-        chunks: async iterator of bytes (the request body, streamed – never held in
-        memory as a whole); length: declared Content-Length. Checks extension, size
-        limits and (for .zip) the archive format, computes the SHA-256 and reads
-        type/version hints from a manifest. Replaces an earlier staged upload.
-        Returns the data for the confirmation form (no file path)."""
+    async def stage_upload_part(
+        self,
+        chunks: AsyncIterator[bytes],
+        filename: str,
+        length: int | None,
+        total: object,
+        offset: object,
+        transfer: object,
+        user: str = "unknown",
+    ) -> dict[str, Any]:
+        """Step 1 of a manual upload: receive one part of the file (streamed to a
+        temporary name, never held in memory as a whole; see _receive_part).
+
+        total: size of the whole file, offset: position of this part, transfer: ID
+        returned by the first part. Checks extension and size limits; after the last
+        part the archive format (.zip), the SHA-256 and type/version hints from a
+        manifest. Replaces an earlier staged upload. Returns {"transfer", "received"}
+        while parts are missing, then the data for the confirmation form (no path)."""
         ext = Path(str(filename or "")).suffix.lower()
         if ext not in shelly.FW_EXTENSIONS:
             raise ValueError("Only .zip, .bin or .gbl firmware files can be uploaded")
-        if not isinstance(length, int) or length < shelly.MIN_FW_SIZE:
+        if not isinstance(total, int) or isinstance(total, bool) or total < shelly.MIN_FW_SIZE:
             raise ValueError("Firmware file implausibly small")
-        if length > shelly.MAX_FW_SIZE:
+        if total > shelly.MAX_FW_SIZE:
             raise ValueError("Firmware larger than 64 MiB")
+        if not isinstance(length, int) or not isinstance(offset, int) or isinstance(offset, bool):
+            raise ValueError("Invalid part of the file transfer")
         if self._upload_lock.locked():
             raise ShellyError("Another upload is in progress – please wait")
         async with self._upload_lock:
-            self._drop_upload()
-            path = data_paths.FW_DIR / f"{UPLOAD_PREFIX}{secrets.token_hex(8)}"
-            digest, size = hashlib.sha256(), 0
+            if offset == 0:
+                self._drop_upload()
+            done = await self._receive_part("upload", UPLOAD_PREFIX, chunks, length, total, offset, transfer)
+            if done is None:
+                part = self._receiving["upload"]
+                return {"transfer": part["id"], "received": part["size"]}
+            path, size = done["path"], done["size"]
             try:
-                with path.open("wb") as handle:
-                    async for chunk in chunks:
-                        size += len(chunk)
-                        if size > shelly.MAX_FW_SIZE or size > length:
-                            raise ValueError("Upload larger than announced or than 64 MiB")
-                        digest.update(chunk)
-                        # Worker thread: a slow disk never blocks the event loop
-                        await asyncio.to_thread(handle.write, chunk)
-                if size != length:
-                    raise ValueError("Upload incomplete")
                 if ext == ".zip" and not await asyncio.to_thread(zipfile.is_zipfile, path):
                     raise ValueError("The .zip file is not a valid ZIP archive")
                 detected: dict[str, str | None] = (
                     await asyncio.to_thread(self._read_manifest, path) if ext == ".zip" else {}
                 )
+                sha = await asyncio.to_thread(self._sha256_of, path)
             except BaseException:
                 path.unlink(missing_ok=True)
                 raise
-            sha = digest.hexdigest()
             self._upload = {
                 "token": secrets.token_hex(16),
                 "path": path,
@@ -537,6 +638,15 @@ class FirmwareStore(ManagerCore):
             "types": sorted(self.upload_types()),
             "duplicate": f"{stored.get('type')} {stored.get('version')}" if stored else None,
         }
+
+    @staticmethod
+    def _sha256_of(path: Path) -> str:
+        """SHA-256 of a file (read in blocks; run in a worker thread)."""
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            while block := handle.read(1024 * 1024):
+                digest.update(block)
+        return digest.hexdigest()
 
     def _by_sha(self, sha: str) -> FirmwareMeta | None:
         """Store entry with this SHA-256 (any file extension), else None."""
@@ -676,37 +786,44 @@ class FirmwareStore(ManagerCore):
         return staged
 
     async def stage_import(self, chunks: AsyncIterator[bytes], length: int | None) -> dict[str, Any]:
-        """Step 1 of an import: store the export file under a temporary name.
-
-        Streamed to disk (never held in memory); refused above the option
-        import_max_mb or without about twice its size of free disk space (the file
-        plus the firmware copied from it). Replaces an earlier staged import."""
+        """Step 1 of an import in one request (the whole file as one part)."""
         if not isinstance(length, int) or length < 1:
             raise ValueError("Empty file")
-        if length > self.import_max:
+        result = await self.stage_import_part(chunks, length, length, 0, None)
+        if "token" not in result:
+            raise ValueError("Transfer incomplete")
+        return result
+
+    async def stage_import_part(
+        self, chunks: AsyncIterator[bytes], length: int | None, total: object, offset: object, transfer: object
+    ) -> dict[str, Any]:
+        """Step 1 of an import: receive one part of the export file (streamed to a
+        temporary name, never held in memory; see _receive_part). Refused above the
+        option import_max_mb or without about twice its size of free disk space (the
+        file plus the firmware copied from it). Replaces an earlier staged import.
+        Returns {"transfer", "received"} while parts are missing, then {"token",
+        "size"}."""
+        if not isinstance(total, int) or isinstance(total, bool) or total < 1:
+            raise ValueError("Empty file")
+        if total > self.import_max:
             raise ValueError(f"File larger than the maximum import size ({self.import_max // 1048576} MB, Settings)")
+        if not isinstance(length, int) or not isinstance(offset, int) or isinstance(offset, bool):
+            raise ValueError("Invalid part of the file transfer")
         if self._import_lock.locked():
             raise ShellyError("Another import is in progress – please wait")
         async with self._import_lock:
-            self._drop_import()
-            if self._free_space() < 2 * length + SPACE_MARGIN:
-                raise ShellyError("Not enough free disk space for this import")
-            path = data_paths.FW_DIR / f"{IMPORT_PREFIX}{secrets.token_hex(8)}"
-            size = 0
-            try:
-                with path.open("wb") as handle:
-                    async for chunk in chunks:
-                        size += len(chunk)
-                        if size > length or size > self.import_max:
-                            raise ValueError("File larger than announced or than the maximum import size")
-                        await asyncio.to_thread(handle.write, chunk)
-                if size != length:
-                    raise ValueError("Transfer incomplete")
-                if not await asyncio.to_thread(zipfile.is_zipfile, path):
-                    raise ValueError("The file is no ZIP archive")
-            except BaseException:
+            if offset == 0:
+                self._drop_import()
+            done = await self._receive_part(
+                "import", IMPORT_PREFIX, chunks, length, total, offset, transfer, space=2 * total
+            )
+            if done is None:
+                part = self._receiving["import"]
+                return {"transfer": part["id"], "received": part["size"]}
+            path, size = done["path"], done["size"]
+            if not await asyncio.to_thread(zipfile.is_zipfile, path):
                 path.unlink(missing_ok=True)
-                raise
+                raise ValueError("The file is no ZIP archive")
             self._import = {"token": secrets.token_hex(16), "path": path, "size": size, "created": time.monotonic()}
         return {"token": self._import["token"], "size": size}
 

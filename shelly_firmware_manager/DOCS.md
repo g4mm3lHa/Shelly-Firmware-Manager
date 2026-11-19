@@ -315,7 +315,9 @@ stored; then the result shows how many files are new, already stored or in confl
   becomes "downloaded" if the export holds it as a download.
 - Conflict (same firmware ID and version, different file): the stored file is kept.
 
-The largest accepted file is set by **Max. import size (MB)**; the import also needs
+The largest accepted file is set by **Max. import size (MB)**. Large files are sent in
+parts of 8 MiB (Home Assistant refuses single requests above 16 MiB); the dialog shows
+the progress. The import also needs
 about twice the file size of free disk space. Not possible during a check. The import is
 logged with user and counts. Uninstalling the app in Home Assistant removes its private
 storage including the firmware store – export it first if you want to keep it.

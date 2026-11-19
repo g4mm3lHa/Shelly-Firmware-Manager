@@ -60,15 +60,27 @@ export async function api(path, body) {
   if (!r.ok) throw new Error(await r.text() || r.status);
   return r.json();
 }
-/** Send a file as raw body (firmware upload, store import – the only non-JSON
- *  writes); errors throw with the server text. */
-export async function uploadFile(file, path = "api/firmware/upload") {
-  const r = await fetch(path, {method: "POST", body: file,
-    // Header values must be ASCII: other characters of the file name are replaced (display only)
-    headers: {"Content-Type": "application/octet-stream", "X-CSRF-Token": CSRF,
-      "X-Filename": file.name.replace(/[^\x20-\x7e]/g, "_").slice(0, 200)}});
-  if (!r.ok) throw new Error(await r.text() || r.status);
-  return r.json();
+// Home Assistant Ingress refuses request bodies above 16 MiB: files are sent in parts
+// of at most this size (the server continues each part at the received size)
+const UPLOAD_PART = 8 * 1048576;
+/** Send a file as raw body in parts (firmware upload, store import – the only
+ *  non-JSON writes); onProgress(sentBytes, totalBytes) after every part. Returns the
+ *  answer to the last part; errors throw with the server text. */
+export async function uploadFile(file, path = "api/firmware/upload", onProgress) {
+  // Header values must be ASCII: other characters of the file name are replaced (display only)
+  const name = file.name.replace(/[^\x20-\x7e]/g, "_").slice(0, 200);
+  let transfer = null, answer = null;
+  for (let offset = 0; offset < file.size || offset === 0; offset += UPLOAD_PART) {
+    const headers = {"Content-Type": "application/octet-stream", "X-CSRF-Token": CSRF, "X-Filename": name,
+      "X-Upload-Total": String(file.size), "X-Upload-Offset": String(offset)};
+    if (transfer) headers["X-Upload-Transfer"] = transfer;
+    const r = await fetch(path, {method: "POST", body: file.slice(offset, offset + UPLOAD_PART), headers});
+    if (!r.ok) throw new Error(await r.text() || r.status);
+    answer = await r.json(); transfer = answer.transfer || null;
+    if (onProgress) onProgress(Math.min(offset + UPLOAD_PART, file.size), file.size);
+    if (!transfer) break;
+  }
+  return answer;
 }
 let stateTag = null;
 /** Device state; conditional request: an unchanged state (304) reuses the last one. */

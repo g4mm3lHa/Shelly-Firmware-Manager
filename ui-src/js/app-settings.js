@@ -219,10 +219,13 @@ export function importDialog() {
 }
 /** Upload and check; shows the summary or the error (the staged file is discarded). */
 async function checkImport(f, password) {
-  modal(IMPORT_TITLE, [el("p", `Uploading and checking ${f.name} (${mb(f.size)}) …`, "hint")], [], "importIcon");
+  const status = el("p", `Uploading ${f.name} (${mb(f.size)}) …`, "hint");
+  modal(IMPORT_TITLE, [status], [], "importIcon");
   let token = null;
   try {
-    token = (await uploadFile(f, "api/firmware/import")).token;
+    token = (await uploadFile(f, "api/firmware/import", (sent, total) => {
+      status.textContent = sent < total ? `Uploading ${f.name} … ${Math.floor(sent * 100 / total)} %` : `Checking ${f.name} …`;
+    })).token;
     importSummary(token, f.name, await api("api/firmware/import/check", {token, password}));
   } catch (e) {
     if (token) api("api/firmware/import/cancel", {token}).catch(() => {});

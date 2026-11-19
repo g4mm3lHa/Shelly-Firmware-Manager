@@ -145,6 +145,14 @@ not part of this file.
   devices …" → second confirmation with "I have stored the password securely" →
   result per device (green check / red X / yellow "!" skipped) plus the yellow HA
   Shelly integration reminder.
+- **Details confirmed with the live test of 3.4.0-rc1:** "Store the existing password"
+  for several devices also gets a second confirmation (without "stored securely"),
+  button "Store for n devices …" (blue); busy devices (installing, being checked, no
+  IP) are greyed out with "busy or not reachable – try again later"; a password over 50
+  characters is refused in the dialog while a Gen1 device is selected; the log entries
+  of export, import and the skipped first start appear under the filter "All" only.
+- **Upload progress (3.4.1):** firmware upload and store import send the file in parts
+  and show "Uploading <file> … n %" in the dialog, then "Checking <file> …" (import).
 
 ## Phone tiles (mockups approved 2026-11-12)
 - Checkbox and ⋮ on the name line, status/Install on the Shelly-name line, 12 px

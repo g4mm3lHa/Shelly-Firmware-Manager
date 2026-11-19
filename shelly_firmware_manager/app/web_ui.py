@@ -8,7 +8,9 @@ Protection layers:
    token (only visible in the delivered page) and Content-Type JSON. The only
    exceptions to JSON are the firmware upload and the store import: Content-Type
    application/octet-stream, streamed to disk with their own limits (upload 64 MiB,
-   import: option import_max_mb); the 32 KB body limit stays for every other request.
+   import: option import_max_mb), sent in parts of at most 8 MiB because Home
+   Assistant Ingress refuses larger bodies; the 32 KB body limit stays for every
+   other request.
 3. Strict Content Security Policy; the frontend uses textContent only.
 4. Secrets are write-only: no endpoint ever returns a stored password or hash. The
    only password in an answer is a newly generated export password, returned once
@@ -38,6 +40,7 @@ from download_server import strip_server_header
 from events import ENTRY_ID_RE, user_from
 from manager import Manager
 from manager_core import DOWNLOAD_BASE_MESSAGES
+from manager_store import PART_MAX, TRANSFER_ID_RE
 from shelly import FW_NAME_RE, MAX_FW_SIZE, ShellyError
 
 log = logging.getLogger("sfm.ui")
@@ -371,20 +374,41 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
             raise web.HTTPConflict(text=str(err)) from None
         return web.json_response({"ok": True})
 
-    async def firmware_upload(request: web.Request) -> web.StreamResponse:
-        """Step 1 of a manual upload: the raw file as body, its name in the
-        X-Filename header. Needs a Content-Length of at most 64 MiB; the body is
-        streamed to disk and never read into memory as a whole."""
+    def part_headers(request: web.Request, limit: int, too_large: str) -> tuple[int, int, int, str | None]:
+        """Length, total size, offset and transfer ID of one part of a file sent in
+        parts (headers X-Upload-Total, X-Upload-Offset, X-Upload-Transfer; without
+        them the body is the whole file). Home Assistant Ingress refuses bodies above
+        16 MiB, so the UI sends larger files in parts of at most PART_MAX."""
         length = request.content_length
         if length is None:
             raise web.HTTPLengthRequired(text="Content-Length required")
-        if length > MAX_FW_SIZE:
+        try:
+            total = int(request.headers.get("X-Upload-Total", length))
+            offset = int(request.headers.get("X-Upload-Offset", 0))
+        except ValueError:
+            raise web.HTTPBadRequest(text="Invalid part of the file transfer") from None
+        transfer = request.headers.get("X-Upload-Transfer")
+        if transfer is not None and not TRANSFER_ID_RE.match(transfer):
+            raise web.HTTPBadRequest(text="Invalid part of the file transfer")
+        if total > limit:
+            raise web.HTTPRequestEntityTooLarge(max_size=limit, actual_size=total, text=too_large)
+        if length > PART_MAX:
             raise web.HTTPRequestEntityTooLarge(
-                max_size=MAX_FW_SIZE, actual_size=length, text="Firmware larger than 64 MiB"
+                max_size=PART_MAX, actual_size=length, text="Part of the file transfer too large"
             )
+        return length, total, offset, transfer
+
+    async def firmware_upload(request: web.Request) -> web.StreamResponse:
+        """Step 1 of a manual upload: the raw file (or one part of it, see
+        part_headers) as body, its name in the X-Filename header; at most 64 MiB in
+        all. The body is streamed to disk and never read into memory as a whole."""
+        length, total, offset, transfer = part_headers(request, MAX_FW_SIZE, "Firmware larger than 64 MiB")
         filename = request.headers.get("X-Filename", "")[:200]
         result = await guarded(
-            mgr.stage_upload(request.content.iter_chunked(UPLOAD_CHUNK), filename, length, user_from(request.headers))
+            mgr.stage_upload_part(
+                request.content.iter_chunked(UPLOAD_CHUNK), filename, length, total, offset, transfer,
+                user_from(request.headers),
+            )
         )
         return web.json_response(result)
 
@@ -439,17 +463,16 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
             path.unlink(missing_ok=True)
 
     async def store_import(request: web.Request) -> web.StreamResponse:
-        """Step 1 of a store import: the export file as body, streamed to disk; its
-        size is limited by the option import_max_mb."""
-        length = request.content_length
-        if length is None:
-            raise web.HTTPLengthRequired(text="Content-Length required")
-        if length > mgr.import_max:
-            raise web.HTTPRequestEntityTooLarge(
-                max_size=mgr.import_max, actual_size=length,
-                text=f"File larger than the maximum import size ({mgr.import_max // 1048576} MB, Settings)",
+        """Step 1 of a store import: the export file (or one part of it, see
+        part_headers) as body, streamed to disk; its size is limited by the option
+        import_max_mb."""
+        too_large = f"File larger than the maximum import size ({mgr.import_max // 1048576} MB, Settings)"
+        length, total, offset, transfer = part_headers(request, mgr.import_max, too_large)
+        return web.json_response(
+            await guarded(
+                mgr.stage_import_part(request.content.iter_chunked(UPLOAD_CHUNK), length, total, offset, transfer)
             )
-        return web.json_response(await guarded(mgr.stage_import(request.content.iter_chunked(UPLOAD_CHUNK), length)))
+        )
 
     async def store_import_check(request: web.Request) -> web.StreamResponse:
         """Step 2: check the staged export with its password; returns the summary."""
