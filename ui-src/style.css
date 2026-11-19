@@ -273,6 +273,8 @@ button.pill{cursor:pointer}
 .log .log-del{margin:-3px 0}
 .tag[class*=sev-]{min-width:64px;text-align:center}   /* Success / Warning / Error: one size */
 .okc{color:color-mix(in srgb,var(--success-color) 60%,var(--primary-text-color))}
+/* Check entry: ignored devices in the normal text colour, also inside an error entry */
+.log li.neutral,.log-m li.neutral{color:var(--primary-text-color)}
 .log details summary{cursor:pointer}
 .log ul{margin:4px 0 0;padding-left:18px}
 .log .user{color:var(--secondary-text-color);font-size:.85em;white-space:nowrap;line-height:20px}   /* centred with the delete icon */

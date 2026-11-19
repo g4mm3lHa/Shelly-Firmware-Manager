@@ -145,11 +145,12 @@ class Checks(DeviceSettings):
             started = time.monotonic()
             failure: str | None = None
             checked: list[str] = []
+            ignored: list[str] = []
             header_ignored: bool | None = None
             self._scan_user = SCHEDULE_USER if automatic else user or "unknown"
             self._progress()["phase"] = "registry"
             try:
-                checked = await self._scan_all()
+                checked, ignored = await self._scan_all()
                 header_ignored = await self._finish_header_check()
                 self._progress()["phase"] = "changelog"
                 await self._store_changelogs(self.devices.values())
@@ -165,7 +166,13 @@ class Checks(DeviceSettings):
                 self.save()
                 self.schedule_changed.set()
             self._log_check(
-                checked, automatic, user, time.monotonic() - started, failure, header_ignored=header_ignored
+                checked,
+                automatic,
+                user,
+                time.monotonic() - started,
+                failure,
+                header_ignored=header_ignored,
+                ignored=ignored,
             )
         if automatic:
             await self._notify_new_updates()
@@ -237,9 +244,10 @@ class Checks(DeviceSettings):
         )
         return {"status": dev.get("status"), "error": failure}
 
-    async def _scan_all(self) -> list[str]:
+    async def _scan_all(self) -> tuple[list[str], list[str]]:
         """Check all Shelly main devices from the HA device registry.
-        Returns the IDs of the checked devices."""
+        Returns the IDs of the checked devices and the names of the ignored
+        (registered, not contacted) devices."""
         offers: OfferTasks = {}  # shared manufacturer requests: one per firmware ID
         entries = self._shelly_entries(await self._registry())
         for dev in self.devices.values():  # A full check ends the "just updated" display
@@ -247,10 +255,13 @@ class Checks(DeviceSettings):
             dev.pop("install_failed", None)
         # Ignored devices count as registered (seen) but are not contacted
         seen = set(entries)
+        ignored: list[str] = []
         for device_id in seen & set(self.devices):
             if self.devices[device_id].get("ignored"):
                 entry = entries.pop(device_id)
-                self.devices[device_id]["name"] = clip(entry.get("name_by_user") or entry.get("name") or device_id, 100)
+                name = clip(entry.get("name_by_user") or entry.get("name") or device_id, 100)
+                self.devices[device_id]["name"] = name
+                ignored.append(name)
         # Every device of this check is "waiting" until it is reached
         progress = self._progress()
         progress.update(total=len(entries), phase="devices")
@@ -259,7 +270,7 @@ class Checks(DeviceSettings):
         for device_id, dev in self.devices.items():
             if device_id not in seen:
                 dev.update(status=STATUS_UNREGISTERED, message="")
-        return sorted(entries)
+        return sorted(entries), sorted(ignored, key=str.lower)
 
     async def _check_entries(self, entries: dict[str, dict[str, Any]], offers: OfferTasks) -> None:
         """Check the given registry entries, up to CHECK_PARALLEL at the same time,
@@ -620,6 +631,7 @@ class Checks(DeviceSettings):
         failure: str | None,
         trigger: str | None = None,
         header_ignored: bool | None = None,
+        ignored: list[str] | None = None,
     ) -> None:
         """One log entry per check; findings = devices with an update, a warning or
         an error. trigger overrides the derived value ("device" for single-device
@@ -629,7 +641,9 @@ class Checks(DeviceSettings):
         An update finding names its source (OFFER_*: manufacturer, store or upload).
         Every finding carries a severity; "error" holds the message of warnings
         and errors (key kept for historic entries). The entry gets the highest
-        severity of its findings, an overall failure is an error."""
+        severity of its findings, an overall failure is an error. ignored: names of
+        the ignored devices of a full check (not contacted) – listed in the entry and
+        counted in the result, never a finding (no influence on the severity)."""
         findings: list[dict[str, Any]] = []
         for device_id in checked:
             dev = self.devices.get(device_id, {})
@@ -666,6 +680,9 @@ class Checks(DeviceSettings):
             )
         counts = {level: sum(1 for f in findings if f["severity"] == level) for level in ("warning", "error")}
         updates = sum(1 for f in findings if "offer" in f)
+        result = f"{updates} update(s), {counts['warning']} warning(s), {counts['error']} error(s)"
+        if ignored:
+            result += f", {len(ignored)} ignored"
         self.events.add(
             "check",
             severity=worst("error" if failure else "success", *(f["severity"] for f in findings)),
@@ -673,11 +690,12 @@ class Checks(DeviceSettings):
             user=SCHEDULE_USER if automatic else user or "unknown",
             devices=len(checked),
             duration=round(duration, 1),
-            result=failure or f"{updates} update(s), {counts['warning']} warning(s), {counts['error']} error(s)",
+            result=failure or result,
             updates=updates,
             warnings=counts["warning"],
             errors=counts["error"],
             findings=findings,
+            ignored=ignored or None,  # left out when empty
         )
 
     async def _store_changelogs(self, devices: Iterable[Device]) -> None:

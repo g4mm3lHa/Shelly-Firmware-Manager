@@ -141,8 +141,9 @@ not part of this file.
   Assistant and choose “Changelog” next to the version." – the link opens the info
   page of the app in the whole window (`/config/app/<slug>/info`, slug from the
   Supervisor; the list of apps until it is known). The Configuration tab of the app
-  page has the same names, help texts and order as the Settings tab; its last help
-  text ends with the same hint (HA shows no links there).
+  page has the same names, help texts and order as the Settings tab; the help text of
+  "Max. parallel installations" ends with the same hint (HA shows no links there and no
+  help text for the list "Pinned certificates", the last option).
 
 ## Toolbar and card heads (3.5.0, variant B)
 - Same toolbar in all tabs: search and sort only as small round icons (36 px desktop,
@@ -210,6 +211,9 @@ not part of this file.
   the last) stretched to the full width, detail list right-aligned with lines; ⋮ keeps
   its 44 px touch target.
 - Firmware ID only in the details; Ignored label at the status.
+- Check entries (2026-11-19): ignored devices of a full check counted in the summary
+  ("…, n ignored") and listed after the findings as "<name>: ignored – not checked" in
+  the normal text colour (also inside an error entry); no influence on the severity.
 - Phone log tile: user top right; one arrow only (none beside the user name when
   opened, the name keeps its place); no expansion when the details only repeat the
   summary (2026-11-19).

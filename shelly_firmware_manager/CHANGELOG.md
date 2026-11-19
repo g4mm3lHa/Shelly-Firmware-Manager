@@ -5,6 +5,18 @@
 Release candidate. Clearer settings, filter chips and one toolbar in all tabs; phone
 header and device tiles reworked; battery devices are recognised.
 
+Changes in rc3
+
+Changed
+- Logs: a check entry counts the ignored devices and names them in its details (normal
+  text colour, not as findings); the device search finds them.
+
+Fixed
+- Battery devices (Gen2+) were not recognised: `wakeup_period` is now read from
+  `Sys.GetStatus`, where these devices report it.
+- App configuration in Home Assistant: the changelog hint was not shown; it now ends
+  the help text of "Max. parallel installations".
+
 Changes in rc2
 
 Added

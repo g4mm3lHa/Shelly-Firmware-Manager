@@ -140,8 +140,9 @@ m.events.add("install", event="started", device="Pool pump", type="Plus1", old="
 m.events.add("install", ok=False, severity="warning", event="unconfirmed", device="Pool pump", type="Plus1", old="1.4.0", new="1.5.0",
              user="demo", detail="The Shelly downloaded the firmware but still reports 1.4.0 – check the device log or the Shelly's "
              "web interface and try again with enabled websocket debugging")
-m.events.add("check", severity="error", trigger="manual", devices=25, duration=30.7, updates=1, warnings=1, errors=1,
-             result="1 update(s), 1 warning(s), 1 error(s)", user="demo",
+# ignored devices are named in the entry (normal text colour) and counted in the result
+m.events.add("check", severity="error", trigger="manual", devices=23, duration=30.7, updates=1, warnings=1, errors=1,
+             result="1 update(s), 1 warning(s), 1 error(s), 2 ignored", user="demo", ignored=["Garage door", "Washing machine"],
              findings=[{"device": "Sauna", "version": "1.6.2", "offer": "2.0.3", "source": "manufacturer", "severity": "success"},
                        {"device": "Doorbell", "error": "Cannot connect to host 192.168.1.34:80", "severity": "warning"},
                        {"device": "Fridge", "error": "The Shelly rejected the password", "severity": "error"}])
