@@ -1,9 +1,10 @@
-# Test report 3.5.0-rc3
+# Test report 3.5.0-rc4
 
-Release candidate 3 of 3.5.0 on branch `release-3.5.0` (base: 3.5.0-rc1, `main` =
+Release candidate 4 of 3.5.0 on branch `release-3.5.0` (base: 3.5.0-rc1, `main` =
 `v3.4.1`). rc2: feedback from the rc1 live test, single download display, app
 configuration alike the Settings tab, battery devices (detection and display only).
-rc3: fixes from the rc2 live test and ignored devices in the check log entry.
+rc3: fixes from the rc2 live test and ignored devices in the check log entry. rc4:
+fixes from the rc3 live test.
 
 ## Scope
 
@@ -16,25 +17,24 @@ rc3: fixes from the rc2 live test and ignored devices in the check log entry.
 | Firmware tab | "For n devices" with one chevron (variant B) |
 | rc3: battery detection | Gen2+ `wakeup_period` read from `Sys.GetStatus` (checks and Reload Device Info), config value as fallback |
 | rc3: app configuration | changelog hint at the end of the `max_parallel_installs` help text (HA shows no helper text for the object selector of `pinned_certificates`) |
+| rc4 | Logs tab fetched again when a check or another device activity ends (or the last check time changes); "Asleep" tooltip only wake-up hint and "Last contact: <date>"; changelog hint removed from the app configuration help texts (`translations/en.yaml`) |
 | rc3: check log entry | ignored devices counted in the summary and named in the details (not findings, severity unchanged), found by the Logs device search |
-| Docs | DOCS, CODEMAP, UI_DECISIONS, CHANGELOG 3.5.0 rc2 and rc3 |
+| Docs | DOCS, CODEMAP, UI_DECISIONS, CHANGELOG 3.5.0 rc2 to rc4 |
 
 ## Results
 
 | Check | Result |
 |---|---|
-| `tools/dev/check.sh ui`: ruff, mypy --strict, build check, version 3.5.0-rc3, pytest | passed, 238 tests (rc2 new: parallel single checks = one download, shared download failure, battery detection and Asleep, app configuration = Settings tab) |
-| UI quick | ui_test 75/75; download_url_hint 18/18, setting_help 26/26, download_url_notice 45/45, firmware_store 264/264, store_transfer 90/90 (443/443) |
-| New UI checks | Unused chip with unknown firmware IDs, export password copy, tile head and outlines, "For n devices" chevron, battery icon, Asleep pill and dimmed IP; rc3: ignored devices in the check log entry |
+| `tools/dev/check.sh ui`: ruff, mypy --strict, build check, version 3.5.0-rc4, pytest | passed, 238 tests (rc2 new: parallel single checks = one download, shared download failure, battery detection and Asleep, app configuration = Settings tab) |
+| UI quick | ui_test 75/75; download_url_hint 18/18, setting_help 26/26, download_url_notice 45/45, firmware_store 267/267, store_transfer 90/90 (446/446) |
+| New UI checks | Unused chip with unknown firmware IDs, export password copy, tile head and outlines, "For n devices" chevron, battery icon, Asleep pill and dimmed IP; rc3: ignored devices in the check log entry; rc4: Logs refresh after a check, Asleep tooltip |
 | Screenshots | `qa/screenshots/3.5.0-rc1/` kept |
 
-One `check.sh ui` run failed once in store_transfer (360 px embedded: "password not
-cut off"); the next two complete runs passed – not reproduced.
+rc3: one `check.sh ui` run failed once in store_transfer (360 px embedded: "password
+not cut off"); the following complete runs (also for rc4) passed – not reproduced.
 
 ## Open questions
 
-- Changelog hint in the app configuration of HA (help text of "Max. parallel
-  installations") not yet seen on a real system.
 - Battery detection via `Sys.GetStatus` not yet verified on the real device.
 - Why the Clipboard API is refused in Home Assistant (certificate / Ingress frame) not
   verified on a real system; the manual-copy fallback covers it.

@@ -34,7 +34,8 @@ not part of this file.
   right after the HA name in the table and the phone tile head (before the "Gen n"
   label). A battery device that did not answer the last check shows the grey status
   pill "Asleep" (not listed under "Errors") and its IP dimmed (opacity 0.5). No queue,
-  no "Check queued" pill.
+  no "Check queued" pill. Tooltip of the "Asleep" pill (2026-11-19): only the wake-up
+  hint and "Last contact: <date>" (last successful check, date as elsewhere).
 - Gen1 firmware column: version only.
 - Phone tiles: "Ignored" label wrap and truncated names accepted.
 
@@ -141,9 +142,8 @@ not part of this file.
   Assistant and choose “Changelog” next to the version." – the link opens the info
   page of the app in the whole window (`/config/app/<slug>/info`, slug from the
   Supervisor; the list of apps until it is known). The Configuration tab of the app
-  page has the same names, help texts and order as the Settings tab; the help text of
-  "Max. parallel installations" ends with the same hint (HA shows no links there and no
-  help text for the list "Pinned certificates", the last option).
+  page has the same names, help texts and order as the Settings tab, without the
+  changelog hint (HA does not show it there, 2026-11-19).
 
 ## Toolbar and card heads (3.5.0, variant B)
 - Same toolbar in all tabs: search and sort only as small round icons (36 px desktop,
