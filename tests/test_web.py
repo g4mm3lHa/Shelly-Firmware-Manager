@@ -384,3 +384,35 @@ async def test_http_first_start_and_bulk_passwords(client, mgr, net):
     r = await client.post("/api/devices/passwords", json={"mode": "set", "devices": [A], "password": "pw"},
                           headers=hdr(client))
     assert r.status == 400 and "Confirmation" in await r.text()
+
+
+async def test_http_upload_and_import_in_parts(client, mgr, net, monkeypatch):
+    """Parts with X-Upload-Total/Offset/Transfer (Ingress refuses bodies above 16 MiB);
+    invalid headers, oversized parts and totals are refused."""
+    import manager_store
+
+    monkeypatch.setattr(manager_store, "PART_MAX", 20000)
+    monkeypatch.setattr(web_ui, "PART_MAX", 20000)
+    await mgr.scan()
+    data = firmware_zip({"name": "Plus1", "version": "1.3.0"}, size=50000)
+    transfer, answer = None, None
+    for offset in range(0, len(data), 20000):
+        part = data[offset : offset + 20000]
+        headers = {**binary(client), "X-Upload-Total": str(len(data)), "X-Upload-Offset": str(offset)}
+        if transfer:
+            headers["X-Upload-Transfer"] = transfer
+        r = await client.post("/api/firmware/upload", data=part, headers=headers)
+        assert r.status == 200, await r.text()
+        answer = await r.json()
+        transfer = answer.get("transfer")
+    assert answer["detected"]["version"] == "1.3.0" and answer["size"] == len(data)
+    bad = {**binary(client), "X-Upload-Total": "x"}
+    assert (await client.post("/api/firmware/upload", data=b"x" * 10, headers=bad)).status == 400
+    bad = {**binary(client), "X-Upload-Total": "100", "X-Upload-Transfer": "zz"}
+    assert (await client.post("/api/firmware/upload", data=b"x" * 10, headers=bad)).status == 400
+    big = {**binary(client), "X-Upload-Total": str(65 * 1024 * 1024)}
+    assert (await client.post("/api/firmware/upload", data=b"x" * 10, headers=big)).status == 413
+    assert (await client.post("/api/firmware/upload", data=b"x" * 20001, headers=binary(client))).status == 413
+    mgr.import_max = 1000
+    big = {**binary(client), "X-Upload-Total": "1001"}
+    assert (await client.post("/api/firmware/import", data=b"x" * 10, headers=big)).status == 413

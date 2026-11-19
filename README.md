@@ -1,4 +1,4 @@
-# Shelly Firmware Manager 3.4.0
+# Shelly Firmware Manager 3.4.1
 
 Home Assistant app that keeps your Shelly devices (Gen1 to Gen4) up to date – locally
 and under your control. It finds all Shellys of the Shelly integration, checks for new

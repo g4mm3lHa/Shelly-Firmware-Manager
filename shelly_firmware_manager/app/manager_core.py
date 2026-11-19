@@ -181,6 +181,9 @@ class ManagerCore:
         self._export: dict[str, Any] | None = None  # prepared store export (see prepare_export), memory only
         self._import: dict[str, Any] | None = None  # staged store import (see stage_import), memory only
         self._import_lock = asyncio.Lock()  # one import transfer / check / confirmation at a time
+        # File transfers in parts (upload, import) that are not complete yet, by kind;
+        # memory only (see FirmwareStore._receive_part)
+        self._receiving: dict[str, dict[str, Any]] = {}
         # First start of a fresh installation (no state.json): no check runs until the
         # user answered the import question (import a store or skip); persisted
         self.first_start_open = False

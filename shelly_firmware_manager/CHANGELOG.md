@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.4.1
+
+Released 2026-11-19. Store imports and firmware uploads above 16 MiB work through Home
+Assistant.
+
+Changed
+- Store import and firmware upload dialogs show the upload progress in percent.
+
+Fixed
+- Store import and firmware upload: files above 16 MiB were refused by Home Assistant
+  ("Maximum request body size … exceeded"); they are now sent in parts of 8 MiB.
+
 ## 3.4.0
 
 Released 2026-11-19. Move the complete firmware store to another Home Assistant

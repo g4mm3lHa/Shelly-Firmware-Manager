@@ -23,7 +23,8 @@ Suites, in this order (the last two change the demo state in their last case):
 - store_transfer      3.4.0: Settings cards "Firmware store" and "Device passwords",
                       export (password once, download), import (check, counts,
                       confirm), passwords of several devices (selection, steps,
-                      confirmation), first-start question with notice bar. Demos
+                      confirmation), first-start question with notice bar, files
+                      above the Ingress limit sent in parts. Demos
                       "idle" 8801 and "first" 8806 (Skip changes it: last case only).
 Usage: python qa/ui_features.py <shots-dir> [--full] [suite ...]   (qa/run_ui.py starts
 the demos; --full: all viewports of firmware_store, final gate)
@@ -975,6 +976,26 @@ def _export_import(c, page, f, out):
         f.click("#dlg-x")
 
 
+def _import_in_parts(c, page, f, out):
+    """A file above the 16 MiB Ingress limit is sent in parts of 8 MiB (here: a ZIP
+    of 17 MiB without manifest – refused after the transfer, not by its size)."""
+    path = out / "big-import.zip"
+    if not path.exists():
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED) as archive:
+            archive.writestr("data.bin", bytes(range(256)) * (17 * 4096))
+    parts = []
+    page.on("request", lambda r: parts.append(r.url) if r.url.endswith("/api/firmware/import") else None)
+    f.click("#store-import")
+    f.wait_for_selector('#dlg-body input[type="file"]')
+    f.set_input_files('#dlg-body input[type="file"]', str(path))
+    f.fill("#dlg-body input.mono", "AAAA-BBBB-CCCC-DDDD-EEEE")
+    f.locator("#dlg-btns button", has_text="Check file").click()
+    check(f"{c}: large file transferred, then checked",
+          wait_until(lambda: "manifest.json missing" in dialog(f)["body"], 30), dialog(f)["body"][:120])
+    check(f"{c}: sent in 3 parts", len(parts) == 3, str(len(parts)))
+    f.click("#dlg-x")
+
+
 def _bulk_passwords(c, page, f, out):
     """Dialog for several devices: steps per device, selection, confirmation."""
     f.click("#set-passwords")
@@ -1028,6 +1049,7 @@ def store_transfer(browser, out):
         check(f"{c}: import size option", f.locator("#opt-import_max_mb").input_value() == "100")
         page.screenshot(path=out / f"store-cards-{c}.png", full_page=True)
         _export_import(c, page, f, out)
+        _import_in_parts(c, page, f, out)
         _bulk_passwords(c, page, f, out)
         check(f"{c}: no overflow", f.evaluate(OVERFLOW_JS) <= 0)
         check(f"{c}: no console errors", not errors, "; ".join(errors[:3]))

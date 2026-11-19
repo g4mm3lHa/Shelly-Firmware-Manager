@@ -178,8 +178,10 @@ function openUpload() {
     const file = input.files && input.files[0];
     if (!file) { message(title, "No file selected.", "error", "upload"); return; }
     if (file.size > 64 * 1048576) { message(title, "Firmware larger than 64 MiB.", "error", "upload"); return; }
-    modal(title, [el("p", `Uploading ${file.name} …`, "hint")], [], "upload");
-    try { uploadConfirm(await uploadFile(file)); } catch (e) { message(title, e.message, "error", "upload"); }
+    const status = el("p", `Uploading ${file.name} …`, "hint");
+    modal(title, [status], [], "upload");
+    const progress = (sent, total) => { status.textContent = `Uploading ${file.name} … ${Math.floor(sent * 100 / total)} %`; };
+    try { uploadConfirm(await uploadFile(file, undefined, progress)); } catch (e) { message(title, e.message, "error", "upload"); }
   }}], "upload");
 }
 function uploadConfirm(r) {
