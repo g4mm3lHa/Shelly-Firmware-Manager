@@ -720,6 +720,10 @@ def _firmware_tab(c):
 
     # Install button behind every device a file is provided for; it opens
     # the usual installation dialog, which names the source of the update
+    marker = f.evaluate("""() => { const s = document.querySelector('.fw-dev summary'), cs = getComputedStyle(s);
+      return {text: s.textContent, list: cs.listStyleType, after: getComputedStyle(s, '::after').borderRightStyle}; }""")
+    check(f"{case}: 'For n devices' with one chevron only", "▾" not in marker["text"] and marker["list"] == "none"
+          and marker["after"] == "solid", str(marker))
     rows.first.locator(".fw-dev summary").click()
     entries = rows.first.locator(".fw-dev li")
     buttons = rows.first.locator(".fw-dev li button")

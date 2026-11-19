@@ -92,6 +92,9 @@ not part of this file.
   the column titles Version, Size and Stored sort the cards too (coupled, arrow at the
   same column in every card); versions inside a card stay newest first. Kept per
   browser.
+- **"For n devices" (2026-11-19, 3.5.0):** no browser marker and no arrow in the
+  text; one chevron after the text (down when closed, up when open), like the Details
+  button of the phone tiles but without a border.
 - **Downgrade icon (2026-11-19):** history icon before the changelog icon on every
   older (not the newest) version of a Gen2+ card; disabled with the reason as title
   while "Allow downgrades" is off (same hint as the row menu) or no device of this type

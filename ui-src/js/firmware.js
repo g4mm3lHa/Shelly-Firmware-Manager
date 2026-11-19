@@ -109,7 +109,7 @@ function firmwareRow(f, latest, older) {
     iconButton("copy", "Copy SHA-256", async () => { await copyText(f.sha256 || ""); }));
   attachTip(sha, () => f.sha256 || "", true);
   const devices = f.devices.length
-    ? keptDetails(`fw-${f.name}`, `For ${f.devices.length} device${f.devices.length === 1 ? "" : "s"} ▾`, box("ul", null, ...f.devices.map(firmwareDevice)))
+    ? keptDetails(`fw-${f.name}`, `For ${f.devices.length} device${f.devices.length === 1 ? "" : "s"}`, box("ul", null, ...f.devices.map(firmwareDevice)))
     : el("span", "–", "muted");
   devices.classList.add("fw-dev");
   const dl = el("a", null, "icon"); dl.href = `api/firmware/${encodeURIComponent(f.name)}/download`; dl.setAttribute("download", "");

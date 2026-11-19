@@ -233,6 +233,12 @@ button.pill{cursor:pointer}
 .fw-head{padding-top:8px;padding-bottom:8px;color:var(--secondary-text-color);font-weight:500;font-size:.85em;white-space:nowrap}
 .fw-row:last-child{border-bottom:0}
 .fw-row details summary{cursor:pointer;color:var(--secondary-text-color)}
+/* "For n devices": no browser marker, one chevron after the text (down closed, up open) */
+.fw-dev summary{list-style:none;display:inline-flex;align-items:center;gap:8px}
+.fw-dev summary::-webkit-details-marker{display:none}
+.fw-dev summary::after{content:"";width:6px;height:6px;margin-top:-3px;border-right:2px solid currentColor;
+  border-bottom:2px solid currentColor;transform:rotate(45deg);transition:transform .15s}
+.fw-dev[open] summary::after{margin-top:3px;transform:rotate(-135deg)}
 .fw-row details ul{margin:4px 0 0;padding-left:18px}
 .fw-row details li{margin:2px 0}
 .fw-row details li>span{margin-right:8px;overflow-wrap:anywhere}
