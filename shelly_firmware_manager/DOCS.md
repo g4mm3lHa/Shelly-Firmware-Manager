@@ -207,8 +207,9 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
 - All downloaded and uploaded firmware files, grouped by device type, with size, date,
   SHA-256 and the devices they are provided for. The number of files, their total size
   and the free disk space are shown at the top. Filters: Provided (provided to at least
-  one device), Uploaded, Intermediate, Gen1 and Unused (no known device has this
-  firmware ID). Search and sort work as in the Devices tab (sort by firmware ID, newest
+  one device), Uploaded, Intermediate, Gen1 and Unused (no device in the list has this
+  firmware ID; while the firmware ID of a device is not known yet – it was never
+  reached, e.g. a sleeping battery device – no file counts as unused). Search and sort work as in the Devices tab (sort by firmware ID, newest
   version, size or storage date, also with the column titles; kept per device); the
   versions inside a card stay newest first. On phones "Upload firmware" is the upload
   icon at the right end.
@@ -301,7 +302,8 @@ unprotected through your network.
 To move to another Home Assistant instance (or keep a copy), export the whole firmware
 store in the Settings tab → **Firmware & Storage** → **Export store …**:
 
-- The app generates an **export password** and shows it once (copy icon). Save it –
+- The app generates an **export password** and shows it once (copy icon; if the browser
+  does not allow copying, the password is selected for copying by hand). Save it –
   it is stored nowhere, and the file cannot be imported without it. **Export** is
   enabled after "I have saved the password"; the browser downloads one ZIP file.
 - The password **seals** the file: the list of all files with their SHA-256 and data

@@ -85,8 +85,9 @@ not part of this file.
 - Delete dialog: both steps with red button; the note that a file may not be
   restorable is a red warning box (`warnbox danger`, text in the normal colour).
 - **Filter chips (3.5.0):** All, Provided (provided to a device), Uploaded,
-  Intermediate, Gen1, Unused (no known device of the firmware ID); counts respect the
-  search; a card shows only its matching versions. Summary "n files · x MB stored · y
+  Intermediate, Gen1, Unused (no device of the list has the firmware ID; while a
+  device's firmware ID is unknown – never reached – nothing is unused and the chip's
+  tooltip names the number of these devices, 2026-11-19); counts respect the search; a card shows only its matching versions. Summary "n files · x MB stored · y
   free" (free disk space of the store volume; MB, from 1024 MB on GB).
 - **Sorting (2026-11-19):** the same sort tool as in the Devices tab sorts the cards: Firmware ID, Newest version, Size (all versions), Stored (latest);
   the column titles Version, Size and Stored sort the cards too (coupled, arrow at the
@@ -152,7 +153,8 @@ not part of this file.
   "Import store …" with export/import icons) and card "Device Passwords" (button
   "Device passwords …" with lock icon).
 - **Export (8b B):** dialog with value list (files with downloaded/uploaded, size, file
-  name), the generated password in a read-only field with copy icon (shown only here),
+  name), the generated password in a read-only field with copy icon (shown only here;
+  if the browser refuses copying, the field's text is selected),
   hint that it seals and is stored nowhere, checkbox "I have saved the password";
   "Export" is enabled only after it and starts the browser download.
 - **Import (8c A):** step 1 file + password + "Check file" (the hint names the maximum
@@ -183,10 +185,14 @@ not part of this file.
   and show "Uploading <file> … n %" in the dialog, then "Checking <file> …" (import).
 
 ## Phone tiles (mockups approved 2026-11-12, T1 of 2026-11-19 in 3.5.0)
-- Line 1 checkbox, name (600) and ⋮; line 2 Shelly name + pencil (lighter) left, IP
+- Line 1 = tile head like the head of a firmware card (2026-11-19): checkbox, name
+  (600, card-head size) with the "Gen n" label (omitted while the generation is unknown)
+  and ⋮, divider line over the full tile width; line 2 Shelly name + pencil (lighter) left, IP
   right (grey, no underline, not monospace, ↗, link to the web UI); line 3 firmware
   left, status pill + Install right; then "Details" as outlined button (36 px, full
-  content width, centred text + chevron down/up, like the feature buttons). 12 px
+  content width, centred text + chevron down/up, like the feature buttons). Outline of
+  "Details" and the feature buttons in the tile line colour (at least 3:1 in light and
+  dark themes, 2026-11-19). 12 px
   padding top and bottom, feature buttons 36 px with natural width and every row (incl.
   the last) stretched to the full width, detail list right-aligned with lines; ⋮ keeps
   its 44 px touch target.

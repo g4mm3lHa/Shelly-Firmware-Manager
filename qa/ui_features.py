@@ -775,6 +775,37 @@ def _checked(f, view):
       .map(b => b.dataset.value)""")
 
 
+def _unused_chip(c):
+    """Firmware chip "Unused": files of a firmware ID no device has; while a device's
+    firmware ID is unknown (never reached) nothing counts as unused (tooltip says why)."""
+    case, f, page = c.case, c.f, c.page
+    unknown = {"on": False}
+
+    def other_types(route):
+        headers = {k: v for k, v in route.request.headers.items() if k.lower() != "if-none-match"}
+        state = route.fetch(headers=headers).json()
+        for d in state["devices"]:
+            d["type"] = "OtherType"
+        if unknown["on"]:
+            state["devices"][0]["type"] = None
+        route.fulfill(json=state)
+
+    def unused():
+        chip = f.locator("#fw-chips .chip", has_text="Unused")
+        return int(chip.locator(".count").inner_text()), chip.get_attribute("title") or ""
+
+    page.route("**/api/state", other_types)
+    refresh_state(page, f)
+    count, title = unused()
+    check(f"{case}: Unused counts files without a device", count == f.locator(".fw-row").count() and not title, f"{count} {title}")
+    unknown["on"] = True
+    refresh_state(page, f)
+    count, title = unused()
+    check(f"{case}: unknown firmware ID blocks Unused", count == 0 and "1 device not known" in title.replace("ID of ", ""), f"{count} {title}")
+    page.unroute("**/api/state")
+    refresh_state(page, f)
+
+
 def _sorting_and_downgrade(c):
     """Toolbar tools (search and sort icons with popovers; Devices and Firmware tab, kept
     per browser, coupled with the column heads on desktop) and the downgrade icon of an
@@ -843,6 +874,7 @@ def _sorting_and_downgrade(c):
     check(f"{case}: sort tool in the Firmware toolbar", _checked(f, "firmware") == ["type", "asc"], str(_checked(f, "firmware")))
     chips = f.evaluate("() => [...document.querySelectorAll('#fw-chips .chip')].map(c => c.firstChild.textContent)")
     check(f"{case}: Firmware filter chips", chips == ["All", "Provided", "Uploaded", "Intermediate", "Gen1", "Unused"], str(chips))
+    _unused_chip(c)
     f.locator("#fw-chips .chip", has_text="Uploaded").click()
     tags = f.evaluate("() => [...document.querySelectorAll('.fw-row')].map(r => !!r.querySelector('.fw-ver .tag.warn'))")
     check(f"{case}: Uploaded filter shows only uploads", tags and all(tags), str(tags))
@@ -1019,6 +1051,13 @@ def _export_import(c, page, f, out):
     check(f"{c}: export dialog", d["title"] == "Export firmware store" and "Files" in d["body"], d["body"][:120])
     check(f"{c}: generated password, 5 groups", len(password) == 24 and password.count("-") == 4, password)
     check(f"{c}: copy button visible", f.locator('#dlg-body .pw-row button[aria-label="Copy password"]').is_visible())
+    # Without the Clipboard API (no secure context, e.g. HA over plain HTTP) the password is
+    # copied through a selected helper field inside the modal dialog (outside it is inert)
+    f.evaluate("""() => { Object.defineProperty(navigator, 'clipboard', {value: undefined, configurable: true});
+      window.__copied = null; document.addEventListener('copy', () => { window.__copied = String(getSelection()); }, {once: true}); }""")
+    f.locator('#dlg-body .pw-row button[aria-label="Copy password"]').click()
+    copied = wait_until(lambda: f.evaluate("() => window.__copied") is not None) and f.evaluate("() => window.__copied")
+    check(f"{c}: copy without Clipboard API", copied == password, str(copied))
     full = f.evaluate("() => { const i = document.querySelector('#dlg-body .pw-row input'); return i.scrollWidth <= i.clientWidth; }")
     check(f"{c}: password not cut off", full)
     check(f"{c}: Export disabled before the acknowledgment", d["buttons"][-1] == ["Export", True], str(d["buttons"]))

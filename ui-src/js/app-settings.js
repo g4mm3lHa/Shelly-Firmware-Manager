@@ -188,7 +188,8 @@ async function exportDialog() {
   try { x = await api("api/firmware/export", {}); } catch (e) { message(EXPORT_TITLE, e.message, "error", "exportIcon"); return; }
   const out = el("input"); out.type = "text"; out.readOnly = true; out.value = x.password; out.className = "mono";
   out.setAttribute("aria-label", "Export password");
-  const copy = iconButton("copy", "Copy password", () => copyText(x.password));
+  // Not copyable (browser refuses both ways): the password is selected for a manual copy
+  const copy = iconButton("copy", "Copy password", async () => { if (!await copyText(x.password)) { out.focus(); out.select(); } });
   const ack = el("input"); ack.type = "checkbox";
   const files = `${x.files} (${x.downloads} downloaded, ${x.uploads} uploaded)`;
   modal(EXPORT_TITLE, [

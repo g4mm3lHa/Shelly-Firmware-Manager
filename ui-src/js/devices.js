@@ -240,7 +240,9 @@ const COLUMNS = {
     const ha = el("div", d.name, "name"), shellyName = el("span", d.shelly_name || "–");
     attachTip(ha, () => `Home Assistant device name: ${d.name}`, true);
     attachTip(shellyName, () => `Shelly device name: ${d.shelly_name || "–"}`, true);
-    return [ha, box("div", "sub shelly-name", shellyName, pen)];
+    // "Gen n" label beside the name: phone tiles only (the table has its own Gen column)
+    const head = box("div", "name-line", ha, d.gen ? el("span", `Gen ${d.gen}`, "tag") : null);
+    return [head, box("div", "sub shelly-name", shellyName, pen)];
   }},
   ip: {label: "IP", sort: d => (d.ip || "").split(".").map(n => n.padStart(3, "0")).join("."), cell: d => {
     if (!d.ip) return ["–"];

@@ -246,11 +246,21 @@ export function keptDetails(key, summary, content) {
   d.ontoggle = () => { d.open ? openDetails.add(key) : openDetails.delete(key); };
   d.append(el("summary", summary), content); return d;
 }
-/** Copy text to the clipboard; fallback for non-secure contexts. */
+/** Copy text to the clipboard. True if copied.
+ *  The Clipboard API is missing or refused outside a secure context (e.g. Home
+ *  Assistant over plain HTTP) and in frames without clipboard permission; then a
+ *  selected helper field is copied. An open modal dialog makes everything outside it
+ *  inert (no selection possible), so the helper field is placed inside the dialog. */
 export async function copyText(text) {
-  try { await navigator.clipboard.writeText(text); return; } catch (e) { /* fallback below */ }
-  const t = el("textarea"); t.value = text; document.body.append(t); t.select();
-  document.execCommand("copy"); t.remove();
+  try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* fallback below */ }
+  const t = el("textarea", null, "copy-helper"); t.value = text; t.readOnly = true;
+  const focused = document.activeElement;
+  (dlg.open ? dlg : document.body).append(t);
+  t.focus(); t.select(); t.setSelectionRange(0, text.length);
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+  t.remove(); if (focused instanceof HTMLElement) focused.focus();
+  return ok;
 }
 
 // ---------------------------------------------------------------- Tooltip
