@@ -164,6 +164,10 @@ class ManagerCore:
         self.reloading: set[str] = set()  # device IDs whose Reload Device Info is running
         # (firmware ID, version) -> running provide task (single flight)
         self._provisions: dict[tuple[str, str], asyncio.Future[tuple[str, str, int]]] = {}
+        # (firmware ID, version) -> devices waiting for that provide task (full and
+        # single-device checks alike); all of them show "downloading" while it downloads
+        self._provision_waiters: dict[tuple[str, str], set[str]] = {}
+        self._fetching: set[tuple[str, str]] = set()  # provide tasks that are downloading right now
         self._downloads_running = 0  # for the progress phase of a parallel check
         # Running checks only (cleared when no check runs anymore, see _release_check_state):
         # file name -> shared checksum verification of a stored file (single flight)
