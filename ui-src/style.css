@@ -372,6 +372,7 @@ dialog table th,dialog table td{padding:6px 8px}
 button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help svg{width:16px;height:16px}
 .form-actions{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:4px}
 .unsaved{color:var(--warning-color);font-size:.9em}.unsaved[hidden]{display:none}
+.set-changelog{margin:16px 0 0}
 .settings-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(560px,1fr));gap:0 16px;align-items:start}
 /* Firmware store block inside "Firmware & Storage": full width, between the options */
 .set-store{grid-column:1/-1;padding:12px 0;border-top:1px solid color-mix(in srgb,var(--primary-text-color) 12%,transparent);

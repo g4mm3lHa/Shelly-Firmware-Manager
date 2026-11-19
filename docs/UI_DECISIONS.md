@@ -136,6 +136,13 @@ not part of this file.
   known Shellys), Firmware & Storage (Gen1 updates, Gen1 types, Allow downgrades, block
   "Firmware store" with export/import, Max. import size), Logs, Advanced, Device
   Passwords. Option labels with "Max." in front. Units in texts always "MB".
+- **Changelog hint (3.5.0, 2026-11-19):** last line of the Settings tab, below
+  the Save area: hint "What changed in each version: open the app page in Home
+  Assistant and choose “Changelog” next to the version." – the link opens the info
+  page of the app in the whole window (`/config/app/<slug>/info`, slug from the
+  Supervisor; the list of apps until it is known). The Configuration tab of the app
+  page has the same names, help texts and order as the Settings tab; its last help
+  text ends with the same hint (HA shows no links there).
 
 ## Toolbar and card heads (3.5.0, variant B)
 - Same toolbar in all tabs: search and sort only as small round icons (36 px desktop,

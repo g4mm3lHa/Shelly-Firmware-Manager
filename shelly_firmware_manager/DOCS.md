@@ -45,7 +45,7 @@ knows). Only original Shelly firmware is supported for now.
 ## Configuration
 
 All options can be changed in the app's **Settings** tab (or the Configuration tab of
-the app page). Saving restarts the app.
+the app page – same names, help texts and order). Saving restarts the app.
 
 | Option | Meaning |
 |---|---|
@@ -266,7 +266,8 @@ your local network. While installations are disabled because of the download bas
 a notice above the tabs explains why. The card **Firmware & Storage** holds the
 **Firmware store** block (export and import, see [Moving the firmware store](#moving-the-firmware-store)),
 the card **Device Passwords** sets passwords on several devices at once (see
-[Device passwords](#device-passwords)).
+[Device passwords](#device-passwords)). The last line links to the app page in Home
+Assistant, where **Changelog** next to the version lists what changed in each version.
 
 ## Device passwords
 
@@ -393,8 +394,8 @@ The app connects only to:
 - **Shelly servers** below `shelly.cloud` – version offers, firmware downloads and the
   official changelog pages. Only the device type (e.g. `Plus1`) is part of the request;
   no other information about your devices or Home Assistant is sent.
-- **Home Assistant** via the Supervisor – device registry, notifications and the app's
-  own settings.
+- **Home Assistant** via the Supervisor – device registry, notifications, the app's
+  own settings and its slug (for the link to the app page).
 
 The user interface loads nothing from the internet. No telemetry.
 

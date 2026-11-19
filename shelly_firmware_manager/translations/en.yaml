@@ -1,40 +1,48 @@
+# Names and help texts of the Configuration tab of the app page: the same as the
+# Settings tab (OPTION_FIELDS in ui-src/js/app-settings.js), in the same order. The
+# last description ends with the changelog hint (the last line of the Settings tab);
+# Home Assistant shows these texts without links.
 configuration:
   check_interval_days:
     name: Check every (days)
-    description: Automatic check every 1-30 days.
+    description: 1–30 days
   check_time:
     name: Check time
-    description: Time of the automatic check (HH:MM, time zone of Home Assistant).
+    description: Local time of Home Assistant
   download_base_url:
     name: Download base URL for the Shellys
     description: >-
-      LAN IP address of Home Assistant and port 8098, e.g. http://192.0.2.10:8098 (use the IP, not a host name). Required: installations are refused until it is set.
+      LAN IP address of Home Assistant + host port 8098, e.g. http://192.168.1.20:8098 (no host name). Required for installations
   restrict_downloads_to_devices:
     name: Serve downloads only to known Shellys
-  max_parallel_installs:
-    name: Max. parallel installations
-    description: Maximum number of approved updates installed at the same time (1-20); further approvals wait.
+    description: Switch off if downloads are rejected from 172.30.x.x
   gen1_updates_enabled:
     name: Enable Gen1 updates
-    description: >-
-      Gen1 firmware is offered by Shelly only via plain HTTP without a checksum. Switch off to skip Gen1 devices.
+    description: Gen1 firmware is only available via plain HTTP without a checksum
+  gen1_allowed_types:
+    name: Allowed Gen1 types
+    description: One type per entry, e.g. SHSW-1, SHSW-PM
   allow_downgrade:
     name: Allow downgrades
     description: >-
-      Allows installing an older stored firmware on Gen2+ devices (device menu and Firmware tab). Off by default.
+      Installing an older stored firmware on Gen2+ devices (device menu and Firmware tab); off by default
   import_max_mb:
     name: Max. import size (MB)
-    description: Largest firmware store export accepted by "Import store" (1-2048 MB).
-  log_retention_days:
-    name: Log retention (days)
+    description: >-
+      Largest file accepted by “Import store” (Settings → Firmware & Storage); 1–2048, default 100
   log_entry_limit:
     name: Max. log size (entries)
-    description: 100-3000 entries.
-  gen1_allowed_types:
-    name: Allowed Gen1 types
+    description: 100–3000
+  log_retention_days:
+    name: Log retention (days)
+    description: 1–365
+  max_parallel_installs:
+    name: Max. parallel installations
+    description: 1–20; further approvals wait
   pinned_certificates:
     name: Pinned certificates
     description: >-
-      Host and SHA-256 fingerprint for Shelly servers using the private Allterco CA. Multiple entries per host are allowed.
+      Host below shelly.cloud + SHA-256 fingerprint; several entries per host allowed.
+      What changed in each version: tab “Info” of this page, link “Changelog” next to the version.
 network:
   8098/tcp: Firmware downloads for the Shellys
