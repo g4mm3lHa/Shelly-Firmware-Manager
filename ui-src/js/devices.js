@@ -13,7 +13,9 @@ import {load, queued, render} from "./main.js";
 // ---------------------------------------------------------------- Devices
 const STATUS_LABELS = {"up-to-date": "Up-To-Date", available: "Available", ready: "Ready", queued: "Queued",
   installing: "Installing", unconfirmed: "Unconfirmed", error: "Error", unregistered: "Unregistered", skipped: "Skipped",
-  updated: "Updated"};
+  updated: "Updated", asleep: "Asleep"};
+// Battery device (detected from the device while it was awake) that did not answer the last check
+const asleep = d => d.status === "asleep";
 // A device with a confirmed or unconfirmed installation stays in the "Updates
 // available" card (without checkbox) until the next full check or a single check of
 // this device; a confirmed one is shown as "Updated", an unconfirmed one keeps its status
@@ -240,14 +242,23 @@ const COLUMNS = {
     const ha = el("div", d.name, "name"), shellyName = el("span", d.shelly_name || "–");
     attachTip(ha, () => `Home Assistant device name: ${d.name}`, true);
     attachTip(shellyName, () => `Shelly device name: ${d.shelly_name || "–"}`, true);
+    // Battery icon right after the name (table and phone tiles)
+    let battery = null;
+    if (d.battery === true) {
+      battery = box("span", "battery", icon("battery")); battery.setAttribute("role", "img");
+      battery.setAttribute("aria-label", "Battery device");
+      attachTip(battery, () => "Battery device: reachable only while it is awake", true);
+    }
     // "Gen n" label beside the name: phone tiles only (the table has its own Gen column)
-    const head = box("div", "name-line", ha, d.gen ? el("span", `Gen ${d.gen}`, "tag") : null);
+    const head = box("div", "name-line", ha, battery, d.gen ? el("span", `Gen ${d.gen}`, "tag") : null);
     return [head, box("div", "sub shelly-name", shellyName, pen)];
   }},
   ip: {label: "IP", sort: d => (d.ip || "").split(".").map(n => n.padStart(3, "0")).join("."), cell: d => {
     if (!d.ip) return ["–"];
-    const url = webUrl(d); if (!url) return [el("span", d.ip, "mono")];
-    const a = el("a", d.ip, "mono"); a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.title = "Open the Shelly web UI";
+    // Dimmed while the battery device sleeps (its web UI does not answer then)
+    const cls = "mono" + (asleep(d) ? " dim" : "");
+    const url = webUrl(d); if (!url) return [el("span", d.ip, cls)];
+    const a = el("a", d.ip, cls); a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.title = "Open the Shelly web UI";
     return [a];
   }},
   gen: {label: "Gen", sort: d => d.gen, cell: d => [d.gen ?? "–"]},

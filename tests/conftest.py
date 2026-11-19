@@ -49,6 +49,8 @@ class FakeNet:
             C: ("Garage", "192.168.1.12", "1.4.0", "1.5.0"),
         }
         self.unreachable = set()
+        self.asleep = set()  # devices that do not answer at all (timeout)
+        self.battery = set()  # devices whose settings report a sleep period (battery devices)
         self.downloads = 0
         self.offer_calls = 0  # requests with the installed version (next step)
         self.offer_version = "1.5.0"  # stable version offered by the manufacturer's server
@@ -102,6 +104,8 @@ def net(monkeypatch, tmp_path):
         device_id = fake.by_origin(origin)
         if device_id in fake.unreachable:
             raise shelly.ShellyError("Device not reachable")
+        if device_id in fake.asleep:
+            raise TimeoutError()
         if on_identity:
             on_identity(2, f"shelly-{device_id}")
         fake.info_calls += 1
@@ -120,7 +124,10 @@ def net(monkeypatch, tmp_path):
         fake.settings_calls.append(args[5] if len(args) > 5 else False)  # extended flag
         if fake.settings_error is not None:
             raise fake.settings_error
-        return {"shelly_name": "plus1", "ntp": "time.local", "eco": False, "ap": False, "ble": "unsupported", "outputs": []}
+        answer = {"shelly_name": "plus1", "ntp": "time.local", "eco": False, "ap": False, "ble": "unsupported", "outputs": []}
+        if any(args[2] == f"http://{fake.devices[i][1]}" for i in fake.battery if i in fake.devices):
+            answer["battery"] = True
+        return answer
 
     def offer(version):
         return {"version": version, "url": f"https://fw.example/Plus1-{version}.zip", "steps": "1"}

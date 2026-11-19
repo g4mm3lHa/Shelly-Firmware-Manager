@@ -36,6 +36,7 @@ from manager_core import (
     ACTIVITY_WAITING,
     Device,
     SOURCE_UPLOAD,
+    STATUS_ASLEEP,
     STATUS_AVAILABLE,
     STATUS_CURRENT,
     STATUS_ERROR,
@@ -48,6 +49,17 @@ from manager_core import (
 from manager_devices import DeviceSettings
 
 log = logging.getLogger("sfm.manager")
+
+# Status message of a battery device that was not reachable (STATUS_ASLEEP); {error}
+# is the error of the attempt
+ASLEEP_MESSAGE = "Battery device asleep – wake it up (e.g. press its button) and check it again. Last attempt: {error}"
+
+
+def _unreachable(err: BaseException) -> bool:
+    """True if the device did not answer at all (timeout, connection failure) – not
+    for an answer the device gave, e.g. a refused password."""
+    return isinstance(err, (TimeoutError, aiohttp.ClientConnectionError, OSError))
+
 
 # Shared manufacturer requests of one check (single flight): ("step", firmware ID,
 # installed version) -> next step for this version, ("newest", firmware ID) -> newest
@@ -295,7 +307,9 @@ class Checks(DeviceSettings):
         """Check one registry entry, keep its result on the device. True on success.
 
         last_check = last attempt, last_success = last successful check; a failed
-        attempt keeps the last known firmware so it is never shown as freshly checked."""
+        attempt keeps the last known firmware so it is never shown as freshly checked.
+        A known battery device (marker battery) that did not answer is STATUS_ASLEEP
+        instead of STATUS_ERROR."""
         dev = self.devices.setdefault(device_id, {})
         dev["name"] = clip(entry.get("name_by_user") or entry.get("name") or device_id, 100)
         dev["last_check"] = int(time.time())
@@ -304,9 +318,11 @@ class Checks(DeviceSettings):
             await self._scan_device(device_id, dev, entry.get("configuration_url"), offers)
         except (TimeoutError, ShellyError, aiohttp.ClientError, KeyError, ValueError, OSError) as err:
             log.warning("%s: %s", dev["name"], err)
-            dev.update(
-                status=STATUS_ERROR, message=error_text(err, 500) or type(err).__name__, error_level=severity_of(err)
-            )
+            text = error_text(err, 500) or type(err).__name__
+            if dev.get("battery") is True and _unreachable(err):
+                dev.update(status=STATUS_ASLEEP, message=ASLEEP_MESSAGE.format(error=text), error_level="warning")
+            else:
+                dev.update(status=STATUS_ERROR, message=text, error_level=severity_of(err))
             return False
         else:
             dev["last_success"] = dev["last_check"]
@@ -598,7 +614,7 @@ class Checks(DeviceSettings):
         findings: list[dict[str, Any]] = []
         for device_id in checked:
             dev = self.devices.get(device_id, {})
-            if dev.get("status") == STATUS_ERROR:
+            if dev.get("status") in (STATUS_ERROR, STATUS_ASLEEP):
                 level = dev.get("error_level") or "error"
                 findings.append({"device": dev.get("name"), "error": dev.get("message"), "severity": level})
                 continue

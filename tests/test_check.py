@@ -90,6 +90,38 @@ async def test_single_check_error_keeps_last_success(mgr, net):
     assert dev["version"] == "1.5.0"
 
 
+async def test_battery_device_not_reachable_is_asleep(mgr, net):
+    """A battery device detected while awake stays marked; when it does not answer, a
+    check shows it as asleep (warning in the log, not an error) and keeps the known
+    firmware. A device without the marker, or a battery device that answers with an
+    error, is an error as before."""
+    net.battery.add(B)
+    await mgr.scan()
+    assert mgr.devices[B]["battery"] is True and "battery" not in mgr.devices[A]
+    assert next(d for d in mgr.public_state()["devices"] if d["id"] == B)["battery"] is True
+    net.asleep.update({A, B})
+    await mgr.scan()
+    dev = mgr.devices[B]
+    assert dev["status"] == manager_core.STATUS_ASLEEP and dev["battery"] is True
+    assert dev["message"].startswith("Battery device asleep") and dev["version"] == "1.5.0"
+    assert mgr.devices[A]["status"] == manager_core.STATUS_ERROR
+    log = [e for e in mgr.events.entries if e["kind"] == "check"][-1]
+    asleep = next(f for f in log["findings"] if f["device"] == "Hall")
+    assert asleep["severity"] == "warning" and asleep["error"].startswith("Battery device asleep")
+    net.asleep.clear()
+    net.unreachable.add(B)  # an answer of the device, not a missing one
+    await mgr.check_device(B)
+    assert mgr.devices[B]["status"] == manager_core.STATUS_ERROR
+
+
+def test_asleep_device_keeps_store_fallback_file():
+    """A stored version offered for a manual installation stays held while the battery
+    device sleeps, like after any failed check."""
+    dev = {"file": "x.zip", "status": manager_core.STATUS_ASLEEP, "store_fallback": True}
+    assert manager_core.holds_file(dev)
+    assert not manager_core.holds_file({**dev, "store_fallback": False})
+
+
 async def test_single_check_unregistered(mgr, net):
     """Device removed from the registry: unregistered, failure logged, no crash."""
     await mgr.scan()

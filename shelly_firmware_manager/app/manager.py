@@ -48,6 +48,7 @@ class Manager(Installs):
             "actions",
             "schedules",
             "auth_enabled",
+            "battery",
             "outputs",
             "source_url",
             "offer_source",

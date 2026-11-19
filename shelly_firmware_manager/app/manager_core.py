@@ -59,6 +59,10 @@ STATUS_UNCLEAR = "unconfirmed"  # installation without confirmed target version
 
 STATUS_ERROR = "error"
 
+# A battery device (marker battery, detected from the device while awake) that was
+# not reachable: it sleeps between wake-ups, so this is no error
+STATUS_ASLEEP = "asleep"
+
 STATUS_UNREGISTERED = "unregistered"
 
 STATUS_SKIPPED = "skipped"  # Gen1 device while Gen1 updates are disabled
@@ -76,7 +80,8 @@ def holds_file(dev: Device) -> bool:
         return False
     if dev.get("status") in PENDING:
         return True
-    return dev.get("status") == STATUS_ERROR and bool(dev.get("install_failed") or dev.get("store_fallback"))
+    failed = dev.get("status") in (STATUS_ERROR, STATUS_ASLEEP)
+    return failed and bool(dev.get("install_failed") or dev.get("store_fallback"))
 
 SUPERVISOR = "http://supervisor"  # Supervisor API (Core API proxy below /core)
 

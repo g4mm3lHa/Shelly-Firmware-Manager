@@ -464,6 +464,47 @@ def _name_tips(c):
     page.keyboard.press("Escape")
 
 
+def _battery(c):
+    """Battery devices: battery icon right after the name on the same line (table and
+    tile) with a tooltip; a sleeping one shows the grey "Asleep" pill and a dimmed IP
+    and is not listed under "Errors"; an awake one keeps its normal IP."""
+    case, f, page, width = c.case, c.f, c.page, c.width
+    def row(name):
+        return f.locator("#dev-cards tr", has_text=name).first
+    geo = row("Doorbell").evaluate("""r => { const n = r.querySelector('td.c-device .name').getBoundingClientRect(),
+      b = r.querySelector('td.c-device .battery'), g = b && b.getBoundingClientRect(), ip = r.querySelector('td.c-ip .mono');
+      return {icon: !!b, after: !!g && g.left >= n.right - 1 && g.left - n.right <= 12,
+        line: !!g && Math.abs((g.top + g.height / 2) - (n.top + n.height / 2)) < 3,
+        dim: !!ip && ip.classList.contains('dim') && getComputedStyle(ip).opacity === '0.5',
+        pill: r.querySelector('td.c-status .pill').textContent}; }""")
+    check(f"{case}: battery icon right after the name", geo["icon"] and geo["after"] and geo["line"], str(geo))
+    check(f"{case}: sleeping battery device – Asleep pill and dimmed IP", geo["pill"] == "Asleep" and geo["dim"], str(geo))
+    pill = row("Doorbell").locator("td.c-status .pill")
+    grey = pill.evaluate("""p => { const s = getComputedStyle(p);
+      return [s.getPropertyValue('--pill').trim(), s.getPropertyValue('--secondary-text-color').trim()]; }""")
+    check(f"{case}: Asleep pill grey", grey[0] == grey[1] and grey[0] != "", str(grey))
+    awake = row("Carport").evaluate("r => [!!r.querySelector('.battery'), r.querySelector('td.c-ip .mono').classList.contains('dim')]")
+    check(f"{case}: awake battery device – icon, IP not dimmed", awake == [True, False], str(awake))
+    check(f"{case}: no battery icon on other devices", row("Hall").locator(".battery").count() == 0)
+    errors = f.locator("#dev-chips .chip", has_text="Errors")
+    errors.click()
+    check(f"{case}: Asleep is not listed under Errors", f.locator("#dev-cards tr", has_text="Doorbell").count() == 0)
+    f.locator("#dev-chips .chip", has_text="All").click()
+    icon = row("Doorbell").locator(".battery")
+    icon.scroll_into_view_if_needed()
+    if width > 700:
+        icon.hover()
+    else:
+        page.wait_for_timeout(300)
+        icon.tap()
+    check(f"{case}: battery tooltip", tip_text(f) == "Battery device: reachable only while it is awake", str(tip_text(f)))
+    page.screenshot(path=c.out / f"{case}-battery.png")
+    if width > 700:
+        page.mouse.move(5, 5)
+    else:
+        f.locator("#dev-chips .chip").first.tap()
+
+
 def _keep_listed(c):
     """Devices of the updates card stay there while they are checked again (the check
     resets their markers); phone tiles: the Ignored label as high as the status pill."""
@@ -1030,6 +1071,7 @@ def firmware_store(browser, out):
         _keep_listed(c)
         _action_popups(c)
         _name_tips(c)
+        _battery(c)
         _next_steps(c)
         _downgrade(c)
         rows = _firmware_tab(c)

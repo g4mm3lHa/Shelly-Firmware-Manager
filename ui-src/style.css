@@ -155,6 +155,7 @@ td.c-menu{text-align:right}
   th.c-menu,td.c-menu{width:52px}
   td.c-device .name,td.c-device .sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   td.c-device .name-line .tag{display:none}   /* Gen label: phone tiles only */
+  td.c-device .name-line{display:flex;align-items:center;gap:6px;min-width:0}   /* name + battery icon */
   /* Every column except "Device": title and content centred; digits of IP and firmware equally wide */
   th:not(.c-device),td:not(.c-device){text-align:center}
   td.c-ip,td.c-firmware{font-variant-numeric:tabular-nums}
@@ -162,6 +163,10 @@ td.c-menu{text-align:right}
   td.c-action .act-strip{margin:0 auto}
 }
 .name{font-weight:600}
+/* Battery device marker after the name; IP of a sleeping battery device dimmed */
+.battery{display:inline-flex;flex:none;color:var(--secondary-text-color)}
+.battery .svg{width:16px;height:16px}
+.dim{opacity:.5}
 .sub{color:var(--secondary-text-color);font-size:.85em}
 .arrow{color:var(--secondary-text-color);margin:0 4px}
 .newver{color:var(--primary-color);font-weight:600}

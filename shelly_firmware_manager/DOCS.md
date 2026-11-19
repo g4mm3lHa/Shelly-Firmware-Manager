@@ -101,6 +101,11 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 - The row menu ⋮ offers: Check for updates (this device only), Install update,
   Downgrade, Reload device info, Ignore / Resume device, Open web UI, device settings,
   Status details and Restart.
+- **Battery devices** (e.g. H&T, door/window sensors) sleep between wake-ups and answer
+  only while they are awake. The app recognises them from the device itself when a check
+  or Reload Device Info reaches them awake (Gen2+: wake-up period, Gen1: sleep mode) and
+  shows a battery icon after the name. A battery device never reached while awake is not
+  marked. To check one, wake it up (e.g. press its button) and check it right away.
 - **Ignored** devices are skipped by automatic checks and cannot be updated until they
   are resumed.
 
@@ -113,6 +118,7 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 | Queued / Installing | Installation waiting for a free slot / running (with progress for Gen2+) |
 | Unconfirmed | The installation ran, but the target version was not confirmed (see the details); stays on top until the next check of the device |
 | Error | Check, download or installation failed; after a failed installation – or with a stored version while the Shelly server could not be asked – the device stays on top and can be installed (again) |
+| Asleep | Battery device that did not answer the last check – it sleeps; the IP is dimmed. Wake it up and check it again |
 | Skipped | Gen1 device while Gen1 updates are disabled |
 | Unregistered | Device is no longer in the Home Assistant device registry |
 

@@ -29,6 +29,12 @@ not part of this file.
 - **Filter chips (3.5.0):** All, Updates, Errors, Up-To-Date, Unprotected, Ignored.
   "Unprotected" = `auth_enabled` false on the device (unknown does not count); filter
   only, no action. Spelling "Up-To-Date" like the status label.
+- **Battery devices (2026-11-19, 3.5.0):** battery icon (16 px,
+  secondary text colour, tooltip "Battery device: reachable only while it is awake")
+  right after the HA name in the table and the phone tile head (before the "Gen n"
+  label). A battery device that did not answer the last check shows the grey status
+  pill "Asleep" (not listed under "Errors") and its IP dimmed (opacity 0.5). No queue,
+  no "Check queued" pill.
 - Gen1 firmware column: version only.
 - Phone tiles: "Ignored" label wrap and truncated names accepted.
 
