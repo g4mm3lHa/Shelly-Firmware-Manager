@@ -261,6 +261,85 @@ async def test_cancelled_single_check_leaves_no_running_download(mgr, net):
     assert _foreign_pending() == []
 
 
+def _forget_downloads(mgr, net):
+    """Remove all stored files so the next check downloads again (a provided file
+    cannot be deleted in the UI, remove it directly)."""
+    for name in list(mgr.firmware):
+        (data_paths.FW_DIR / name).unlink()
+    mgr.firmware.clear()
+    net.downloads = 0
+
+
+async def test_parallel_single_checks_share_one_download(mgr, net):
+    """Single-device checks of two devices with the same firmware ID and offered
+    version download the file once: the second check waits for the running download
+    (shown as downloading for both) and provides the same file."""
+    await mgr.scan()  # devices known
+    _forget_downloads(mgr, net)
+    net.download_gate = asyncio.Event()
+    mgr.reserve_check("device", A)
+    first = asyncio.create_task(mgr.check_device(A, user="alice"))
+    await asyncio.sleep(0.05)
+    mgr.reserve_check("device", C)
+    second = asyncio.create_task(mgr.check_device(C, user="bob"))
+    await asyncio.sleep(0.05)
+    assert net.downloads == 1
+    assert mgr.activity == {A: manager_core.ACTIVITY_DOWNLOADING, C: manager_core.ACTIVITY_DOWNLOADING}
+    net.download_gate.set()
+    assert (await first)["status"] == (await second)["status"] == manager_core.STATUS_READY
+    assert net.downloads == 1
+    assert mgr.devices[A]["file"] == mgr.devices[C]["file"] and mgr.devices[A]["file"] in mgr.firmware
+    assert {mgr.devices[d]["offer_source"] for d in (A, C)} == {"manufacturer"}
+    downloads = [e for e in mgr.events.entries if e["kind"] == "download"]
+    assert downloads[-1]["user"] == "alice"  # one entry, user of the check that started it
+    assert len(downloads) == 2  # the first one is from the full check above
+    assert mgr._provisions == {} and mgr._provision_waiters == {} and mgr._fetching == set()
+    assert mgr.activity == {}
+
+
+async def test_single_check_after_shared_download_uses_stored_file(mgr, net):
+    """A single-device check started after the download of the same firmware ended
+    uses the stored file instead of downloading it again."""
+    await mgr.scan()
+    _forget_downloads(mgr, net)
+    await mgr.check_device(A)
+    await mgr.check_device(C)
+    assert net.downloads == 1
+    assert mgr.devices[C]["status"] == manager_core.STATUS_READY
+    assert mgr.devices[C]["file"] == mgr.devices[A]["file"]
+
+
+async def test_failed_shared_download_fails_all_waiting_checks(mgr, net, monkeypatch):
+    """A failed shared download is an error for every check waiting for it (no
+    retries); the next check starts a new download."""
+    await mgr.scan()
+    _forget_downloads(mgr, net)
+    gate = asyncio.Event()
+    calls = 0
+
+    async def failing(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        await gate.wait()
+        raise ShellyError("Download failed")
+
+    monkeypatch.setattr(shelly, "download_firmware", failing)
+    mgr.reserve_check("device", A)
+    first = asyncio.create_task(mgr.check_device(A))
+    await asyncio.sleep(0.05)
+    mgr.reserve_check("device", C)
+    second = asyncio.create_task(mgr.check_device(C))
+    await asyncio.sleep(0.05)
+    gate.set()
+    await first
+    await second
+    assert calls == 1
+    assert mgr.devices[A]["status"] == mgr.devices[C]["status"] == manager_core.STATUS_ERROR
+    assert mgr._provisions == {} and mgr._provision_waiters == {} and mgr._fetching == set()
+    await mgr.check_device(A)
+    assert calls == 2
+
+
 async def test_cancelled_check_cancels_shared_offer_task(mgr, net, monkeypatch):
     """Two devices of one type wait for one shared offer task; cancelling the check
     leaves no task running (the shared offer task is cancelled as well)."""

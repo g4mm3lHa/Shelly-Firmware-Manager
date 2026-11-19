@@ -376,14 +376,25 @@ class Checks(DeviceSettings):
             and (data_paths.FW_DIR / str(dev.get("file"))).is_file()
         )
         if not already:
-            # One provide task per firmware ID and version: a parallel device of the
-            # same type waits for it instead of downloading the file a second time
+            # One provide task per firmware ID and version, shared by the full check and
+            # all single-device checks: a parallel device of the same type waits for it
+            # instead of downloading the file a second time
             fw_key = (info["type"], offer["version"])
             task = self._provisions.get(fw_key)
             if task is None:
-                task = self._provisions[fw_key] = asyncio.ensure_future(self._provide(device_id, dev, info, offer))
+                provide = self._provide(fw_key, device_id, dev, info, offer)
+                task = self._provisions[fw_key] = asyncio.ensure_future(provide)
                 task.add_done_callback(functools.partial(self._provision_done, fw_key))
-            name, sha, size = await task
+            waiters = self._provision_waiters.setdefault(fw_key, set())
+            waiters.add(device_id)
+            if fw_key in self._fetching:  # joined a running download
+                self.activity[device_id] = ACTIVITY_DOWNLOADING
+            try:
+                name, sha, size = await task
+            finally:
+                waiters.discard(device_id)
+                if self.activity.get(device_id) == ACTIVITY_DOWNLOADING:
+                    self.activity[device_id] = ACTIVITY_CHECKING
             dev.update(
                 file=name,
                 sha256=sha,
@@ -535,19 +546,25 @@ class Checks(DeviceSettings):
     def _provision_done(self, fw_key: tuple[str, str], _task: "asyncio.Future[Any]") -> None:
         """Forget a finished provide task (single flight per firmware ID and version)."""
         self._provisions.pop(fw_key, None)
+        self._provision_waiters.pop(fw_key, None)
 
     async def _provide(
-        self, device_id: str, dev: Device, info: dict[str, Any], offer: dict[str, str]
+        self, fw_key: tuple[str, str], device_id: str, dev: Device, info: dict[str, Any], offer: dict[str, str]
     ) -> tuple[str, str, int]:
         """The firmware offered by the manufacturer's server: an already downloaded
         file of exactly this version (after checksum verification) or a new download.
+        Runs once per fw_key (firmware ID, version); every device waiting for it shows
+        "downloading" during the download. device_id, dev: the device whose check started
+        it (log text and the user of the download entry).
         Returns (file name, sha256, size)."""
         stored = await self._stored_firmware(info["type"], offer["version"], uploads=info["gen"] >= 2)
         if stored:
             name, meta = stored
             log.info("%s: using stored firmware %s %s", dev["name"], info["type"], offer["version"])
             return name, str(meta["sha256"]), int(meta["size"])
-        self.activity[device_id] = ACTIVITY_DOWNLOADING
+        self._fetching.add(fw_key)
+        for waiting in self._provision_waiters.get(fw_key, ()):
+            self.activity[waiting] = ACTIVITY_DOWNLOADING
         self._downloads_running += 1
         if self.progress:
             self.progress["phase"] = "download"
@@ -556,11 +573,13 @@ class Checks(DeviceSettings):
                 self.session, offer["url"], data_paths.FW_DIR, self.pins, https_only=info["gen"] >= 2
             )
         finally:
+            self._fetching.discard(fw_key)
             self._downloads_running -= 1
             if self.progress and not self._downloads_running:
                 self.progress["phase"] = "devices"
-            if self.activity.get(device_id) == ACTIVITY_DOWNLOADING:
-                self.activity[device_id] = ACTIVITY_CHECKING
+            for waiting in self._provision_waiters.get(fw_key, ()):
+                if self.activity.get(waiting) == ACTIVITY_DOWNLOADING:
+                    self.activity[waiting] = ACTIVITY_CHECKING
         self._register_firmware(name, info["type"], info["gen"], offer["version"], sha, size, https)
         self._fresh[name] = clip(offer["url"], 500)  # later devices of this check: same offer
         self.events.add(
