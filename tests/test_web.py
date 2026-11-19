@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 
+import data_paths
 import shelly
 import web_ui
 from aiohttp.test_utils import TestClient, TestServer
@@ -317,3 +318,69 @@ async def test_state_shows_the_downgrade_marker(mgr, net):
     await mgr.scan()
     mgr.devices[B]["downgrade"] = True
     assert next(d for d in mgr.public_state()["devices"] if d["id"] == B)["downgrade"] is True
+
+
+async def test_http_store_export_and_import(client, mgr, net):
+    """Export (password once, single-use download), import in three steps; the
+    password never appears in the state or the log."""
+    store(mgr, "Plus1", "1.3.0")
+    assert (await client.post("/api/firmware/export", json={})).status == 403  # CSRF
+    r = await client.post("/api/firmware/export", json={}, headers=hdr(client))
+    assert r.status == 200
+    prepared = await r.json()
+    assert prepared["files"] == 1 and len(prepared["password"]) == 24
+    assert (await client.get("/api/firmware/export/zz")).status == 404
+    r = await client.get(f"/api/firmware/export/{prepared['token']}")
+    assert r.status == 200 and r.headers["Content-Type"] == "application/zip"
+    assert "attachment" in r.headers["Content-Disposition"]
+    data = await r.read()
+    assert (await client.get(f"/api/firmware/export/{prepared['token']}")).status == 409  # single use
+    for name in list(mgr.firmware):
+        (data_paths.FW_DIR / name).unlink()
+    mgr.firmware.clear()
+
+    r = await client.post("/api/firmware/import", data=data, headers=binary(client, "store.zip"))
+    assert r.status == 200, await r.text()
+    token = (await r.json())["token"]
+    r = await client.post("/api/firmware/import/check", json={"token": token, "password": "wrong"}, headers=hdr(client))
+    assert r.status == 400 and "password" in await r.text()
+    r = await client.post(
+        "/api/firmware/import/check", json={"token": token, "password": prepared["password"]}, headers=hdr(client)
+    )
+    assert r.status == 200 and len((await r.json())["new"]) == 1
+    r = await client.post("/api/firmware/import/confirm", json={"token": token}, headers=hdr(client))
+    assert r.status == 200 and (await r.json())["stored"] == 1
+    blobs = json.dumps(mgr.public_state()) + json.dumps(mgr.events.list())
+    assert prepared["password"] not in blobs
+
+
+async def test_http_store_import_guards(client, mgr, net):
+    """CSRF, the size limit of the option and a missing length are checked before
+    anything is stored."""
+    r = await client.post("/api/firmware/import", data=b"x" * 10, headers={**binary(client), "X-CSRF-Token": "x"})
+    assert r.status == 403
+    mgr.import_max = 100
+    r = await client.post("/api/firmware/import", data=b"x" * 101, headers=binary(client))
+    assert r.status == 413
+    r = await client.post("/api/firmware/import", data=b"x" * 50, headers=binary(client))
+    assert r.status == 400 and "ZIP" in await r.text()
+    r = await client.post("/api/firmware/import", data=b"{}", headers={**hdr(client), "Content-Type": "application/json"})
+    assert r.status in (400, 415)
+    assert (await client.post("/api/firmware/export", json={}, headers=hdr(client))).status == 409  # empty store
+
+
+async def test_http_first_start_and_bulk_passwords(client, mgr, net):
+    """First-start question: checks refused until Skip. Bulk passwords: validated."""
+    mgr.first_start_open = True
+    assert (await client.post("/api/scan", json={}, headers=hdr(client))).status == 409
+    assert (await client.get("/api/state")).status == 200
+    assert (await client.post("/api/first-start/skip", json={}, headers=hdr(client))).status == 200
+    assert not mgr.first_start_open
+    state = await (await client.get("/api/state")).json()
+    assert state["first_start_open"] is False and state["import_max_mb"] == 100
+    r = await client.post("/api/devices/passwords", json={"mode": "set", "devices": [A], "password": 5},
+                          headers=hdr(client))
+    assert r.status == 400
+    r = await client.post("/api/devices/passwords", json={"mode": "set", "devices": [A], "password": "pw"},
+                          headers=hdr(client))
+    assert r.status == 400 and "Confirmation" in await r.text()

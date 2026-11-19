@@ -36,7 +36,10 @@ from shelly import clip
 log = logging.getLogger("sfm.events")
 
 # "log": the log itself was cleared (see EventLog.clear)
-KINDS = ("check", "download", "upload", "install", "delete", "setting", "password", "options", "log")
+KINDS = (
+    "check", "download", "upload", "install", "delete", "setting", "password", "options", "log", "export", "import",
+    "setup",
+)
 ENTRY_ID_RE = re.compile(r"^[0-9a-f]{12}$")  # "id" of an entry, also checked for IDs from the URL
 SEVERITIES = ("success", "warning", "error")  # ordered from lowest to highest
 COMPACT_SLACK = 200  # dropped lines tolerated in the file before it is rewritten

@@ -12,7 +12,7 @@ const LOG_FILTERS = {all: ["All", () => true], checks: ["Checks", e => e.kind ==
   installs: ["Installations", e => e.kind === "install"], settings: ["Settings", e => ["setting", "password", "options"].includes(e.kind)],
   warnings: ["Warnings", e => severity(e) === "warning"], errors: ["Errors", e => severity(e) === "error"]};
 const KIND_LABELS = {check: "Check", download: "Download", upload: "Upload", install: "Installation", delete: "Deleted", setting: "Setting",
-  password: "Password", options: "App settings", log: "Log"};
+  password: "Password", options: "App settings", log: "Log", export: "Store export", import: "Store import", setup: "First start"};
 // Successful actions, failed actions are logged with the mode; older entries: set/removed/test_failed
 const PASSWORD_ACTIONS = {stored: "password stored", enabled: "password protection enabled", changed: "password changed",
   removed: "password protection removed", forgotten: "stored password forgotten",
@@ -60,6 +60,16 @@ function logContent(e) {
       return [el("div", e.ok ? "App settings saved – app restarted" : "App settings could not be saved"),
         ...(e.changes || []).map(c => el("div", c.redacted ? `${optionLabel(c.option)}: changed` : `${optionLabel(c.option)}: ${arrow(c.old, c.new)}`, "sub")),
         e.error ? el("div", e.error, "bad") : null].filter(Boolean);
+    case "export":
+      return [el("div", `Firmware store exported · ${e.files ?? 0} file${e.files === 1 ? "" : "s"} (${e.downloads ?? 0} downloaded, ${e.uploads ?? 0} uploaded) · ${mb(e.size || 0)}`),
+        e.damaged ? el("div", `${e.damaged} damaged stored file${e.damaged === 1 ? "" : "s"} left out (SHA-256 no longer matches)`, "warnc") : null].filter(Boolean);
+    case "import": {
+      const line = el("div", `Firmware store imported · ${e.stored ?? 0} new · ${e.same ?? 0} already stored (${e.updated ?? 0} with data added) · ${e.conflicts ?? 0} conflict${e.conflicts === 1 ? "" : "s"}`);
+      if (!e.conflicts_list || !e.conflicts_list.length) return [line];
+      return [line, el("div", `Conflicts – stored file kept: ${e.conflicts_list.join(", ")}`, "sub")];
+    }
+    case "setup":
+      return [el("div", "First start: firmware store import skipped")];
     case "log":
       return [el("div", `Log cleared · ${e.entries ?? 0} entr${e.entries === 1 ? "y" : "ies"} deleted`)];
     default:
@@ -95,6 +105,9 @@ function logSummary(e) {
     case "password": return [`${e.device}: ${passwordAction(e)}`];
     case "options": return [e.confirmed ? "Download base URL confirmed" : e.ok ? "App settings saved" : "App settings not saved"];
     case "log": return ["Log cleared"];
+    case "export": return [`${e.files ?? 0} file${e.files === 1 ? "" : "s"} exported`];
+    case "import": return [`${e.stored ?? 0} new · ${e.conflicts ?? 0} conflict${e.conflicts === 1 ? "" : "s"}`];
+    case "setup": return ["Import skipped"];
     default: return [e.kind];
   }
 }

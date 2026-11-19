@@ -22,6 +22,9 @@ configuration:
     name: Allow downgrades
     description: >-
       Allows installing an older stored firmware on Gen2+ devices (device menu and Firmware tab). Off by default.
+  import_max_mb:
+    name: Max. import size (MB)
+    description: Largest firmware store export accepted by "Import store" (1-2048 MB).
   log_retention_days:
     name: Log retention (days)
   log_entry_limit:

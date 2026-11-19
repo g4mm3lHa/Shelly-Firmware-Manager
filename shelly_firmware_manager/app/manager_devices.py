@@ -1,9 +1,12 @@
 """Manager, layer 3 of 6: reading and changing a single Shelly – identity, settings,
-feature states, restart and the device password.
+feature states, restart and the device password. The device password can also be
+stored or set on several devices in one step (set_passwords): each device is still
+set, verified, stored and logged on its own.
 
 Nothing here looks for firmware: these are local device operations only.
 """
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -21,6 +24,8 @@ from manager_store import FirmwareStore
 log = logging.getLogger("sfm.manager")
 
 PASSWORD_MODES = ("store", "enable", "change", "remove", "forget")
+
+BULK_MODES = ("store", "set")  # several devices: store the existing password, or set one (enable or change)
 
 
 class DeviceSettings(FirmwareStore):
@@ -302,6 +307,85 @@ class DeviceSettings(FirmwareStore):
             log.info("%s: password %s by %s, not stored in this app", name, action, user)
             self.events.add("password", device=name, action=action, user=user, stored=False)
         return result
+
+    def bulk_password_step(self, device_id: str, mode: str) -> tuple[str | None, str]:
+        """What a multi-device password action does on one device: (single-device
+        mode, "") or (None, reason why the device is skipped). "set" enables the
+        protection of an unprotected device and changes the password of a protected
+        one whose current password is stored (the app needs it to change)."""
+        dev = self.devices.get(device_id)
+        if dev is None:
+            return None, "Unknown device"
+        try:
+            self._settings_device(device_id)
+        except ShellyError as err:
+            return None, str(err)
+        protected = dev.get("auth_enabled")
+        if protected is None:
+            return None, "Protection state unknown – reload device info"
+        if mode == "store":
+            return ("store", "") if protected else (None, "Not password protected")
+        if not protected:
+            return "enable", ""
+        if not self.credentials.has_device_password(device_id):
+            return None, "Store the current password first"
+        return "change", ""
+
+    async def set_passwords(
+        self,
+        mode: str,
+        device_ids: object,
+        password: str | None,
+        confirm: object = False,
+        acknowledged: object = False,
+        user: str | None = None,
+        keep: object = True,
+    ) -> list[dict[str, Any]]:
+        """Password action for several devices in one step – each device is set,
+        verified, stored and logged on its own exactly like the single-device dialog
+        (set_device_password). Runs in parallel up to the option
+        max_parallel_installs; a failure on one device does not stop the others,
+        devices the action does not fit or that are busy are skipped.
+        Returns one result per device: {"id", "name", "result": ok|error|skipped,
+        "action", "message"}."""
+        if mode not in BULK_MODES:
+            raise ValueError("Unknown password action")
+        if confirm is not True:
+            raise ValueError("Confirmation required")
+        if mode == "set" and acknowledged is not True:
+            raise ValueError("Confirm that the new password is stored securely")
+        if not isinstance(keep, bool) or (not keep and mode != "set"):
+            raise ValueError("Invalid storage choice")
+        if not isinstance(password, str) or not password:
+            raise ValueError("No password entered")
+        if not isinstance(device_ids, list) or not device_ids or len(device_ids) > 500:
+            raise ValueError("Choose at least one device")
+        if not all(isinstance(i, str) and i in self.devices for i in device_ids):
+            raise ValueError("Unknown device in the selection")
+        ids = list(dict.fromkeys(device_ids))
+        slots = asyncio.Semaphore(int(self.options.get("max_parallel_installs", 5)))
+
+        async def one(device_id: str) -> dict[str, Any]:
+            """Run the action on one device (skipped if it does not fit or is busy)."""
+            name = self.devices[device_id].get("name") or "?"
+            async with slots:
+                single, reason = self.bulk_password_step(device_id, mode)
+                if single is None:
+                    return {"id": device_id, "name": name, "result": "skipped", "action": None, "message": reason}
+                try:
+                    await self.set_device_password(
+                        device_id, single, password, confirm=True, acknowledged=single != "store" or None,
+                        user=user, keep=keep if single != "store" else True,
+                    )
+                except (TimeoutError, ShellyError, aiohttp.ClientError, ValueError, KeyError) as err:
+                    message = error_text(err, 300) or type(err).__name__
+                    return {"id": device_id, "name": name, "result": "error", "action": single, "message": message}
+                return {"id": device_id, "name": name, "result": "ok", "action": single, "message": ""}
+
+        results = await asyncio.gather(*(one(i) for i in ids))
+        summary = {k: sum(1 for r in results if r["result"] == k) for k in ("ok", "error", "skipped")}
+        log.info("Passwords (%s) on %d devices by %s: %s", mode, len(ids), user, summary)
+        return list(results)
 
     async def _password_action(
         self,

@@ -465,3 +465,31 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
     box-shadow:0 -2px 8px rgba(0,0,0,.18)}
   .form-actions .unsaved{margin-right:auto}
 }
+
+/* Settings tab: cards "Firmware store" and "Device passwords" */
+.store-btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.store-btns button{display:inline-flex;align-items:center;gap:6px}
+.store-btns svg{width:16px;height:16px;fill:currentColor}
+/* Export: generated password with copy button */
+.pw-row{display:flex;gap:6px;align-items:center}
+.pw-row input{flex:1;min-width:0;width:auto;letter-spacing:.05em}
+.pw-row button{flex:none}
+@media (max-width:700px){.pw-row input{letter-spacing:0;padding-left:8px;padding-right:8px}}
+/* Import: result as counts, every group expandable */
+.imp-groups{display:flex;flex-direction:column;gap:6px}
+.imp-sum{display:inline-flex;align-items:center;gap:6px}
+.imp-list{margin:6px 0 4px 18px;padding:0;font-size:.92em}
+.imp-list li{margin:2px 0}
+/* Passwords of several devices: device list with the step per device, result rows */
+.bulk-list{display:flex;flex-direction:column}
+.bulk-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;padding:6px 0;border-bottom:1px solid var(--divider-color)}
+.bulk-row.off{opacity:.6}
+.bulk-all{padding:4px 0 8px;font-weight:500}
+.bulk-dev{display:inline-flex;flex-direction:column}
+.bulk-dev .sub,.bulk-row>.sub{color:var(--secondary-text-color);font-size:.88em}
+.bulk-step{margin-left:auto;font-size:.9em;color:var(--primary-color)}
+.bulk-res{display:flex;flex-direction:column}
+.bulk-res-row{display:flex;align-items:center;gap:12px;padding:6px 0;border-bottom:1px solid var(--divider-color)}
+.msg-icon.sm{width:28px;height:28px}
+.msg-icon.sm svg{width:18px;height:18px}
+@media (max-width:700px){.bulk-step,.bulk-row>.sub{margin-left:26px}}

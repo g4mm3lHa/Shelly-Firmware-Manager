@@ -1,0 +1,285 @@
+"""Firmware store export/import: seal and password, unchanged files, re-packed
+archives, new / already stored / conflicting entries, limits, first-start question.
+
+All HA/Shelly/vendor traffic is mocked (conftest.FakeNet); no network is used."""
+
+import io
+import json
+import zipfile
+
+import data_paths
+import manager_core
+import manager_store
+import pytest
+import store_transfer
+from conftest import A
+from helpers import chunks, store
+from shelly import ShellyError
+from store_transfer import TransferError
+
+
+async def export_bytes(mgr):
+    """Export the store; returns (ZIP bytes, password)."""
+    prepared = mgr.prepare_export("tester")
+    path, filename = await mgr.build_export(prepared["token"], "3.4.0")
+    data = path.read_bytes()
+    path.unlink()
+    assert filename.startswith("shelly-firmware-store-") and filename.endswith(".zip")
+    return data, prepared["password"]
+
+
+async def stage(mgr, data):
+    """Stage an export file like the upload route."""
+    return (await mgr.stage_import(chunks(data), len(data)))["token"]
+
+
+def forget_store(mgr):
+    """Empty the store (files and entries), like a fresh installation."""
+    for name in list(mgr.firmware):
+        (data_paths.FW_DIR / name).unlink(missing_ok=True)
+    mgr.firmware.clear()
+
+
+def rewrite(data, change):
+    """Re-pack an export; change(name, bytes) returns the new bytes of a member."""
+    out = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(data)) as src, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+        for info in src.infolist():
+            dst.writestr(info.filename, change(info.filename, src.read(info.filename)))
+    return out.getvalue()
+
+
+async def test_export_layout_and_roundtrip_keeps_source_and_date(mgr, net):
+    """Readable layout with manifest and checksums; an import into an empty store
+    restores every file with its source (download/upload), date and changelog."""
+    down, _ = store(mgr, "Plus1", "1.3.0")
+    up, _ = store(mgr, "Plus1", "1.2.0", source=manager_core.SOURCE_UPLOAD)
+    gen1, _ = store(mgr, "SHSW-1", "1.13.0", gen=1)
+    mgr.firmware[down]["downloaded"] = 1735787045
+    mgr.firmware[down]["changelog"] = {"date": "2025-01-01", "entries": [{"text": "Fix", "models": ["Plus1"]}]}
+    before = {n: dict(m) for n, m in mgr.firmware.items()}
+    data, password = await export_bytes(mgr)
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        names = set(archive.namelist())
+    assert {"manifest.json", "SHA256SUMS.txt"} <= names
+    assert "Gen2+/Plus1/Plus1-1.3.0.zip" in names
+    assert "Gen2+/Plus1/Plus1-1.2.0-upload.zip" in names
+    assert any(n.startswith("Gen1/SHSW-1/SHSW-1-v1.13.0") for n in names)
+    assert all(not n.startswith(manager_store.EXPORT_PREFIX) for n in os_listdir())
+
+    forget_store(mgr)
+    token = await stage(mgr, data)
+    summary = await mgr.check_import(token, password.lower())  # case and spaces do not matter
+    assert summary["files"] == 3 and len(summary["new"]) == 3 and not summary["same"] and not summary["conflict"]
+    assert not mgr.firmware  # nothing stored before the confirmation
+    counts = await mgr.confirm_import(token, "tester")
+    assert counts["stored"] == 3 and counts["conflicts"] == 0
+    for name in (down, up, gen1):
+        meta = mgr.firmware[name]
+        assert (data_paths.FW_DIR / name).is_file()
+        for key in ("type", "gen", "version", "sha256", "size", "source", "downloaded"):
+            assert meta.get(key) == before[name].get(key), key
+    assert mgr.firmware[down]["changelog"]["entries"][0]["text"] == "Fix"
+    assert [e for e in mgr.events.list() if e["kind"] == "import"][0]["user"] == "tester"
+    assert not any(n.startswith((manager_store.IMPORT_PREFIX, manager_store.EXPORT_PREFIX)) for n in os_listdir())
+
+
+def os_listdir():
+    return [p.name for p in data_paths.FW_DIR.iterdir()]
+
+
+async def test_repacked_archive_without_changes_is_accepted(mgr, net):
+    """Unpacked and packed again (other compression): accepted, files unchanged."""
+    store(mgr, "Plus1", "1.3.0")
+    data, password = await export_bytes(mgr)
+    forget_store(mgr)
+    token = await stage(mgr, rewrite(data, lambda _n, b: b))
+    assert len((await mgr.check_import(token, password))["new"]) == 1
+
+
+async def test_changed_file_or_manifest_or_password_is_refused(mgr, net):
+    """A changed firmware file, a changed manifest or a wrong password: refused
+    before anything is stored."""
+    store(mgr, "Plus1", "1.3.0")
+    data, password = await export_bytes(mgr)
+    forget_store(mgr)
+
+    def flip(name, content):
+        return content[:-1] + bytes([content[-1] ^ 1]) if name.endswith("1.3.0.zip") else content
+
+    token = await stage(mgr, rewrite(data, flip))
+    with pytest.raises(TransferError, match="changed since the export"):
+        await mgr.check_import(token, password)
+
+    def edit_manifest(name, content):
+        if name != "manifest.json":
+            return content
+        body = json.loads(content)
+        body["entries"][0]["source"] = "upload" if body["entries"][0]["source"] == "download" else "download"
+        return json.dumps(body).encode()
+
+    token = await stage(mgr, rewrite(data, edit_manifest))
+    with pytest.raises(TransferError, match="Wrong export password"):
+        await mgr.check_import(token, password)
+
+    token = await stage(mgr, data)
+    with pytest.raises(TransferError, match="Wrong export password"):
+        await mgr.check_import(token, "AAAA-AAAA-AAAA-AAAA-AAAA")
+    with pytest.raises(TransferError, match="Enter the export password"):
+        await mgr.check_import(token, "  ")
+    with pytest.raises(ShellyError, match="not been checked"):
+        await mgr.confirm_import(token)
+    assert not mgr.firmware
+
+
+async def test_same_and_conflicting_files(mgr, net):
+    """Same SHA-256: not stored twice, missing data is added and an upload becomes a
+    download. Same firmware ID and version with another file: the stored one is kept."""
+    keep, _ = store(mgr, "Plus1", "1.3.0")
+    other, _ = store(mgr, "Plus1", "1.4.0")
+    mgr.firmware[keep]["changelog"] = {"date": "2025-01-01", "entries": [{"text": "Fix", "models": []}]}
+    data, password = await export_bytes(mgr)
+
+    # Receiving store: 1.3.0 as an upload without changelog, 1.4.0 as a different file
+    forget_store(mgr)
+    store(mgr, "Plus1", "1.3.0", source=manager_core.SOURCE_UPLOAD)
+    mgr.firmware[keep]["sha_checked"] = True
+    conflict, _ = store(mgr, "Plus1", "1.4.0", content=b"another file" * 500)
+    token = await stage(mgr, data)
+    summary = await mgr.check_import(token, password)
+    assert not summary["new"]
+    assert [(e["version"], e["note"]) for e in summary["same"]] == [
+        ("1.3.0", "marked as downloaded, changelog added")
+    ]
+    assert [e["version"] for e in summary["conflict"]] == ["1.4.0"]
+    counts = await mgr.confirm_import(token)
+    assert counts == {"stored": 0, "updated": 1, "same": 1, "conflicts": 1}
+    assert mgr.firmware[keep]["source"] == manager_core.SOURCE_DOWNLOAD and "sha_checked" not in mgr.firmware[keep]
+    assert mgr.firmware[keep]["changelog"]["entries"][0]["text"] == "Fix"
+    assert other not in mgr.firmware and conflict in mgr.firmware  # stored file kept
+    event = [e for e in mgr.events.list() if e["kind"] == "import"][0]
+    assert event["severity"] == "warning" and event["conflicts_list"] == ["Plus1 1.4.0"]
+
+
+async def test_gen1_is_imported_even_when_gen1_is_off(mgr, net):
+    """Gen1 files are imported independent of the Gen1 options."""
+    store(mgr, "SHSW-25", "1.14.0", gen=1)
+    data, password = await export_bytes(mgr)
+    forget_store(mgr)
+    mgr.gen1_enabled = False
+    token = await stage(mgr, data)
+    await mgr.check_import(token, password)
+    assert (await mgr.confirm_import(token))["stored"] == 1
+
+
+async def test_damaged_files_are_left_out_of_the_export(mgr, net):
+    """A stored file that no longer matches its SHA-256 is not exported (warning)."""
+    good, _ = store(mgr, "Plus1", "1.3.0")
+    bad, _ = store(mgr, "Plus1", "1.2.0")
+    (data_paths.FW_DIR / bad).write_bytes(b"damaged")
+    data, password = await export_bytes(mgr)
+    event = [e for e in mgr.events.list() if e["kind"] == "export"][0]
+    assert event["damaged"] == 1 and event["files"] == 1 and event["severity"] == "warning"
+    forget_store(mgr)
+    token = await stage(mgr, data)
+    assert [e["version"] for e in (await mgr.check_import(token, password))["new"]] == ["1.3.0"]
+
+
+async def test_export_token_is_single_use_and_expires(mgr, net, monkeypatch):
+    """The download works once; an expired or unknown token is refused; an empty
+    store has nothing to export."""
+    with pytest.raises(ShellyError, match="empty"):
+        mgr.prepare_export()
+    store(mgr, "Plus1", "1.3.0")
+    prepared = mgr.prepare_export()
+    path, _ = await mgr.build_export(prepared["token"], "3.4.0")
+    path.unlink()
+    with pytest.raises(ShellyError, match="expired"):
+        await mgr.build_export(prepared["token"], "3.4.0")
+    prepared = mgr.prepare_export()
+    monkeypatch.setattr(manager_store, "EXPORT_TTL_S", -1)
+    with pytest.raises(ShellyError, match="expired"):
+        await mgr.build_export(prepared["token"], "3.4.0")
+
+
+async def test_import_limits(mgr, net, monkeypatch):
+    """Size limit of the option, announced size, no ZIP, free disk space, token."""
+    mgr.import_max = 1000
+    with pytest.raises(ValueError, match="maximum import size"):
+        await mgr.stage_import(chunks(b"x" * 1001), 1001)
+    with pytest.raises(ValueError, match="larger than announced"):
+        await mgr.stage_import(chunks(b"x" * 600), 500)
+    with pytest.raises(ValueError, match="no ZIP"):
+        await mgr.stage_import(chunks(b"x" * 500), 500)
+    with pytest.raises(ValueError, match="Empty"):
+        await mgr.stage_import(chunks(b""), 0)
+    monkeypatch.setattr(type(mgr), "_free_space", lambda _self: 0)
+    with pytest.raises(ShellyError, match="free disk space"):
+        await mgr.stage_import(chunks(b"x" * 500), 500)
+    with pytest.raises(ShellyError, match="No pending import"):
+        await mgr.check_import("0" * 32, "x")
+    assert not any(n.startswith(manager_store.IMPORT_PREFIX) for n in os_listdir())
+
+
+async def test_no_zip_export_or_foreign_zip(mgr, net):
+    """A ZIP without manifest is refused with a clear message."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as archive:
+        archive.writestr("a.txt", "x")
+    token = await stage(mgr, buf.getvalue())
+    with pytest.raises(TransferError, match="manifest.json missing"):
+        await mgr.check_import(token, "AAAA")
+
+
+async def test_import_refused_during_a_check(mgr, net, monkeypatch):
+    """The store must not change while a check runs."""
+    store(mgr, "Plus1", "1.3.0")
+    data, password = await export_bytes(mgr)
+    forget_store(mgr)
+    token = await stage(mgr, data)
+    await mgr.check_import(token, password)
+    monkeypatch.setattr(type(mgr), "checking", property(lambda self: getattr(self, "busy_for_test", False)))
+    mgr.busy_for_test = True
+    with pytest.raises(ShellyError, match="during a check"):
+        await mgr.confirm_import(token)
+    mgr.busy_for_test = False
+    real = type(mgr)._free_space
+    monkeypatch.setattr(type(mgr), "_free_space", lambda _self: 0)
+    with pytest.raises(ShellyError, match="free disk space"):
+        await mgr.confirm_import(token)
+    monkeypatch.setattr(type(mgr), "_free_space", real)
+    assert (await mgr.confirm_import(token))["stored"] == 1
+
+
+async def test_first_start_question(mgr, net):
+    """While open: checks are blocked, one notification; answered by Skip or by an
+    import, and kept in state.json."""
+    mgr.first_start_open = True
+    for args in (("all",), ("device", A)):
+        with pytest.raises(ShellyError, match="first-start question"):
+            mgr.reserve_check(*args)
+    await mgr.announce_first_start()
+    await mgr.announce_first_start()
+    assert [a[2] for a in mgr.notified] == ["shelly_firmware_manager_first_start"]
+    mgr.skip_first_start("tester")
+    assert not mgr.first_start_open and mgr.schedule_changed.is_set()
+    saved = json.loads(data_paths.STATE_FILE.read_text())
+    assert saved["first_start_open"] is False and saved["first_start_notified"] is True
+    assert [e for e in mgr.events.list() if e["kind"] == "setup"][0]["action"] == "skipped"
+
+    store(mgr, "Plus1", "1.3.0")
+    data, password = await export_bytes(mgr)
+    forget_store(mgr)
+    mgr.first_start_open = True
+    mgr.schedule_changed.clear()
+    token = await stage(mgr, data)
+    await mgr.check_import(token, password)
+    await mgr.confirm_import(token)
+    assert not mgr.first_start_open and mgr.schedule_changed.is_set()
+
+
+def test_password_format_and_normalization():
+    """Generated: 5 groups of 4 characters; spaces and case do not matter."""
+    password = store_transfer.generate_password()
+    assert len(password.split("-")) == 5 and all(len(p) == 4 for p in password.split("-"))
+    assert store_transfer.normalize_password(f"  {password.lower()} ") == password

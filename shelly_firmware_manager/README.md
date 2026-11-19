@@ -12,6 +12,8 @@ Nothing is installed without your approval.
 - Older firmware versions stay stored and allow a downgrade (Gen2+, once switched on).
 - Device settings such as name, NTP server, power-on action, eco mode and password
   protection can be edited directly.
+- The firmware store moves to another Home Assistant instance as one sealed ZIP file;
+  device passwords can be stored or set on several devices in one step.
 
 Requires the Home Assistant Shelly integration (the app works with the devices it
 knows). Only original Shelly firmware is supported for now.

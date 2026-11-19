@@ -59,6 +59,7 @@ async def test_sigterm_cancels_running_check_and_saves_state(app_env, monkeypatc
     """SIGTERM during an automatic check: the check is cancelled, no device stays
     'checking', the state is saved, main() returns normally."""
     monkeypatch.setattr(manager.Manager, "scan_due_in", lambda _self, _now: 0)
+    data_paths.STATE_FILE.write_text(json.dumps({"first_start_open": False}))  # not a fresh installation
     app_env.gate = CountingEvent()  # device queries block: the check keeps running
     task = asyncio.create_task(main.main())
     for _ in range(250):  # wait until the check is querying the devices
@@ -72,6 +73,43 @@ async def test_sigterm_cancels_running_check_and_saves_state(app_env, monkeypatc
     state = json.loads(data_paths.STATE_FILE.read_text())
     assert state["last_scan"]  # written by the check's finally block
     assert "activity" not in data_paths.STATE_FILE.read_text()
+
+
+async def test_fresh_installation_waits_for_the_first_start_answer(app_env, monkeypatch):
+    """No state file (fresh installation): one notification, no automatic check until
+    the import question is answered; "Skip" lets the due check start."""
+    monkeypatch.setattr(manager.Manager, "scan_due_in", lambda _self, _now: 0)
+    sent = []
+    created = []
+
+    async def notify(_self, *args):
+        sent.append(args)
+
+    real_init = manager.Manager.__init__
+
+    def init(self, *args, **kwargs):
+        real_init(self, *args, **kwargs)
+        created.append(self)
+
+    monkeypatch.setattr(manager.Manager, "notify", notify)
+    monkeypatch.setattr(manager.Manager, "__init__", init)
+    app_env.gate = CountingEvent()
+    task = asyncio.create_task(main.main())
+    await asyncio.sleep(0.5)
+    assert created and created[0].first_start_open
+    assert not app_env.gate.waiting  # no check started
+    assert [a[2] for a in sent] == ["shelly_firmware_manager_first_start"]
+    created[0].skip_first_start("tester")
+    for _ in range(250):
+        await asyncio.sleep(0.02)
+        if app_env.gate.waiting:
+            break
+    else:
+        pytest.fail("The check did not start after the question was answered")
+    await _send_sigterm()
+    assert await asyncio.wait_for(task, 5) is None
+    state = json.loads(data_paths.STATE_FILE.read_text())
+    assert state["first_start_open"] is False and state["first_start_notified"] is True
 
 
 class CountingEvent(asyncio.Event):

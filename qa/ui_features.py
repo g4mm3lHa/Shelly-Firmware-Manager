@@ -20,6 +20,11 @@ Suites, in this order (the last two change the demo state in their last case):
                       touch, Firmware-tab labels and dialog title icons; sorting per
                       browser and the Firmware-tab downgrade, downgrades switched off.
                       Demo "features" on 8805 (and "idle" 8801, "missing" 8804).
+- store_transfer      3.4.0: Settings cards "Firmware store" and "Device passwords",
+                      export (password once, download), import (check, counts,
+                      confirm), passwords of several devices (selection, steps,
+                      confirmation), first-start question with notice bar. Demos
+                      "idle" 8801 and "first" 8806 (Skip changes it: last case only).
 Usage: python qa/ui_features.py <shots-dir> [--full] [suite ...]   (qa/run_ui.py starts
 the demos; --full: all viewports of firmware_store, final gate)
 Every suite checks: no horizontal overflow, no console errors; screenshots go to
@@ -36,7 +41,7 @@ from types import SimpleNamespace
 from common import launch
 from playwright.sync_api import sync_playwright
 
-IDLE, LEGACY, MISSING, FEATURES = (f"http://127.0.0.1:{p}" for p in (8801, 8803, 8804, 8805))
+IDLE, LEGACY, MISSING, FEATURES, FIRST = (f"http://127.0.0.1:{p}" for p in (8801, 8803, 8804, 8805, 8806))
 OVERFLOW_JS = "document.documentElement.scrollWidth - document.documentElement.clientWidth"
 results = []  # (suite: name, ok, detail)
 SUITE = [""]  # name of the running suite (prefix of the result names)
@@ -132,7 +137,7 @@ def setting_help(browser, out):
         described = f.get_attribute("#opt-check_interval_days", "aria-describedby")
         check(f"{case}: help text stays the description of the field", described == "opt-check_interval_days-help", str(described))
         icons = f.locator(".set-name button.help")
-        check(f"{case}: one i-icon per setting", icons.count() == 11, str(icons.count()))
+        check(f"{case}: one i-icon per setting", icons.count() == 12, str(icons.count()))
         name = f.locator("label[for=opt-check_interval_days]")
         info = f.locator(".set-name", has=name).locator("button.help")
         geo = f.evaluate("""() => { const l = document.querySelector('label[for=opt-check_interval_days]'), i = l.nextElementSibling;
@@ -927,8 +932,137 @@ def firmware_store(browser, out):
         ctx.close()
 
 
+def _export_import(c, page, f, out):
+    """Export with the generated password, then import the downloaded file again."""
+    f.click("#store-export")
+    f.wait_for_selector("#dlg-body .pw-row input")
+    password = f.input_value("#dlg-body .pw-row input")
+    d = dialog(f)
+    check(f"{c}: export dialog", d["title"] == "Export firmware store" and "Files" in d["body"], d["body"][:120])
+    check(f"{c}: generated password, 5 groups", len(password) == 24 and password.count("-") == 4, password)
+    check(f"{c}: copy button visible", f.locator('#dlg-body .pw-row button[aria-label="Copy password"]').is_visible())
+    full = f.evaluate("() => { const i = document.querySelector('#dlg-body .pw-row input'); return i.scrollWidth <= i.clientWidth; }")
+    check(f"{c}: password not cut off", full)
+    check(f"{c}: Export disabled before the acknowledgment", d["buttons"][-1] == ["Export", True], str(d["buttons"]))
+    f.locator("#dlg-body label.check input").check()
+    check(f"{c}: Export enabled after it", dialog(f)["buttons"][-1] == ["Export", False])
+    page.screenshot(path=out / f"store-export-{c}.png")
+    with page.expect_download() as info:
+        f.locator("#dlg-btns button", has_text="Export").click()
+    path = out / f"export-{c}.zip"
+    info.value.save_as(path)
+    check(f"{c}: export downloaded", zipfile.is_zipfile(path) and "manifest.json" in zipfile.ZipFile(path).namelist())
+    check(f"{c}: success message", wait_until(lambda: "downloads it" in dialog(f)["body"]))
+    f.click("#dlg-x")
+    # Import: wrong password first, then the right one
+    for pw, ok in (("AAAA-BBBB-CCCC-DDDD-EEEE", False), (password.lower(), True)):
+        f.click("#store-import")
+        f.wait_for_selector('#dlg-body input[type="file"]')
+        f.set_input_files('#dlg-body input[type="file"]', str(path))
+        f.fill("#dlg-body input.mono", pw)
+        f.locator("#dlg-btns button", has_text="Check file").click()
+        if not ok:
+            check(f"{c}: wrong password refused", wait_until(lambda: "Wrong export password" in dialog(f)["body"]))
+            f.click("#dlg-x")
+            continue
+        check(f"{c}: import checked", wait_until(lambda: "nothing was changed" in dialog(f)["body"]))
+        d = dialog(f)
+        check(f"{c}: counts (already stored)", "1 already stored" in d["body"].replace("\n", " "), d["body"][:300])
+        check(f"{c}: finish button", d["buttons"][-1][0] == "Finish import", str(d["buttons"]))
+        page.screenshot(path=out / f"store-import-{c}.png")
+        f.locator("#dlg-btns button", has_text="Finish import").click()
+        check(f"{c}: import done", wait_until(lambda: "0 new files stored" in dialog(f)["body"]), dialog(f)["body"][:200])
+        f.click("#dlg-x")
+
+
+def _bulk_passwords(c, page, f, out):
+    """Dialog for several devices: steps per device, selection, confirmation."""
+    f.click("#set-passwords")
+    f.wait_for_selector("#dlg-body .bulk-list")
+    d = dialog(f)
+    rows = f.locator("#dlg-body .bulk-row").count()
+    check(f"{c}: one row per device", rows == 25, str(rows))
+    check(f"{c}: set is the default action", f.locator('#dlg-body input[value="set"]').is_checked())
+    fits = f.locator("#dlg-body .bulk-row:not(.off)").count()
+    check(f"{c}: count of fitting devices", f"All devices that fit ({fits} of 25)" in d["body"], d["body"][:200])
+    check(f"{c}: protected without stored password greyed out", "store the current password first" in d["body"])
+    check(f"{c}: step per device", "→ enable protection" in d["body"])
+    check(f"{c}: red button with the count", d["buttons"][-1][0] == f"Set on {fits} devices …", str(d["buttons"]))
+    f.locator("#dlg-body label.check", has_text="Store in this app").locator("input").uncheck()
+    check(f"{c}: not stored: red box", f.locator("#dlg-body .warnbox.danger").count() == 1)
+    page.screenshot(path=out / f"bulk-passwords-{c}.png", full_page=True)
+    f.locator('#dlg-body input[value="store"]').check()
+    d = dialog(f)
+    stores = f.locator("#dlg-body .bulk-row:not(.off)").count()
+    check(f"{c}: store mode: protected devices", "→ test and store" in d["body"] and stores > 0 and stores != fits, str(stores))
+    check(f"{c}: store mode: no repeat field", not f.locator("#dlg-body label.field", has_text="Repeat password").is_visible())
+    f.locator('#dlg-body input[value="set"]').check()
+    f.locator("#dlg-btns button").last.click()
+    check(f"{c}: password required", wait_until(lambda: "No password entered" in dialog(f)["body"]))
+    f.click("#dlg-x")
+    f.click("#set-passwords")
+    f.wait_for_selector("#dlg-body .bulk-list")
+    f.locator("#dlg-body .bulk-all input").uncheck()
+    check(f"{c}: nothing selected: button disabled", dialog(f)["buttons"][-1][1] is True)
+    f.locator("#dlg-body .bulk-all input").check()
+    for field in f.locator('#dlg-body input[type="password"]').all():
+        field.fill("Demo-Pass-1")
+    f.locator("#dlg-btns button").last.click()
+    check(f"{c}: second confirmation", wait_until(lambda: "I have stored the password securely" in dialog(f)["body"]))
+    check(f"{c}: confirm disabled before the acknowledgment", dialog(f)["buttons"][-1][1] is True)
+    f.click("#dlg-x")
+
+
+def store_transfer(browser, out):
+    """Firmware store export/import, device passwords for several devices, first start."""
+    cases = ((360, "light", True), (1440, "dark", False))
+    for width, scheme, embedded in cases:
+        c = f"{width}-{scheme}{'-embedded' if embedded else ''}"
+        # The wrong export password is refused on purpose (HTTP 400)
+        ctx, page, f, errors = open_page(browser, IDLE, width, scheme, embedded, ignore=("import/check",))
+        check(f"{c}: no first-start notice", f.locator("#notice").is_hidden())
+        f.click("#tab-settings")
+        f.wait_for_selector("#store-export")
+        heads = f.locator("#settings-form h2").all_text_contents()
+        check(f"{c}: cards in the Settings tab", "Firmware store" in heads and "Device passwords" in heads, str(heads))
+        check(f"{c}: import size option", f.locator("#opt-import_max_mb").input_value() == "100")
+        page.screenshot(path=out / f"store-cards-{c}.png", full_page=True)
+        _export_import(c, page, f, out)
+        _bulk_passwords(c, page, f, out)
+        check(f"{c}: no overflow", f.evaluate(OVERFLOW_JS) <= 0)
+        check(f"{c}: no console errors", not errors, "; ".join(errors[:3]))
+        ctx.close()
+    for index, (width, scheme, embedded) in enumerate(cases):
+        c = f"first-{width}-{scheme}{'-embedded' if embedded else ''}"
+        ctx, page, f, errors = open_page(browser, FIRST, width, scheme, embedded)
+        check(f"{c}: welcome dialog", wait_until(lambda f=f: dialog(f)["title"] == "Welcome – import a firmware store?"))
+        check(f"{c}: buttons", dialog(f)["buttons"] == [["Skip", False], ["Import store …", False]], str(dialog(f)["buttons"]))
+        page.screenshot(path=out / f"first-start-dialog-{c}.png")
+        f.click("#dlg-x")
+        notice = f.locator("#notice")
+        check(f"{c}: notice bar", notice.is_visible() and "First start" in notice.text_content())
+        check(f"{c}: Check now disabled", f.locator("#scan").is_disabled() and "first-start" in (f.get_attribute("#scan", "title") or ""))
+        page.screenshot(path=out / f"first-start-notice-{c}.png")
+        f.locator("#notice button", has_text="Import store …").click()
+        check(f"{c}: import dialog from the notice", wait_until(lambda f=f: dialog(f)["title"] == "Import firmware store"))
+        f.click("#dlg-x")
+        page.reload()
+        f = ui_frame(page, embedded)
+        f.wait_for_selector("#dev-cards table")
+        page.wait_for_timeout(300)
+        check(f"{c}: dialog only once", not f.evaluate("() => document.getElementById('dlg').open"))
+        check(f"{c}: notice stays until answered", f.locator("#notice").is_visible())
+        if index == len(cases) - 1:   # changes the demo state: last case only
+            f.locator("#notice button", has_text="Skip").click()
+            check(f"{c}: Skip removes the notice", wait_until(f.locator("#notice").is_hidden))
+            check(f"{c}: Check now enabled", wait_until(f.locator("#scan").is_enabled))
+        check(f"{c}: no overflow", f.evaluate(OVERFLOW_JS) <= 0)
+        check(f"{c}: no console errors", not errors, "; ".join(errors[:3]))
+        ctx.close()
+
+
 SUITES = {"download_url_hint": download_url_hint, "setting_help": setting_help, "download_url_notice": download_url_notice,
-          "firmware_store": firmware_store}
+          "firmware_store": firmware_store, "store_transfer": store_transfer}
 
 
 def main():

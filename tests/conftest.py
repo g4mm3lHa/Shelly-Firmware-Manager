@@ -189,6 +189,7 @@ def quick_install(monkeypatch):
 async def mgr(net):
     """Manager with fake registry; notifications are recorded instead of sent."""
     m = manager.Manager(dict(OPTIONS), session=None, token="t")
+    m.first_start_open = False  # tests start like an installation that already answered the question
 
     async def registry():
         await asyncio.sleep(0)
