@@ -1014,7 +1014,7 @@ def _bulk_passwords(c, page, f, out):
 
 
 def store_transfer(browser, out):
-    """3.4.0 features: Firmware store export/import, device passwords, first start."""
+    """Firmware store export/import, device passwords for several devices, first start."""
     cases = ((360, "light", True), (1440, "dark", False))
     for width, scheme, embedded in cases:
         c = f"{width}-{scheme}{'-embedded' if embedded else ''}"

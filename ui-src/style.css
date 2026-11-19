@@ -466,7 +466,7 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
   .form-actions .unsaved{margin-right:auto}
 }
 
-/* Settings tab: cards "Firmware store" and "Device passwords" (3.4.0) */
+/* Settings tab: cards "Firmware store" and "Device passwords" */
 .store-btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .store-btns button{display:inline-flex;align-items:center;gap:6px}
 .store-btns svg{width:16px;height:16px;fill:currentColor}

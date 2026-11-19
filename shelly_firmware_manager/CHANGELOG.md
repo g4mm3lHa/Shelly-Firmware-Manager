@@ -2,10 +2,8 @@
 
 ## 3.4.0
 
-Release candidate. Move the complete firmware store to another Home Assistant instance;
-store or set the device password on several devices in one step.
-
-Changes in rc1
+Released 2026-11-19. Move the complete firmware store to another Home Assistant
+instance; store or set the device password on several devices in one step.
 
 Added
 - Settings tab, card "Firmware store": export the whole store as one ZIP file (folders
