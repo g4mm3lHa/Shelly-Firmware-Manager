@@ -1,7 +1,8 @@
 # Names and help texts of the Configuration tab of the app page: the same as the
 # Settings tab (OPTION_FIELDS in ui-src/js/app-settings.js), in the same order. The
-# last description ends with the changelog hint (the last line of the Settings tab);
-# Home Assistant shows these texts without links.
+# changelog hint (the last line of the Settings tab) ends the help text of
+# max_parallel_installs: Home Assistant shows no help text for a list of entries such as
+# pinned_certificates (the last option), and shows these texts without links.
 configuration:
   check_interval_days:
     name: Check every (days)
@@ -38,11 +39,12 @@ configuration:
     description: 1–365
   max_parallel_installs:
     name: Max. parallel installations
-    description: 1–20; further approvals wait
+    description: >-
+      1–20; further approvals wait.
+      What changed in each version: tab “Info” of this page, link “Changelog” next to the version.
   pinned_certificates:
     name: Pinned certificates
     description: >-
-      Host below shelly.cloud + SHA-256 fingerprint; several entries per host allowed.
-      What changed in each version: tab “Info” of this page, link “Changelog” next to the version.
+      Host below shelly.cloud + SHA-256 fingerprint; several entries per host allowed
 network:
   8098/tcp: Firmware downloads for the Shellys
