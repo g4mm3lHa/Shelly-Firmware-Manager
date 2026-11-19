@@ -143,7 +143,7 @@ not part of this file.
   page of the app in the whole window (`/config/app/<slug>/info`, slug from the
   Supervisor; the list of apps until it is known). The Configuration tab of the app
   page has the same names, help texts and order as the Settings tab, without the
-  changelog hint (HA does not show it there; owner 2026-11-19).
+  changelog hint (HA does not show it there, 2026-11-19).
 
 ## Toolbar and card heads (3.5.0, variant B)
 - Same toolbar in all tabs: search and sort only as small round icons (36 px desktop,

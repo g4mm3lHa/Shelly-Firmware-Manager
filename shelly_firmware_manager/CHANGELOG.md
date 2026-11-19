@@ -5,6 +5,17 @@
 Release candidate. Clearer settings, filter chips and one toolbar in all tabs; phone
 header and device tiles reworked; battery devices are recognised.
 
+Changes in rc4
+
+Changed
+- App configuration in Home Assistant: the changelog hint was removed from the help
+  texts (Home Assistant does not show it); the Settings tab keeps its changelog link.
+- Asleep status: the tooltip shows only how to wake the device and the last contact.
+
+Fixed
+- Logs tab: the entry of a check appears as soon as the check has finished, without
+  switching tabs.
+
 Changes in rc3
 
 Changed
