@@ -501,6 +501,12 @@ def _battery(c):
     page.screenshot(path=c.out / f"{case}-battery.png")
     if width > 700:
         page.mouse.move(5, 5)
+        pill.hover()   # Asleep tooltip: wake-up hint and the last contact only
+        wait_until(lambda: tip_text(f))
+        lines = (tip_text(f) or "").split("\n")
+        check(f"{case}: Asleep tooltip – wake-up hint and last contact only", len(lines) == 2
+              and lines[0].startswith("Battery device asleep – wake it up") and lines[1].startswith("Last contact: 20"), str(lines))
+        page.mouse.move(5, 5)
     else:
         f.locator("#dev-chips .chip").first.tap()
 
@@ -990,6 +996,34 @@ def _firmware_delete_and_upload(c, rows):
         f.wait_for_selector("#dlg", state="hidden")
 
 
+def _logs_after_check(c):
+    """Logs tab open while a check runs: the log is fetched again as soon as the check
+    has ended (no tab change needed), not only after the 30 s refresh."""
+    case, f, page = c.case, c.f, c.page
+    phase = {"busy": True}
+
+    def state(route):
+        headers = {k: v for k, v in route.request.headers.items() if k.lower() != "if-none-match"}
+        s = route.fetch(headers=headers).json()
+        if phase["busy"]:
+            s["progress"] = {"kind": "all", "phase": "devices", "done": 1, "total": 25}
+        else:
+            s["last_scan"] = (s.get("last_scan") or 0) + 60
+        route.fulfill(json=s)
+
+    requests = []
+    page.on("request", lambda r: "/api/logs" in r.url and requests.append(r.url))
+    page.route("**/api/state", state)
+    refresh_state(page, f)   # check running
+    busy = len(requests)
+    phase["busy"] = False
+    refresh_state(page, f)   # check ended
+    ended = wait_until(lambda: len(requests) > busy)
+    page.unroute("**/api/state")
+    check(f"{case}: Logs tab fetches the log when a check ends", busy == 0 and ended, f"{busy} / {len(requests)}")
+    refresh_state(page, f)
+
+
 def _logs(c):
     """Logs tab: group bar, coloured findings, deleting an entry / the whole log (last case)."""
     case, f, page, out, last = c.case, c.f, c.page, c.out, c.last
@@ -997,6 +1031,7 @@ def _logs(c):
     f.locator("#tab-logs").click()
     entries = f.locator("#log-list .log, #log-list .log-m")
     entries.first.wait_for()
+    _logs_after_check(c)
     total = entries.count()
     check(f"{case}: three consecutive entries of one device grouped", f.locator("#log-list .grp").count() == 3
           and f.locator("#log-list .grp-first").count() == 1 and f.locator("#log-list .grp-last").count() == 1)

@@ -200,9 +200,8 @@ def _translations():
 
 def test_app_configuration_matches_settings_tab():
     """Configuration tab of the app page = Settings tab: same options in the same order
-    (schema and translations), same names and help texts. Allowed differences: the
-    Gen1 type list (list editor in HA) and the changelog hint after the help text of
-    the last option with a visible help text (HA shows none for the certificate list)."""
+    (schema and translations), same names and help texts. Allowed difference: the
+    Gen1 type list (list editor in HA). No changelog hint (HA does not show it)."""
     js = (ROOT / "ui-src" / "js" / "app-settings.js").read_text()
     fields = re.findall(r'^  \["(\w+)", "([^"]+)", "\w+", "([^"]*)", ', js, re.M)
     config = (APP_DIR / "config.yaml").read_text()
@@ -214,7 +213,5 @@ def test_app_configuration_matches_settings_tab():
         assert tname == name, key
         if key == "gen1_allowed_types":
             assert tdesc == "One type per entry, e.g. SHSW-1, SHSW-PM"
-        elif key == "max_parallel_installs":
-            assert tdesc.startswith(desc + ". ") and "Changelog" in tdesc
         else:
             assert tdesc == desc, key

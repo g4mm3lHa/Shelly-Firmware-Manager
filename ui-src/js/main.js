@@ -122,12 +122,17 @@ for (const v of VIEWS) $("tab-" + v).onclick = () => showView(v);
 let timer = 0, inflight = false;
 export let queued = false;   // read by devices.js
 const POLL_IDLE_MS = 30000, POLL_BUSY_MS = 3000;
+/** Something runs: a check, an installation or another device activity. */
+const isActive = s => !!(s && (s.busy || s.progress || s.devices.some(d => d.installing || d.activity)));
+/** Work ended since the last state (it writes its log entry at the end) or a check
+ *  finished in between (last check time changed): the Logs tab fetches the log at once. */
+const workEnded = (before, now) => !!before && now !== before &&
+  ((isActive(before) && !isActive(now)) || now.last_scan !== before.last_scan);
 /** Next refresh: fast while something runs, slow when idle, none while the page is hidden. */
 function schedule() {
   clearTimeout(timer);
   if (document.hidden) return;
-  const s = ui.state, active = s && (s.busy || s.progress || s.devices.some(d => d.installing || d.activity));
-  timer = setTimeout(load, active ? POLL_BUSY_MS : POLL_IDLE_MS);
+  timer = setTimeout(load, isActive(ui.state) ? POLL_BUSY_MS : POLL_IDLE_MS);
 }
 // Hidden tab / HA panel in background: no requests; visible again: refresh at once
 document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); else clearTimeout(timer); });
@@ -138,7 +143,7 @@ export async function load(force) {
   try {
     const s = await getState();
     if (ui.view === "firmware") { const f = await api("api/firmware"); ui.firmware = f.firmware; ui.firmwareTotal = f.total_size || 0; ui.firmwareFree = f.free_space ?? null; }
-    if (ui.view === "logs" && (force || Date.now() - ui.logsLoaded > 30000)) { ui.logs = (await api("api/logs")).entries; ui.logsLoaded = Date.now(); }
+    if (ui.view === "logs" && (force || workEnded(ui.state, s) || Date.now() - ui.logsLoaded > 30000)) { ui.logs = (await api("api/logs")).entries; ui.logsLoaded = Date.now(); }
     ui.state = s;
     render(force);
   } catch (e) { $("busy").textContent = "Error: " + e.message; }

@@ -57,8 +57,11 @@ const ACTIVITY_LABELS = {waiting: "Waiting", checking: "Checking…", downloadin
 // The last successful check differs from the last attempt only after a failed attempt
 const lastSuccess = d => d.last_success && d.last_success !== d.last_check ? fmt(d.last_success) : null;
 
+// Tooltip of the "Asleep" pill: the wake-up hint and the last successful contact only
+const ASLEEP_HINT = "Battery device asleep – wake it up (e.g. press its button) and check it again.";
 /** Text of the status tooltip (details, versions, last attempt and last success). */
 function statusText(d) {
+  if (asleep(d)) return `${ASLEEP_HINT}\nLast contact: ${d.last_success ? fmt(d.last_success) : "never"}`;
   return [d.message, `Installed: ${d.version || "–"}`, d.offer_version ? `Available: ${d.offer_version}` : null,
     `Last check: ${fmt(d.last_check)}`, lastSuccess(d) && `Last successful check: ${lastSuccess(d)}`].filter(Boolean).join("\n");
 }
