@@ -619,6 +619,23 @@ def _flag(value: object) -> bool | str:
     return value if isinstance(value, bool) else UNSUPPORTED
 
 
+def _positive(value: object) -> bool:
+    """True if a reported period is a number above 0 (a sleeping battery device)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+
+
+async def _battery_status(session: aiohttp.ClientSession, origin: str, auth: DeviceAuth | None) -> dict[str, bool]:
+    """{"battery": bool} from the Gen2+ sys status (wakeup_period, reported by battery
+    devices only); {} if it could not be read – the stored value then stays."""
+    try:
+        status = await _rpc(session, origin, "Sys.GetStatus", auth=auth)
+    except UnsupportedError:
+        return {"battery": False}
+    except (TimeoutError, ShellyError, aiohttp.ClientError):
+        return {}
+    return {"battery": _positive(status.get("wakeup_period"))}
+
+
 async def _list_active(
     read: Callable[[], Awaitable[dict[str, Any]]], key: str, active: Callable[[dict[str, Any]], bool]
 ) -> bool | str | None:
@@ -647,8 +664,15 @@ async def read_settings(
     auth: DeviceAuth | None = None,
     extended: bool = False,
 ) -> dict[str, Any]:
-    """Shelly name, NTP server, eco mode, AP, Bluetooth and websocket debug switch and
-    power-on action of all outputs – one request (Gen2+ Shelly.GetConfig, Gen1 /settings).
+    """Shelly name, NTP server, eco mode, AP, Bluetooth and websocket debug switch,
+    battery flag and power-on action of all outputs – one request (Gen2+
+    Shelly.GetConfig, Gen1 /settings).
+
+    battery is True for a battery device that sleeps between wake-ups (Gen2+
+    wakeup_period > 0 in the sys status – read with Sys.GetStatus only when extended –
+    or in the sys config; Gen1 sleep_mode.period > 0) – such a device answers only
+    while it is awake, so it is only ever detected from the device itself. Gen2+
+    leaves battery out (stored value kept) when it could not be read.
 
     Switch values are True/False or UNSUPPORTED. extended=True (checks and Reload
     Device Info only) also reads whether actions/webhooks and schedules are active:
@@ -668,7 +692,11 @@ async def read_settings(
         # then runs on demand) and ble.rpc.enable is no global switch.
         extra["ble"] = _flag((config.get("ble") or {}).get("enable"))
         extra["debug_ws"] = _flag(((system.get("debug") or {}).get("websocket") or {}).get("enable"))
+        if _positive(system.get("wakeup_period")):
+            extra["battery"] = True
         if extended:
+            if "battery" not in extra:
+                extra.update(await _battery_status(session, origin, auth))
             extra["actions"] = await _list_active(
                 lambda: _rpc(session, origin, "Webhook.List", auth=auth), "hooks", lambda e: e.get("enable") is True
             )
@@ -695,6 +723,7 @@ async def read_settings(
         extra["ap"] = _flag((settings.get("wifi_ap") or {}).get("enabled"))
         extra["ble"] = UNSUPPORTED  # Gen1 devices have no Bluetooth switch
         extra["debug_ws"] = UNSUPPORTED  # Gen1 devices have no websocket debug log
+        extra["battery"] = _positive((settings.get("sleep_mode") or {}).get("period"))
         if extended:
             channels = [
                 c for c in (settings.get("relays") or []) + (settings.get("lights") or []) if isinstance(c, dict)
@@ -960,7 +989,7 @@ async def fetch_cloud_text(
 ) -> str:
     """Text page (e.g. changelog) from a shelly.cloud server (see _cloud_get).
     Sends no device data."""
-    too_large = f"Page larger than {limit // 1024 // 1024} MiB: {clip(url)}"
+    too_large = f"Page larger than {limit // 1024 // 1024} MB: {clip(url)}"
     raw, charset = await _cloud_get(session, url, pins, limit, too_large)
     return raw.decode(charset or "utf-8", "replace")
 
@@ -1064,7 +1093,7 @@ async def _store(
             async for chunk in resp.content.iter_chunked(128 * 1024):
                 size += len(chunk)
                 if size > MAX_FW_SIZE:
-                    raise ShellyError("Firmware larger than 64 MiB")
+                    raise ShellyError("Firmware larger than 64 MB")
                 digest.update(chunk)
                 # In a worker thread: a slow disk (SD card) never blocks the event loop
                 await asyncio.to_thread(handle.write, chunk)

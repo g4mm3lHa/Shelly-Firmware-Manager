@@ -20,7 +20,7 @@ Suites, in this order (the last two change the demo state in their last case):
                       touch, Firmware-tab labels and dialog title icons; sorting per
                       browser and the Firmware-tab downgrade, downgrades switched off.
                       Demo "features" on 8805 (and "idle" 8801, "missing" 8804).
-- store_transfer      3.4.0: Settings cards "Firmware store" and "Device passwords",
+- store_transfer      3.4.0: Settings block "Firmware store" and card "Device Passwords",
                       export (password once, download), import (check, counts,
                       confirm), passwords of several devices (selection, steps,
                       confirmation), first-start question with notice bar, files
@@ -459,9 +459,56 @@ def _name_tips(c):
     page.wait_for_timeout(300)
     page.unroute("**/settings/refresh")
     ha.tap()
-    f.locator("#dev-search").tap()
+    f.locator("#dev-chips .chip").first.tap()
     check(f"{case}: tap elsewhere hides the tooltip", tip_text(f) is None)
     page.keyboard.press("Escape")
+
+
+def _battery(c):
+    """Battery devices: battery icon right after the name on the same line (table and
+    tile) with a tooltip; a sleeping one shows the grey "Asleep" pill and a dimmed IP
+    and is not listed under "Errors"; an awake one keeps its normal IP."""
+    case, f, page, width = c.case, c.f, c.page, c.width
+    def row(name):
+        return f.locator("#dev-cards tr", has_text=name).first
+    geo = row("Doorbell").evaluate("""r => { const n = r.querySelector('td.c-device .name').getBoundingClientRect(),
+      b = r.querySelector('td.c-device .battery'), g = b && b.getBoundingClientRect(), ip = r.querySelector('td.c-ip .mono');
+      return {icon: !!b, after: !!g && g.left >= n.right - 1 && g.left - n.right <= 12,
+        line: !!g && Math.abs((g.top + g.height / 2) - (n.top + n.height / 2)) < 3,
+        dim: !!ip && ip.classList.contains('dim') && getComputedStyle(ip).opacity === '0.5',
+        pill: r.querySelector('td.c-status .pill').textContent}; }""")
+    check(f"{case}: battery icon right after the name", geo["icon"] and geo["after"] and geo["line"], str(geo))
+    check(f"{case}: sleeping battery device – Asleep pill and dimmed IP", geo["pill"] == "Asleep" and geo["dim"], str(geo))
+    pill = row("Doorbell").locator("td.c-status .pill")
+    grey = pill.evaluate("""p => { const s = getComputedStyle(p);
+      return [s.getPropertyValue('--pill').trim(), s.getPropertyValue('--secondary-text-color').trim()]; }""")
+    check(f"{case}: Asleep pill grey", grey[0] == grey[1] and grey[0] != "", str(grey))
+    awake = row("Carport").evaluate("r => [!!r.querySelector('.battery'), r.querySelector('td.c-ip .mono').classList.contains('dim')]")
+    check(f"{case}: awake battery device – icon, IP not dimmed", awake == [True, False], str(awake))
+    check(f"{case}: no battery icon on other devices", row("Hall").locator(".battery").count() == 0)
+    errors = f.locator("#dev-chips .chip", has_text="Errors")
+    errors.click()
+    check(f"{case}: Asleep is not listed under Errors", f.locator("#dev-cards tr", has_text="Doorbell").count() == 0)
+    f.locator("#dev-chips .chip", has_text="All").click()
+    icon = row("Doorbell").locator(".battery")
+    icon.scroll_into_view_if_needed()
+    if width > 700:
+        icon.hover()
+    else:
+        page.wait_for_timeout(300)
+        icon.tap()
+    check(f"{case}: battery tooltip", tip_text(f) == "Battery device: reachable only while it is awake", str(tip_text(f)))
+    page.screenshot(path=c.out / f"{case}-battery.png")
+    if width > 700:
+        page.mouse.move(5, 5)
+        pill.hover()   # Asleep tooltip: wake-up hint and the last contact only
+        wait_until(lambda: tip_text(f))
+        lines = (tip_text(f) or "").split("\n")
+        check(f"{case}: Asleep tooltip – wake-up hint and last contact only", len(lines) == 2
+              and lines[0].startswith("Battery device asleep – wake it up") and lines[1].startswith("Last contact: 20"), str(lines))
+        page.mouse.move(5, 5)
+    else:
+        f.locator("#dev-chips .chip").first.tap()
 
 
 def _keep_listed(c):
@@ -555,7 +602,7 @@ def _layout(c):
     check(f"{case}: installation dialog in sections", heads == ["Device", "Firmware", "Changelog"], str(heads))
     page.screenshot(path=out / f"{case}-install-dialog.png")
     f.locator("#dlg-btns button", has_text="Cancel").click()
-    if width < 700:   # phone tile: lines, flush button rows, chevron
+    if width < 700:   # phone tile: lines, flush button rows, Details button
         row = card.locator("tr", has_text="Attic fan")
         if not row.locator("td.c-details details").evaluate("d => d.open"):
             row.locator("td.c-details summary").click()
@@ -564,12 +611,20 @@ def _layout(c):
           const q = s => tr.querySelector(s), strip = q('.act-strip.labeled'), buttons = [...strip.children];
           const rows = {}; buttons.forEach(b => { const t = Math.round(r(b).top); rows[t] = Math.max(rows[t] || 0, r(b).right); });
           return {check: Math.abs(mid(q('td.c-select input')) - mid(q('.name'))), menu: Math.abs(mid(q('td.c-menu button svg')) - mid(q('.name'))),
-            status: Math.abs(mid(q('.status-cell .pill')) - mid(q('.shelly-name'))),
+            status: Math.abs(mid(q('.status-cell .pill')) - mid(q('td.c-firmware .nowrap'))),
+            ip: Math.abs(mid(q('td.c-ip a')) - mid(q('.shelly-name'))) < 4 && r(q('td.c-ip a')).right > r(q('.shelly-name')).right,
+            details: {h: Math.round(r(q('td.c-details summary')).height), w: Math.round(r(q('td.c-details summary')).width),
+                      full: Math.round(r(tr).width - r(q('td.c-details summary')).width),
+                      border: getComputedStyle(q('td.c-details summary')).borderTopStyle},
             flush: Object.values(rows).map(x => Math.round(r(strip).right - x)),
             chevron: getComputedStyle(q('td.c-details summary'), '::after').borderRightStyle,
             top: Math.round(r(q('.name')).top - r(tr).top), bottom: Math.round(r(tr).bottom - r(q('dl.tile-kv')).bottom)}; }""")
-        check(f"{case}: tile – checkbox and menu on the name line, status on the Shelly-name line",
-              geo["check"] < 2 and geo["menu"] < 2 and geo["status"] < 2, str(geo))
+        check(f"{case}: tile – checkbox and menu on the name line, IP right of the Shelly name, status on the firmware line",
+              geo["check"] < 2 and geo["menu"] < 2 and geo["status"] < 2 and geo["ip"], str(geo))
+        # Details: outlined button, 36 px, full content width (tile padding 12 px + border each side)
+        det = geo["details"]
+        check(f"{case}: tile – Details as outlined 36 px button over the content width",
+              det["h"] == 36 and det["border"] == "solid" and det["full"] <= 26, str(det))
         check(f"{case}: tile – every button row flush with the content width", all(x <= 1 for x in geo["flush"]), str(geo["flush"]))
         check(f"{case}: tile – details chevron, padding top = bottom", geo["chevron"] == "solid" and abs(geo["top"] - geo["bottom"]) <= 3,
               str(geo))
@@ -664,8 +719,16 @@ def _firmware_tab(c):
       const t = document.createRange(); t.selectNodeContents(b.firstChild); const tr = t.getBoundingClientRect();
       return {size: Math.round(r(s).width), hidden: s.getAttribute('aria-hidden'), after: r(s).left > tr.right,
         dy: Math.abs((r(s).top + r(s).height / 2) - (tr.top + tr.height / 2)), name: b.textContent}; }""")
-    check(f"{case}: upload button with the upload icon after the text", up["size"] == 16 and up["hidden"] == "true" and up["after"]
-          and up["dy"] < 1.5 and up["name"] == "Upload firmware", str(up))
+    if width < 700:   # phones: the icon only, round 44 px at the right end of toolbar row 2
+        geo = f.evaluate("""() => { const b = document.getElementById('fw-upload'), r = b.getBoundingClientRect(),
+          row = b.parentElement.getBoundingClientRect();
+          return {w: Math.round(r.width), h: Math.round(r.height), right: Math.round(row.right - r.right),
+            text: getComputedStyle(b.querySelector('span')).display, label: b.getAttribute('aria-label')}; }""")
+        check(f"{case}: upload button as icon at the right end", geo["w"] == 44 and geo["h"] == 44 and geo["right"] <= 1
+              and geo["text"] == "none" and geo["label"] == "Upload firmware" and up["hidden"] == "true", str(geo))
+    else:
+        check(f"{case}: upload button with the upload icon after the text", up["size"] == 16 and up["hidden"] == "true"
+              and up["after"] and up["dy"] < 1.5 and up["name"] == "Upload firmware", str(up))
     head = f.evaluate("""() => { const h = document.querySelector('#fw-cards .fw-head'), row = document.querySelector('#fw-cards .fw-row');
       if (getComputedStyle(h).display === 'none') return {shown: false,
         labels: [...row.querySelectorAll('[data-label]')].map(e => getComputedStyle(e, '::before').content)};
@@ -704,6 +767,10 @@ def _firmware_tab(c):
 
     # Install button behind every device a file is provided for; it opens
     # the usual installation dialog, which names the source of the update
+    marker = f.evaluate("""() => { const s = document.querySelector('.fw-dev summary'), cs = getComputedStyle(s);
+      return {text: s.textContent, list: cs.listStyleType, after: getComputedStyle(s, '::after').borderRightStyle}; }""")
+    check(f"{case}: 'For n devices' with one chevron only", "▾" not in marker["text"] and marker["list"] == "none"
+          and marker["after"] == "solid", str(marker))
     rows.first.locator(".fw-dev summary").click()
     entries = rows.first.locator(".fw-dev li")
     buttons = rows.first.locator(".fw-dev li button")
@@ -749,36 +816,126 @@ def _firmware_tab(c):
     return rows
 
 
+def _checked(f, view):
+    """Checked fields of the sort popover of a tab: [field, direction]."""
+    return f.evaluate(f"""() => [...document.querySelectorAll('#view-{view} .sort-item[aria-checked=true]')]
+      .map(b => b.dataset.value)""")
+
+
+def _unused_chip(c):
+    """Firmware chip "Unused": files of a firmware ID no device has; while a device's
+    firmware ID is unknown (never reached) nothing counts as unused (tooltip says why)."""
+    case, f, page = c.case, c.f, c.page
+    unknown = {"on": False}
+
+    def other_types(route):
+        headers = {k: v for k, v in route.request.headers.items() if k.lower() != "if-none-match"}
+        state = route.fetch(headers=headers).json()
+        for d in state["devices"]:
+            d["type"] = "OtherType"
+        if unknown["on"]:
+            state["devices"][0]["type"] = None
+        route.fulfill(json=state)
+
+    def unused():
+        chip = f.locator("#fw-chips .chip", has_text="Unused")
+        return int(chip.locator(".count").inner_text()), chip.get_attribute("title") or ""
+
+    page.route("**/api/state", other_types)
+    refresh_state(page, f)
+    count, title = unused()
+    check(f"{case}: Unused counts files without a device", count == f.locator(".fw-row").count() and not title, f"{count} {title}")
+    unknown["on"] = True
+    refresh_state(page, f)
+    count, title = unused()
+    check(f"{case}: unknown firmware ID blocks Unused", count == 0 and "1 device not known" in title.replace("ID of ", ""), f"{count} {title}")
+    page.unroute("**/api/state")
+    refresh_state(page, f)
+
+
 def _sorting_and_downgrade(c):
-    """Sort select + direction button (Devices and Firmware tab, kept per browser,
-    coupled with the column heads on desktop) and the downgrade icon of an older
-    version in the Firmware tab (dialog -> device -> second confirmation)."""
+    """Toolbar tools (search and sort icons with popovers; Devices and Firmware tab, kept
+    per browser, coupled with the column heads on desktop) and the downgrade icon of an
+    older version in the Firmware tab (dialog -> device -> second confirmation)."""
     case, f, page, out, width = c.case, c.f, c.page, c.out, c.width
     f.locator("#tab-devices").click()
-    ctl = f.locator("#view-devices .sortctl")
-    check(f"{case}: sort select in the Devices toolbar", ctl.locator("select").input_value() == "device", ctl.inner_text())
-    ctl.locator("button.sort-dir").click()
+    chips = f.evaluate("() => [...document.querySelectorAll('#dev-chips .chip')].map(c => c.firstChild.textContent)")
+    check(f"{case}: Devices filter chips", chips == ["All", "Updates", "Errors", "Up-To-Date", "Unprotected", "Ignored"], str(chips))
+    f.locator("#dev-chips .chip", has_text="Unprotected").click()
+    shown = f.evaluate("() => [...document.querySelectorAll('#dev-cards tbody tr')].length")
+    expected = f.locator("#dev-chips .chip", has_text="Unprotected").locator(".count").inner_text()
+    check(f"{case}: Unprotected filter shows its count", str(shown) == expected, f"{shown} / {expected}")
+    f.locator("#dev-chips .chip", has_text="All").click()
+    if width < 700:   # header: pills stacked left, "Check now" right on the same line, not wrapped;
+        # centred with the title block (embedded: the pills only, the title is hidden)
+        head = f.evaluate("""() => { const r = e => e.getBoundingClientRect(), m = r(document.querySelector('.titlebar>div')),
+          s = r(document.getElementById('scan')), p = [...document.querySelectorAll('#meta .meta-pill')].map(r);
+          return {right: s.left >= m.right, mid: Math.abs((s.top + s.height / 2) - (m.top + m.height / 2)),
+            stacked: p.length === 2 && p[1].top >= p[0].bottom, lines: Math.round(s.height)}; }""")
+        check(f"{case}: header – pills stacked, Check now right and centred", head["right"] and head["mid"] < 2
+              and head["stacked"] and head["lines"] <= 48, str(head))
+    tools = f.locator("#view-devices .tool-btn")
+    size = tools.first.evaluate("b => Math.round(b.getBoundingClientRect().width)")
+    check(f"{case}: search and sort icons in the Devices toolbar", tools.count() == 2 and size == (44 if width < 700 else 36),
+          f"{tools.count()} / {size}")
+    sort = tools.nth(1)
+    sort.click()
+    pop = f.locator("#view-devices .tool.open .tool-pop")
+    check(f"{case}: sort popover opens below the icon", pop.is_visible() and _checked(f, "devices") == ["device", "asc"],
+          str(_checked(f, "devices")))
+    if width < 700:   # phones: popover over the full width
+        w = pop.evaluate("p => Math.round(p.getBoundingClientRect().width)")
+        check(f"{case}: sort popover full width", w >= width - 20, str(w))
+    page.screenshot(path=out / f"{case}-sort-popover.png")
+    pop.locator(".sort-item", has_text="Descending").click()
     stored = f.evaluate("() => localStorage.getItem('shelly-firmware-manager:devices')")
     check(f"{case}: sort direction kept per browser", '"desc"' in (stored or ""), str(stored))
+    page.keyboard.press("Escape")
+    check(f"{case}: Escape closes the popover", f.locator("#view-devices .tool.open").count() == 0)
     if width > 700:
         head = f.locator("#dev-cards th.c-device").first.get_attribute("data-dir")
-        check(f"{case}: column head follows the select", head == "desc", str(head))
+        check(f"{case}: column head follows the sort tool", head == "desc", str(head))
         f.locator("#dev-cards th.c-ip").first.click()
-        check(f"{case}: select follows the column head", ctl.locator("select").input_value() == "ip")
+        check(f"{case}: sort tool follows the column head", _checked(f, "devices") == ["ip", "asc"], str(_checked(f, "devices")))
         f.locator("#dev-cards th.c-device").first.click()
     else:
-        ctl.locator("button.sort-dir").click()
+        sort.click()
+        f.locator("#view-devices .sort-item", has_text="Ascending").click()
+        f.locator("#meta .meta-pill").first.click()   # a click outside closes the popover
+        check(f"{case}: a click outside closes the popover", f.locator("#view-devices .tool.open").count() == 0)
     check(f"{case}: back to device name ascending", "asc" in f.evaluate(
         "() => localStorage.getItem('shelly-firmware-manager:devices')"))
+    # Search: popover with the field, a dot on the icon while a text is set
+    search = tools.first
+    search.click()
+    f.locator("#dev-search").fill("kitchen")
+    page.keyboard.press("Enter")
+    marked = search.evaluate("b => b.classList.contains('has-value') && getComputedStyle(b, '::after').content !== 'none'")
+    rows = f.locator("#dev-cards tbody tr").count()
+    check(f"{case}: search filters and marks the icon", marked and rows == 1, f"{marked} / {rows}")
+    search.click()
+    f.locator("#dev-search").fill("")
+    page.keyboard.press("Enter")
+    check(f"{case}: no dot without search text", not search.evaluate("b => b.classList.contains('has-value')"))
     f.locator("#tab-firmware").click()
     f.wait_for_selector(".fw-row")
-    fw = f.locator("#view-firmware .sortctl select")
-    check(f"{case}: sort select in the Firmware toolbar", fw.input_value() == "type")
+    check(f"{case}: sort tool in the Firmware toolbar", _checked(f, "firmware") == ["type", "asc"], str(_checked(f, "firmware")))
+    chips = f.evaluate("() => [...document.querySelectorAll('#fw-chips .chip')].map(c => c.firstChild.textContent)")
+    check(f"{case}: Firmware filter chips", chips == ["All", "Provided", "Uploaded", "Intermediate", "Gen1", "Unused"], str(chips))
+    _unused_chip(c)
+    f.locator("#fw-chips .chip", has_text="Uploaded").click()
+    tags = f.evaluate("() => [...document.querySelectorAll('.fw-row')].map(r => !!r.querySelector('.fw-ver .tag.warn'))")
+    check(f"{case}: Uploaded filter shows only uploads", tags and all(tags), str(tags))
+    f.locator("#fw-chips .chip", has_text="All").click()
+    summary = f.locator("#fw-summary").text_content()
+    check(f"{case}: free disk space in the summary", " free" in summary, summary)
     if width > 700:
         f.locator(".fw-head .sortable", has_text="Size").first.click()
-        check(f"{case}: Firmware column head sorts the cards", fw.input_value() == "size"
+        check(f"{case}: Firmware column head sorts the cards", _checked(f, "firmware")[0] == "size"
               and f.locator(".fw-head [data-dir]").count() == f.locator(".fw-head").count())
-        fw.select_option("type")
+        f.locator("#view-firmware .tool-btn").nth(1).click()
+        f.locator("#view-firmware .sort-item", has_text="Firmware ID").click()
+        page.keyboard.press("Escape")
     icons = f.locator(".fw-row .actions button[aria-label^='Downgrade to']")
     enabled = [i for i in range(icons.count()) if icons.nth(i).is_enabled()]
     check(f"{case}: downgrade icon on older versions", bool(enabled), str(icons.count()))
@@ -840,6 +997,34 @@ def _firmware_delete_and_upload(c, rows):
         f.wait_for_selector("#dlg", state="hidden")
 
 
+def _logs_after_check(c):
+    """Logs tab open while a check runs: the log is fetched again as soon as the check
+    has ended (no tab change needed), not only after the 30 s refresh."""
+    case, f, page = c.case, c.f, c.page
+    phase = {"busy": True}
+
+    def state(route):
+        headers = {k: v for k, v in route.request.headers.items() if k.lower() != "if-none-match"}
+        s = route.fetch(headers=headers).json()
+        if phase["busy"]:
+            s["progress"] = {"kind": "all", "phase": "devices", "done": 1, "total": 25}
+        else:
+            s["last_scan"] = (s.get("last_scan") or 0) + 60
+        route.fulfill(json=s)
+
+    requests = []
+    page.on("request", lambda r: "/api/logs" in r.url and requests.append(r.url))
+    page.route("**/api/state", state)
+    refresh_state(page, f)   # check running
+    busy = len(requests)
+    phase["busy"] = False
+    refresh_state(page, f)   # check ended
+    ended = wait_until(lambda: len(requests) > busy)
+    page.unroute("**/api/state")
+    check(f"{case}: Logs tab fetches the log when a check ends", busy == 0 and ended, f"{busy} / {len(requests)}")
+    refresh_state(page, f)
+
+
 def _logs(c):
     """Logs tab: group bar, coloured findings, deleting an entry / the whole log (last case)."""
     case, f, page, out, last = c.case, c.f, c.page, c.out, c.last
@@ -847,6 +1032,7 @@ def _logs(c):
     f.locator("#tab-logs").click()
     entries = f.locator("#log-list .log, #log-list .log-m")
     entries.first.wait_for()
+    _logs_after_check(c)
     total = entries.count()
     check(f"{case}: three consecutive entries of one device grouped", f.locator("#log-list .grp").count() == 3
           and f.locator("#log-list .grp-first").count() == 1 and f.locator("#log-list .grp-last").count() == 1)
@@ -870,7 +1056,13 @@ def _logs(c):
     f.locator("#log-list summary", has_text="30.7 s").first.click()
     colours = f.evaluate("""() => { const ul = [...document.querySelectorAll('#log-list ul')].find(u => u.textContent.includes('Sauna'));
       return [...ul.children].map(li => li.className); }""")
-    check(f"{case}: findings coloured by their own severity", colours == ["okc", "warnc", "bad"], str(colours))
+    check(f"{case}: findings coloured by their own severity, then the ignored devices",
+          colours == ["okc", "warnc", "bad", "neutral", "neutral"], str(colours))
+    plain = f.evaluate("""() => { const li = document.querySelector('#log-list li.neutral'), body = getComputedStyle(document.body).color;
+      return li && li.textContent.startsWith('Garage door: ignored') && getComputedStyle(li).color === body; }""")
+    check(f"{case}: ignored devices in the normal text colour", plain)
+    summary = f.locator("#log-list summary", has_text="30.7 s").first.inner_text()
+    check(f"{case}: ignored devices counted in the summary", "2 ignored" in summary, summary)
     check(f"{case}: no overflow (logs)", f.evaluate(OVERFLOW_JS) <= 0)
     page.screenshot(path=out / f"{case}-logs.png", full_page=True)
     f.locator("#log-list .log-del").last.click()
@@ -921,6 +1113,7 @@ def firmware_store(browser, out):
         _keep_listed(c)
         _action_popups(c)
         _name_tips(c)
+        _battery(c)
         _next_steps(c)
         _downgrade(c)
         rows = _firmware_tab(c)
@@ -942,6 +1135,13 @@ def _export_import(c, page, f, out):
     check(f"{c}: export dialog", d["title"] == "Export firmware store" and "Files" in d["body"], d["body"][:120])
     check(f"{c}: generated password, 5 groups", len(password) == 24 and password.count("-") == 4, password)
     check(f"{c}: copy button visible", f.locator('#dlg-body .pw-row button[aria-label="Copy password"]').is_visible())
+    # Without the Clipboard API (no secure context, e.g. HA over plain HTTP) the password is
+    # copied through a selected helper field inside the modal dialog (outside it is inert)
+    f.evaluate("""() => { Object.defineProperty(navigator, 'clipboard', {value: undefined, configurable: true});
+      window.__copied = null; document.addEventListener('copy', () => { window.__copied = String(getSelection()); }, {once: true}); }""")
+    f.locator('#dlg-body .pw-row button[aria-label="Copy password"]').click()
+    copied = wait_until(lambda: f.evaluate("() => window.__copied") is not None) and f.evaluate("() => window.__copied")
+    check(f"{c}: copy without Clipboard API", copied == password, str(copied))
     full = f.evaluate("() => { const i = document.querySelector('#dlg-body .pw-row input'); return i.scrollWidth <= i.clientWidth; }")
     check(f"{c}: password not cut off", full)
     check(f"{c}: Export disabled before the acknowledgment", d["buttons"][-1] == ["Export", True], str(d["buttons"]))
@@ -1045,7 +1245,13 @@ def store_transfer(browser, out):
         f.click("#tab-settings")
         f.wait_for_selector("#store-export")
         heads = f.locator("#settings-form h2").all_text_contents()
-        check(f"{c}: cards in the Settings tab", "Firmware store" in heads and "Device passwords" in heads, str(heads))
+        check(f"{c}: cards in the Settings tab", heads == ["Checks", "Download Server", "Firmware & Storage", "Logs", "Advanced",
+                                                          "Device Passwords"], str(heads))
+        order = f.evaluate("""() => [...document.querySelectorAll('#settings-form .form > *')]
+          .map(e => e.classList.contains('set-store') ? 'store' : (e.querySelector('input,select,textarea,.pins') || {}).id || '')
+          .filter(x => ['opt-allow_downgrade', 'store', 'opt-import_max_mb'].includes(x))""")
+        check(f"{c}: store block between Allow downgrades and Max. import size",
+              order == ["opt-allow_downgrade", "store", "opt-import_max_mb"], str(order))
         check(f"{c}: import size option", f.locator("#opt-import_max_mb").input_value() == "100")
         page.screenshot(path=out / f"store-cards-{c}.png", full_page=True)
         _export_import(c, page, f, out)

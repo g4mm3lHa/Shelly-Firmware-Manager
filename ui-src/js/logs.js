@@ -1,5 +1,7 @@
 // Logs tab: activity log with filters, grouping per device and deleting entries.
-import {$, api, box, closeModal, el, fmt, iconButton, keptDetails, mb, message, modal, openDetails, pad, ui, valueList} from "./core.js";
+import {
+  $, api, box, closeModal, el, fmt, iconButton, keptDetails, mb, message, modal, openDetails, pad, searchTool, ui, valueList,
+} from "./core.js";
 import {OFFER_SOURCES} from "./install.js";
 import {OPTION_FIELDS} from "./app-settings.js";
 import {load, render} from "./main.js";
@@ -36,9 +38,8 @@ function logContent(e) {
       // A scheduled check that could not start (other work running): cancelled, not repeated
       if (e.skipped) return [el("div", `Scheduled check cancelled · ${e.skipped}`)];
       const line = el("div", `${TRIGGER_LABELS[e.trigger] || "Scheduled"} check · ${e.devices} device${e.devices === 1 ? "" : "s"} · ${e.duration} s · ${e.result}`);
-      if (!e.findings || !e.findings.length) return [line];
-      const ul = checkFindings(e);
-      return [keptDetails(`log-${e.ts}-check`, line.textContent, ul)];
+      if (!e.findings?.length && !e.ignored?.length) return [line];
+      return [keptDetails(`log-${e.ts}-check`, line.textContent, checkFindings(e))];
     }
     case "download":
       return [box("div", null, `Firmware downloaded: ${e.type} ${e.version} · ${mb(e.size || 0)} · SHA ${(e.sha256 || "").slice(0, 12)}… `,
@@ -77,14 +78,15 @@ function logContent(e) {
   }
 }
 /** Device results of a check, each colored by its own severity (an update is
- *  green and a warning yellow also inside an entry that is an error as a whole). */
+ *  green and a warning yellow also inside an entry that is an error as a whole);
+ *  then the ignored devices (not contacted) in the normal text colour. */
 function checkFindings(e) {
-  return box("ul", null, ...e.findings.map(f => {
+  return box("ul", null, ...(e.findings || []).map(f => {
     const sev = f.severity || (f.error ? "error" : "success");
     // Updates from the firmware store are marked (the server was not asked)
     const from = f.source && f.source !== "manufacturer" && OFFER_SOURCES[f.source] ? ` · ${OFFER_SOURCES[f.source]}` : "";
     return el("li", f.error ? `${f.device}: ${f.error}` : `${f.device}: ${arrow(f.version, f.offer)}${from}`, sev === "error" ? "bad" : sev === "warning" ? "warnc" : "okc");
-  }));
+  }), ...(e.ignored || []).map(name => el("li", `${name}: ignored – not checked`, "neutral")));
 }
 /** Mobile: short summary lines of an entry (details stay collapsed). */
 function logSummary(e) {
@@ -94,6 +96,7 @@ function logSummary(e) {
       const first = `${TRIGGER_LABELS[e.trigger] || "Scheduled"} · ${e.devices} device${e.devices === 1 ? "" : "s"} · ${e.duration} s`;
       const counts = typeof e.updates === "number"
         ? `${e.updates} update${e.updates === 1 ? "" : "s"} · ${e.warnings || 0} warning${e.warnings === 1 ? "" : "s"} · ${e.errors || 0} error${e.errors === 1 ? "" : "s"}`
+          + (e.ignored?.length ? ` · ${e.ignored.length} ignored` : "")
         : e.result;   // entries before 3.0
       return [first, counts];
     }
@@ -146,7 +149,7 @@ function logTile(e, d, group) {
   const sev = severity(e), summary = logSummary(e);
   const head = box("div", "log-head", el("span", `${pad(d.getHours())}:${pad(d.getMinutes())}`, "mono sub"),
     el("span", KIND_LABELS[e.kind] || e.kind, "tag"), el("span", SEVERITY_LABELS[sev], `tag sev-${sev}`), el("span", null, "spacer"), logDelete(e));
-  const body = box("div", "log-details", ...(e.kind === "check" ? (e.findings && e.findings.length ? [checkFindings(e)] : [el("div", e.result, "sub")]) : logContent(e)));
+  const body = box("div", "log-details", ...(e.kind === "check" ? (e.findings?.length || e.ignored?.length ? [checkFindings(e)] : [el("div", e.result, "sub")]) : logContent(e)));
   // The user stands top right, beside the first summary line
   const lines = () => summary.map((t, i) => i === 0 && e.user ? box("div", "first", el("span", t), el("span", e.user, "user")) : el("div", t));
   const same = [...body.children].map(c => c.textContent.trim()).join("\n") === summary.join("\n");
@@ -162,7 +165,7 @@ function logTile(e, d, group) {
 /** Logs tab: grouped by day, filters, device search, quiet checks. */
 export function renderLogs() {
   const q = $("log-search").value.trim().toLowerCase(), quiet = $("log-quiet").checked;
-  const devMatch = e => !q || [e.device, ...(e.findings || []).map(f => f.device)].some(v => String(v || "").toLowerCase().includes(q));
+  const devMatch = e => !q || [e.device, ...(e.findings || []).map(f => f.device), ...(e.ignored || [])].some(v => String(v || "").toLowerCase().includes(q));
   const base = ui.logs.filter(e => devMatch(e) && !(quiet && e.kind === "check" && !(e.findings || []).length));
   $("log-chips").replaceChildren(...Object.entries(LOG_FILTERS).map(([key, [label, fn]]) => {
     const b = el("button", label, "chip" + (ui.logFilter === key ? " active" : ""));
@@ -189,6 +192,7 @@ export function renderLogs() {
   $("log-list").replaceChildren(...out);
 }
 $("log-search").oninput = () => render(true);
+searchTool($("log-search"));
 $("log-quiet").onchange = () => render(true);
 /** Delete the whole activity log after a confirmation (one entry naming the user stays). */
 $("log-clear").onclick = () => {

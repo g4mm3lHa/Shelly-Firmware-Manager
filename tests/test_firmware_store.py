@@ -59,6 +59,16 @@ async def test_total_size_and_sources_in_the_list(mgr, net):
     assert by_version["1.2.0"]["source"] == "upload" and by_version["1.2.0"]["https"] is None
 
 
+async def test_free_space_of_the_store_volume(mgr, net, monkeypatch):
+    """Free disk space for the Firmware tab; an unreadable volume gives None."""
+    assert mgr.free_space() == mgr._free_space() > 0
+
+    def unreadable(_self):
+        raise OSError("no volume")
+    monkeypatch.setattr(type(mgr), "_free_space", unreadable)
+    assert mgr.free_space() is None
+
+
 async def test_entries_before_rc7_count_as_downloads(mgr, net):
     name, _ = store(mgr, "Plus1", "1.3.0")
     del mgr.firmware[name]["source"]
@@ -300,7 +310,7 @@ async def test_upload_checks_extension_size_and_zip_format(mgr, net):
         await mgr.stage_upload(chunks(b"x" * 5000), "fw.exe", 5000)
     with pytest.raises(ValueError, match="small"):
         await mgr.stage_upload(chunks(b"x" * 10), "fw.bin", 10)
-    with pytest.raises(ValueError, match="64 MiB"):
+    with pytest.raises(ValueError, match="64 MB"):
         await mgr.stage_upload(chunks(b""), "fw.bin", shelly.MAX_FW_SIZE + 1)
     with pytest.raises(ValueError, match="ZIP"):
         await mgr.stage_upload(chunks(b"x" * 5000), "fw.zip", 5000)

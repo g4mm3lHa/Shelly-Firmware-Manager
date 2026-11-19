@@ -333,8 +333,10 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
         return name
 
     async def firmware_list(_request: web.Request) -> web.StreamResponse:
-        """Stored firmware files with metadata and the total size of the store."""
-        return web.json_response({"firmware": mgr.firmware_list(), "total_size": mgr.store_size()})
+        """Stored firmware files with metadata, the total size of the store and the free
+        disk space of its volume (null if unreadable)."""
+        return web.json_response({"firmware": mgr.firmware_list(), "total_size": mgr.store_size(),
+                                  "free_space": mgr.free_space()})
 
     async def firmware_changelog(request: web.Request) -> web.StreamResponse:
         """Changelog kept with a stored firmware (plain text entries); nothing is
@@ -402,7 +404,7 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
         """Step 1 of a manual upload: the raw file (or one part of it, see
         part_headers) as body, its name in the X-Filename header; at most 64 MiB in
         all. The body is streamed to disk and never read into memory as a whole."""
-        length, total, offset, transfer = part_headers(request, MAX_FW_SIZE, "Firmware larger than 64 MiB")
+        length, total, offset, transfer = part_headers(request, MAX_FW_SIZE, "Firmware larger than 64 MB")
         filename = request.headers.get("X-Filename", "")[:200]
         result = await guarded(
             mgr.stage_upload_part(
@@ -551,6 +553,10 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
         """App options (there are no secret options)."""
         return web.json_response(mgr.options_view())
 
+    async def app_page(_request: web.Request) -> web.StreamResponse:
+        """Path of this app's page in the Home Assistant frontend (changelog link)."""
+        return web.json_response({"url": await mgr.app_page()})
+
     async def options_save(request: web.Request) -> web.StreamResponse:
         """Save changed app options via the Supervisor, then restart the app."""
         changed = await guarded(mgr.save_options(await json_body(request), user_from(request.headers)))
@@ -612,6 +618,7 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
     app.router.add_post("/api/logs/clear", logs_clear)
     app.router.add_post("/api/logs/{id}/delete", log_delete)
     app.router.add_get("/api/settings", options_get)
+    app.router.add_get("/api/settings/app-page", app_page)
     app.router.add_post("/api/settings", options_save)
     app.router.add_post("/api/settings/download-base/confirm", confirm_download_base)
     app.router.add_static("/static/", STATIC_DIR, show_index=False, follow_symlinks=False, name="static")

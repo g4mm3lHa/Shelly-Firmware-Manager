@@ -10,8 +10,8 @@ const CSRF = document.querySelector("meta[name=csrf]").content;
 // Inside the HA panel (Ingress iframe) HA shows the app name already: compact header on phones
 if (window.parent !== window) document.documentElement.classList.add("embedded");
 export const $ = id => document.getElementById(id);
-export const ui = {state: null, firmware: [], firmwareTotal: 0, logs: [], options: null, view: "devices",
-  devFilter: "all", logFilter: "all", rendered: "",
+export const ui = {state: null, firmware: [], firmwareTotal: 0, firmwareFree: null, logs: [], options: null, view: "devices",
+  devFilter: "all", fwFilter: "all", logFilter: "all", rendered: "",
   logsLoaded: 0};       // time of the last log fetch (0 = fetch at the next refresh)
 export const selected = new Set();       // device IDs ticked for a (multi) installation
 export const openDetails = new Set();    // keys of expanded <details>, kept across re-renders
@@ -120,7 +120,9 @@ const ICONS = {
   copy: "M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z",
   // Downgrade (Firmware tab, older versions)
   history: "M13.5,8H12V13L16.28,15.54L17,14.33L13.5,12.25V8M13,3A9,9 0 0,0 4,12H1L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.07,19 9.32,18.21 8.06,16.94L6.64,18.36C8.27,20 10.5,21 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3Z",
-  // Sort direction button
+  // Toolbar tools: search (magnify) and sort (lines of falling length); sort directions
+  search: "M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.44,13.73L14.71,14H15.5L20.5,19L19,20.5L14,15.5V14.71L13.73,14.44C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5C7,5 5,7 5,9.5C5,12 7,14 9.5,14C12,14 14,12 14,9.5C14,7 12,5 9.5,5Z",
+  sort: "M3,13H15V11H3M3,6V8H21V6M3,18H9V16H3V18Z",
   up: "M13,20H11V8L5.5,13.5L4.08,12.08L12,4.16L19.92,12.08L18.5,13.5L13,8V20Z",
   down: "M11,4H13V16L18.5,10.5L19.92,11.92L12,19.84L4.08,11.92L5.5,10.5L11,16V4Z",
   // Message dialogs: success check and warning exclamation mark (errors use "close")
@@ -145,6 +147,8 @@ const ICONS = {
   // Settings tab, Firmware store card: export / import
   exportIcon: "M23,12L19,8V11H10V13H19V16M1,18V6C1,4.89 1.9,4 3,4H15A2,2 0 0,1 17,6V9H15V6H3V18H15V15H17V18A2,2 0 0,1 15,20H3A2,2 0 0,1 1,18Z",
   importIcon: "M14,12L10,8V11H2V13H10V16M20,18V6C20,4.89 19.1,4 18,4H6A2,2 0 0,0 4,6V9H6V6H18V18H6V15H4V18A2,2 0 0,0 6,20H18A2,2 0 0,0 20,18Z",
+  // Battery device marker after the device name (outline with a half-full bar)
+  battery: "M16,20H8V6H16M16.67,4H15V2H9V4H7.33A1.33,1.33 0 0,0 6,5.33V20.67C6,21.4 6.6,22 7.33,22H16.67A1.33,1.33 0 0,0 18,20.67V5.33C18,4.6 17.4,4 16.67,4M15,13H9V18H15V13Z",
   pencil: "M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z",
 };
 /** Inline SVG icon from a path. */
@@ -167,24 +171,76 @@ export function loadLocal(key) {
 export function saveLocal(key, value) {
   try { localStorage.setItem(`shelly-firmware-manager:${key}`, JSON.stringify(value)); } catch (e) { /* page only */ }
 }
-/** Sort control of a toolbar: select "Sort: <field>" and a direction button.
- *  fields: [[key, label], …]; onChange([key, dir]) is called on every change.
- *  Returns the node and set([key, dir]) to show the current order. */
-export function sortControl(fields, onChange) {
-  const select = el("select"); select.setAttribute("aria-label", "Sort by");
-  for (const [key, label] of fields) { const o = el("option", `Sort: ${label}`); o.value = key; select.append(o); }
-  const dir = el("button", null, "icon sort-dir");
-  let current = [fields[0][0], "asc"];
-  const set = value => {
-    current = value; select.value = value[0];
-    const label = value[1] === "desc" ? "Descending" : "Ascending";
-    dir.title = label; dir.setAttribute("aria-label", `${label} – change the direction`);
-    dir.replaceChildren(icon(value[1] === "desc" ? "down" : "up"));
+// ---- Toolbar tools
+// Search and sort are small round icons at the start of a toolbar; a click opens a
+// popover below the icon (phones: full width below the first toolbar row). Only one
+// popover is open at a time; a click outside it or Escape closes it.
+/** Close every open toolbar popover. */
+function closeTools() {
+  for (const t of document.querySelectorAll(".tool.open")) {
+    t.classList.remove("open"); t.querySelector(".tool-pop").hidden = true;
+    t.querySelector(".tool-btn").setAttribute("aria-expanded", "false");
+  }
+}
+/** Round toolbar icon with a popover holding content. Returns {node, button}. */
+function toolButton(name, label, ...content) {
+  const b = iconButton(name, label, null, "tool-btn"); b.type = "button";
+  b.setAttribute("aria-haspopup", "true"); b.setAttribute("aria-expanded", "false");
+  const pop = box("div", "tool-pop", ...content); pop.hidden = true;
+  const wrap = box("div", "tool", b, pop);
+  b.onclick = () => {
+    const opening = pop.hidden;
+    closeTools(); hideTip();
+    if (!opening) return;
+    wrap.classList.add("open"); pop.hidden = false; b.setAttribute("aria-expanded", "true");
+    const first = pop.querySelector("input,[aria-checked=true],button"); if (first) first.focus();
   };
-  select.onchange = () => onChange([select.value, current[1]]);
-  dir.onclick = () => onChange([current[0], current[1] === "desc" ? "asc" : "desc"]);
+  return {node: wrap, button: b};
+}
+document.addEventListener("click", e => { if (!e.target.closest(".tool")) closeTools(); });
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape") return;
+  const open = document.querySelector(".tool.open .tool-btn");
+  if (open) { closeTools(); open.focus(); }
+});
+/** Search tool: moves the given search input into the popover of a search icon (in
+ *  place of the input); a dot on the icon marks a set search text. Enter closes it. */
+export function searchTool(input) {
+  const parent = input.parentNode, next = input.nextSibling;
+  const t = toolButton("search", input.getAttribute("aria-label") || "Search", input);
+  parent.insertBefore(t.node, next);
+  const mark = () => t.button.classList.toggle("has-value", !!input.value.trim());
+  input.addEventListener("input", mark);
+  // preventDefault: the key press would otherwise reach the focused icon and reopen it
+  input.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); closeTools(); t.button.focus(); } });
+  mark();
+}
+/** Sort tool of a toolbar: popover with the fields and the direction (Ascending /
+ *  Descending). fields: [[key, label], …]; onChange([key, dir]) is called on every
+ *  change. Returns the node and set([key, dir]) to show the current order. */
+export function sortControl(fields, onChange) {
+  let current = [fields[0][0], "asc"];
+  const item = (text, value, pick) => {
+    const b = el("button", text, "sort-item"); b.type = "button"; b.role = "menuitemradio"; b.dataset.value = value;
+    b.onclick = () => onChange(pick()); return b;
+  };
+  const byField = fields.map(([key, label]) => item(label, key, () => [key, current[1]]));
+  const byDir = [["asc", "Ascending", "up"], ["desc", "Descending", "down"]].map(([dir, label, arrow]) => {
+    const b = item(label, dir, () => [current[0], dir]); b.prepend(icon(arrow)); return b;
+  });
+  const menu = box("div", "sort-menu", el("div", "Sort by", "pop-title"), ...byField, el("hr"), ...byDir);
+  menu.role = "menu";
+  const t = toolButton("sort", "Sort", menu);
+  const set = value => {
+    current = value;
+    for (const b of byField) b.setAttribute("aria-checked", String(b.dataset.value === value[0]));
+    for (const b of byDir) b.setAttribute("aria-checked", String(b.dataset.value === value[1]));
+    const field = (fields.find(f => f[0] === value[0]) || fields[0])[1];
+    const text = `Sort: ${field} · ${value[1] === "desc" ? "Descending" : "Ascending"}`;
+    t.button.title = text; t.button.setAttribute("aria-label", text);
+  };
   set(current);
-  return {node: box("div", "sortctl", select, dir), set};
+  return {node: t.node, set};
 }
 /** <details> whose open state survives re-rendering. */
 export function keptDetails(key, summary, content) {
@@ -192,11 +248,21 @@ export function keptDetails(key, summary, content) {
   d.ontoggle = () => { d.open ? openDetails.add(key) : openDetails.delete(key); };
   d.append(el("summary", summary), content); return d;
 }
-/** Copy text to the clipboard; fallback for non-secure contexts. */
+/** Copy text to the clipboard. True if copied.
+ *  The Clipboard API is missing or refused outside a secure context (e.g. Home
+ *  Assistant over plain HTTP) and in frames without clipboard permission; then a
+ *  selected helper field is copied. An open modal dialog makes everything outside it
+ *  inert (no selection possible), so the helper field is placed inside the dialog. */
 export async function copyText(text) {
-  try { await navigator.clipboard.writeText(text); return; } catch (e) { /* fallback below */ }
-  const t = el("textarea"); t.value = text; document.body.append(t); t.select();
-  document.execCommand("copy"); t.remove();
+  try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* fallback below */ }
+  const t = el("textarea", null, "copy-helper"); t.value = text; t.readOnly = true;
+  const focused = document.activeElement;
+  (dlg.open ? dlg : document.body).append(t);
+  t.focus(); t.select(); t.setSelectionRange(0, text.length);
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+  t.remove(); if (focused instanceof HTMLElement) focused.focus();
+  return ok;
 }
 
 // ---------------------------------------------------------------- Tooltip

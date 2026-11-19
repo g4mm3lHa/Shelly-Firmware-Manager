@@ -45,18 +45,18 @@ knows). Only original Shelly firmware is supported for now.
 ## Configuration
 
 All options can be changed in the app's **Settings** tab (or the Configuration tab of
-the app page). Saving restarts the app.
+the app page – same names, help texts and order). Saving restarts the app.
 
 | Option | Meaning |
 |---|---|
 | Check every (days) / Check time | Automatic check every 1–30 days at a time of day (default: every 7 days at 02:45, Home Assistant time zone) |
 | Download base URL | LAN IP of Home Assistant + port 8098. Use the IP address, not a host name – Shellys often cannot resolve names. Required for installations |
 | Serve downloads only to known Shellys | Firmware is only served to the device it is meant for (default on). Switch off if downloads are rejected from a 172.30.x.x address |
-| Parallel installations | How many installations run at the same time (1–20, default 5) |
+| Max. parallel installations | How many installations run at the same time (1–20, default 5) |
 | Enable Gen1 updates / Allowed Gen1 types | Gen1 support and the Gen1 models to check (see [Gen1 firmware](#gen1-firmware)) |
 | Allow downgrades | Installing an older stored firmware on Gen2+ devices (see [Downgrade](#downgrade-gen2)). Off unless switched on, also after an update of the app |
 | Max. import size (MB) | Largest file accepted by **Import store** (1–2048, default 100) |
-| Log size / Log retention | Activity log limits (100–3000 entries, 1–365 days) |
+| Max. log size / Log retention | Activity log limits (100–3000 entries, 1–365 days) |
 | Pinned certificates | Certificate fingerprints for Shelly servers (see [Certificate pinning](#certificate-pinning)) |
 
 ## Using the app
@@ -68,9 +68,13 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 
 - **Check now** checks all devices; the header shows the last check and the schedule.
 - Devices with updates are listed on top, then all other devices, ignored devices at
-  the end. Search, filters (Updates, Errors, Up to date, Ignored), sorting and a column
-  chooser help with larger installations. Sort with the "Sort" select and the arrow
-  next to it, or (desktop) with the column titles. Sort order, hidden columns and column
+  the end. Search, filters (Updates, Errors, Up-To-Date, Unprotected, Ignored), sorting
+  and a column chooser help with larger installations. **Unprotected** lists the devices
+  without password protection set on the device; set it per device from that list.
+  Search and sort are the two round icons at the start of the toolbar: the magnifier
+  opens the search field (a dot on it shows that a search text is set), the sort icon a
+  list of the columns and the direction. On desktops the column titles sort as well.
+  A click outside the popup or Escape closes it. Sort order, hidden columns and column
   order are kept in the browser of each device you use (phone and PC can differ); a new
   device starts sorted by device name. A device you just updated stays on top as "Updated"
   (or "Unconfirmed" if the target version was not confirmed, or "Error" if the
@@ -97,6 +101,11 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 - The row menu ⋮ offers: Check for updates (this device only), Install update,
   Downgrade, Reload device info, Ignore / Resume device, Open web UI, device settings,
   Status details and Restart.
+- **Battery devices** (e.g. H&T, door/window sensors) sleep between wake-ups and answer
+  only while they are awake. The app recognises them from the device itself when a check
+  or Reload Device Info reaches them awake (Gen2+: wake-up period, Gen1: sleep mode) and
+  shows a battery icon after the name. A battery device never reached while awake is not
+  marked. To check one, wake it up (e.g. press its button) and check it right away.
 - **Ignored** devices are skipped by automatic checks and cannot be updated until they
   are resumed.
 
@@ -109,6 +118,7 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 | Queued / Installing | Installation waiting for a free slot / running (with progress for Gen2+) |
 | Unconfirmed | The installation ran, but the target version was not confirmed (see the details); stays on top until the next check of the device |
 | Error | Check, download or installation failed; after a failed installation – or with a stored version while the Shelly server could not be asked – the device stays on top and can be installed (again) |
+| Asleep | Battery device that did not answer the last check – it sleeps; the IP is dimmed. Wake it up and check it again |
 | Skipped | Gen1 device while Gen1 updates are disabled |
 | Unregistered | Device is no longer in the Home Assistant device registry |
 
@@ -152,7 +162,7 @@ and kept with the stored firmware; it is not requested again afterwards.
 
 ### Installing updates
 
-1. Tick the devices under "Updates available" and click **Review & install** (or use
+1. Tick the devices under "Updates Available" and click **Review & install** (or use
    "Install update" in the row menu, or **Install** behind a device in the Firmware tab).
 2. The dialog shows installed and target version, size, SHA-256, source and the
    changelog (security entries and entries for this model are highlighted).
@@ -201,10 +211,14 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
 ### Firmware
 
 - All downloaded and uploaded firmware files, grouped by device type, with size, date,
-  SHA-256 and the devices they are provided for. The total size is shown at the top.
-  The cards can be sorted by firmware ID, newest version, size or storage date (select
-  and arrow, or the column titles; kept per device like in the Devices tab); the
-  versions inside a card stay newest first.
+  SHA-256 and the devices they are provided for. The number of files, their total size
+  and the free disk space are shown at the top. Filters: Provided (provided to at least
+  one device), Uploaded, Intermediate, Gen1 and Unused (no device in the list has this
+  firmware ID; while the firmware ID of a device is not known yet – it was never
+  reached, e.g. a sleeping battery device – no file counts as unused). Search and sort work as in the Devices tab (sort by firmware ID, newest
+  version, size or storage date, also with the column titles; kept per device); the
+  versions inside a card stay newest first. On phones "Upload firmware" is the upload
+  icon at the right end.
 - **Install** behind a device name opens the usual installation dialog for this device
   and this firmware (same conditions as "Install update" in the Devices tab).
 - The **changelog icon** of a version shows the changelog stored with this firmware.
@@ -234,8 +248,9 @@ The activity log records checks, downloads, uploads, installations and downgrade
 deleted firmware, setting and password changes on devices, store exports and imports
 and changes of the app settings – each with time, user and result (success, warning, error). A download names
 the user of the check that fetched it; scheduled checks and their downloads name
-"Schedule". Filters and a
-device search help to find entries. Passwords never appear in the log. Consecutive
+"Schedule". A full check also counts the ignored devices ("2 ignored") and names them
+in its details in the normal text colour – they are not contacted and never make the
+entry a warning or error. Filters and a device search help to find entries. Passwords never appear in the log. Consecutive
 entries of the same device are marked by a bar at the side.
 
 The bin icon deletes a single entry, **Delete all logs** the whole log (each after a
@@ -243,13 +258,17 @@ confirmation). After clearing, one entry remains that names who cleared the log.
 
 ### Settings
 
-All options from [Configuration](#configuration), grouped into cards with one Save
-button. The i-icon next to a setting (or the setting name) shows its help – on touch
+All options from [Configuration](#configuration), grouped into the cards **Checks**,
+**Download Server** (download base URL, serve only to known Shellys), **Firmware &
+Storage** (Gen1, downgrades, the firmware store, import size), **Logs** and
+**Advanced**, with one Save button. The i-icon next to a setting (or the setting name) shows its help – on touch
 devices with a tap. A hint warns while typing if the download base URL is a host name or not in
 your local network. While installations are disabled because of the download base URL,
-a notice above the tabs explains why. Below the options, the cards **Firmware store**
-(export and import, see [Moving the firmware store](#moving-the-firmware-store)) and
-**Device passwords** (several devices at once, see [Device passwords](#device-passwords)).
+a notice above the tabs explains why. The card **Firmware & Storage** holds the
+**Firmware store** block (export and import, see [Moving the firmware store](#moving-the-firmware-store)),
+the card **Device Passwords** sets passwords on several devices at once (see
+[Device passwords](#device-passwords)). The last line links to the app page in Home
+Assistant, where **Changelog** next to the version lists what changed in each version.
 
 ## Device passwords
 
@@ -269,14 +288,14 @@ password**, or the lock icon):
 After enabling, changing or removing the protection, change the password in the Home
 Assistant Shelly integration as well.
 
-**Several devices at once:** Settings tab → **Device passwords …**. Choose the action –
+**Several devices at once:** Settings tab → **Device Passwords** → **Device passwords …**. Choose the action –
 **Store the existing device password in this app** or **Set password** (enables the
 protection of unprotected devices, changes it on protected devices whose password is
 stored) – tick the devices ("All devices that fit") and enter one password for all of
 them. Devices the action does not fit are greyed out with the reason (e.g. protected
 without stored password: store the current password first; state unknown: reload the
 device info). Each device is still set, verified, stored and logged on its own, as in
-the single-device dialog; up to **Parallel installations** devices at the same time. A
+the single-device dialog; up to **Max. parallel installations** devices at the same time. A
 failure on one device does not stop the others; busy devices are skipped. The result
 lists every device (done, failed, skipped). Removing the protection and forgetting a
 password stay in the single-device dialog.
@@ -289,9 +308,10 @@ unprotected through your network.
 ## Moving the firmware store
 
 To move to another Home Assistant instance (or keep a copy), export the whole firmware
-store in the Settings tab → **Firmware store** → **Export store …**:
+store in the Settings tab → **Firmware & Storage** → **Export store …**:
 
-- The app generates an **export password** and shows it once (copy icon). Save it –
+- The app generates an **export password** and shows it once (copy icon; if the browser
+  does not allow copying, the password is selected for copying by hand). Save it –
   it is stored nowhere, and the file cannot be imported without it. **Export** is
   enabled after "I have saved the password"; the browser downloads one ZIP file.
 - The password **seals** the file: the list of all files with their SHA-256 and data
@@ -316,7 +336,7 @@ stored; then the result shows how many files are new, already stored or in confl
 - Conflict (same firmware ID and version, different file): the stored file is kept.
 
 The largest accepted file is set by **Max. import size (MB)**. Large files are sent in
-parts of 8 MiB (Home Assistant refuses single requests above 16 MiB); the dialog shows
+parts of 8 MB (Home Assistant refuses single requests above 16 MB); the dialog shows
 the progress. The import also needs
 about twice the file size of free disk space. Not possible during a check. The import is
 logged with user and counts. Uninstalling the app in Home Assistant removes its private
@@ -375,8 +395,8 @@ The app connects only to:
 - **Shelly servers** below `shelly.cloud` – version offers, firmware downloads and the
   official changelog pages. Only the device type (e.g. `Plus1`) is part of the request;
   no other information about your devices or Home Assistant is sent.
-- **Home Assistant** via the Supervisor – device registry, notifications and the app's
-  own settings.
+- **Home Assistant** via the Supervisor – device registry, notifications, the app's
+  own settings and its slug (for the link to the app page).
 
 The user interface loads nothing from the internet. No telemetry.
 

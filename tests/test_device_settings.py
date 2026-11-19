@@ -76,6 +76,31 @@ async def test_gen1_capabilities(device_api):
     assert (got["ap"], got["ble"], got["schedules"], got["actions"]) == (False, "unsupported", True, False)
 
 
+async def test_battery_device_detected_from_the_device(device_api):
+    """A battery device is detected only from its own answer: Gen2+ wakeup_period above
+    0 in the sys status (Sys.GetStatus, checks and Reload Device Info only) or in the sys
+    config, Gen1 sleep_mode.period above 0; missing or 0 means no battery device. An
+    unreadable sys status leaves the flag out (the stored value stays)."""
+    calls, answers = device_api
+    answers["Shelly.GetConfig"] = {"sys": {"device": {"name": "smoke"}}}
+    answers["Sys.GetStatus"] = {"wakeup_period": 86400, "wakeup_reason": {"boot": "deepsleep_wake"}}
+    assert (await shelly.read_settings(None, 2, "http://1.2.3.4", "PlusSmoke", None, extended=True))["battery"] is True
+    calls.clear()
+    assert "battery" not in await shelly.read_settings(None, 2, "http://1.2.3.4", "PlusSmoke", None)
+    assert ("Sys.GetStatus", None) not in calls   # no extra request outside checks and reloads
+    for status in ({"wakeup_period": 0}, {}, {"wakeup_period": True}):
+        answers["Sys.GetStatus"] = status
+        assert (await shelly.read_settings(None, 2, "http://1.2.3.4", "Plus1", None, extended=True))["battery"] is False
+    answers["Sys.GetStatus"] = shelly.ShellyError("busy")
+    assert "battery" not in await shelly.read_settings(None, 2, "http://1.2.3.4", "Plus1", None, extended=True)
+    answers["Shelly.GetConfig"] = {"sys": {"wakeup_period": 7200}}
+    assert (await shelly.read_settings(None, 2, "http://1.2.3.4", "HTG3", None))["battery"] is True
+    answers["/settings"] = {"sleep_mode": {"period": 6, "unit": "h"}}
+    assert (await shelly.read_settings(None, 1, "http://1.2.3.4", "SHHT-1", None))["battery"] is True
+    answers["/settings"] = {}
+    assert (await shelly.read_settings(None, 1, "http://1.2.3.4", "SHSW-1", None))["battery"] is False
+
+
 async def test_ap_and_ble_writes(device_api):
     """Gen2 AP sends only ap.enable; Gen1 AP and BLE are refused."""
     calls, _answers = device_api

@@ -187,6 +187,8 @@ async def test_http_upload_flow(client, mgr, net):
     assert r.status == 200 and (await r.json())["version"] == "1.3.0"
     listing = await (await client.get("/api/firmware")).json()
     assert listing["total_size"] == mgr.store_size() and len(listing["firmware"]) == 2
+    # Free disk space of the store volume (Firmware tab summary)
+    assert isinstance(listing["free_space"], int) and listing["free_space"] > 0
     # Devices a file is provided for, with their IDs (Install button of the Firmware tab)
     provided = next(f for f in listing["firmware"] if f["version"] == "1.5.0")
     assert {d["id"] for d in provided["devices"]} == {A, C} and all(d["name"] for d in provided["devices"])

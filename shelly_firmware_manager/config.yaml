@@ -1,5 +1,5 @@
 name: Shelly Firmware Manager
-version: "3.4.1"
+version: "3.5.0"
 slug: shelly_firmware_manager
 description: >-
   Downloads Shelly firmware via Home Assistant, provides it through its own
@@ -17,7 +17,8 @@ watchdog: "tcp://[HOST]:[PORT:8098]"
 homeassistant: "2026.10.0"
 
 # Core API proxy (device registry, notifications). Of the Supervisor API only
-# /addons/self/options and /addons/self/restart are used (no hassio_api, no host access).
+# /addons/self/info (slug for the link to the app page), /addons/self/options and
+# /addons/self/restart are used (no hassio_api, no host access).
 homeassistant_api: true
 
 # Management UI via Ingress only (HA login, admins only).
@@ -35,28 +36,32 @@ ports_description:
 
 # No "map": no access to the Home Assistant configuration folder.
 # Firmware, state, passwords and logs live in the app's private /data.
-# Settings tab: /addons/self/options + /addons/self/restart are open to every app,
+# Settings tab: /addons/self/info, /addons/self/options + /addons/self/restart are open
+# to every app,
 # so no "hassio_api" permission is needed.
 
 options:
+  # Same order as the Settings tab (cards Checks, Download Server, Firmware & Storage,
+  # Logs, Advanced); the Configuration tab of the app page shows the options in the
+  # order of "schema".
   # Automatic check every N days at HH:MM (time zone of Home Assistant)
   check_interval_days: 7
   check_time: "02:45"
-  # allow_downgrade has no default: downgrades stay off until enabled
   # download_base_url has no default: LAN IP of Home Assistant + port 8098,
   # e.g. http://<HA-IP>:8098 – installations are refused until it is set
   restrict_downloads_to_devices: true
-  max_parallel_installs: 5
   gen1_updates_enabled: true
-  log_retention_days: 90
-  log_entry_limit: 1000
-  import_max_mb: 100
   gen1_allowed_types:
     - SHSW-1
     - SHSW-PM
     - SHSW-25
     - SHPLG-S
     - SHEM
+  # allow_downgrade has no default: downgrades stay off until enabled
+  import_max_mb: 100
+  log_entry_limit: 1000
+  log_retention_days: 90
+  max_parallel_installs: 5
   # Default pins for the Shelly servers with the in-house Allterco CA (see DOCS.md, Certificate pinning)
   pinned_certificates:
     - host: updates.shelly.cloud
@@ -68,14 +73,14 @@ schema:
   check_time: "match(^([01]\\d|2[0-3]):[0-5]\\d$)"
   download_base_url: "url?"
   restrict_downloads_to_devices: bool
-  max_parallel_installs: "int(1,20)"
   gen1_updates_enabled: bool
-  allow_downgrade: "bool?"
-  log_retention_days: "int(1,365)"
-  log_entry_limit: "int(100,3000)"
-  import_max_mb: "int(1,2048)"
   gen1_allowed_types:
     - "match(^[A-Za-z0-9-]{1,32}$)"
+  allow_downgrade: "bool?"
+  import_max_mb: "int(1,2048)"
+  log_entry_limit: "int(100,3000)"
+  log_retention_days: "int(1,365)"
+  max_parallel_installs: "int(1,20)"
   # Certificate pinning for Shelly servers with an in-house CA (O=Allterco)
   pinned_certificates:
     - host: "match(^([a-z0-9-]+\\.)*shelly\\.cloud$)"

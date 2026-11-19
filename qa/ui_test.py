@@ -58,12 +58,13 @@ PILL_JS = """() => [...document.querySelectorAll('.pill')].map(p => {
   return {cls: p.className, text: p.textContent, color: cs.color, bg: cs.backgroundColor, card: card.backgroundColor};
 })"""
 OVERFLOW_JS = "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
-TARGETS_JS = """() => [...document.querySelectorAll('#view-devices button, #view-devices summary, .tab, #scan, #dev-search')]
-  .filter(b => b.offsetParent !== null).map(b => { const r = b.getBoundingClientRect();
+# The Details button of a phone tile is 36 px high like the feature buttons (approved)
+TARGETS_JS = """() => [...document.querySelectorAll('#view-devices button, #view-devices summary, .tab, #scan')]
+  .filter(b => b.offsetParent !== null && !b.matches('td.c-details summary')).map(b => { const r = b.getBoundingClientRect();
   return {t: (b.getAttribute('aria-label') || b.textContent || b.id).trim().slice(0, 30), w: Math.round(r.width), h: Math.round(r.height)}; })
   .filter(x => x.h < 44 || x.w < 44)"""
 PILL_TEXTS = {"Up-To-Date", "Available", "Ready", "Queued", "Installing", "Unconfirmed", "Error", "Unregistered", "Skipped",
-              "Updated"}
+              "Updated", "Asleep"}
 TABS_JS = """() => [...document.querySelectorAll('.tab')].map(t => { const r = t.getBoundingClientRect();
   return {id: t.id, left: Math.round(r.left), right: Math.round(r.right), w: Math.round(r.width)}; })"""
 

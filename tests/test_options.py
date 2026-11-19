@@ -3,7 +3,10 @@
 All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test servers."""
 
 import json
+import re
+from pathlib import Path
 
+import aiohttp
 import app_options
 import data_paths
 import manager
@@ -12,6 +15,9 @@ import pytest
 import shelly
 from conftest import OPTIONS, A
 from helpers import make_manager, web_client, without_url
+
+ROOT = Path(__file__).resolve().parent.parent  # repository root
+APP_DIR = ROOT / "shelly_firmware_manager"
 
 
 def test_schedule_option_bounds():
@@ -122,3 +128,90 @@ async def test_web_install_refused_and_confirm_endpoint(net):
         assert state["download_base"] == {"url": LEGACY, "issue": None, "message": None}
     finally:
         await client.close()
+
+
+class _InfoResponse:
+    """Answer of the fake Supervisor to GET /addons/self/info."""
+
+    def __init__(self, body, status=200):
+        self.body, self.status = body, status
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_exc):
+        return False
+
+    def raise_for_status(self):
+        if self.status >= 400:
+            raise aiohttp.ClientError(f"status {self.status}")
+
+    async def json(self, content_type=None):
+        return self.body
+
+
+class _InfoSession:
+    """Session that only answers GET /addons/self/info (counts the requests)."""
+
+    def __init__(self, *answers):
+        self.answers, self.urls = list(answers), []
+
+    def get(self, url, **_kwargs):
+        self.urls.append(url)
+        return self.answers.pop(0)
+
+
+async def test_app_page_link(net):
+    """Changelog link: the app page from the Supervisor slug, read once; the list of
+    apps while the slug is not available (error or invalid slug), then asked again."""
+    m = make_manager(net)
+    m.session = _InfoSession(_InfoResponse({}, status=403), _InfoResponse({"data": {"slug": "../x"}}),
+                             _InfoResponse({"result": "ok", "data": {"slug": "a0d7b954_shelly_firmware_manager"}}))
+    assert await m.app_page() == "/config/apps"
+    assert await m.app_page() == "/config/apps"
+    assert await m.app_page() == "/config/app/a0d7b954_shelly_firmware_manager/info"
+    assert await m.app_page() == "/config/app/a0d7b954_shelly_firmware_manager/info"
+    assert m.session.urls == ["http://supervisor/addons/self/info"] * 3
+    client = await web_client(m)
+    try:
+        r = await client.get("/api/settings/app-page")
+        assert (await r.json()) == {"url": "/config/app/a0d7b954_shelly_firmware_manager/info"}
+    finally:
+        await client.close()
+
+
+def _translations():
+    """{key: (name, description)} of translations/en.yaml in file order (small parser:
+    two-space keys, name/description, folded ">-" texts)."""
+    out, key, field = {}, None, None
+    for line in (APP_DIR / "translations" / "en.yaml").read_text().splitlines():
+        if line.startswith("network:"):
+            break
+        if re.match(r"^  \w+:$", line):
+            key = line.strip()[:-1]
+            out[key] = {"name": "", "description": ""}
+        elif m := re.match(r"^    (name|description): ?(.*)$", line):
+            field = m.group(1)
+            out[key][field] = "" if m.group(2) == ">-" else m.group(2)
+        elif line.startswith("      ") and key:
+            out[key][field] = (out[key][field] + " " + line.strip()).strip()
+    return {k: (v["name"], v["description"]) for k, v in out.items()}
+
+
+def test_app_configuration_matches_settings_tab():
+    """Configuration tab of the app page = Settings tab: same options in the same order
+    (schema and translations), same names and help texts. Allowed difference: the
+    Gen1 type list (list editor in HA). No changelog hint (HA does not show it)."""
+    js = (ROOT / "ui-src" / "js" / "app-settings.js").read_text()
+    fields = re.findall(r'^  \["(\w+)", "([^"]+)", "\w+", "([^"]*)", ', js, re.M)
+    config = (APP_DIR / "config.yaml").read_text()
+    schema = re.findall(r"^  (\w+):", config[config.index("\nschema:"):], re.M)
+    texts = _translations()
+    assert [f[0] for f in fields] == schema == list(texts) and set(schema) == app_options.KEYS
+    for key, name, desc in fields:
+        tname, tdesc = texts[key]
+        assert tname == name, key
+        if key == "gen1_allowed_types":
+            assert tdesc == "One type per entry, e.g. SHSW-1, SHSW-PM"
+        else:
+            assert tdesc == desc, key

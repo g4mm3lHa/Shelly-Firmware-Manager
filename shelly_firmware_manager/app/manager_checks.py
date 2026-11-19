@@ -36,6 +36,7 @@ from manager_core import (
     ACTIVITY_WAITING,
     Device,
     SOURCE_UPLOAD,
+    STATUS_ASLEEP,
     STATUS_AVAILABLE,
     STATUS_CURRENT,
     STATUS_ERROR,
@@ -48,6 +49,17 @@ from manager_core import (
 from manager_devices import DeviceSettings
 
 log = logging.getLogger("sfm.manager")
+
+# Status message of a battery device that was not reachable (STATUS_ASLEEP); {error}
+# is the error of the attempt
+ASLEEP_MESSAGE = "Battery device asleep – wake it up (e.g. press its button) and check it again. Last attempt: {error}"
+
+
+def _unreachable(err: BaseException) -> bool:
+    """True if the device did not answer at all (timeout, connection failure) – not
+    for an answer the device gave, e.g. a refused password."""
+    return isinstance(err, (TimeoutError, aiohttp.ClientConnectionError, OSError))
+
 
 # Shared manufacturer requests of one check (single flight): ("step", firmware ID,
 # installed version) -> next step for this version, ("newest", firmware ID) -> newest
@@ -133,11 +145,12 @@ class Checks(DeviceSettings):
             started = time.monotonic()
             failure: str | None = None
             checked: list[str] = []
+            ignored: list[str] = []
             header_ignored: bool | None = None
             self._scan_user = SCHEDULE_USER if automatic else user or "unknown"
             self._progress()["phase"] = "registry"
             try:
-                checked = await self._scan_all()
+                checked, ignored = await self._scan_all()
                 header_ignored = await self._finish_header_check()
                 self._progress()["phase"] = "changelog"
                 await self._store_changelogs(self.devices.values())
@@ -153,7 +166,13 @@ class Checks(DeviceSettings):
                 self.save()
                 self.schedule_changed.set()
             self._log_check(
-                checked, automatic, user, time.monotonic() - started, failure, header_ignored=header_ignored
+                checked,
+                automatic,
+                user,
+                time.monotonic() - started,
+                failure,
+                header_ignored=header_ignored,
+                ignored=ignored,
             )
         if automatic:
             await self._notify_new_updates()
@@ -225,9 +244,10 @@ class Checks(DeviceSettings):
         )
         return {"status": dev.get("status"), "error": failure}
 
-    async def _scan_all(self) -> list[str]:
+    async def _scan_all(self) -> tuple[list[str], list[str]]:
         """Check all Shelly main devices from the HA device registry.
-        Returns the IDs of the checked devices."""
+        Returns the IDs of the checked devices and the names of the ignored
+        (registered, not contacted) devices."""
         offers: OfferTasks = {}  # shared manufacturer requests: one per firmware ID
         entries = self._shelly_entries(await self._registry())
         for dev in self.devices.values():  # A full check ends the "just updated" display
@@ -235,10 +255,13 @@ class Checks(DeviceSettings):
             dev.pop("install_failed", None)
         # Ignored devices count as registered (seen) but are not contacted
         seen = set(entries)
+        ignored: list[str] = []
         for device_id in seen & set(self.devices):
             if self.devices[device_id].get("ignored"):
                 entry = entries.pop(device_id)
-                self.devices[device_id]["name"] = clip(entry.get("name_by_user") or entry.get("name") or device_id, 100)
+                name = clip(entry.get("name_by_user") or entry.get("name") or device_id, 100)
+                self.devices[device_id]["name"] = name
+                ignored.append(name)
         # Every device of this check is "waiting" until it is reached
         progress = self._progress()
         progress.update(total=len(entries), phase="devices")
@@ -247,7 +270,7 @@ class Checks(DeviceSettings):
         for device_id, dev in self.devices.items():
             if device_id not in seen:
                 dev.update(status=STATUS_UNREGISTERED, message="")
-        return sorted(entries)
+        return sorted(entries), sorted(ignored, key=str.lower)
 
     async def _check_entries(self, entries: dict[str, dict[str, Any]], offers: OfferTasks) -> None:
         """Check the given registry entries, up to CHECK_PARALLEL at the same time,
@@ -295,7 +318,9 @@ class Checks(DeviceSettings):
         """Check one registry entry, keep its result on the device. True on success.
 
         last_check = last attempt, last_success = last successful check; a failed
-        attempt keeps the last known firmware so it is never shown as freshly checked."""
+        attempt keeps the last known firmware so it is never shown as freshly checked.
+        A known battery device (marker battery) that did not answer is STATUS_ASLEEP
+        instead of STATUS_ERROR."""
         dev = self.devices.setdefault(device_id, {})
         dev["name"] = clip(entry.get("name_by_user") or entry.get("name") or device_id, 100)
         dev["last_check"] = int(time.time())
@@ -304,9 +329,11 @@ class Checks(DeviceSettings):
             await self._scan_device(device_id, dev, entry.get("configuration_url"), offers)
         except (TimeoutError, ShellyError, aiohttp.ClientError, KeyError, ValueError, OSError) as err:
             log.warning("%s: %s", dev["name"], err)
-            dev.update(
-                status=STATUS_ERROR, message=error_text(err, 500) or type(err).__name__, error_level=severity_of(err)
-            )
+            text = error_text(err, 500) or type(err).__name__
+            if dev.get("battery") is True and _unreachable(err):
+                dev.update(status=STATUS_ASLEEP, message=ASLEEP_MESSAGE.format(error=text), error_level="warning")
+            else:
+                dev.update(status=STATUS_ERROR, message=text, error_level=severity_of(err))
             return False
         else:
             dev["last_success"] = dev["last_check"]
@@ -376,14 +403,25 @@ class Checks(DeviceSettings):
             and (data_paths.FW_DIR / str(dev.get("file"))).is_file()
         )
         if not already:
-            # One provide task per firmware ID and version: a parallel device of the
-            # same type waits for it instead of downloading the file a second time
+            # One provide task per firmware ID and version, shared by the full check and
+            # all single-device checks: a parallel device of the same type waits for it
+            # instead of downloading the file a second time
             fw_key = (info["type"], offer["version"])
             task = self._provisions.get(fw_key)
             if task is None:
-                task = self._provisions[fw_key] = asyncio.ensure_future(self._provide(device_id, dev, info, offer))
+                provide = self._provide(fw_key, device_id, dev, info, offer)
+                task = self._provisions[fw_key] = asyncio.ensure_future(provide)
                 task.add_done_callback(functools.partial(self._provision_done, fw_key))
-            name, sha, size = await task
+            waiters = self._provision_waiters.setdefault(fw_key, set())
+            waiters.add(device_id)
+            if fw_key in self._fetching:  # joined a running download
+                self.activity[device_id] = ACTIVITY_DOWNLOADING
+            try:
+                name, sha, size = await task
+            finally:
+                waiters.discard(device_id)
+                if self.activity.get(device_id) == ACTIVITY_DOWNLOADING:
+                    self.activity[device_id] = ACTIVITY_CHECKING
             dev.update(
                 file=name,
                 sha256=sha,
@@ -535,19 +573,25 @@ class Checks(DeviceSettings):
     def _provision_done(self, fw_key: tuple[str, str], _task: "asyncio.Future[Any]") -> None:
         """Forget a finished provide task (single flight per firmware ID and version)."""
         self._provisions.pop(fw_key, None)
+        self._provision_waiters.pop(fw_key, None)
 
     async def _provide(
-        self, device_id: str, dev: Device, info: dict[str, Any], offer: dict[str, str]
+        self, fw_key: tuple[str, str], device_id: str, dev: Device, info: dict[str, Any], offer: dict[str, str]
     ) -> tuple[str, str, int]:
         """The firmware offered by the manufacturer's server: an already downloaded
         file of exactly this version (after checksum verification) or a new download.
+        Runs once per fw_key (firmware ID, version); every device waiting for it shows
+        "downloading" during the download. device_id, dev: the device whose check started
+        it (log text and the user of the download entry).
         Returns (file name, sha256, size)."""
         stored = await self._stored_firmware(info["type"], offer["version"], uploads=info["gen"] >= 2)
         if stored:
             name, meta = stored
             log.info("%s: using stored firmware %s %s", dev["name"], info["type"], offer["version"])
             return name, str(meta["sha256"]), int(meta["size"])
-        self.activity[device_id] = ACTIVITY_DOWNLOADING
+        self._fetching.add(fw_key)
+        for waiting in self._provision_waiters.get(fw_key, ()):
+            self.activity[waiting] = ACTIVITY_DOWNLOADING
         self._downloads_running += 1
         if self.progress:
             self.progress["phase"] = "download"
@@ -556,11 +600,13 @@ class Checks(DeviceSettings):
                 self.session, offer["url"], data_paths.FW_DIR, self.pins, https_only=info["gen"] >= 2
             )
         finally:
+            self._fetching.discard(fw_key)
             self._downloads_running -= 1
             if self.progress and not self._downloads_running:
                 self.progress["phase"] = "devices"
-            if self.activity.get(device_id) == ACTIVITY_DOWNLOADING:
-                self.activity[device_id] = ACTIVITY_CHECKING
+            for waiting in self._provision_waiters.get(fw_key, ()):
+                if self.activity.get(waiting) == ACTIVITY_DOWNLOADING:
+                    self.activity[waiting] = ACTIVITY_CHECKING
         self._register_firmware(name, info["type"], info["gen"], offer["version"], sha, size, https)
         self._fresh[name] = clip(offer["url"], 500)  # later devices of this check: same offer
         self.events.add(
@@ -585,6 +631,7 @@ class Checks(DeviceSettings):
         failure: str | None,
         trigger: str | None = None,
         header_ignored: bool | None = None,
+        ignored: list[str] | None = None,
     ) -> None:
         """One log entry per check; findings = devices with an update, a warning or
         an error. trigger overrides the derived value ("device" for single-device
@@ -594,11 +641,13 @@ class Checks(DeviceSettings):
         An update finding names its source (OFFER_*: manufacturer, store or upload).
         Every finding carries a severity; "error" holds the message of warnings
         and errors (key kept for historic entries). The entry gets the highest
-        severity of its findings, an overall failure is an error."""
+        severity of its findings, an overall failure is an error. ignored: names of
+        the ignored devices of a full check (not contacted) – listed in the entry and
+        counted in the result, never a finding (no influence on the severity)."""
         findings: list[dict[str, Any]] = []
         for device_id in checked:
             dev = self.devices.get(device_id, {})
-            if dev.get("status") == STATUS_ERROR:
+            if dev.get("status") in (STATUS_ERROR, STATUS_ASLEEP):
                 level = dev.get("error_level") or "error"
                 findings.append({"device": dev.get("name"), "error": dev.get("message"), "severity": level})
                 continue
@@ -631,6 +680,9 @@ class Checks(DeviceSettings):
             )
         counts = {level: sum(1 for f in findings if f["severity"] == level) for level in ("warning", "error")}
         updates = sum(1 for f in findings if "offer" in f)
+        result = f"{updates} update(s), {counts['warning']} warning(s), {counts['error']} error(s)"
+        if ignored:
+            result += f", {len(ignored)} ignored"
         self.events.add(
             "check",
             severity=worst("error" if failure else "success", *(f["severity"] for f in findings)),
@@ -638,11 +690,12 @@ class Checks(DeviceSettings):
             user=SCHEDULE_USER if automatic else user or "unknown",
             devices=len(checked),
             duration=round(duration, 1),
-            result=failure or f"{updates} update(s), {counts['warning']} warning(s), {counts['error']} error(s)",
+            result=failure or result,
             updates=updates,
             warnings=counts["warning"],
             errors=counts["error"],
             findings=findings,
+            ignored=ignored or None,  # left out when empty
         )
 
     async def _store_changelogs(self, devices: Iterable[Device]) -> None:

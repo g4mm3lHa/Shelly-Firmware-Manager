@@ -1,7 +1,7 @@
 // Devices tab: status and action icons, the device table / phone tiles and the row menu.
 import {
   $, api, attachTip, box, collator, devUrl, el, fmt, hideTip, icon, iconButton, loadLocal, message, modal, openDetails,
-  saveLocal, section, selected, sortControl, toast, ui, valueList, webUrl,
+  saveLocal, searchTool, section, selected, sortControl, toast, ui, valueList, webUrl,
 } from "./core.js";
 import {DOWNGRADE_OFF, OFFER_SOURCES, openDowngrade, openInstall} from "./install.js";
 import {
@@ -13,7 +13,9 @@ import {load, queued, render} from "./main.js";
 // ---------------------------------------------------------------- Devices
 const STATUS_LABELS = {"up-to-date": "Up-To-Date", available: "Available", ready: "Ready", queued: "Queued",
   installing: "Installing", unconfirmed: "Unconfirmed", error: "Error", unregistered: "Unregistered", skipped: "Skipped",
-  updated: "Updated"};
+  updated: "Updated", asleep: "Asleep"};
+// Battery device (detected from the device while it was awake) that did not answer the last check
+const asleep = d => d.status === "asleep";
 // A device with a confirmed or unconfirmed installation stays in the "Updates
 // available" card (without checkbox) until the next full check or a single check of
 // this device; a confirmed one is shown as "Updated", an unconfirmed one keeps its status
@@ -44,17 +46,22 @@ const downgradable = (d, s) => d.gen >= 2 && !!d.ip && !d.installing && d.status
   d.activity !== "reloading" && !(s.download_base && s.download_base.issue);
 // Settings can be read/changed once the device was reached and while it is not updating or reloading
 const editable = d => !!d.ip && !!d.gen && !d.installing && d.status !== "installing" && d.activity !== "reloading";
+// "Unprotected": devices without password protection set on the device (filter only,
+// the user acts per device in the filtered list); an unknown state does not count
 const FILTERS = {all: ["All", () => true], updates: ["Updates", d => hasUpdate(d) && !d.ignored],
-  errors: ["Errors", d => ["error", "unconfirmed"].includes(d.status)], uptodate: ["Up to date", d => d.status === "up-to-date"],
-  ignored: ["Ignored", d => d.ignored]};
+  errors: ["Errors", d => ["error", "unconfirmed"].includes(d.status)], uptodate: ["Up-To-Date", d => d.status === "up-to-date"],
+  unprotected: ["Unprotected", d => d.auth_enabled === false], ignored: ["Ignored", d => d.ignored]};
 
 // Running check of a device (server-side state, in memory only)
 const ACTIVITY_LABELS = {waiting: "Waiting", checking: "Checking…", downloading: "Downloading…", reloading: "Reloading…"};
 // The last successful check differs from the last attempt only after a failed attempt
 const lastSuccess = d => d.last_success && d.last_success !== d.last_check ? fmt(d.last_success) : null;
 
+// Tooltip of the "Asleep" pill: the wake-up hint and the last successful contact only
+const ASLEEP_HINT = "Battery device asleep – wake it up (e.g. press its button) and check it again.";
 /** Text of the status tooltip (details, versions, last attempt and last success). */
 function statusText(d) {
+  if (asleep(d)) return `${ASLEEP_HINT}\nLast contact: ${d.last_success ? fmt(d.last_success) : "never"}`;
   return [d.message, `Installed: ${d.version || "–"}`, d.offer_version ? `Available: ${d.offer_version}` : null,
     `Last check: ${fmt(d.last_check)}`, lastSuccess(d) && `Last successful check: ${lastSuccess(d)}`].filter(Boolean).join("\n");
 }
@@ -238,12 +245,23 @@ const COLUMNS = {
     const ha = el("div", d.name, "name"), shellyName = el("span", d.shelly_name || "–");
     attachTip(ha, () => `Home Assistant device name: ${d.name}`, true);
     attachTip(shellyName, () => `Shelly device name: ${d.shelly_name || "–"}`, true);
-    return [ha, box("div", "sub shelly-name", shellyName, pen)];
+    // Battery icon right after the name (table and phone tiles)
+    let battery = null;
+    if (d.battery === true) {
+      battery = box("span", "battery", icon("battery")); battery.setAttribute("role", "img");
+      battery.setAttribute("aria-label", "Battery device");
+      attachTip(battery, () => "Battery device: reachable only while it is awake", true);
+    }
+    // "Gen n" label beside the name: phone tiles only (the table has its own Gen column)
+    const head = box("div", "name-line", ha, battery, d.gen ? el("span", `Gen ${d.gen}`, "tag") : null);
+    return [head, box("div", "sub shelly-name", shellyName, pen)];
   }},
   ip: {label: "IP", sort: d => (d.ip || "").split(".").map(n => n.padStart(3, "0")).join("."), cell: d => {
     if (!d.ip) return ["–"];
-    const url = webUrl(d); if (!url) return [el("span", d.ip, "mono")];
-    const a = el("a", d.ip, "mono"); a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.title = "Open the Shelly web UI";
+    // Dimmed while the battery device sleeps (its web UI does not answer then)
+    const cls = "mono" + (asleep(d) ? " dim" : "");
+    const url = webUrl(d); if (!url) return [el("span", d.ip, cls)];
+    const a = el("a", d.ip, cls); a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.title = "Open the Shelly web UI";
     return [a];
   }},
   gen: {label: "Gen", sort: d => d.gen, cell: d => [d.gen ?? "–"]},
@@ -395,9 +413,9 @@ export function renderDevices() {
     all.onchange = () => { for (const d of sel) all.checked ? selected.add(d.id) : selected.delete(d.id); render(true); };
     const go = el("button", `Review & install (${selected.size})`, "primary"); go.disabled = !selected.size;
     go.onclick = () => openInstall(s.devices.filter(d => selected.has(d.id)));
-    cards.push(deviceCard("Updates available", updates, [all], [go]));
+    cards.push(deviceCard("Updates Available", updates, [all], [go]));
   }
-  if (others.length) cards.push(deviceCard(updates.length ? "All other devices" : "Devices", others));
+  if (others.length) cards.push(deviceCard(updates.length ? "All Other Devices" : "Devices", others));
   if (ignored.length) cards.push(deviceCard("Ignored", ignored));
   if (!cards.length) cards.push(box("div", "card", el("div", s.devices.length ? "No devices match." :
     s.first_start_open ? "No devices yet – they are found by the first check." : "No devices yet – run “Check now”.", "empty")));
@@ -422,6 +440,7 @@ export function buildChooser() {
 export function syncChooser() { for (const cb of $("cols-devices").querySelectorAll("input")) cb.checked = !prefs.devices.hidden.includes(cb.dataset.col); }
 document.addEventListener("click", e => { if (!$("cols").contains(e.target)) $("cols").open = false; });
 $("dev-search").oninput = () => render(true);
+searchTool($("dev-search"));
 
 // ---------------------------------------------------------------- Row menu ⋮
 const rowmenu = $("rowmenu");

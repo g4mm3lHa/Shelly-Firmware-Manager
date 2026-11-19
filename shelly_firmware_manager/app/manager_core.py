@@ -23,6 +23,7 @@ device): the UI shows it while polling, nothing of it is persisted.
 import asyncio
 import json
 import logging
+import re
 import time
 from collections.abc import Callable
 from typing import Any
@@ -59,6 +60,10 @@ STATUS_UNCLEAR = "unconfirmed"  # installation without confirmed target version
 
 STATUS_ERROR = "error"
 
+# A battery device (marker battery, detected from the device while awake) that was
+# not reachable: it sleeps between wake-ups, so this is no error
+STATUS_ASLEEP = "asleep"
+
 STATUS_UNREGISTERED = "unregistered"
 
 STATUS_SKIPPED = "skipped"  # Gen1 device while Gen1 updates are disabled
@@ -76,11 +81,18 @@ def holds_file(dev: Device) -> bool:
         return False
     if dev.get("status") in PENDING:
         return True
-    return dev.get("status") == STATUS_ERROR and bool(dev.get("install_failed") or dev.get("store_fallback"))
+    failed = dev.get("status") in (STATUS_ERROR, STATUS_ASLEEP)
+    return failed and bool(dev.get("install_failed") or dev.get("store_fallback"))
 
 SUPERVISOR = "http://supervisor"  # Supervisor API (Core API proxy below /core)
 
 SUPERVISOR_TIMEOUT = aiohttp.ClientTimeout(total=15)
+
+# Pages of the Home Assistant frontend: the page of this app (its info card has the
+# "Changelog" link next to the version) and, if the slug is unknown, the list of apps
+APP_PAGE = "/config/app/{slug}/info"
+APP_LIST_PAGE = "/config/apps"
+APP_SLUG_RE = re.compile(r"^[a-z0-9_]{1,64}$")  # slug as the Supervisor reports it
 
 # Per-device activity during a check (memory only, shown in the device row)
 ACTIVITY_WAITING = "waiting"  # part of the running check, not yet reached
@@ -144,6 +156,7 @@ class ManagerCore:
         self.session = session
         self.token = token
         self.pins = pins  # certificate pins for shelly.cloud
+        self.app_slug: str | None = None  # slug of this app (Supervisor), read on first use
         self.lock = asyncio.Lock()  # check (exclusive)
         self.install_slots = asyncio.Semaphore(int(options.get("max_parallel_installs", 5)))
         self.installing: set[str] = set()  # device IDs: running or waiting
@@ -159,6 +172,10 @@ class ManagerCore:
         self.reloading: set[str] = set()  # device IDs whose Reload Device Info is running
         # (firmware ID, version) -> running provide task (single flight)
         self._provisions: dict[tuple[str, str], asyncio.Future[tuple[str, str, int]]] = {}
+        # (firmware ID, version) -> devices waiting for that provide task (full and
+        # single-device checks alike); all of them show "downloading" while it downloads
+        self._provision_waiters: dict[tuple[str, str], set[str]] = {}
+        self._fetching: set[tuple[str, str]] = set()  # provide tasks that are downloading right now
         self._downloads_running = 0  # for the progress phase of a parallel check
         # Running checks only (cleared when no check runs anymore, see _release_check_state):
         # file name -> shared checksum verification of a stored file (single flight)
@@ -316,6 +333,28 @@ class ManagerCore:
                     raise ShellyError(f"Supervisor rejected the request: {clip(detail or resp.status, 300)}")
         except (TimeoutError, aiohttp.ClientError) as err:
             raise ShellyError(f"Supervisor not reachable: {err or type(err).__name__}") from None
+
+    async def app_page(self) -> str:
+        """Path of this app's page in the Home Assistant frontend (Settings tab: link to
+        the changelog). The slug is read once from the Supervisor (/addons/self/info,
+        open to every app); while it is not available the list of apps is returned."""
+        if self.app_slug is None:
+            try:
+                async with self.session.get(
+                    f"{SUPERVISOR}/addons/self/info",
+                    headers={"Authorization": f"Bearer {self.token}"},
+                    timeout=SUPERVISOR_TIMEOUT,
+                ) as resp:
+                    resp.raise_for_status()
+                    slug = ((await resp.json(content_type=None)).get("data") or {}).get("slug")
+            except (TimeoutError, aiohttp.ClientError, ValueError, AttributeError) as err:
+                log.warning("App info not available from the Supervisor: %s", err or type(err).__name__)
+                return APP_LIST_PAGE
+            if not isinstance(slug, str) or not APP_SLUG_RE.fullmatch(slug):
+                log.warning("App info from the Supervisor has no valid slug")
+                return APP_LIST_PAGE
+            self.app_slug = slug
+        return APP_PAGE.format(slug=self.app_slug)
 
     # ----------------------------------------------------------------------------------------- App options
 

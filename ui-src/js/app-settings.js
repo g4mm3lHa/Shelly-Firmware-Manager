@@ -1,5 +1,6 @@
 // Settings tab: app options with validation hints and the download base URL notice;
-// cards "Firmware store" (export / import) and "Device passwords" (several devices).
+// the firmware store block (export / import) in the card "Firmware & Storage" and the
+// card "Device Passwords" (several devices).
 import {
   $, api, attachTip, box, closeModal, copyText, el, fmt, icon, iconButton, mb, message, messageBody, modal, section, ui,
   uploadFile, valueList,
@@ -7,23 +8,27 @@ import {
 import {bulkPasswords} from "./device-settings.js";
 
 // ---------------------------------------------------------------- App settings
-// All app options, grouped into cards. Saving goes through the Supervisor and
-// restarts the app. [key, label, type, description, group]
-const OPTION_GROUPS = ["Checks", "Firmware & storage", "Logs", "Advanced"];
+// All app options, grouped into cards in this order (Title Case card heads). Saving
+// goes through the Supervisor and restarts the app. [key, label, type, description, group]
+const OPTION_GROUPS = ["Checks", "Download Server", "Firmware & Storage", "Logs", "Advanced"];
+const STORAGE = "Firmware & Storage";
 export const OPTION_FIELDS = [
   ["check_interval_days", "Check every (days)", "number", "1–30 days", "Checks"],
   ["check_time", "Check time", "time", "Local time of Home Assistant", "Checks"],
-  ["download_base_url", "Download base URL for the Shellys", "text", "LAN IP address of Home Assistant + host port 8098, e.g. http://192.168.1.20:8098 (no host name). Required for installations", "Firmware & storage"],
-  ["restrict_downloads_to_devices", "Serve downloads only to known Shellys", "bool", "Switch off if downloads are rejected from 172.30.x.x", "Firmware & storage"],
-  ["gen1_updates_enabled", "Enable Gen1 updates", "bool", "Gen1 firmware is only available via plain HTTP without a checksum", "Firmware & storage"],
-  ["gen1_allowed_types", "Allowed Gen1 types", "list", "Comma-separated, e.g. SHSW-1, SHSW-PM", "Firmware & storage"],
-  ["import_max_mb", "Max. import size (MB)", "number", "Largest file accepted by “Import store” (Settings → Firmware store); 1–2048, default 100", "Firmware & storage"],
-  ["allow_downgrade", "Allow downgrades", "bool", "Installing an older stored firmware on Gen2+ devices (device menu and Firmware tab); off by default", "Firmware & storage"],
-  ["log_entry_limit", "Log size (max. entries)", "number", "100–3000", "Logs"],
+  ["download_base_url", "Download base URL for the Shellys", "text", "LAN IP address of Home Assistant + host port 8098, e.g. http://192.168.1.20:8098 (no host name). Required for installations", "Download Server"],
+  ["restrict_downloads_to_devices", "Serve downloads only to known Shellys", "bool", "Switch off if downloads are rejected from 172.30.x.x", "Download Server"],
+  ["gen1_updates_enabled", "Enable Gen1 updates", "bool", "Gen1 firmware is only available via plain HTTP without a checksum", STORAGE],
+  ["gen1_allowed_types", "Allowed Gen1 types", "list", "Comma-separated, e.g. SHSW-1, SHSW-PM", STORAGE],
+  ["allow_downgrade", "Allow downgrades", "bool", "Installing an older stored firmware on Gen2+ devices (device menu and Firmware tab); off by default", STORAGE],
+  ["import_max_mb", "Max. import size (MB)", "number", "Largest file accepted by “Import store” (Settings → Firmware & Storage); 1–2048, default 100", STORAGE],
+  ["log_entry_limit", "Max. log size (entries)", "number", "100–3000", "Logs"],
   ["log_retention_days", "Log retention (days)", "number", "1–365", "Logs"],
-  ["max_parallel_installs", "Parallel installations (max.)", "number", "1–20; further approvals wait", "Advanced"],
+  ["max_parallel_installs", "Max. parallel installations", "number", "1–20; further approvals wait", "Advanced"],
   ["pinned_certificates", "Pinned certificates", "pins", "Host below shelly.cloud + SHA-256 fingerprint; several entries per host allowed", "Advanced"],
 ];
+// The firmware store block (export / import) stands in the card "Firmware & Storage"
+// directly before this option
+const STORE_BEFORE = "import_max_mb";
 let settingsInputs = {};
 
 // The Shellys download the firmware from download_base_url, so it must point to Home
@@ -54,6 +59,7 @@ export function renderSettings() {
   const cards = OPTION_GROUPS.map(group => {
     const form = el("div", null, "form");
     for (const [key, label, type, desc] of OPTION_FIELDS.filter(f => f[4] === group)) {
+      if (key === STORE_BEFORE) form.append(storeBlock());
       const id = "opt-" + key, lab = el("label", label); lab.htmlFor = id;
       let input;
       if (type === "bool") { input = el("input"); input.type = "checkbox"; input.checked = !!o[key]; }
@@ -83,13 +89,25 @@ export function renderSettings() {
     }
     return box("div", "card", box("div", "card-head", el("h2", group)), box("div", "card-body", form));
   });
-  cards.push(storeCard(), passwordsCard());
+  cards.push(passwordsCard());
   const save = el("button", "Save settings", "primary"); save.onclick = saveOptions;
   const dirty = el("span", "Unsaved changes", "unsaved"); dirty.hidden = true;
   const markDirty = () => { dirty.hidden = !Object.keys(optionChanges()).length; };
   const wrap = box("div", "settings-grid", ...cards);
   wrap.addEventListener("input", markDirty); wrap.addEventListener("change", markDirty); wrap.addEventListener("click", () => setTimeout(markDirty));
-  $("settings-form").replaceChildren(wrap, box("div", "form-actions", dirty, save));   // common save area
+  $("settings-form").replaceChildren(wrap, box("div", "form-actions", dirty, save), changelogNote());   // common save area
+}
+// Path of this app's page in Home Assistant (server: slug from the Supervisor); the list
+// of apps until it is known
+const APP_LIST_PAGE = "/config/apps";
+let appPage = APP_LIST_PAGE;
+/** Last line of the tab: where the changelog is – the info card of the app page in
+ *  Home Assistant has the link "Changelog" next to the version. The link opens the
+ *  page in the whole window (the app runs in a frame of Home Assistant). */
+function changelogNote() {
+  const link = el("a", "app page in Home Assistant"); link.href = appPage; link.target = "_top"; link.id = "set-changelog";
+  if (appPage === APP_LIST_PAGE) api("api/settings/app-page").then(r => { appPage = r.url; link.href = appPage; }).catch(() => {});
+  return box("p", "hint set-changelog", "What changed in each version: open the ", link, " and choose “Changelog” next to the version.");
 }
 /** Editable list of host + fingerprint rows. */
 function pinsEditor(pins) {
@@ -158,18 +176,19 @@ function waitForRestart() {
 // folders per generation and firmware ID, manifest.json, SHA256SUMS.txt). The app
 // generates the export password and shows it once; it seals the file (HMAC over the
 // manifest with every SHA-256): the import checks that nothing was changed.
-/** Settings card with the Export and Import buttons. */
-function storeCard() {
+/** Block "Firmware store" of the card "Firmware & Storage" with the Export and Import
+ *  buttons (full width of the card, between the options). */
+function storeBlock() {
   const ex = el("button"); ex.append(icon("exportIcon"), " Export store …"); ex.id = "store-export"; ex.onclick = exportDialog;
   const im = el("button"); im.append(icon("importIcon"), " Import store …"); im.id = "store-import"; im.onclick = importDialog;
-  return box("div", "card", box("div", "card-head", el("h2", "Firmware store")), box("div", "card-body",
+  return box("div", "set-store", el("div", "Firmware store", "set-store-name"),
     el("p", "Move the complete firmware store to another Home Assistant instance: export it as one ZIP file (sealed with a password) and import it there. Device passwords are not exported.", "hint"),
-    box("div", "store-btns", ex, im)));
+    box("div", "store-btns", ex, im));
 }
 /** Settings card that opens the dialog for passwords of several devices. */
 function passwordsCard() {
   const pw = el("button"); pw.append(icon("lock"), " Device passwords …"); pw.id = "set-passwords"; pw.onclick = bulkPasswords;
-  return box("div", "card", box("div", "card-head", el("h2", "Device passwords")), box("div", "card-body",
+  return box("div", "card", box("div", "card-head", el("h2", "Device Passwords")), box("div", "card-body",
     el("p", "Store the existing password or set a new one on several devices in one step (each device is set, verified and stored on its own).", "hint"),
     box("div", "store-btns", pw)));
 }
@@ -181,7 +200,8 @@ async function exportDialog() {
   try { x = await api("api/firmware/export", {}); } catch (e) { message(EXPORT_TITLE, e.message, "error", "exportIcon"); return; }
   const out = el("input"); out.type = "text"; out.readOnly = true; out.value = x.password; out.className = "mono";
   out.setAttribute("aria-label", "Export password");
-  const copy = iconButton("copy", "Copy password", () => copyText(x.password));
+  // Not copyable (browser refuses both ways): the password is selected for a manual copy
+  const copy = iconButton("copy", "Copy password", async () => { if (!await copyText(x.password)) { out.focus(); out.select(); } });
   const ack = el("input"); ack.type = "checkbox";
   const files = `${x.files} (${x.downloads} downloaded, ${x.uploads} uploaded)`;
   modal(EXPORT_TITLE, [
