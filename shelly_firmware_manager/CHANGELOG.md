@@ -2,68 +2,22 @@
 
 ## 3.5.0
 
-Release candidate. Clearer settings, filter chips and one toolbar in all tabs; phone
+Released 2026-11-20. Clearer settings, filter chips and one toolbar in all tabs; phone
 header and device tiles reworked; battery devices are recognised.
 
-Changes in rc4
-
-Changed
-- App configuration in Home Assistant: the changelog hint was removed from the help
-  texts (Home Assistant does not show it); the Settings tab keeps its changelog link.
-- Asleep status: the tooltip shows only how to wake the device and the last contact.
-
-Fixed
-- Logs tab: the entry of a check appears as soon as the check has finished, without
-  switching tabs.
-
-Changes in rc3
-
-Changed
-- Logs: a check entry counts the ignored devices and names them in its details (normal
-  text colour, not as findings); the device search finds them.
-
-Fixed
-- Battery devices (Gen2+) were not recognised: `wakeup_period` is now read from
-  `Sys.GetStatus`, where these devices report it.
-- App configuration in Home Assistant: the changelog hint was not shown; it now ends
-  the help text of "Max. parallel installations".
-
-Changes in rc2
-
 Added
-- Battery devices are recognised while awake (Gen2+ `sys.wakeup_period`, Gen1
-  `sleep_mode`): battery icon after the name in the table and the tile.
+- Battery devices are recognised while awake (Gen2+ `wakeup_period` from
+  `Sys.GetStatus`, Gen1 `sleep_mode`): battery icon after the name (table and tile).
 - Battery device not reachable at a check: grey status "Asleep" instead of Error (not
-  counted under "Errors"), IP dimmed.
-- Settings tab, last line: link to the app page in Home Assistant, where "Changelog"
-  next to the version shows the changes of every version.
-
-Changed
-- Devices waiting for a firmware download started by another check show "Downloading…"
-  (full and single-device checks; still one download per firmware ID and version).
-- App configuration in Home Assistant: same order, names and help texts as the Settings
-  tab; the last help text points to the changelog on the app page.
-- Phones, device tiles: Home Assistant name as head with the "Gen n" label, divider over
-  the full tile width.
-- Phones: "Details" and the feature buttons with a stronger outline, also in dark mode.
-- Firmware tab: "For n devices" with one chevron after the text (down closed, up open)
-  instead of two arrows.
-
-Fixed
-- Firmware tab, filter Unused: a file was listed while a device of the list had no
-  known firmware ID; now no file counts as unused then (tooltip names these devices).
-- Store export: the copy button did not copy the password; if copying is refused, the
-  password field is selected for a manual copy.
-
-Changes in rc1
-
-Added
+  counted under "Errors"), IP dimmed; tooltip with the wake-up hint and last contact.
 - Devices tab: filter "Unprotected" lists devices without password protection set on
   the device.
 - Firmware tab: filters Provided, Uploaded, Intermediate, Gen1 and Unused (no known
-  device of the firmware ID).
+  device of the firmware ID; none while a device's firmware ID is unknown).
 - Firmware tab: free disk space of the store shown next to the number of files and the
   stored size.
+- Settings tab, last line: link to the app page in Home Assistant, where "Changelog"
+  next to the version shows the changes of every version.
 
 Changed
 - All tabs: search and sort as small round icons that open a popup (search field; sort
@@ -75,14 +29,30 @@ Changed
   import size.
 - Settings tab: export/import of the firmware store moved into "Firmware & Storage"; the
   separate card "Firmware store" is gone.
+- App configuration in Home Assistant: same order, names and help texts as the Settings
+  tab.
 - Option names start with "Max." ("Max. log size (entries)", "Max. parallel
   installations"); sizes are always given in MB.
 - Card heads in Title Case and the same bold weight (firmware ID more prominent).
 - Devices filter "Up to date" is now spelled "Up-To-Date" like the status.
+- Devices waiting for a firmware download started by another check show "Downloading…"
+  (full and single-device checks; still one download per firmware ID and version).
+- Logs: a check entry counts the ignored devices and names them in its details (normal
+  text colour, not as findings); the device search finds them.
+- Firmware tab: "For n devices" with one chevron after the text (down closed, up open)
+  instead of two arrows.
 - Phones, header: last check and schedule stacked on the left, "Check now" right on the
   same line (it no longer wraps below them).
-- Phones, device tiles: IP right of the Shelly name (grey, ↗), status and Install right
-  of the firmware; "Details" is an outlined button over the full width.
+- Phones, device tiles: Home Assistant name as head with the "Gen n" label and a divider
+  over the full width; IP right of the Shelly name (grey, ↗).
+- Phones, device tiles: status and Install right of the firmware; "Details" is an
+  outlined button over the full width; stronger outlines, also in dark mode.
+
+Fixed
+- Logs tab: the entry of a check appears as soon as the check has finished, without
+  switching tabs.
+- Store export: the copy button did not copy the password; if copying is refused, the
+  password field is selected for a manual copy.
 
 ## 3.4.1
 

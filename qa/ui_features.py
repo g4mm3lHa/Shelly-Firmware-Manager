@@ -866,8 +866,9 @@ def _sorting_and_downgrade(c):
     expected = f.locator("#dev-chips .chip", has_text="Unprotected").locator(".count").inner_text()
     check(f"{case}: Unprotected filter shows its count", str(shown) == expected, f"{shown} / {expected}")
     f.locator("#dev-chips .chip", has_text="All").click()
-    if width < 700:   # header: pills stacked left, "Check now" right on the same line, not wrapped
-        head = f.evaluate("""() => { const r = e => e.getBoundingClientRect(), m = r(document.getElementById('meta')),
+    if width < 700:   # header: pills stacked left, "Check now" right on the same line, not wrapped;
+        # centred with the title block (embedded: the pills only, the title is hidden)
+        head = f.evaluate("""() => { const r = e => e.getBoundingClientRect(), m = r(document.querySelector('.titlebar>div')),
           s = r(document.getElementById('scan')), p = [...document.querySelectorAll('#meta .meta-pill')].map(r);
           return {right: s.left >= m.right, mid: Math.abs((s.top + s.height / 2) - (m.top + m.height / 2)),
             stacked: p.length === 2 && p[1].top >= p[0].bottom, lines: Math.round(s.height)}; }""")
