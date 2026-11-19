@@ -63,14 +63,6 @@ async def test_restart_during_install_is_unconfirmed(net):
     assert m.progress is None and m.activity == {}
 
 
-async def test_ui_prefs_order_validated(mgr):
-    """Column order is stored deduplicated; invalid names are refused."""
-    mgr.set_ui({"devices": {"sort": ["ip", "desc"], "hidden": [], "order": ["ip", "gen", "ip"]}})
-    assert mgr.ui["devices"]["order"] == ["ip", "gen"]
-    with pytest.raises(ValueError):
-        mgr.set_ui({"devices": {"sort": ["ip", "desc"], "hidden": [], "order": ["<b>"]}})
-
-
 def test_no_shared_password_fallback(tmp_path):
     """Credentials only come from per-device entries."""
     creds = Credentials(tmp_path / "c.json")

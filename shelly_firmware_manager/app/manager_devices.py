@@ -250,6 +250,7 @@ class DeviceSettings(FirmwareStore):
         confirm: object = False,
         acknowledged: object = False,
         user: str | None = None,
+        keep: object = True,
     ) -> dict[str, Any]:
         """Password dialog. Modes:
 
@@ -260,7 +261,9 @@ class DeviceSettings(FirmwareStore):
         - forget: delete the locally stored password only (the device is untouched)
 
         Every mode needs confirm=True, enable/change also acknowledged=True (the
-        user stored the new password). The protection status is read live from
+        user stored the new password). keep=False (enable/change only): the new
+        password is verified on the device but not stored in this app – a stored
+        password is deleted once the device confirms the new one. The protection status is read live from
         the device (/shelly) – stored credentials never count as protection.
         Device writes are verified afterwards; local credentials change only after
         a verified success, so an ambiguous answer never loses the recovery
@@ -271,6 +274,8 @@ class DeviceSettings(FirmwareStore):
             raise ValueError("Confirmation required")
         if mode in ("enable", "change") and acknowledged is not True:
             raise ValueError("Confirm that the new password is stored securely")
+        if not isinstance(keep, bool) or (not keep and mode not in ("enable", "change")):
+            raise ValueError("Invalid storage choice")
         dev = self._settings_device(device_id)
         name = dev.get("name")
         if mode == "forget":
@@ -281,7 +286,7 @@ class DeviceSettings(FirmwareStore):
             return {"protected": dev.get("auth_enabled")}
         gen, origin, realm = dev["gen"], dev["origin"], dev.get("shelly_id")
         try:
-            result = await self._password_action(device_id, dev, mode, password, gen, origin, realm)
+            result = await self._password_action(device_id, dev, mode, password, gen, origin, realm, keep)
         except (TimeoutError, ShellyError, aiohttp.ClientError, ValueError) as err:
             error = error_text(err, 300) or type(err).__name__
             if not isinstance(err, ValueError):  # input errors never reached the device
@@ -290,8 +295,12 @@ class DeviceSettings(FirmwareStore):
         finally:
             self.save()
         action = {"store": "stored", "enable": "enabled", "change": "changed", "remove": "removed"}[mode]
-        log.info("%s: password %s by %s", name, action, user)
-        self.events.add("password", device=name, action=action, user=user)
+        if keep:
+            log.info("%s: password %s by %s", name, action, user)
+            self.events.add("password", device=name, action=action, user=user)
+        else:
+            log.info("%s: password %s by %s, not stored in this app", name, action, user)
+            self.events.add("password", device=name, action=action, user=user, stored=False)
         return result
 
     async def _password_action(
@@ -303,6 +312,7 @@ class DeviceSettings(FirmwareStore):
         gen: int,
         origin: str,
         realm: str | None,
+        keep: bool = True,
     ) -> dict[str, Any]:
         """Device part of set_device_password (see there); raises on any failure."""
         protected = await shelly.protection_status(self.session, origin)
@@ -347,7 +357,11 @@ class DeviceSettings(FirmwareStore):
                 return {"protected": False}
             raise ShellyError(self._unverified("Password protection was not confirmed as removed", answer))
         if protected is True and new is not None and await self._auth_works(dev, new):
-            self.credentials.store(device_id, new)  # replaces the old credential only now
+            # Replaces (or, if not kept, deletes) the old credential only now
+            if keep:
+                self.credentials.store(device_id, new)
+            else:
+                self.credentials.remove(device_id)
             return {"protected": True}
         if mode == "change" and await self._auth_works(dev, current):
             raise ShellyError(

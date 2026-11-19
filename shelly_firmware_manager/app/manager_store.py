@@ -45,6 +45,8 @@ MAX_MANIFEST = 64 * 1024  # upper limit for a manifest.json read from an uploade
 
 STABLE_VERSION_RE = re.compile(r"^\d{1,4}\.\d{1,4}\.\d{1,4}$")  # stable Gen2+ versions only
 
+DOWNGRADE_OFF = "Downgrades are off – enable “Allow downgrades” in Settings"  # option allow_downgrade is off
+
 
 class FirmwareStore(ManagerCore):
     """Firmware files of the store: housekeeping, lookup, deletion, downgrades, uploads."""
@@ -377,6 +379,8 @@ class FirmwareStore(ManagerCore):
         dev = self.devices[device_id]
         if (dev.get("gen") or 1) < 2:
             return "Downgrades are not offered for Gen1 devices"
+        if not self.allow_downgrade:
+            return DOWNGRADE_OFF
         if self.checking:
             return "Check in progress – please try again afterwards"
         if self.download_base_issue:

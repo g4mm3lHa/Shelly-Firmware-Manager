@@ -23,7 +23,6 @@ device): the UI shows it while polling, nothing of it is persisted.
 import asyncio
 import json
 import logging
-import re
 import time
 from collections.abc import Callable
 from typing import Any
@@ -98,14 +97,6 @@ SOURCE_DOWNLOAD = "download"  # downloaded from the manufacturer by a check
 
 SOURCE_UPLOAD = "upload"  # uploaded manually in the Firmware tab
 
-UI_TABLES = ("devices",)  # tables whose sort order/columns are stored
-
-UI_VERSION = 3  # table settings format since 3.0 (older formats are dropped, not migrated)
-
-COLUMN_RE = re.compile(r"^[a-z_]{1,32}$")
-
-MAX_COLUMNS = 30
-
 # download_base_url problems that block installations
 DOWNLOAD_BASE_MESSAGES = {
     "missing": "Installations are disabled: set the download base URL (LAN IP address of Home "
@@ -145,6 +136,7 @@ class ManagerCore:
         self.restrict_downloads = bool(options["restrict_downloads_to_devices"])
         self.gen1_allowed = frozenset(options.get("gen1_allowed_types", []))
         self.gen1_enabled = bool(options["gen1_updates_enabled"])
+        self.allow_downgrade = options.get("allow_downgrade") is True  # optional, missing = off
         self.session = session
         self.token = token
         self.pins = pins  # certificate pins for shelly.cloud
@@ -155,7 +147,6 @@ class ManagerCore:
         self.devices: dict[str, Device] = {}  # HA device ID -> state
         self.downloads: dict[str, dict[str, Any]] = {}  # file name -> {"served": {ip: n}, "rejected": {ip, ...}}
         self.firmware: dict[str, FirmwareMeta] = {}  # file name -> metadata of the stored firmware
-        self.ui: dict[str, Any] = {}  # table settings (sort order, hidden columns) for all users
         self.activity: dict[str, str] = {}  # HA device ID -> ACTIVITY_* while a check runs
         self.progress: dict[str, Any] | None = None  # running full check: {"kind", "total", "done", "errors", "phase"}
         self.device_checks: dict[str, str] = {}  # HA device ID -> "queued"/"running" (single-device checks)
@@ -209,8 +200,6 @@ class ManagerCore:
             self.devices = data.get("devices") or {}
             self.last_scan = data.get("last_scan")
             self.firmware = data["firmware"] if isinstance(data.get("firmware"), dict) else {}
-            if isinstance(data.get("ui"), dict) and data.get("ui_version") == UI_VERSION:
-                self.ui = data["ui"]
             self.schedule = data["schedule"] if isinstance(data.get("schedule"), dict) else {}
             confirmed = data.get("download_base_confirmed")
             self.download_base_confirmed = confirmed if isinstance(confirmed, str) else None
@@ -244,8 +233,6 @@ class ManagerCore:
             "devices": self.devices,
             "last_scan": self.last_scan,
             "firmware": self.firmware,
-            "ui": self.ui,
-            "ui_version": UI_VERSION,
             "schedule": self.schedule,
             "download_base_confirmed": self.download_base_confirmed,
         }
@@ -259,34 +246,6 @@ class ManagerCore:
             return False
         self.storage_error = None
         return True
-
-    def set_ui(self, prefs: dict[str, Any]) -> None:
-        """Store table settings shared by all users. Raises ValueError on bad input."""
-        clean: dict[str, Any] = {}
-        for table in UI_TABLES:
-            entry = prefs.get(table)
-            if entry is None:
-                continue
-            sort, hidden, order = (
-                (entry.get("sort"), entry.get("hidden"), entry.get("order", []))
-                if isinstance(entry, dict)
-                else (None, None, None)
-            )
-            valid_sort = (
-                isinstance(sort, list)
-                and len(sort) == 2
-                and isinstance(sort[0], str)
-                and COLUMN_RE.match(sort[0])
-                and sort[1] in ("asc", "desc")
-            )
-            valid_lists = all(isinstance(x, list) and len(x) <= MAX_COLUMNS for x in (hidden, order))
-            if not valid_sort or not valid_lists or hidden is None or order is None:
-                raise ValueError(f"Invalid table settings for {table}")
-            if not all(isinstance(c, str) and COLUMN_RE.match(c) for c in [*hidden, *order]):
-                raise ValueError(f"Invalid column name for {table}")
-            clean[table] = {"sort": sort, "hidden": sorted(set(hidden)), "order": list(dict.fromkeys(order))}
-        self.ui = clean
-        self.save()
 
     # -------------------------------------------------------------------------------------- Home Assistant
 

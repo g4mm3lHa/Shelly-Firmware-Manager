@@ -23,6 +23,7 @@
 <section id="view-devices">
 <div class="toolbar">
 <input id="dev-search" type="search" placeholder="Search name, IP or model" aria-label="Search devices">
+<div id="dev-sort"></div>
 <div class="chips" id="dev-chips"></div>
 <details class="dropdown" id="cols"><summary>Columns ▾</summary><div class="menu-panel" id="cols-devices"></div></details>
 </div>
@@ -32,8 +33,9 @@
 <section id="view-firmware" hidden>
 <div class="toolbar">
 <input id="fw-search" type="search" placeholder="Search firmware ID, version or device" aria-label="Search firmware">
+<div id="fw-sort"></div>
 <span class="meta" id="fw-summary"></span>
-<button class="icon" id="fw-info" aria-label="Storage" data-tip="Firmware is never deleted automatically – delete files here when they are no longer needed. Older versions allow a downgrade of Gen2+ devices (device menu “Downgrade”). The store comes first: a check provides the next higher stored version of a device (downloads and uploads, after a SHA-256 check) and asks the Shelly update server only if nothing newer is stored."></button>
+<button class="icon" id="fw-info" aria-label="Storage" data-tip="Firmware is never deleted automatically – delete files here when they are no longer needed. Older versions allow a downgrade of Gen2+ devices (device menu “Downgrade” or the downgrade icon of a version) once “Allow downgrades” is switched on in Settings. The store comes first: a check provides the next higher stored version of a device (downloads and uploads, after a SHA-256 check) and asks the Shelly update server only if nothing newer is stored."></button>
 <button id="fw-upload">Upload firmware</button>
 </div>
 <div id="fw-cards"></div>

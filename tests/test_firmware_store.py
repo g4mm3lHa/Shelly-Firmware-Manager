@@ -148,6 +148,20 @@ async def test_no_downgrade_for_gen1(mgr, net):
     assert "Gen1" in mgr.downgrade_blocker(A)
 
 
+async def test_downgrade_refused_while_the_option_is_off(mgr, net, quick_install):
+    """allow_downgrade off (missing option = off): blocked with the Settings hint and
+    refused by install itself; the list of stored versions stays readable."""
+    await mgr.scan()
+    _name, sha = store(mgr, "Plus1", "1.4.0")
+    mgr.allow_downgrade = False
+    assert mgr.downgrade_blocker(B) == manager_store.DOWNGRADE_OFF
+    assert [v["version"] for v in mgr.downgrade_versions(B)] == ["1.4.0"]
+    assert await mgr.install(B, sha, approved_by="u", downgrade=True) is False
+    assert mgr.devices[B]["version"] == "1.5.0"
+    off = manager.Manager({k: v for k, v in OPTIONS.items() if k != "allow_downgrade"}, session=None, token="t")
+    assert off.allow_downgrade is False and off.public_state()["allow_downgrade"] is False
+
+
 async def test_downgrade_blocked_during_check_and_without_download_url(mgr, net):
     await mgr.scan()
     store(mgr, "Plus1", "1.4.0")

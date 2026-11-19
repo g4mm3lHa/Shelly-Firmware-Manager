@@ -1,6 +1,6 @@
 // Entry module: rendering, tabs and polling. Importing it loads all other modules.
 import {$, api, attachTip, closeModal, el, fmt, getState, hideTip, message, modal, ui} from "./core.js";
-import {adoptPrefs, buildChooser, closeRowMenu, renderDevices, syncChooser} from "./devices.js";
+import {buildChooser, closeRowMenu, loadPrefs, renderDevices, syncChooser} from "./devices.js";
 import {renderFirmware} from "./firmware.js";
 import {mobileQuery, renderLogs} from "./logs.js";
 import {renderSettings} from "./app-settings.js";
@@ -105,10 +105,6 @@ export async function load(force) {
   inflight = true;
   try {
     const s = await getState();
-    if (!ui.prefsLoaded) {   // stored table settings are adopted once; afterwards the page owns them
-      if (s.ui && s.ui.devices) adoptPrefs(s.ui.devices);
-      ui.prefsLoaded = true; syncChooser();
-    }
     if (ui.view === "firmware") { const f = await api("api/firmware"); ui.firmware = f.firmware; ui.firmwareTotal = f.total_size || 0; }
     if (ui.view === "logs" && (force || Date.now() - ui.logsLoaded > 30000)) { ui.logs = (await api("api/logs")).entries; ui.logsLoaded = Date.now(); }
     ui.state = s;
@@ -119,5 +115,5 @@ export async function load(force) {
     if (queued) { const f = queued === true; queued = false; load(f); } else schedule();
   }
 }
-buildChooser();
+loadPrefs(); buildChooser(); syncChooser();
 load();

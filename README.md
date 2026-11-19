@@ -1,4 +1,4 @@
-# Shelly Firmware Manager 3.2.1
+# Shelly Firmware Manager 3.3.0
 
 Home Assistant app that keeps your Shelly devices (Gen1 to Gen4) up to date – locally
 and under your control. It finds all Shellys of the Shelly integration, checks for new
@@ -9,11 +9,12 @@ in your network. Nothing is installed without your approval.
 - Every installation is approved manually and verified afterwards.
 - Stored firmware comes first: a check provides the next higher stored version before
   the Shelly update server is asked.
-- Older firmware versions stay stored and allow a downgrade (Gen2+).
+- Older firmware versions stay stored and allow a downgrade (Gen2+, once switched on).
 - Device settings such as name, NTP server, power-on action, eco mode, password
   protection and the websocket debug log can be edited directly.
 
-Requires Home Assistant 2026.10 or newer.
+Requires Home Assistant 2026.10 or newer and the Home Assistant Shelly integration (the
+app works with the devices it knows). Only original Shelly firmware is supported for now.
 
 - **User documentation:** [`shelly_firmware_manager/DOCS.md`](shelly_firmware_manager/DOCS.md)
   (also the Documentation tab of the app page in Home Assistant)

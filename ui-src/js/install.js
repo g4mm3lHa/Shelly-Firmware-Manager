@@ -96,7 +96,7 @@ export function openInstall(devs) {
 // ---------------------------------------------------------------- Downgrade
 // Flow: list of stored older versions -> installation dialog for the selected
 // version -> second confirmation with acknowledgment (as for the device password).
-const DOWNGRADE_WARNING = "A downgrade installs an older firmware. The device may refuse it, settings added by newer versions may be lost, and some devices may need a factory reset afterwards. Install only if you need this version.";
+export const DOWNGRADE_WARNING = "A downgrade installs an older firmware. The device may refuse it, settings added by newer versions may be lost, and some devices may need a factory reset afterwards. Install only if you need this version.";
 export const UPLOAD_HINT = "An uploaded file does not come from the Shelly update server; its origin is only as trustworthy as its source.";
 /** Label of a stored version for lists and dialogs. */
 export const fwSource = v => v.source === "upload" ? (v.sha_checked ? "Uploaded (SHA-256 checked)" : "Uploaded (SHA-256 not checked)") : "Downloaded from Shelly";
@@ -133,8 +133,11 @@ function downgradeInstall(d, v) {
   content.push(el("p", "The device restarts during the installation.", "hint"));
   modal("Downgrade?", content, [{text: "Cancel"}, {text: "Continue", kind: "primary", action: () => downgradeConfirm(d, v)}]);
 }
-/** Step 3: explicit confirmation; the red button needs the acknowledgment. */
-function downgradeConfirm(d, v) {
+/** Hint while the option "Allow downgrades" is off (row menu, Firmware tab). */
+export const DOWNGRADE_OFF = "Downgrades are off – enable “Allow downgrades” in Settings";
+/** Step 3: explicit confirmation; the red button needs the acknowledgment
+ *  (also the last step of a downgrade started in the Firmware tab). */
+export function downgradeConfirm(d, v) {
   const title = "Downgrade?", ack = el("input"); ack.type = "checkbox";
   modal(title, [el("p", `Install ${v.version} on ${d.name} (installed: ${d.version})?`), el("div", DOWNGRADE_WARNING, "warnbox"),
     box("label", "check", ack, " I understand that the downgrade may fail or reset settings")],

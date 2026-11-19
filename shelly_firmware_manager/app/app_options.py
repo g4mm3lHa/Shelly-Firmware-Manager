@@ -19,7 +19,7 @@ INT_RANGES = {
     "log_retention_days": (1, 365),
     "log_entry_limit": (100, 3000),
 }
-BOOLS = ("restrict_downloads_to_devices", "gen1_updates_enabled")
+BOOLS = ("restrict_downloads_to_devices", "gen1_updates_enabled", "allow_downgrade")
 DEFAULTS = {
     "check_interval_days": 7,
     "check_time": "02:45",
@@ -34,6 +34,7 @@ KEYS = frozenset({*INT_RANGES, *BOOLS, *DEFAULTS, "download_base_url", "gen1_all
 # is optional without default; this value only counts after an explicit confirmation.
 LEGACY_DOWNLOAD_BASE = "http://192.168.178.50:8098"
 OPTIONAL = ("download_base_url",)  # options that can be removed (empty input)
+# allow_downgrade has no default either: missing = off (also for existing installations)
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 GEN1_TYPE_RE = re.compile(r"^[A-Za-z0-9-]{1,32}$")
 MAX_LIST = 100

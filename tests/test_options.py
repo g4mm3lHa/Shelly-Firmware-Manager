@@ -34,6 +34,16 @@ def test_removed_options_never_propagate():
     assert "shelly_password" not in new
 
 
+def test_allow_downgrade_is_an_optional_switch():
+    """allow_downgrade: no default (missing = off), only true/false accepted."""
+    without = {k: v for k, v in OPTIONS.items() if k != "allow_downgrade"}
+    assert "allow_downgrade" not in app_options.public_view(without)
+    with pytest.raises(ValueError):
+        app_options.merge(without, {"allow_downgrade": "yes"})
+    new, changed = app_options.merge(without, {"allow_downgrade": True})
+    assert new["allow_downgrade"] is True and changed == ["allow_downgrade"]
+
+
 LEGACY = app_options.LEGACY_DOWNLOAD_BASE
 
 

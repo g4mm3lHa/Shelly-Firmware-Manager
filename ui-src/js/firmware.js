@@ -1,11 +1,36 @@
 // Firmware tab: stored files, changelog, Install button per device, delete and upload.
 import {
-  $, api, attachTip, box, closeModal, collator, copyText, el, fmt, icon, iconButton, keptDetails, mb, message, modal,
-  shaRow, toast, ui, uploadFile, valueList,
+  $, api, attachTip, box, closeModal, collator, copyText, el, fmt, icon, iconButton, keptDetails, loadLocal, mb, message,
+  modal, saveLocal, section, shaRow, sortControl, toast, ui, uploadFile, valueList,
 } from "./core.js";
 import {installable, installBlocker} from "./devices.js";
-import {changelogNodes, fwSource, openInstall, UPLOAD_HINT} from "./install.js";
+import {changelogNodes, DOWNGRADE_OFF, DOWNGRADE_WARNING, downgradeConfirm, fwSource, openInstall, UPLOAD_HINT} from "./install.js";
 import {render} from "./main.js";
+
+// ---------------------------------------------------------------- Sorting
+// The cards are sorted (versions inside a card stay newest first); the order is kept
+// per end device. Column heads of the cards sort the cards as well.
+const FW_SORT_FIELDS = [["type", "Firmware ID"], ["version", "Newest version"], ["size", "Size"], ["stored", "Stored"]];
+const FW_SORT_HEADS = {Version: "version", Size: "size", Stored: "stored"};   // column title -> sort field
+let fwSort = ["type", "asc"];
+{
+  const stored = loadLocal("firmware");
+  if (Array.isArray(stored) && FW_SORT_FIELDS.some(f => f[0] === stored[0])) fwSort = [stored[0], stored[1] === "desc" ? "desc" : "asc"];
+}
+/** Change the order of the cards (toolbar control and column heads). */
+function setFirmwareSort(value) { fwSort = value; saveLocal("firmware", fwSort); render(true); }
+const fwSortControl = sortControl(FW_SORT_FIELDS, setFirmwareSort);
+$("fw-sort").replaceWith(fwSortControl.node);
+/** Sort value of a card (its files, newest first): newest version, total size, latest storage date. */
+const CARD_VALUES = {type: (type, files) => type, version: (type, files) => files[0].version || "",
+  size: (type, files) => files.reduce((sum, f) => sum + (f.size || 0), 0),
+  stored: (type, files) => Math.max(...files.map(f => f.downloaded || 0))};
+/** Compare two cards [type, files] by the chosen field; ties by firmware ID. */
+function compareCards([ta, fa], [tb, fb]) {
+  const value = CARD_VALUES[fwSort[0]], x = value(ta, fa), y = value(tb, fb);
+  const c = typeof x === "number" ? x - y : collator.compare(String(x), String(y));
+  return (fwSort[1] === "desc" ? -c : c) || collator.compare(ta, tb);
+}
 
 // ---------------------------------------------------------------- Firmware
 /** Firmware tab: one card per firmware ID, versions as rows, newest first. */
@@ -16,12 +41,13 @@ export function renderFirmware() {
   $("fw-summary").textContent = `${ui.firmware.length} file${ui.firmware.length === 1 ? "" : "s"} · ${mb(total)} stored`;
   const groups = new Map();
   for (const f of list) { if (!groups.has(f.type)) groups.set(f.type, []); groups.get(f.type).push(f); }
-  const cards = [...groups.keys()].sort(collator.compare).map(type => {
-    const files = groups.get(type).sort((a, b) => collator.compare(b.version || "", a.version || ""));
+  fwSortControl.set(fwSort);
+  const sorted = [...groups].map(([type, files]) => [type, files.sort((a, b) => collator.compare(b.version || "", a.version || ""))]);
+  const cards = sorted.sort(compareCards).map(([type, files]) => {
     const head = box("div", "card-head", el("h2", type), el("span", `Gen ${files[0].gen ?? "?"}`, "tag"),
       files.some(f => f.source !== "upload" && !f.https) ? el("span", "HTTP only", "tag warn") : null);
     const card = box("div", "card", head, firmwareHead());
-    files.forEach((f, i) => card.append(firmwareRow(f, i === 0)));
+    files.forEach((f, i) => card.append(firmwareRow(f, i === 0, i > 0 && f.gen >= 2)));
     return card;
   });
   if (!cards.length) cards.push(box("div", "card", el("div", ui.firmware.length ? "No firmware matches." : "No firmware stored.", "empty")));
@@ -29,7 +55,18 @@ export function renderFirmware() {
 }
 /** Column titles over the version rows (wide screens; phones label the values in the tile). */
 const FW_COLUMNS = ["Version", "Size", "Stored", "SHA-256", "Devices", ""];
-const firmwareHead = () => box("div", "fw-head", ...FW_COLUMNS.map(t => el("span", t)));
+/** Column titles; Version, Size and Stored sort the cards (click, second click reverses). */
+function firmwareHead() {
+  return box("div", "fw-head", ...FW_COLUMNS.map(t => {
+    const key = FW_SORT_HEADS[t], head = el("span", t);
+    if (!key) return head;
+    head.className = "sortable"; head.tabIndex = 0; head.role = "button"; head.title = "Click to sort";
+    if (fwSort[0] === key) head.dataset.dir = fwSort[1];
+    head.onclick = () => setFirmwareSort([key, fwSort[0] === key && fwSort[1] === "asc" ? "desc" : "asc"]);
+    head.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); head.onclick(); } };
+    return head;
+  }));
+}
 /** Text of the "intermediate" label (tooltip without action, also on touch). */
 const INTERMEDIATE_TIP = "Intermediate version: required step before newer firmware can be installed safely";
 /** Device a firmware is provided for, with an "Install" button that opens the
@@ -49,8 +86,9 @@ async function openFirmwareChangelog(f) {
   try { modal(title, changelogNodes(await api(`api/firmware/${encodeURIComponent(f.name)}/changelog`)), undefined, "changelog"); }
   catch (e) { message(title, e.message, "error", "changelog"); }
 }
-/** One version row with size, date, SHA (copy), devices and icon actions. */
-function firmwareRow(f, latest) {
+/** One version row with size, date, SHA (copy), devices and icon actions.
+ *  older: an older Gen2+ version (gets the downgrade icon). */
+function firmwareRow(f, latest, older) {
   const sha = box("span", "nowrap fw-sha", el("span", (f.sha256 || "").slice(0, 12) + "…", "mono"),
     iconButton("copy", "Copy SHA-256", async () => { await copyText(f.sha256 || ""); }));
   attachTip(sha, () => f.sha256 || "", true);
@@ -75,8 +113,40 @@ function firmwareRow(f, latest) {
   const size = el("span", mb(f.size || 0), "nowrap fw-size"), date = el("span", fmt(f.downloaded), "nowrap sub fw-date");
   size.dataset.label = "Size"; date.dataset.label = "Stored"; sha.dataset.label = "SHA-256";
   return box("div", "fw-row", box("div", "fw-ver", el("span", f.version, "name"), latest ? el("span", "latest", "tag primary") : null, uploaded, step),
-    size, date, sha, devices, box("div", "actions", log, dl, del));
+    size, date, sha, devices, box("div", "actions", older ? downgradeButton(f) : null, log, dl, del));
 }
+// ---------------------------------------------------------------- Downgrade from the Firmware tab
+const STABLE = /^\d{1,4}\.\d{1,4}\.\d{1,4}$/;   // downgrades only to stable versions
+/** Gen2+ devices of the file's firmware ID with a newer installed version. */
+const downgradeTargets = f => STABLE.test(f.version || "") ? (ui.state?.devices || []).filter(d =>
+  d.gen >= 2 && d.type === f.type && d.version && collator.compare(d.version, f.version) > 0) : [];
+/** Downgrade icon of an older version; disabled (reason as title, also on touch)
+ *  while the option is off or no device has a newer version installed. */
+function downgradeButton(f) {
+  const reason = !ui.state?.allow_downgrade ? DOWNGRADE_OFF : !downgradeTargets(f).length
+    ? "No device of this firmware ID has a newer version installed" : null;
+  const b = iconButton("history", reason || "Downgrade", () => openFirmwareDowngrade(f));
+  b.disabled = !!reason; b.setAttribute("aria-label", reason ? `Downgrade to ${f.version}: ${reason}` : `Downgrade to ${f.type} ${f.version}`);
+  return b;
+}
+/** Dialog: the stored version, the devices that can go back to it, the warning;
+ *  Continue leads to the known second confirmation of a downgrade. */
+function openFirmwareDowngrade(f) {
+  const targets = downgradeTargets(f), list = el("div", null, "modes");
+  targets.forEach((d, i) => {
+    const radio = el("input"); radio.type = "radio"; radio.name = "dg-device"; radio.value = String(i); radio.checked = i === 0;
+    list.append(box("label", "check", radio, " ", el("span", d.name, "name"), el("span", ` · installed ${d.version}`, "sub")));
+  });
+  modal(`Downgrade to ${f.type} ${f.version}`, [
+    valueList([["Firmware ID", f.type], ["Version", f.version], ["Size", mb(f.size || 0)], ["Stored", fmt(f.downloaded)],
+      ["Source", fwSource(f), "src"], shaRow(f.sha256)]),
+    section("Device (newer version installed)", list), el("div", DOWNGRADE_WARNING, "warnbox"),
+    f.source === "upload" ? el("div", UPLOAD_HINT, "warnbox") : null].filter(Boolean),
+  [{text: "Cancel"}, {text: "Continue", kind: "primary", action: () => {
+    downgradeConfirm(targets[Number(list.querySelector("input:checked").value)], f);
+  }}]);
+}
+
 /** Delete a stored firmware: dialog, then a second confirmation with
  *  acknowledgment (as for the device password). Nothing is deleted automatically. */
 function deleteFirmware(f) {
@@ -84,8 +154,9 @@ function deleteFirmware(f) {
   // A file provided to devices may be deleted: they lose the provided update
   const held = (f.devices || []).map(d => d.name);
   modal(title, [details, held.length ? el("div", `Provided for ${held.join(", ")}: ${held.length === 1 ? "this device loses" : "these devices lose"} the provided update and ${held.length === 1 ? "is" : "are"} shown as "Available" until ${held.length === 1 ? "it is" : "they are"} checked again.`, "warnbox") : null,
-    el("p", f.source === "upload" ? "An uploaded file can only be restored by uploading it again." :
-    "Only versions that Shelly still offers can be downloaded again; older versions are gone for good.", "hint")].filter(Boolean),
+    // What cannot be restored: red warning box
+    el("div", f.source === "upload" ? "An uploaded file can only be restored by uploading it again." :
+    "Only versions that Shelly still offers can be downloaded again; older versions are gone for good.", "warnbox danger")].filter(Boolean),
   [{text: "Cancel"}, {text: "Continue", kind: "danger", action: () => {
     const ack = el("input"); ack.type = "checkbox";
     modal(title, [el("p", `Delete ${f.type} ${f.version} permanently?`), box("label", "check", ack, " I understand that this file cannot be restored by the app")],

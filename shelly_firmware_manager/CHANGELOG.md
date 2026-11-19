@@ -1,5 +1,34 @@
 # Changelog
 
+## 3.3.0
+
+Released 2026-11-19. Optional downgrades, sorting per browser in both tabs, password
+changes without storing, status icons in messages.
+
+Added
+- New option "Allow downgrades" (Settings tab, Firmware & storage): off by default, also
+  after an update; while off, downgrades are refused and shown greyed out with a hint.
+- Firmware tab: downgrade icon on older Gen2+ versions; choose a device with a newer
+  version installed, then the usual second confirmation.
+- Sort select with direction arrow in the Devices and Firmware tab (desktop and phone);
+  column titles sort too. Firmware cards: by ID, newest version, size or date.
+- Password dialog: "Store in this app" for enabling or changing the protection; off =
+  verified only, a stored password is deleted once the device confirms the new one.
+
+Changed
+- Sort order, hidden and moved columns are kept per browser instead of for all users;
+  the stored shared settings are dropped (start: device name ascending).
+- Messages show a round status icon: success, warning or error; neutral notes ("Nothing
+  changed.") without icon. Password results remind to update the HA Shelly integration.
+- Password dialog: storage note as coloured box (Gen2+ yellow, Gen1 plain text or not
+  stored red), including the reminder for the HA Shelly integration.
+- Delete firmware dialog: the note that a file may not be restorable is a red box.
+- Phones: warning toast as wide as its text; more space above the content of popups.
+
+Fixed
+- Logs (phone): no second arrow next to the user name of an opened entry, the name no
+  longer moves; entries whose details only repeat the title do not expand.
+
 ## 3.2.1
 
 Released 2026-11-17. Power-on action of Gen1 dimmers, Duo and Vintage can be changed

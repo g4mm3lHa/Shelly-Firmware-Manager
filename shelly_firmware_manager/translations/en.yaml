@@ -18,6 +18,10 @@ configuration:
     name: Enable Gen1 updates
     description: >-
       Gen1 firmware is offered by Shelly only via plain HTTP without a checksum. Switch off to skip Gen1 devices.
+  allow_downgrade:
+    name: Allow downgrades
+    description: >-
+      Allows installing an older stored firmware on Gen2+ devices (device menu and Firmware tab). Off by default.
   log_retention_days:
     name: Log retention (days)
   log_entry_limit:

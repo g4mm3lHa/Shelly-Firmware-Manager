@@ -12,6 +12,7 @@ export const OPTION_FIELDS = [
   ["restrict_downloads_to_devices", "Serve downloads only to known Shellys", "bool", "Switch off if downloads are rejected from 172.30.x.x", "Firmware & storage"],
   ["gen1_updates_enabled", "Enable Gen1 updates", "bool", "Gen1 firmware is only available via plain HTTP without a checksum", "Firmware & storage"],
   ["gen1_allowed_types", "Allowed Gen1 types", "list", "Comma-separated, e.g. SHSW-1, SHSW-PM", "Firmware & storage"],
+  ["allow_downgrade", "Allow downgrades", "bool", "Installing an older stored firmware on Gen2+ devices (device menu and Firmware tab); off by default", "Firmware & storage"],
   ["log_entry_limit", "Log size (max. entries)", "number", "100–3000", "Logs"],
   ["log_retention_days", "Log retention (days)", "number", "1–365", "Logs"],
   ["max_parallel_installs", "Parallel installations (max.)", "number", "1–20; further approvals wait", "Advanced"],
@@ -111,7 +112,9 @@ function optionChanges() {
     else if (type === "list") value = input.value.split(",").map(s => s.trim()).filter(Boolean).sort();
     else if (type === "pins") value = input.values();
     else value = input.value.trim();
-    const old = type === "list" ? [...(o[key] || [])].sort() : type === "pins" ? o[key] || [] : type === "text" ? o[key] ?? "" : o[key];
+    // A missing optional switch (allow_downgrade) counts as off
+    const old = type === "list" ? [...(o[key] || [])].sort() : type === "pins" ? o[key] || [] : type === "text" ? o[key] ?? "" :
+      type === "bool" ? !!o[key] : o[key];
     if (JSON.stringify(value) !== JSON.stringify(old)) changes[key] = value;
   }
   return changes;

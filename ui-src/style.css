@@ -110,7 +110,11 @@ th,td{padding:8px 10px;text-align:left;vertical-align:middle;
 tr:last-child>td{border-bottom:0}
 tbody tr:hover>td{background:color-mix(in srgb,var(--primary-text-color) 4%,transparent)}
 th{color:var(--secondary-text-color);font-weight:500;font-size:.85em;white-space:nowrap;user-select:none}
-th.sortable{cursor:pointer}th.sortable:hover{color:var(--primary-text-color)}
+th.sortable,.fw-head>.sortable{cursor:pointer}th.sortable:hover,.fw-head>.sortable:hover{color:var(--primary-text-color)}
+.fw-head>[data-dir=asc]::after{content:" ▲";font-size:.75em}.fw-head>[data-dir=desc]::after{content:" ▼";font-size:.75em}
+/* Sort control of the toolbars (Devices, Firmware): select + direction button */
+.sortctl{display:flex;align-items:center;gap:4px}
+.sortctl select{min-width:0}
 th[draggable=true]{cursor:grab}th.drop{box-shadow:inset 2px 0 0 var(--primary-color)}
 tr.ignored>td{opacity:.7}
 .shelly-name{display:flex;align-items:center;gap:2px;min-width:0}
@@ -201,7 +205,7 @@ button.pill{cursor:pointer}
 
 /* Firmware cards: column titles (.fw-head, wide screens) and one row per version; both
    share the grid, the icon column has a fixed width so the columns line up */
-.fw-row,.fw-head{display:grid;grid-template-columns:minmax(120px,1.2fr) 80px 130px minmax(150px,1fr) minmax(130px,1fr) 82px;
+.fw-row,.fw-head{display:grid;grid-template-columns:minmax(120px,1.2fr) 80px 130px minmax(150px,1fr) minmax(130px,1fr) 112px;
   gap:8px 12px;align-items:center;padding:10px 16px;border-bottom:1px solid color-mix(in srgb,var(--primary-text-color) 12%,transparent)}
 .fw-head{padding-top:8px;padding-bottom:8px;color:var(--secondary-text-color);font-weight:500;font-size:.85em;white-space:nowrap}
 .fw-row:last-child{border-bottom:0}
@@ -244,6 +248,7 @@ button.pill{cursor:pointer}
 .log-m:last-child{border-bottom:0}
 .log-head{display:flex;align-items:center;gap:6px}
 .log-m summary{cursor:pointer;list-style:none;margin-top:4px;color:var(--primary-text-color)}
+.log-sum{margin-top:4px}   /* summary without details (nothing to expand) */
 .log-m summary::-webkit-details-marker{display:none}
 .log-m summary div:last-child::after{content:" ▾";color:var(--secondary-text-color)}
 .log-m details[open] summary div:last-child::after{content:" ▴"}
@@ -298,6 +303,15 @@ dl.kv>dd.src{font-size:.9em}
 .dmsg{margin:0;line-height:1.45}
 .warnbox{border-left:3px solid var(--warning-color);padding:8px 12px;margin:10px 0;
   background:color-mix(in srgb,var(--warning-color) 10%,transparent)}
+/* Red variant (e.g. deleting a provided firmware); text stays in the normal colour */
+.warnbox.danger{border-left-color:var(--error-color);background:color-mix(in srgb,var(--error-color) 10%,transparent)}
+/* Message dialog: large round status icon left of the text (success, warning, error) */
+.msg{display:flex;align-items:center;gap:14px;margin:16px 0 6px}
+.msg>p{margin:0;line-height:1.45;overflow-wrap:anywhere;white-space:pre-line}
+.msg-icon{display:inline-flex;align-items:center;justify-content:center;flex:none;width:40px;height:40px;
+  border-radius:50%;color:var(--msg);background:color-mix(in srgb,var(--msg) 16%,transparent)}
+.msg-icon svg{width:24px;height:24px;fill:currentColor}
+.msg-success{--msg:var(--success-color)}.msg-warning{--msg:var(--warning-color)}.msg-error{--msg:var(--error-color)}
 .cl-version{margin:4px 0;font-weight:600}
 .cl-list{margin:0;padding-left:18px}.cl-list li{margin:6px 0;line-height:1.4}
 .cl-list li.this{font-weight:600}
@@ -326,6 +340,8 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
 .settings-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(560px,1fr));gap:0 16px;align-items:start}
 .modes{display:flex;flex-direction:column;gap:6px;margin:10px 0}
 .modes .check{color:var(--primary-text-color)}
+.modes .sub-check{margin-left:26px}   /* option of the mode above it ("Store in this app") */
+.modes .sub-check[hidden]{display:none}
 
 /* Narrow screens (phones): device rows become compact cards */
 @media (max-width:700px){
@@ -336,6 +352,7 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
   .tabs{gap:0}.tab{flex:1;justify-content:center;padding:10px 4px;min-height:48px}
   .toolbar input[type=search]{flex:1 1 100%;min-width:0}
   .chips{flex-wrap:nowrap;overflow-x:auto;max-width:100%;scrollbar-width:none}
+  .sortctl{flex:1 1 100%}.sortctl select{flex:1}   /* own row, the select fills it */
   .chip{white-space:nowrap}
   #cols{display:none}   /* fixed card layout: no column chooser */
   button,.chip,input[type=search],select{min-height:44px}
@@ -350,6 +367,9 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
      contrast (the theme's divider colour is too faint, about 1.5:1 in dark themes). */
   tbody{padding:10px;background:var(--primary-background-color);border-radius:0 0 12px 12px}
   dialog{width:calc(100vw - 16px);max-height:calc(100vh - 24px)}
+  #dlg-body{padding-top:12px}
+  /* Toast as wide as its text, at most the width minus 16 px on each side */
+  .toast{left:16px;right:16px;transform:none;width:fit-content;max-width:none;margin:0 auto}
   /* Tile: checkbox, HA name and ⋮ on line 1; Shelly name with status/Install on line 2;
      firmware and IP on line 3; details below. Same padding at top and bottom. */
   tr{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;column-gap:8px;row-gap:2px;align-items:center;
@@ -417,11 +437,12 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
   .log-head .spacer{flex:1}
   .log-head .log-del{margin:-8px -6px -8px 0}
   /* User top right, beside the first summary line */
-  .log-m summary div.first{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
-  .log-m summary div.first>.user{color:var(--secondary-text-color);font-size:.85em;white-space:nowrap}
+  .log-m :is(summary,.log-sum) div.first{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .log-m :is(summary,.log-sum) div.first>.user{color:var(--secondary-text-color);font-size:.85em;white-space:nowrap}
   .log-m summary div.first:last-child::after{content:none}
   .log-m summary div.first:last-child>span:first-child::after{content:" ▾";color:var(--secondary-text-color)}
   .log-m details[open] summary div.first:last-child>span:first-child::after{content:" ▴"}
+  .log-m details[open] summary div.first:last-child::after{content:none}   /* one arrow only, the user stays in place */
   /* Settings: each option is one block (label, control, help) with a separator */
   .form{display:block}
   .set-field{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;padding:14px 0;
