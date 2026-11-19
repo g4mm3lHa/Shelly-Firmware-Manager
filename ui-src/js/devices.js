@@ -1,9 +1,9 @@
 // Devices tab: status and action icons, the device table / phone tiles and the row menu.
 import {
-  $, api, attachTip, box, collator, devUrl, el, fmt, hideTip, icon, iconButton, message, modal, openDetails, selected,
-  section, toast, ui, valueList, webUrl,
+  $, api, attachTip, box, collator, devUrl, el, fmt, hideTip, icon, iconButton, loadLocal, message, modal, openDetails,
+  saveLocal, section, selected, sortControl, toast, ui, valueList, webUrl,
 } from "./core.js";
-import {OFFER_SOURCES, openDowngrade, openInstall} from "./install.js";
+import {DOWNGRADE_OFF, OFFER_SOURCES, openDowngrade, openInstall} from "./install.js";
 import {
   aopLabel, aopSummary, aopTone, editAop, editDebug, editEco, editPassword, editSwitch, editValue, featureStrip,
   restartDevice,
@@ -269,17 +269,25 @@ const COLUMNS = {
 // Data columns can be reordered; selection (left) and menu/details (right) stay at the edges
 const DATA_COLUMNS = Object.keys(COLUMNS).filter(k => !COLUMNS[k].fixed);
 const defaultPrefs = () => ({sort: ["device", "asc"], hidden: DATA_COLUMNS.filter(k => COLUMNS[k].optional), order: [...DATA_COLUMNS]});
-// Sort order, hidden columns and column order – shared by all users, stored in the app
+// Sort order, hidden columns and column order – kept per end device (browser storage);
+// a new device starts with the defaults (device name ascending)
 const prefs = {devices: defaultPrefs()};
-const savePrefs = () => api("api/ui", prefs).catch(e => message("Columns", e.message, "error"));
-/** Adopt stored prefs; unknown column IDs (older/newer versions) are discarded. */
-export function adoptPrefs(stored) {
+const savePrefs = () => saveLocal("devices", prefs.devices);
+/** Adopt the stored prefs of this end device; unknown column IDs are discarded. */
+export function loadPrefs() {
+  const raw = loadLocal("devices"), stored = raw && typeof raw === "object" ? raw : {};
   const known = k => DATA_COLUMNS.includes(k), base = defaultPrefs();
   const order = (Array.isArray(stored.order) ? stored.order : []).filter(known);
   const sort = Array.isArray(stored.sort) && COLUMNS[stored.sort[0]] && COLUMNS[stored.sort[0]].sort ? stored.sort : base.sort;
-  prefs.devices = {sort, hidden: Array.isArray(stored.hidden) ? stored.hidden.filter(known) : base.hidden,
+  prefs.devices = {sort: sort[1] === "desc" ? sort : [sort[0], "asc"],
+    hidden: Array.isArray(stored.hidden) ? stored.hidden.filter(known) : base.hidden,
     order: [...new Set(order), ...DATA_COLUMNS.filter(k => !order.includes(k))]};
 }
+/** Change the sort order (toolbar control and column heads share it). */
+function setSort(value) { prefs.devices.sort = value; savePrefs(); render(true); }
+// Toolbar control: all sortable columns, also those hidden in the table
+const devSort = sortControl(DATA_COLUMNS.filter(k => COLUMNS[k].sort).map(k => [k, COLUMNS[k].label]), setSort);
+$("dev-sort").replaceWith(devSort.node);
 /** All column keys in display order. */
 const columnKeys = () => ["select", ...prefs.devices.order, ...Object.keys(COLUMNS).filter(k => COLUMNS[k].fixed && k !== "select")];
 /** Move a data column before another one (drag & drop) or by one step (keyboard). */
@@ -330,7 +338,7 @@ function tableHead() {
         } else if (e.key === "Enter" && col.sort) th.onclick();
       };
     }
-    if (col.sort) th.onclick = () => { prefs.devices.sort = [key, sKey === key && dir === "asc" ? "desc" : "asc"]; savePrefs(); render(true); };
+    if (col.sort) th.onclick = () => setSort([key, sKey === key && dir === "asc" ? "desc" : "asc"]);
     tr.append(th);
   }
   return box("thead", null, tr);
@@ -369,6 +377,7 @@ export function renderDevices() {
     b.append(el("span", found.filter(fn).length, "count")); b.onclick = () => { ui.devFilter = key; render(true); };
     return b;
   }));
+  devSort.set(prefs.devices.sort);
   const rows = found.filter(FILTERS[ui.devFilter][1]);
   // Ignored devices form their own group, always last (known update stays visible there)
   const ignored = rows.filter(d => d.ignored), active = rows.filter(d => !d.ignored);
@@ -429,8 +438,10 @@ function openRowMenu(d, anchor) {
   add("Check for updates", () => checkDevice(d), !blocked);
   if (installable(d, ui.state)) add("Install update", () => openInstall([d]), true);   // only for Ready
   // Downgrade to a stored older version – Gen2+ only, also up to date / ignored devices
-  // Disabled (no dialog) while no older version is stored or something blocks it
-  if (d.gen >= 2) add("Downgrade", () => openDowngrade(d), downgradable(d, ui.state) && d.downgrades > 0);
+  // Disabled (no dialog) while no older version is stored or something blocks it; while
+  // the option "Allow downgrades" is off it is shown disabled with the hint below it
+  if (d.gen >= 2 && !s.allow_downgrade) { add("Downgrade", () => {}, false); items.push(el("div", DOWNGRADE_OFF, "menu-hint")); }
+  else if (d.gen >= 2) add("Downgrade", () => openDowngrade(d), downgradable(d, ui.state) && d.downgrades > 0);
   add("Reload device info", () => reloadDevice(d), !blocked && !!d.ip);
   if (blocked) items.push(el("div", `Not available – ${blocked}`, "menu-hint"));   // reason, also for touch
   add(d.ignored ? "Resume device" : "Ignore device", () => setIgnored(d, !d.ignored), !d.installing);

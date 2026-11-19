@@ -22,7 +22,7 @@ async def test_ui_page_headers(client):
 async def test_ui_json_body_limit(client):
     """A JSON body above 32 KB is refused before any handler runs."""
     r = await client.post(
-        "/api/ui",
+        "/api/logs/clear",
         data="{" + " " * 40000 + "}",
         headers={"X-CSRF-Token": client.csrf, "Content-Type": "application/json"},
     )

@@ -169,6 +169,9 @@ async def test_password_endpoint_validation(client, mgr, net):
     assert r.status == 400 and "Secret-9" not in await r.text()
     r = await client.post(url, json={"mode": "forget", "confirm": True}, headers=hdr(client))
     assert r.status == 200 and (await r.json())["password_set"] is False
+    r = await client.post(url, json={"mode": "enable", "password": "Secret-9", "confirm": True, "acknowledged": True,
+                          "keep": "no"}, headers=hdr(client))
+    assert r.status == 400 and "Secret-9" not in await r.text()
 
 
 async def test_http_upload_flow(client, mgr, net):
@@ -215,6 +218,17 @@ async def test_http_upload_guards(client, mgr, net):
     r = await client.post("/api/firmware/upload", data=data,
                           headers={**binary(client), "Content-Length": str(shelly.MAX_FW_SIZE + 1)})
     assert r.status == 413
+
+
+async def test_http_downgrade_refused_while_the_option_is_off(client, mgr, net):
+    """allow_downgrade off: the install request is refused with the Settings hint."""
+    await mgr.scan()
+    _name, sha = store(mgr, "Plus1", "1.4.0")
+    mgr.allow_downgrade = False
+    r = await client.post(f"/api/devices/{B}/install", json={"sha256": sha, "confirm": True, "downgrade": True,
+                          "acknowledged": True}, headers={"X-CSRF-Token": client.csrf})
+    assert r.status == 409 and "Allow downgrades" in await r.text()
+    assert (await (await client.get("/api/state")).json())["allow_downgrade"] is False
 
 
 async def test_http_downgrade_and_delete_need_acknowledgment(client, mgr, net):

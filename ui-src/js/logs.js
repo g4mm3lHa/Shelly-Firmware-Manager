@@ -19,6 +19,8 @@ const PASSWORD_ACTIONS = {stored: "password stored", enabled: "password protecti
   store: "storing the password failed", enable: "enabling protection failed", change: "changing the password failed",
   remove: "removing protection failed", forget: "forgetting the password failed",
   set: "device password set", test_failed: "device password test failed"};
+/** Password action of a log entry; a new password that was not stored is marked. */
+const passwordAction = e => (PASSWORD_ACTIONS[e.action] || e.action) + (e.stored === false ? " – not stored in this app" : "");
 /** Label of an app option for the log (key if unknown). */
 const optionLabel = key => (OPTION_FIELDS.find(f => f[0] === key) || [key, key])[1];
 const INSTALL_EVENTS = {started: "started", confirmed: "confirmed", unconfirmed: "not confirmed", failed: "failed"};
@@ -52,7 +54,7 @@ function logContent(e) {
     case "setting":
       return [el("div", e.device), ...(e.changes || []).map(c => el("div", `${c.setting}: ${arrow(c.old, c.new)}`, "sub")), e.error ? el("div", e.error, "bad") : null].filter(Boolean);
     case "password":
-      return [el("div", `${e.device}: ${PASSWORD_ACTIONS[e.action] || e.action}`), e.error ? el("div", e.error, "bad") : null].filter(Boolean);
+      return [el("div", `${e.device}: ${passwordAction(e)}`), e.error ? el("div", e.error, "bad") : null].filter(Boolean);
     case "options":
       if (e.confirmed) return [el("div", "Download base URL confirmed as the address of Home Assistant")];
       return [el("div", e.ok ? "App settings saved – app restarted" : "App settings could not be saved"),
@@ -90,7 +92,7 @@ function logSummary(e) {
     case "upload": return [`${e.type} ${e.version}`];
     case "install": return [`${e.device}: ${e.downgrade ? "downgrade " : ""}${INSTALL_EVENTS[e.event] || e.event}`];
     case "setting": return [e.device];
-    case "password": return [`${e.device}: ${PASSWORD_ACTIONS[e.action] || e.action}`];
+    case "password": return [`${e.device}: ${passwordAction(e)}`];
     case "options": return [e.confirmed ? "Download base URL confirmed" : e.ok ? "App settings saved" : "App settings not saved"];
     case "log": return ["Log cleared"];
     default: return [e.kind];
@@ -125,18 +127,22 @@ function logRow(e, d, group) {
     box("div", "log-body" + (sev === "error" ? " bad" : ""), el("span", SEVERITY_LABELS[sev], `tag sev-${sev}`), box("div", null, ...logContent(e))),
     el("span", e.user || "", "user"), logDelete(e));
 }
-/** Mobile entry: time/type/outcome, short summary, details collapsed. */
+/** Mobile entry: time/type/outcome, short summary, details collapsed. Details that
+ *  only repeat the summary are left out: the summary is shown without expansion. */
 function logTile(e, d, group) {
   const sev = severity(e), summary = logSummary(e);
   const head = box("div", "log-head", el("span", `${pad(d.getHours())}:${pad(d.getMinutes())}`, "mono sub"),
     el("span", KIND_LABELS[e.kind] || e.kind, "tag"), el("span", SEVERITY_LABELS[sev], `tag sev-${sev}`), el("span", null, "spacer"), logDelete(e));
   const body = box("div", "log-details", ...(e.kind === "check" ? (e.findings && e.findings.length ? [checkFindings(e)] : [el("div", e.result, "sub")]) : logContent(e)));
+  // The user stands top right, beside the first summary line
+  const lines = () => summary.map((t, i) => i === 0 && e.user ? box("div", "first", el("span", t), el("span", e.user, "user")) : el("div", t));
+  const same = [...body.children].map(c => c.textContent.trim()).join("\n") === summary.join("\n");
+  if (same) return box("div", "log-m" + (group ? ` grp grp-${group}` : ""), head, box("div", "log-sum", ...lines()));
   const det = el("details"), key = `logm-${e.ts}-${e.kind}`;
   det.open = openDetails.has(key);
   det.ontoggle = () => { det.open ? openDetails.add(key) : openDetails.delete(key); };
-  // The user stands top right, beside the first summary line
   const sum = el("summary");
-  sum.append(...summary.map((t, i) => i === 0 && e.user ? box("div", "first", el("span", t), el("span", e.user, "user")) : el("div", t)));
+  sum.append(...lines());
   det.append(sum, body);
   return box("div", "log-m" + (group ? ` grp grp-${group}` : ""), head, det);
 }

@@ -9,9 +9,12 @@ Nothing is installed without your approval.
 - Every installation is approved manually and verified afterwards.
 - Stored firmware comes first: a check provides the next higher stored version before
   the Shelly update server is asked.
-- Older firmware versions stay stored and allow a downgrade (Gen2+).
+- Older firmware versions stay stored and allow a downgrade (Gen2+, once switched on).
 - Device settings such as name, NTP server, power-on action, eco mode and password
   protection can be edited directly.
+
+Requires the Home Assistant Shelly integration (the app works with the devices it
+knows). Only original Shelly firmware is supported for now.
 
 After the installation set the **download base URL** in the app's Settings tab (LAN IP
 address of Home Assistant and port 8098) – see the Documentation tab.

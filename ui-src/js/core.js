@@ -12,8 +12,7 @@ if (window.parent !== window) document.documentElement.classList.add("embedded")
 export const $ = id => document.getElementById(id);
 export const ui = {state: null, firmware: [], firmwareTotal: 0, logs: [], options: null, view: "devices",
   devFilter: "all", logFilter: "all", rendered: "",
-  logsLoaded: 0,        // time of the last log fetch (0 = fetch at the next refresh)
-  prefsLoaded: false};  // stored table settings were adopted
+  logsLoaded: 0};       // time of the last log fetch (0 = fetch at the next refresh)
 export const selected = new Set();       // device IDs ticked for a (multi) installation
 export const openDetails = new Set();    // keys of expanded <details>, kept across re-renders
 
@@ -106,6 +105,14 @@ const ICONS = {
   download: "M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z",
   delete: "M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z",
   copy: "M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z",
+  // Downgrade (Firmware tab, older versions)
+  history: "M13.5,8H12V13L16.28,15.54L17,14.33L13.5,12.25V8M13,3A9,9 0 0,0 4,12H1L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.07,19 9.32,18.21 8.06,16.94L6.64,18.36C8.27,20 10.5,21 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3Z",
+  // Sort direction button
+  up: "M13,20H11V8L5.5,13.5L4.08,12.08L12,4.16L19.92,12.08L18.5,13.5L13,8V20Z",
+  down: "M11,4H13V16L18.5,10.5L19.92,11.92L12,19.84L4.08,11.92L5.5,10.5L11,16V4Z",
+  // Message dialogs: success check and warning exclamation mark (errors use "close")
+  check: "M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z",
+  alert: "M10,3H14V14H10V3M10,21V17H14V21H10Z",
   close: "M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z",
   // Action column: flash (power-on action), leaf, lock, access point, bluetooth, link (actions),
   // calendar, bug (websocket debug log), pencil
@@ -134,6 +141,34 @@ export function icon(name) {
 export function iconButton(name, label, onclick, cls) {
   const b = el("button", null, "icon" + (cls ? " " + cls : "")); b.title = label; b.setAttribute("aria-label", label);
   b.append(icon(name)); if (onclick) b.onclick = onclick; return b;
+}
+/** Settings kept per end device (browser storage); null if missing or unreadable. */
+export function loadLocal(key) {
+  try { return JSON.parse(localStorage.getItem(`shelly-firmware-manager:${key}`) || "null"); }
+  catch (e) { return null; }   // storage blocked or damaged: defaults
+}
+/** Store a setting per end device; without browser storage it lasts for this page only. */
+export function saveLocal(key, value) {
+  try { localStorage.setItem(`shelly-firmware-manager:${key}`, JSON.stringify(value)); } catch (e) { /* page only */ }
+}
+/** Sort control of a toolbar: select "Sort: <field>" and a direction button.
+ *  fields: [[key, label], …]; onChange([key, dir]) is called on every change.
+ *  Returns the node and set([key, dir]) to show the current order. */
+export function sortControl(fields, onChange) {
+  const select = el("select"); select.setAttribute("aria-label", "Sort by");
+  for (const [key, label] of fields) { const o = el("option", `Sort: ${label}`); o.value = key; select.append(o); }
+  const dir = el("button", null, "icon sort-dir");
+  let current = [fields[0][0], "asc"];
+  const set = value => {
+    current = value; select.value = value[0];
+    const label = value[1] === "desc" ? "Descending" : "Ascending";
+    dir.title = label; dir.setAttribute("aria-label", `${label} – change the direction`);
+    dir.replaceChildren(icon(value[1] === "desc" ? "down" : "up"));
+  };
+  select.onchange = () => onChange([select.value, current[1]]);
+  dir.onclick = () => onChange([current[0], current[1] === "desc" ? "asc" : "desc"]);
+  set(current);
+  return {node: box("div", "sortctl", select, dir), set};
 }
 /** <details> whose open state survives re-rendering. */
 export function keptDetails(key, summary, content) {
@@ -227,7 +262,18 @@ export function modal(title, content, buttons = [{text: "Close"}], titleIcon) {
 export function closeModal() { if (dlg.open) dlg.close(); load(); }
 $("dlg-x").append(icon("close"));
 $("dlg-x").onclick = closeModal;
-export const message = (title, text, cls = "hint", titleIcon) => modal(title, [el("p", text, cls)], undefined, titleIcon);
+// Icon of a message kind; "info" (neutral notes such as "Nothing changed.") has none
+const MESSAGE_ICONS = {success: "check", warning: "alert", error: "close"};
+/** Message dialog. kind: "info" (default, no icon), "success", "warning" or "error" –
+ *  the last three show a large round status icon left of the text. */
+export function message(title, text, kind = "info", titleIcon) {
+  modal(title, [messageBody(text, kind)], undefined, titleIcon);
+}
+/** Content of a message dialog (for dialogs that add more below it). */
+export function messageBody(text, kind = "info") {
+  const name = MESSAGE_ICONS[kind];
+  return name ? box("div", `msg msg-${kind}`, box("span", "msg-icon", icon(name)), el("p", text)) : el("p", text, "hint");
+}
 // Short, non-blocking feedback (e.g. Reload Device Info – no popup)
 let toastTimer = 0;
 export function toast(text, warn) {

@@ -94,10 +94,10 @@ class Manager(Installs):
             "progress": dict(self.progress) if self.progress else None,
             "storage_error": self.storage_error,
             "gen1_enabled": self.gen1_enabled,
+            "allow_downgrade": self.allow_downgrade,
             "download_base": {
                 "url": self.download_base,
                 "issue": self.download_base_issue,
                 "message": DOWNLOAD_BASE_MESSAGES.get(self.download_base_issue or ""),
             },
-            "ui": self.ui,
         }

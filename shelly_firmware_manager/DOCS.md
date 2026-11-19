@@ -26,6 +26,9 @@ Assistant). Version history: `CHANGELOG.md` (Changelog tab).
 
 ## First start
 
+Requires the Home Assistant Shelly integration (the app works with the devices it
+knows). Only original Shelly firmware is supported for now.
+
 1. Start the app and enable "Show in sidebar".
 2. Open the app, go to the **Settings** tab and set the **download base URL**: the LAN
    IP address of Home Assistant with port 8098, e.g. `http://192.168.1.20:8098`.
@@ -46,6 +49,7 @@ the app page). Saving restarts the app.
 | Serve downloads only to known Shellys | Firmware is only served to the device it is meant for (default on). Switch off if downloads are rejected from a 172.30.x.x address |
 | Parallel installations | How many installations run at the same time (1–20, default 5) |
 | Enable Gen1 updates / Allowed Gen1 types | Gen1 support and the Gen1 models to check (see [Gen1 firmware](#gen1-firmware)) |
+| Allow downgrades | Installing an older stored firmware on Gen2+ devices (see [Downgrade](#downgrade-gen2)). Off unless switched on, also after an update of the app |
 | Log size / Log retention | Activity log limits (100–3000 entries, 1–365 days) |
 | Pinned certificates | Certificate fingerprints for Shelly servers (see [Certificate pinning](#certificate-pinning)) |
 
@@ -58,8 +62,11 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 
 - **Check now** checks all devices; the header shows the last check and the schedule.
 - Devices with updates are listed on top, then all other devices, ignored devices at
-  the end. Search, filters (Updates, Errors, Up to date, Ignored) and a column chooser
-  help with larger installations. A device you just updated stays on top as "Updated"
+  the end. Search, filters (Updates, Errors, Up to date, Ignored), sorting and a column
+  chooser help with larger installations. Sort with the "Sort" select and the arrow
+  next to it, or (desktop) with the column titles. Sort order, hidden columns and column
+  order are kept in the browser of each device you use (phone and PC can differ); a new
+  device starts sorted by device name. A device you just updated stays on top as "Updated"
   (or "Unconfirmed" if the target version was not confirmed, or "Error" if the
   installation failed – then with checkbox and **Install** for another attempt) until
   you check it again or the next full check runs (it stays there while it is checked).
@@ -171,8 +178,13 @@ updates) or at the next full check.
 
 ### Downgrade (Gen2+)
 
+Downgrades are off until **Allow downgrades** is switched on in the Settings tab; while
+it is off, the entries below are greyed out with a hint and the app refuses downgrades.
+
 Row menu ⋮ → **Downgrade** lists all stored versions that are older than the installed
-one (the entry is greyed out while no older version is stored). Choose a version, check the installation dialog and confirm a second time. The
+one (the entry is greyed out while no older version is stored). Choose a version, check the installation dialog and confirm a second time.
+In the Firmware tab, the downgrade icon of an older version lists the devices of this
+type with a newer version installed; choose one and confirm a second time. The
 downgrade runs like a normal installation and is logged as such. It is available for
 up-to-date and ignored devices too, but never for Gen1.
 
@@ -184,6 +196,9 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
 
 - All downloaded and uploaded firmware files, grouped by device type, with size, date,
   SHA-256 and the devices they are provided for. The total size is shown at the top.
+  The cards can be sorted by firmware ID, newest version, size or storage date (select
+  and arrow, or the column titles; kept per device like in the Devices tab); the
+  versions inside a card stay newest first.
 - **Install** behind a device name opens the usual installation dialog for this device
   and this firmware (same conditions as "Install update" in the Devices tab).
 - The **changelog icon** of a version shows the changelog stored with this firmware.
@@ -237,8 +252,14 @@ password**, or the lock icon):
   device is not changed.
 - **Enable protection / Change password** – sets the password on the device (user
   `admin`). Requires a second confirmation; keep the password safe – losing it may
-  require a factory reset.
+  require a factory reset. **Store in this app** (on by default) keeps the new password
+  for the app; without it the password is only verified, any stored password is deleted
+  once the device confirms the new one, and the app cannot reach the device (checks,
+  installations, settings) until you store the password.
 - **Remove protection** and **Forget stored password**.
+
+After enabling, changing or removing the protection, change the password in the Home
+Assistant Shelly integration as well.
 
 Passwords are stored only in the app's private storage. For Gen2+ only a hash bound to
 the device is stored. Gen1 devices need the password itself (Basic Auth): it is stored
@@ -332,7 +353,10 @@ server interfaces are not officially guaranteed.
   to its new storage format at the first start. 3.1.1 adds a watchdog: check that the
   **Watchdog** switch on the app page is on. Log entries get an internal ID at the
   first start of 3.1.1 (needed to delete single entries).
-- **From 3.1.1:** nothing to do.
+- **From 3.1.1 to 3.2.1:** downgrades are off after the update – switch on **Allow
+  downgrades** in the Settings tab if you use them. The sort order and column settings
+  of the Devices table start fresh (device name ascending) and are then kept per
+  browser.
 - **From 2.x or 1.x:** since 3.0.1 the conversion code of these versions is no longer
   included. Update to 3.0.0 first and start it once (it removes the former shared Shelly
   password from the stored options and converts the table settings), then update to

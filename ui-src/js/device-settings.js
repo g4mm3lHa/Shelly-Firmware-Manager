@@ -1,6 +1,6 @@
 // Dialogs for the settings of a single Shelly: name, NTP, power-on action, eco mode, switches,
 // websocket debug log, password, restart.
-import {$, api, box, closeModal, devUrl, el, icon, message, modal, valueList, webUrl} from "./core.js";
+import {$, api, box, closeModal, devUrl, el, icon, message, messageBody, modal, valueList, webUrl} from "./core.js";
 
 // ---------------------------------------------------------------- Device settings
 // Flow: read live values from the Shelly -> input -> (Shelly name: confirmation
@@ -41,13 +41,13 @@ async function saveSettings(d, title, changes, quiet) {
   try {
     const r = await api(`${devUrl(d)}/settings`, changes);
     if (r.verified === false) {   // written, but the read-back failed: state unknown
-      message(title, "Sent to the Shelly, but the new value could not be read back – please check the device.", "warnbox"); return;
+      message(title, "Sent to the Shelly, but the new value could not be read back – please check the device.", "warning"); return;
     }
     if (r.not_applied?.length) {  // accepted, but the read-back shows another value
-      message(title, `The Shelly accepted the request but did not apply: ${r.not_applied.join(", ")}. The value read back is shown.`, "warnbox"); return;
+      message(title, `The Shelly accepted the request but did not apply: ${r.not_applied.join(", ")}. The value read back is shown.`, "warning"); return;
     }
     if (quiet && !r.restart_required) { closeModal(); return; }
-    message(title, r.restart_required ? "Saved. The Shelly reports that a restart is required to apply the change." : "Saved and read back from the Shelly.");
+    message(title, r.restart_required ? "Saved. The Shelly reports that a restart is required to apply the change." : "Saved and read back from the Shelly.", "success");
   } catch (e) { message(title, e.message, "error"); }
 }
 /** Edit the Shelly name (with old -> new confirmation) or the NTP server. */
@@ -58,7 +58,7 @@ export function editValue(d, field) {
     const old = live[prop] || "";
     modal(title, [box("label", "field", label, input)], [{text: "Cancel"}, {text: field === "name" ? "Next" : "Save", kind: "primary", action: () => {
       const value = input.value.trim();
-      if (value === old) { message(title, "Nothing changed.", "error"); return; }
+      if (value === old) { message(title, "Nothing changed."); return; }
       if (field !== "name") { saveSettings(d, title, {[field]: value}, true); return; }
       modal(title, [el("p", `Write this change to ${d.name}?`), valueList([["Current", old || "–"], ["New", value || "–"]])],
         [{text: "Cancel"}, {text: "Apply", kind: "danger", action: () => saveSettings(d, title, {name: value}, false)}]);
@@ -83,7 +83,7 @@ export function editAop(d) {
     const strip = featureStrip("aop", "Power-on action", aopTone(live.outputs), aopSummary(live.outputs));
     modal(title, [strip, t], [{text: "Cancel"}, {text: "Save", kind: "primary", action: () => {
       const changed = selects.filter(([o, sel]) => sel.value !== o.aop);
-      if (!changed.length) { message(title, "Nothing changed.", "error"); return; }
+      if (!changed.length) { message(title, "Nothing changed."); return; }
       saveSettings(d, title, {aop: Object.fromEntries(changed.map(([o, sel]) => [o.key, sel.value]))}, true);
     }}]);
   });
@@ -139,7 +139,7 @@ export function restartDevice(d) {
   const title = `Restart – ${d.name}`;
   modal(title, [featureStrip("restart", "Restart", "neutral", null), el("p", "The device will be unavailable for a few seconds.", "hint")], [{text: "Cancel"},
     {text: "Restart", kind: "danger", action: async () => {
-      try { await api(`${devUrl(d)}/restart`, {}); message(title, "Restart command sent."); }
+      try { await api(`${devUrl(d)}/restart`, {}); message(title, "Restart command sent.", "success"); }
       catch (e) { message(title, e.message, "error"); }
     }}]);
 }
@@ -157,6 +157,12 @@ const PASSWORD_MODES = {
 };
 const PASSWORD_DONE = {store: "Password tested and stored.", enable: "Password protection enabled and verified.",
   change: "Password changed and verified.", remove: "Password protection removed.", forget: "Stored password deleted from this app."};
+// Reminder after a change on the device: the Home Assistant Shelly integration needs it too
+const PASSWORD_HA = {enable: "Also enter the password for this device in the Home Assistant Shelly integration.",
+  change: "Also change the password for this device in the Home Assistant Shelly integration.",
+  remove: "Also remove the password for this device in the Home Assistant Shelly integration."};
+const HA_AFTER_SET = "After setting it, also enter the password for this device in the Home Assistant Shelly integration.";
+const NOT_STORED = "Not stored in this app: the manager can no longer access this device (checks, installations, settings) until the password is stored.";
 /** Modes that fit the reported protection state (unknown: all device modes). */
 function passwordModes(d) {
   const p = d.auth_enabled, modes = [];
@@ -172,11 +178,24 @@ export function editPassword(d) {
   const pw = el("input"), pw2 = el("input");
   for (const i of [pw, pw2]) { i.type = "password"; i.autocomplete = "new-password"; i.maxLength = d.gen === 1 ? 50 : 128; }
   const pwField = box("label", "field", "Password (user “admin”)", pw), pw2Field = box("label", "field", "Repeat password", pw2);
-  const hint = el("p", null, "hint"), radios = el("div", null, "modes");
+  const hint = el("p", null, "hint"), radios = el("div", null, "modes"), storage = el("div");
+  // "Store in this app": only for enable/change, directly under the selected mode
+  const keep = el("input"); keep.type = "checkbox"; keep.checked = true;
+  const keepLabel = box("label", "check sub-check", keep, " Store in this app");
+  const storedText = d.gen === 1 ? "Gen1: the password is stored in plain text in the app's private storage (needed for Basic Auth); 1–50 characters." :
+    "Gen2+: only a SHA-256 hash bound to this device is stored.";
   const update = () => {
-    const m = PASSWORD_MODES[radios.querySelector("input:checked").value];
+    const input = radios.querySelector("input:checked"), mode = input.value, m = PASSWORD_MODES[mode];
     hint.textContent = m.hint; pwField.hidden = !m.input; pw2Field.hidden = !m.repeat;
+    const choice = mode === "enable" || mode === "change";
+    keepLabel.hidden = !choice;
+    if (choice) input.parentElement.after(keepLabel);
+    // Storage note: yellow box (Gen2+ hash) or red box (Gen1 plain text, or not stored)
+    if (!choice) storage.replaceChildren(el("p", storedText, "hint"));
+    else if (keep.checked) storage.replaceChildren(el("div", `${storedText} ${HA_AFTER_SET}`, d.gen === 1 ? "warnbox danger" : "warnbox"));
+    else storage.replaceChildren(el("div", `${NOT_STORED} ${HA_AFTER_SET}`, "warnbox danger"));
   };
+  keep.onchange = update;
   modes.forEach((mode, i) => {
     const r = el("input"); r.type = "radio"; r.name = "pw-mode"; r.value = mode; r.checked = i === 0; r.onchange = update;
     radios.append(box("label", "check", r, " " + PASSWORD_MODES[mode].label));
@@ -187,28 +206,28 @@ export function editPassword(d) {
   modal(title, [
     featureStrip("lock", "Password protection", tone, d.auth_enabled === true ? "Protected" : d.auth_enabled === false ? "Not protected" : "Unknown"),
     valueList([["Device protection", prot], ["Stored in this app", d.password_set ? "yes" : "no"]]),
-    radios, hint, pwField, pw2Field,
-    el("p", d.gen === 1 ? "Gen1: the password is stored in plain text in the app's private storage (needed for Basic Auth); 1–50 characters." :
-      "Gen2+: only a SHA-256 hash bound to this device is stored.", "hint"),
+    radios, hint, pwField, pw2Field, storage,
     el("div", PASSWORD_WARNING, "warnbox")],
   [{text: "Cancel"}, {text: "Continue", kind: "primary", action: () => {
     const mode = radios.querySelector("input:checked").value, m = PASSWORD_MODES[mode], password = pw.value;
     if (m.input && !password) { message(title, "No password entered.", "error"); return; }
     if (m.repeat && password !== pw2.value) { message(title, "The passwords do not match.", "error"); return; }
-    passwordConfirm(d, title, mode, m.input ? password : null);
+    passwordConfirm(d, title, mode, m.input ? password : null, (mode !== "enable" && mode !== "change") || keep.checked);
   }}]);
   update();
 }
 /** Second step: explicit confirmation; enable/change additionally need the
- *  "stored securely" acknowledgment before the red button becomes active. */
-function passwordConfirm(d, title, mode, password) {
+ *  "stored securely" acknowledgment before the red button becomes active.
+ *  keep = store the new password in this app (enable/change). */
+function passwordConfirm(d, title, mode, password, keep) {
   const m = PASSWORD_MODES[mode], content = [el("p", `${m.label} for ${d.name}?`), el("div", PASSWORD_WARNING, "warnbox")];
   const ack = el("input"); ack.type = "checkbox";
   if (m.risky) content.push(box("label", "check", ack, " I have stored the password securely"));
   const send = async () => {
     try {
-      await api(`${devUrl(d)}/password`, {mode, password, confirm: true, acknowledged: m.risky ? ack.checked : false});
-      message(title, PASSWORD_DONE[mode]);
+      await api(`${devUrl(d)}/password`, {mode, password, confirm: true, acknowledged: m.risky ? ack.checked : false, keep});
+      const done = keep ? PASSWORD_DONE[mode] : `${PASSWORD_DONE[mode]} It is not stored in this app.`;
+      modal(title, [messageBody(done, "success"), PASSWORD_HA[mode] ? el("div", PASSWORD_HA[mode], "warnbox") : null].filter(Boolean));
     } catch (e) { message(title, e.message, "error"); }
   };
   modal(title, content, [{text: "Cancel"}, {text: mode === "store" ? "Test & save" : m.label, kind: mode === "forget" || mode === "store" ? "primary" : "danger", action: send}]);

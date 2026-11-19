@@ -298,6 +298,28 @@ async def test_remove_protection_deletes_only_after_success(mgr, device):
     assert not mgr.credentials.has_device_password(A)
 
 
+async def test_enable_and_change_without_storing(mgr, device):
+    """keep=False: the new password is verified on the device but not stored; a change
+    without storing deletes the stored password only after the device confirmed it."""
+    await mgr.set_device_password(A, "enable", "pw-1", confirm=True, acknowledged=True, keep=False)
+    assert device["protected"] and not mgr.credentials.has_device_password(A)
+    assert mgr.events.entries[-1]["action"] == "enabled" and mgr.events.entries[-1]["stored"] is False
+    await mgr.set_device_password(A, "store", "pw-1", confirm=True)
+    old = dict(mgr.credentials.entries[A])
+    device["apply"] = False
+    with pytest.raises(shelly.ShellyError):
+        await mgr.set_device_password(A, "change", "pw-2", confirm=True, acknowledged=True, keep=False)
+    assert mgr.credentials.entries[A] == old   # not confirmed: stored password kept
+    device["apply"] = True
+    await mgr.set_device_password(A, "change", "pw-2", confirm=True, acknowledged=True, keep=False)
+    assert not mgr.credentials.has_device_password(A)
+    for mode in ("store", "remove", "forget"):   # only enable/change can skip storing
+        with pytest.raises(ValueError, match="storage choice"):
+            await mgr.set_device_password(A, mode, "pw-2", confirm=True, keep=False)
+    with pytest.raises(ValueError, match="storage choice"):
+        await mgr.set_device_password(A, "enable", "pw-3", confirm=True, acknowledged=True, keep="no")
+
+
 async def test_store_requires_protected_device(mgr, device):
     """Storing on an unprotected device proves nothing and is refused."""
     with pytest.raises(shelly.ShellyError, match="not password protected"):

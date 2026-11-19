@@ -190,14 +190,6 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Applic
         background(run())
         return web.json_response({"started": True})
 
-    async def set_ui(request: web.Request) -> web.StreamResponse:
-        """Store the shared table settings (sort order, hidden columns)."""
-        try:
-            mgr.set_ui(await json_body(request))
-        except ValueError as err:
-            raise web.HTTPBadRequest(text=str(err)) from None
-        return web.json_response({"ok": True})
-
     async def install(request: web.Request) -> web.StreamResponse:
         """Start an approved installation, bound to the SHA-256 shown to the user.
 
@@ -276,13 +268,19 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Applic
     async def device_password(request: web.Request) -> web.StreamResponse:
         """Password dialog actions (mode: store | enable | change | remove | forget).
 
-        The confirmation flags are checked again by the manager; the password is
+        The confirmation flags are checked again by the manager; keep=false
+        (enable/change) verifies the new password without storing it. The password is
         never returned – the answer only carries the device's protection status
         and whether credentials are stored."""
         device_id = device_id_from(request)
         body = await json_body(request)
         mode, password = body.get("mode"), body.get("password")
-        if not isinstance(mode, str) or (password is not None and not isinstance(password, str)):
+        keep = body.get("keep", True)   # enable/change: store the new password in this app
+        if (
+            not isinstance(mode, str)
+            or (password is not None and not isinstance(password, str))
+            or not isinstance(keep, bool)
+        ):
             raise web.HTTPBadRequest(text="Invalid password request")
         result = await guarded(
             mgr.set_device_password(
@@ -292,6 +290,7 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Applic
                 confirm=body.get("confirm"),
                 acknowledged=body.get("acknowledged"),
                 user=user_from(request.headers),
+                keep=keep,
             )
         )
         return web.json_response(
@@ -462,7 +461,6 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP) -> web.Applic
     app.router.add_get("/", page)
     app.router.add_get("/api/state", state)
     app.router.add_post("/api/scan", scan)
-    app.router.add_post("/api/ui", set_ui)
     app.router.add_post("/api/devices/{id}/check", check_device)
     app.router.add_post("/api/devices/{id}/install", install)
     app.router.add_get("/api/devices/{id}/changelog", changelog)

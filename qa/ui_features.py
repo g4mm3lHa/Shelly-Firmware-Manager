@@ -17,8 +17,9 @@ Suites, in this order (the last two change the demo state in their last case):
                       user in the log tile; devices stay in the updates card while
                       checked, Ignored label size on phones; action popups with status strip,
                       websocket debug icon, tooltips of the device names and tooltips on
-                      touch, Firmware-tab labels and dialog title icons. Demo "features"
-                      on 8805 (and "idle" on 8801).
+                      touch, Firmware-tab labels and dialog title icons; sorting per
+                      browser and the Firmware-tab downgrade, downgrades switched off.
+                      Demo "features" on 8805 (and "idle" 8801, "missing" 8804).
 Usage: python qa/ui_features.py <shots-dir> [--full] [suite ...]   (qa/run_ui.py starts
 the demos; --full: all viewports of firmware_store, final gate)
 Every suite checks: no horizontal overflow, no console errors; screenshots go to
@@ -131,7 +132,7 @@ def setting_help(browser, out):
         described = f.get_attribute("#opt-check_interval_days", "aria-describedby")
         check(f"{case}: help text stays the description of the field", described == "opt-check_interval_days-help", str(described))
         icons = f.locator(".set-name button.help")
-        check(f"{case}: one i-icon per setting", icons.count() == 10, str(icons.count()))
+        check(f"{case}: one i-icon per setting", icons.count() == 11, str(icons.count()))
         name = f.locator("label[for=opt-check_interval_days]")
         info = f.locator(".set-name", has=name).locator("button.help")
         geo = f.evaluate("""() => { const l = document.querySelector('label[for=opt-check_interval_days]'), i = l.nextElementSibling;
@@ -742,6 +743,52 @@ def _firmware_tab(c):
     return rows
 
 
+def _sorting_and_downgrade(c):
+    """Sort select + direction button (Devices and Firmware tab, kept per browser,
+    coupled with the column heads on desktop) and the downgrade icon of an older
+    version in the Firmware tab (dialog -> device -> second confirmation)."""
+    case, f, page, out, width = c.case, c.f, c.page, c.out, c.width
+    f.locator("#tab-devices").click()
+    ctl = f.locator("#view-devices .sortctl")
+    check(f"{case}: sort select in the Devices toolbar", ctl.locator("select").input_value() == "device", ctl.inner_text())
+    ctl.locator("button.sort-dir").click()
+    stored = f.evaluate("() => localStorage.getItem('shelly-firmware-manager:devices')")
+    check(f"{case}: sort direction kept per browser", '"desc"' in (stored or ""), str(stored))
+    if width > 700:
+        head = f.locator("#dev-cards th.c-device").first.get_attribute("data-dir")
+        check(f"{case}: column head follows the select", head == "desc", str(head))
+        f.locator("#dev-cards th.c-ip").first.click()
+        check(f"{case}: select follows the column head", ctl.locator("select").input_value() == "ip")
+        f.locator("#dev-cards th.c-device").first.click()
+    else:
+        ctl.locator("button.sort-dir").click()
+    check(f"{case}: back to device name ascending", "asc" in f.evaluate(
+        "() => localStorage.getItem('shelly-firmware-manager:devices')"))
+    f.locator("#tab-firmware").click()
+    f.wait_for_selector(".fw-row")
+    fw = f.locator("#view-firmware .sortctl select")
+    check(f"{case}: sort select in the Firmware toolbar", fw.input_value() == "type")
+    if width > 700:
+        f.locator(".fw-head .sortable", has_text="Size").first.click()
+        check(f"{case}: Firmware column head sorts the cards", fw.input_value() == "size"
+              and f.locator(".fw-head [data-dir]").count() == f.locator(".fw-head").count())
+        fw.select_option("type")
+    icons = f.locator(".fw-row .actions button[aria-label^='Downgrade to']")
+    enabled = [i for i in range(icons.count()) if icons.nth(i).is_enabled()]
+    check(f"{case}: downgrade icon on older versions", bool(enabled), str(icons.count()))
+    if enabled:
+        icons.nth(enabled[0]).click()
+        d = dialog(f)
+        check(f"{case}: Firmware-tab downgrade dialog lists devices", d["title"].startswith("Downgrade to")
+              and f.locator("#dlg-body .modes input[type=radio]").count() >= 1, d["title"])
+        page.screenshot(path=out / f"{case}-fw-downgrade.png")
+        f.locator("#dlg-btns button", has_text="Continue").click()
+        d = dialog(f)
+        check(f"{case}: then the second confirmation", d["title"] == "Downgrade?"
+              and dict(d["buttons"]).get("Downgrade") is True, str(d["buttons"]))
+        f.locator("#dlg-btns button", has_text="Cancel").click()
+
+
 def _firmware_delete_and_upload(c, rows):
     """Two-step delete and the upload dialog (the last case changes the demo state)."""
     case, f, page, out, index, last = c.case, c.f, c.page, c.out, c.index, c.last
@@ -852,6 +899,14 @@ def firmware_store(browser, out):
             items = dict(menu_items(f, "Hall"))
             check(f"{case}: downgrade disabled without a stored older version", items.get(entry) is True, str(items))
             ctx.close()
+            # Option "Allow downgrades" off (demo "missing"): disabled with the Settings hint
+            ctx, page, f, errors = open_page(browser, MISSING, width, scheme, embedded)
+            items = dict(menu_items(f, "Hall"))
+            hint = f.locator("#rowmenu .menu-hint").all_inner_texts()
+            check(f"{case}: downgrade off – entry disabled with hint", items.get(entry) is True
+                  and any("Allow downgrades" in h for h in hint), str(hint))
+            page.screenshot(path=out / f"{case}-downgrade-off.png")
+            ctx.close()
         ctx, page, f, errors = open_page(browser, FEATURES, width, scheme, embedded, ignore=("/upload/confirm",))
 
         c = SimpleNamespace(case=case, f=f, page=page, out=out, width=width, index=index, last=last)
@@ -863,6 +918,7 @@ def firmware_store(browser, out):
         _next_steps(c)
         _downgrade(c)
         rows = _firmware_tab(c)
+        _sorting_and_downgrade(c)
         _firmware_delete_and_upload(c, rows)
         _logs(c)
 

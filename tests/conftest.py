@@ -30,6 +30,7 @@ OPTIONS = {
     "max_parallel_installs": 2,
     "log_retention_days": 30,
     "log_entry_limit": 1000,
+    "allow_downgrade": True,
 }
 
 

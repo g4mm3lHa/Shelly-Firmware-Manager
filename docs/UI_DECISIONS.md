@@ -19,7 +19,14 @@ not part of this file.
   failed downgrade); the result of a single check of the device or a full check decides
   afterwards – while the check runs the device stays in the card (UI `shownUpdates`).
 - Phones: "Ignored" and "Checking…" labels 32 px like the status pill. Row menu
-  "Downgrade" disabled without a stored older version.
+  "Downgrade" disabled without a stored older version; while the option "Allow
+  downgrades" is off it is disabled with the menu hint "Downgrades are off – enable
+  “Allow downgrades” in Settings" below it (Gen2+ only, 2026-11-19).
+- **Sorting (2026-11-19, variant A):** select "Sort: <column>" with a direction button
+  (arrow up/down) in the toolbar after the search field, desktop and phones (phones: own
+  row, the select fills it); all sortable columns, also hidden ones. Desktop column heads
+  keep sorting and share the state with the select. Sort order, hidden columns and column
+  order are kept per browser (localStorage); start: device name ascending.
 - Gen1 firmware column: version only.
 - Phone tiles: "Ignored" label wrap and truncated names accepted; IP ends in line with
   the ⋮ menu.
@@ -67,14 +74,26 @@ not part of this file.
   ("Intermediate version: required step before newer firmware can be installed
   safely"); phones: date right-aligned in the size line.
 - Column titles (2026-11-17, variant A): one head per card over the version rows
-  (`.fw-head`, same grid, icon column 82 px without title): Version · Size · Stored ·
+  (`.fw-head`, same grid, icon column 112 px without title, 82 px before the downgrade icon): Version · Size · Stored ·
   SHA-256 · Devices; "Version" left, all other titles and contents centred like the
   Devices table, size and date with tabular digits, the opened device list centred as a
   block with left-aligned lines. Phones: no head, small labels Size, Stored, SHA-256
   inside the version tile (`data-label`).
 - "Upload firmware" button: upload icon of its dialog title after the text (16 px,
   `aria-hidden`, vertically centred).
-- Delete dialog: both steps with red button.
+- Delete dialog: both steps with red button; the note that a file may not be
+  restorable is a red warning box (`warnbox danger`, text in the normal colour).
+- **Sorting (2026-11-19):** the same select + direction button as in the Devices tab
+  sorts the cards: Firmware ID, Newest version, Size (all versions), Stored (latest);
+  the column titles Version, Size and Stored sort the cards too (coupled, arrow at the
+  same column in every card); versions inside a card stay newest first. Kept per
+  browser.
+- **Downgrade icon (2026-11-19):** history icon before the changelog icon on every
+  older (not the newest) version of a Gen2+ card; disabled with the reason as title
+  while "Allow downgrades" is off (same hint as the row menu) or no device of this type
+  has a newer version installed. Dialog "Downgrade to <type> <version>": value list,
+  section with a radio list of these devices (name · installed version), downgrade
+  warning, Continue → the known second confirmation.
 
 ## Dialogs (mockups approved 2026-11-12)
 - Divider lines under the title and over the buttons, titled sections, value lists
@@ -84,6 +103,20 @@ not part of this file.
   (all steps incl. errors), installation dialog (red chip).
 - Status dialog: title = device name, message left / status pill right, sections
   Firmware and History.
+- **Message dialogs (2026-11-19, variant B):** large round icon (40 px circle, 24 px
+  icon) left of the text, text in the normal colour: success green check, error red X,
+  warning yellow "!" (e.g. not applied / not read back). Neutral notes ("Nothing
+  changed.", "This device has no …") without icon. Success: device settings saved,
+  restart sent, password done.
+- **Password dialog (2026-11-19, variant A):** checkbox "Store in this app" (checked)
+  indented directly under the selected mode "Enable protection" / "Change password".
+  Storage note as box: checked → Gen2+ yellow (hash), Gen1 red (plain text), each plus
+  the reminder for the HA Shelly integration; unchecked → red box "Not stored in this
+  app: …" plus the reminder. Result of enable/change/remove: success icon plus a yellow
+  box to update the password in the HA Shelly integration. The yellow "Keep the
+  password safe …" warning stays.
+- Phones (2026-11-19): `#dlg-body` top padding 12 px; warning toast as wide as its
+  text, at most the width minus 16 px on each side.
 - Settings tab design approved.
 
 ## Phone tiles (mockups approved 2026-11-12)
@@ -92,7 +125,9 @@ not part of this file.
   the last) stretched to the full width, detail list right-aligned with lines, chevron
   right of "Details"; ⋮ and "Details" keep 44 px touch targets.
 - Firmware ID only in the details; Ignored label at the status.
-- Phone log tile: user top right.
+- Phone log tile: user top right; one arrow only (none beside the user name when
+  opened, the name keeps its place); no expansion when the details only repeat the
+  summary (2026-11-19).
 
 ## Tooltips and setting help (2026-11-17)
 - Settings tab: help texts not shown under the fields; i-icon (16 px) next to the
