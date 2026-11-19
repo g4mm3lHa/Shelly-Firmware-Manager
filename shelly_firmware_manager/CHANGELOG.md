@@ -2,10 +2,8 @@
 
 ## 3.3.0
 
-Release candidate, not released yet. Optional downgrades, sorting per device in both
-tabs, password changes without storing, status icons in messages.
-
-Changes in rc1
+Released 2026-11-19. Optional downgrades, sorting per browser in both tabs, password
+changes without storing, status icons in messages.
 
 Added
 - New option "Allow downgrades" (Settings tab, Firmware & storage): off by default, also
