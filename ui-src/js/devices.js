@@ -1,7 +1,7 @@
 // Devices tab: status and action icons, the device table / phone tiles and the row menu.
 import {
   $, api, attachTip, box, collator, devUrl, el, fmt, hideTip, icon, iconButton, loadLocal, message, modal, openDetails,
-  saveLocal, section, selected, sortControl, toast, ui, valueList, webUrl,
+  saveLocal, searchTool, section, selected, sortControl, toast, ui, valueList, webUrl,
 } from "./core.js";
 import {DOWNGRADE_OFF, OFFER_SOURCES, openDowngrade, openInstall} from "./install.js";
 import {
@@ -44,9 +44,11 @@ const downgradable = (d, s) => d.gen >= 2 && !!d.ip && !d.installing && d.status
   d.activity !== "reloading" && !(s.download_base && s.download_base.issue);
 // Settings can be read/changed once the device was reached and while it is not updating or reloading
 const editable = d => !!d.ip && !!d.gen && !d.installing && d.status !== "installing" && d.activity !== "reloading";
+// "Unprotected": devices without password protection set on the device (filter only,
+// the user acts per device in the filtered list); an unknown state does not count
 const FILTERS = {all: ["All", () => true], updates: ["Updates", d => hasUpdate(d) && !d.ignored],
-  errors: ["Errors", d => ["error", "unconfirmed"].includes(d.status)], uptodate: ["Up to date", d => d.status === "up-to-date"],
-  ignored: ["Ignored", d => d.ignored]};
+  errors: ["Errors", d => ["error", "unconfirmed"].includes(d.status)], uptodate: ["Up-To-Date", d => d.status === "up-to-date"],
+  unprotected: ["Unprotected", d => d.auth_enabled === false], ignored: ["Ignored", d => d.ignored]};
 
 // Running check of a device (server-side state, in memory only)
 const ACTIVITY_LABELS = {waiting: "Waiting", checking: "Checking…", downloading: "Downloading…", reloading: "Reloading…"};
@@ -395,9 +397,9 @@ export function renderDevices() {
     all.onchange = () => { for (const d of sel) all.checked ? selected.add(d.id) : selected.delete(d.id); render(true); };
     const go = el("button", `Review & install (${selected.size})`, "primary"); go.disabled = !selected.size;
     go.onclick = () => openInstall(s.devices.filter(d => selected.has(d.id)));
-    cards.push(deviceCard("Updates available", updates, [all], [go]));
+    cards.push(deviceCard("Updates Available", updates, [all], [go]));
   }
-  if (others.length) cards.push(deviceCard(updates.length ? "All other devices" : "Devices", others));
+  if (others.length) cards.push(deviceCard(updates.length ? "All Other Devices" : "Devices", others));
   if (ignored.length) cards.push(deviceCard("Ignored", ignored));
   if (!cards.length) cards.push(box("div", "card", el("div", s.devices.length ? "No devices match." :
     s.first_start_open ? "No devices yet – they are found by the first check." : "No devices yet – run “Check now”.", "empty")));
@@ -422,6 +424,7 @@ export function buildChooser() {
 export function syncChooser() { for (const cb of $("cols-devices").querySelectorAll("input")) cb.checked = !prefs.devices.hidden.includes(cb.dataset.col); }
 document.addEventListener("click", e => { if (!$("cols").contains(e.target)) $("cols").open = false; });
 $("dev-search").oninput = () => render(true);
+searchTool($("dev-search"));
 
 // ---------------------------------------------------------------- Row menu ⋮
 const rowmenu = $("rowmenu");

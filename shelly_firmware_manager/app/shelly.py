@@ -960,7 +960,7 @@ async def fetch_cloud_text(
 ) -> str:
     """Text page (e.g. changelog) from a shelly.cloud server (see _cloud_get).
     Sends no device data."""
-    too_large = f"Page larger than {limit // 1024 // 1024} MiB: {clip(url)}"
+    too_large = f"Page larger than {limit // 1024 // 1024} MB: {clip(url)}"
     raw, charset = await _cloud_get(session, url, pins, limit, too_large)
     return raw.decode(charset or "utf-8", "replace")
 
@@ -1064,7 +1064,7 @@ async def _store(
             async for chunk in resp.content.iter_chunked(128 * 1024):
                 size += len(chunk)
                 if size > MAX_FW_SIZE:
-                    raise ShellyError("Firmware larger than 64 MiB")
+                    raise ShellyError("Firmware larger than 64 MB")
                 digest.update(chunk)
                 # In a worker thread: a slow disk (SD card) never blocks the event loop
                 await asyncio.to_thread(handle.write, chunk)

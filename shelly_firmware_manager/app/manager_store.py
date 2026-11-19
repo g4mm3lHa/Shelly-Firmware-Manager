@@ -595,7 +595,7 @@ class FirmwareStore(ManagerCore):
         if not isinstance(total, int) or isinstance(total, bool) or total < shelly.MIN_FW_SIZE:
             raise ValueError("Firmware file implausibly small")
         if total > shelly.MAX_FW_SIZE:
-            raise ValueError("Firmware larger than 64 MiB")
+            raise ValueError("Firmware larger than 64 MB")
         if not isinstance(length, int) or not isinstance(offset, int) or isinstance(offset, bool):
             raise ValueError("Invalid part of the file transfer")
         if self._upload_lock.locked():
@@ -707,6 +707,14 @@ class FirmwareStore(ManagerCore):
     def _free_space(self) -> int:
         """Free bytes on the volume of the firmware store."""
         return shutil.disk_usage(data_paths.FW_DIR).free
+
+    def free_space(self) -> int | None:
+        """Free bytes on the volume of the firmware store for the Firmware tab; None
+        if the volume cannot be read (information only)."""
+        try:
+            return self._free_space()
+        except OSError:
+            return None
 
     def prepare_export(self, user: str = "unknown") -> dict[str, Any]:
         """Step 1 of an export: generate the export password and derive the seal key.

@@ -77,7 +77,7 @@ function askFirstStart() {
   firstStartAsked = true; saveLocal("firstStartAsked", true);
   modal("Welcome – import a firmware store?", [
     el("p", "Moving from another Home Assistant instance? Import its exported firmware store first: the stored versions (also older ones Shelly no longer offers) and uploads are then available at once."),
-    el("p", FIRST_START, "hint"), el("div", "You can also import later: Settings → Firmware store.", "hint")],
+    el("p", FIRST_START, "hint"), el("div", "You can also import later: Settings → Firmware & Storage.", "hint")],
   [{text: "Skip", action: skipFirstStart}, {text: "Import store …", kind: "primary", action: importDialog}], "importIcon");
 }
 /** Answer the first-start question with "Skip": checks may run from now on. */
@@ -137,7 +137,7 @@ export async function load(force) {
   inflight = true;
   try {
     const s = await getState();
-    if (ui.view === "firmware") { const f = await api("api/firmware"); ui.firmware = f.firmware; ui.firmwareTotal = f.total_size || 0; }
+    if (ui.view === "firmware") { const f = await api("api/firmware"); ui.firmware = f.firmware; ui.firmwareTotal = f.total_size || 0; ui.firmwareFree = f.free_space ?? null; }
     if (ui.view === "logs" && (force || Date.now() - ui.logsLoaded > 30000)) { ui.logs = (await api("api/logs")).entries; ui.logsLoaded = Date.now(); }
     ui.state = s;
     render(force);

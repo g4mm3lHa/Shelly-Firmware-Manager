@@ -1,7 +1,7 @@
 // Firmware tab: stored files, changelog, Install button per device, delete and upload.
 import {
   $, api, attachTip, box, closeModal, collator, copyText, el, fmt, icon, iconButton, keptDetails, loadLocal, mb, message,
-  modal, saveLocal, section, shaRow, sortControl, toast, ui, uploadFile, valueList,
+  modal, saveLocal, searchTool, section, shaRow, sortControl, toast, ui, uploadFile, valueList,
 } from "./core.js";
 import {installable, installBlocker} from "./devices.js";
 import {changelogNodes, DOWNGRADE_OFF, DOWNGRADE_WARNING, downgradeConfirm, fwSource, openInstall, UPLOAD_HINT} from "./install.js";
@@ -32,13 +32,29 @@ function compareCards([ta, fa], [tb, fb]) {
   return (fwSort[1] === "desc" ? -c : c) || collator.compare(ta, tb);
 }
 
+// ---------------------------------------------------------------- Filters
+// Filter chips over the stored files (counts respect the search); a card shows only its
+// matching versions. "Unused": no known device has the firmware ID of the file.
+const FW_FILTERS = {all: ["All", () => true], provided: ["Provided", f => f.devices.length > 0],
+  uploaded: ["Uploaded", f => f.source === "upload"], intermediate: ["Intermediate", f => !!f.intermediate],
+  gen1: ["Gen1", f => f.gen === 1], unused: ["Unused", f => !(ui.state?.devices || []).some(d => d.type === f.type)]};
+
 // ---------------------------------------------------------------- Firmware
+/** Free disk space for the summary: MB, from 1024 MB on in GB (one decimal). */
+const freeText = bytes => bytes >= 1024 * 1048576 ? `${(bytes / 1073741824).toFixed(1)} GB free` : `${mb(bytes)} free`;
 /** Firmware tab: one card per firmware ID, versions as rows, newest first. */
 export function renderFirmware() {
   const q = $("fw-search").value.trim().toLowerCase();
-  const list = ui.firmware.filter(f => !q || [f.type, f.version, ...f.devices.map(d => d.name)].some(v => String(v || "").toLowerCase().includes(q)));
-  const total = ui.firmwareTotal;
-  $("fw-summary").textContent = `${ui.firmware.length} file${ui.firmware.length === 1 ? "" : "s"} · ${mb(total)} stored`;
+  const found = ui.firmware.filter(f => !q || [f.type, f.version, ...f.devices.map(d => d.name)].some(v => String(v || "").toLowerCase().includes(q)));
+  $("fw-chips").replaceChildren(...Object.entries(FW_FILTERS).map(([key, [label, fn]]) => {
+    const b = el("button", label, "chip" + (ui.fwFilter === key ? " active" : ""));
+    b.append(el("span", found.filter(fn).length, "count")); b.onclick = () => { ui.fwFilter = key; render(true); };
+    return b;
+  }));
+  const list = found.filter(FW_FILTERS[ui.fwFilter][1]);
+  const total = ui.firmwareTotal, free = ui.firmwareFree;
+  $("fw-summary").textContent = `${ui.firmware.length} file${ui.firmware.length === 1 ? "" : "s"} · ${mb(total)} stored` +
+    (typeof free === "number" ? ` · ${freeText(free)}` : "");
   const groups = new Map();
   for (const f of list) { if (!groups.has(f.type)) groups.set(f.type, []); groups.get(f.type).push(f); }
   fwSortControl.set(fwSort);
@@ -172,12 +188,12 @@ function deleteFirmware(f) {
  *  firmware ID and version (pre-filled from the file where possible), optional SHA-256. */
 function openUpload() {
   const title = "Upload firmware", input = el("input"); input.type = "file"; input.accept = ".zip,.bin,.gbl";
-  modal(title, [box("label", "field", "Firmware file (.zip, .bin or .gbl, max. 64 MiB)", input),
+  modal(title, [box("label", "field", "Firmware file (.zip, .bin or .gbl, max. 64 MB)", input),
     el("p", "Only for Gen2+ devices known to this app and stable versions. A version newer than the installed one is provided as update by the next check, an older one allows a downgrade. Use files from a source you trust.", "hint"), el("div", UPLOAD_HINT, "warnbox")],
   [{text: "Cancel"}, {text: "Upload", kind: "primary", action: async () => {
     const file = input.files && input.files[0];
     if (!file) { message(title, "No file selected.", "error", "upload"); return; }
-    if (file.size > 64 * 1048576) { message(title, "Firmware larger than 64 MiB.", "error", "upload"); return; }
+    if (file.size > 64 * 1048576) { message(title, "Firmware larger than 64 MB.", "error", "upload"); return; }
     const status = el("p", `Uploading ${file.name} …`, "hint");
     modal(title, [status], [], "upload");
     const progress = (sent, total) => { status.textContent = `Uploading ${file.name} … ${Math.floor(sent * 100 / total)} %`; };
@@ -213,3 +229,4 @@ function uploadConfirm(r) {
 $("fw-upload").append(icon("upload"));   // same icon as the upload dialog title (aria-hidden)
 $("fw-upload").onclick = openUpload;
 $("fw-search").oninput = () => render(true);
+searchTool($("fw-search"));

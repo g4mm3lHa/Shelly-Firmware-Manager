@@ -22,14 +22,15 @@ not part of this file.
   "Downgrade" disabled without a stored older version; while the option "Allow
   downgrades" is off it is disabled with the menu hint "Downgrades are off – enable
   “Allow downgrades” in Settings" below it (Gen2+ only, 2026-11-19).
-- **Sorting (2026-11-19, variant A):** select "Sort: <column>" with a direction button
-  (arrow up/down) in the toolbar after the search field, desktop and phones (phones: own
-  row, the select fills it); all sortable columns, also hidden ones. Desktop column heads
-  keep sorting and share the state with the select. Sort order, hidden columns and column
-  order are kept per browser (localStorage); start: device name ascending.
+- **Sorting:** sort tool of the toolbar (see "Toolbar") with all sortable columns, also
+  hidden ones. Desktop column heads keep sorting and share the state with the sort tool.
+  Sort order, hidden columns and column order are kept per browser (localStorage);
+  start: device name ascending.
+- **Filter chips (3.5.0):** All, Updates, Errors, Up-To-Date, Unprotected, Ignored.
+  "Unprotected" = `auth_enabled` false on the device (unknown does not count); filter
+  only, no action. Spelling "Up-To-Date" like the status label.
 - Gen1 firmware column: version only.
-- Phone tiles: "Ignored" label wrap and truncated names accepted; IP ends in line with
-  the ⋮ menu.
+- Phone tiles: "Ignored" label wrap and truncated names accepted.
 
 ## Action icons
 - Power-on action = lightning, green if all outputs are "Restore last state" (Gen1
@@ -83,8 +84,11 @@ not part of this file.
   `aria-hidden`, vertically centred).
 - Delete dialog: both steps with red button; the note that a file may not be
   restorable is a red warning box (`warnbox danger`, text in the normal colour).
-- **Sorting (2026-11-19):** the same select + direction button as in the Devices tab
-  sorts the cards: Firmware ID, Newest version, Size (all versions), Stored (latest);
+- **Filter chips (3.5.0):** All, Provided (provided to a device), Uploaded,
+  Intermediate, Gen1, Unused (no known device of the firmware ID); counts respect the
+  search; a card shows only its matching versions. Summary "n files · x MB stored · y
+  free" (free disk space of the store volume; MB, from 1024 MB on GB).
+- **Sorting (2026-11-19):** the same sort tool as in the Devices tab sorts the cards: Firmware ID, Newest version, Size (all versions), Stored (latest);
   the column titles Version, Size and Stored sort the cards too (coupled, arrow at the
   same column in every card); versions inside a card stay newest first. Kept per
   browser.
@@ -118,11 +122,32 @@ not part of this file.
 - Phones (2026-11-19): `#dlg-body` top padding 12 px; warning toast as wide as its
   text, at most the width minus 16 px on each side.
 - Settings tab design approved.
+- **Settings cards (3.5.0):** Checks, Download Server (download base URL, serve only to
+  known Shellys), Firmware & Storage (Gen1 updates, Gen1 types, Allow downgrades, block
+  "Firmware store" with export/import, Max. import size), Logs, Advanced, Device
+  Passwords. Option labels with "Max." in front. Units in texts always "MB".
+
+## Toolbar and card heads (3.5.0, variant B)
+- Same toolbar in all tabs: search and sort only as small round icons (36 px desktop,
+  44 px phones); a click opens a popover under the icon (search field; sort: list of
+  fields + Ascending/Descending, checked entries marked); click outside or Escape
+  closes; Enter in the search field closes it; dot on the search icon while a search
+  text is set. Logs: search icon only.
+- Desktop order: icons, chips, tab extras right. Phones: icons and chips share row 1
+  (chips scroll), tab extras in row 2, popover full width under row 1; "Upload
+  firmware" as round icon at the right end of row 2; the Devices row 2 (column
+  chooser) is not shown.
+- Card heads (device groups, firmware IDs, settings cards) in Title Case and the same
+  weight (600).
+- Phones, title bar (H1): inside HA the app title is hidden; the pills "Last checked …"
+  and "Every n days · HH:MM" stacked on the left (ellipsis if too long), "Check now"
+  right, vertically centred, never wraps.
 
 ## Firmware store and device passwords (approved 2026-11-19, 3.4.0)
-- **Entry points (8a B, 7a B):** Settings tab, below the option cards: card "Firmware
-  store" (buttons "Export store …" / "Import store …" with export/import icons) and
-  card "Device passwords" (button "Device passwords …" with lock icon).
+- **Entry points (8a B, 7a B; places changed in 3.5.0):** Settings tab: block
+  "Firmware store" in the card "Firmware & Storage" (buttons "Export store …" /
+  "Import store …" with export/import icons) and card "Device Passwords" (button
+  "Device passwords …" with lock icon).
 - **Export (8b B):** dialog with value list (files with downloaded/uploaded, size, file
   name), the generated password in a read-only field with copy icon (shown only here),
   hint that it seals and is stored nowhere, checkbox "I have saved the password";
@@ -154,11 +179,14 @@ not part of this file.
 - **Upload progress (3.4.1):** firmware upload and store import send the file in parts
   and show "Uploading <file> … n %" in the dialog, then "Checking <file> …" (import).
 
-## Phone tiles (mockups approved 2026-11-12)
-- Checkbox and ⋮ on the name line, status/Install on the Shelly-name line, 12 px
+## Phone tiles (mockups approved 2026-11-12, T1 of 2026-11-19 in 3.5.0)
+- Line 1 checkbox, name (600) and ⋮; line 2 Shelly name + pencil (lighter) left, IP
+  right (grey, no underline, not monospace, ↗, link to the web UI); line 3 firmware
+  left, status pill + Install right; then "Details" as outlined button (36 px, full
+  content width, centred text + chevron down/up, like the feature buttons). 12 px
   padding top and bottom, feature buttons 36 px with natural width and every row (incl.
-  the last) stretched to the full width, detail list right-aligned with lines, chevron
-  right of "Details"; ⋮ and "Details" keep 44 px touch targets.
+  the last) stretched to the full width, detail list right-aligned with lines; ⋮ keeps
+  its 44 px touch target.
 - Firmware ID only in the details; Ignored label at the status.
 - Phone log tile: user top right; one arrow only (none beside the user name when
   opened, the name keeps its place); no expansion when the details only repeat the

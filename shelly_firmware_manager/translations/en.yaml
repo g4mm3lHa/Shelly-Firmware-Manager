@@ -12,7 +12,7 @@ configuration:
   restrict_downloads_to_devices:
     name: Serve downloads only to known Shellys
   max_parallel_installs:
-    name: Parallel installations (max.)
+    name: Max. parallel installations
     description: Maximum number of approved updates installed at the same time (1-20); further approvals wait.
   gen1_updates_enabled:
     name: Enable Gen1 updates
@@ -28,7 +28,7 @@ configuration:
   log_retention_days:
     name: Log retention (days)
   log_entry_limit:
-    name: Log size (max. entries)
+    name: Max. log size (entries)
     description: 100-3000 entries.
   gen1_allowed_types:
     name: Allowed Gen1 types

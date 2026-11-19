@@ -1,5 +1,7 @@
 // Logs tab: activity log with filters, grouping per device and deleting entries.
-import {$, api, box, closeModal, el, fmt, iconButton, keptDetails, mb, message, modal, openDetails, pad, ui, valueList} from "./core.js";
+import {
+  $, api, box, closeModal, el, fmt, iconButton, keptDetails, mb, message, modal, openDetails, pad, searchTool, ui, valueList,
+} from "./core.js";
 import {OFFER_SOURCES} from "./install.js";
 import {OPTION_FIELDS} from "./app-settings.js";
 import {load, render} from "./main.js";
@@ -189,6 +191,7 @@ export function renderLogs() {
   $("log-list").replaceChildren(...out);
 }
 $("log-search").oninput = () => render(true);
+searchTool($("log-search"));
 $("log-quiet").onchange = () => render(true);
 /** Delete the whole activity log after a confirmation (one entry naming the user stays). */
 $("log-clear").onclick = () => {

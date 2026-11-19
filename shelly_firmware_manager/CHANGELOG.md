@@ -1,5 +1,39 @@
 # Changelog
 
+## 3.5.0
+
+Release candidate. Clearer settings, filter chips and one toolbar in all tabs; phone
+header and device tiles reworked.
+
+Changes in rc1
+
+Added
+- Devices tab: filter "Unprotected" lists devices without password protection set on
+  the device.
+- Firmware tab: filters Provided, Uploaded, Intermediate, Gen1 and Unused (no known
+  device of the firmware ID).
+- Firmware tab: free disk space of the store shown next to the number of files and the
+  stored size.
+
+Changed
+- All tabs: search and sort as small round icons that open a popup (search field; sort
+  fields and direction); a dot marks an active search. Logs: search only.
+- Phones: icons and filter chips share the first toolbar row; "Upload firmware" is an
+  icon at the right end of the second row.
+- Settings tab: new card "Download Server" (download base URL, serve only to known
+  Shellys); "Firmware & Storage" holds Gen1, downgrades, the firmware store and the
+  import size.
+- Settings tab: export/import of the firmware store moved into "Firmware & Storage"; the
+  separate card "Firmware store" is gone.
+- Option names start with "Max." ("Max. log size (entries)", "Max. parallel
+  installations"); sizes are always given in MB.
+- Card heads in Title Case and the same bold weight (firmware ID more prominent).
+- Devices filter "Up to date" is now spelled "Up-To-Date" like the status.
+- Phones, header: last check and schedule stacked on the left, "Check now" right on the
+  same line (it no longer wraps below them).
+- Phones, device tiles: IP right of the Shelly name (grey, ↗), status and Install right
+  of the firmware; "Details" is an outlined button over the full width.
+
 ## 3.4.1
 
 Released 2026-11-19. Store imports and firmware uploads above 16 MiB work through Home
