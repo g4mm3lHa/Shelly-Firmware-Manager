@@ -176,7 +176,7 @@ export function saveLocal(key, value) {
 // popover below the icon (phones: full width below the first toolbar row). Only one
 // popover is open at a time; a click outside it or Escape closes it.
 /** Close every open toolbar popover. */
-export function closeTools() {
+function closeTools() {
   for (const t of document.querySelectorAll(".tool.open")) {
     t.classList.remove("open"); t.querySelector(".tool-pop").hidden = true;
     t.querySelector(".tool-btn").setAttribute("aria-expanded", "false");
