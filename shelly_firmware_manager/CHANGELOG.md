@@ -2,10 +2,8 @@
 
 ## 3.4.1
 
-Release candidate. Store imports and firmware uploads above 16 MiB work through Home
+Released 2026-11-19. Store imports and firmware uploads above 16 MiB work through Home
 Assistant.
-
-Changes in rc1
 
 Changed
 - Store import and firmware upload dialogs show the upload progress in percent.
