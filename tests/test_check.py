@@ -404,6 +404,9 @@ async def test_ignored_device_not_contacted_and_stays_registered(mgr, net):
     assert dev["status"] == manager_core.STATUS_READY and dev["name"] == "Kitchen renamed"
     check = [e for e in mgr.events.entries if e["kind"] == "check"][-1]
     assert check["devices"] == 2
+    # Named in the entry and counted in the result, but no finding (severity unchanged)
+    assert check["ignored"] == ["Kitchen renamed"] and check["result"].endswith(", 1 ignored")
+    assert all(f.get("device") != "Kitchen renamed" for f in check["findings"])
     await mgr.check_device(A)  # explicit single-device check stays possible
     assert net.info_calls == calls + 3
     mgr.set_ignored(A, False)

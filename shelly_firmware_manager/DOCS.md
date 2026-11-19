@@ -248,8 +248,9 @@ The activity log records checks, downloads, uploads, installations and downgrade
 deleted firmware, setting and password changes on devices, store exports and imports
 and changes of the app settings – each with time, user and result (success, warning, error). A download names
 the user of the check that fetched it; scheduled checks and their downloads name
-"Schedule". Filters and a
-device search help to find entries. Passwords never appear in the log. Consecutive
+"Schedule". A full check also counts the ignored devices ("2 ignored") and names them
+in its details in the normal text colour – they are not contacted and never make the
+entry a warning or error. Filters and a device search help to find entries. Passwords never appear in the log. Consecutive
 entries of the same device are marked by a bar at the side.
 
 The bin icon deletes a single entry, **Delete all logs** the whole log (each after a

@@ -1020,7 +1020,13 @@ def _logs(c):
     f.locator("#log-list summary", has_text="30.7 s").first.click()
     colours = f.evaluate("""() => { const ul = [...document.querySelectorAll('#log-list ul')].find(u => u.textContent.includes('Sauna'));
       return [...ul.children].map(li => li.className); }""")
-    check(f"{case}: findings coloured by their own severity", colours == ["okc", "warnc", "bad"], str(colours))
+    check(f"{case}: findings coloured by their own severity, then the ignored devices",
+          colours == ["okc", "warnc", "bad", "neutral", "neutral"], str(colours))
+    plain = f.evaluate("""() => { const li = document.querySelector('#log-list li.neutral'), body = getComputedStyle(document.body).color;
+      return li && li.textContent.startsWith('Garage door: ignored') && getComputedStyle(li).color === body; }""")
+    check(f"{case}: ignored devices in the normal text colour", plain)
+    summary = f.locator("#log-list summary", has_text="30.7 s").first.inner_text()
+    check(f"{case}: ignored devices counted in the summary", "2 ignored" in summary, summary)
     check(f"{case}: no overflow (logs)", f.evaluate(OVERFLOW_JS) <= 0)
     page.screenshot(path=out / f"{case}-logs.png", full_page=True)
     f.locator("#log-list .log-del").last.click()

@@ -211,6 +211,9 @@ not part of this file.
   the last) stretched to the full width, detail list right-aligned with lines; ⋮ keeps
   its 44 px touch target.
 - Firmware ID only in the details; Ignored label at the status.
+- Check entries (2026-11-19): ignored devices of a full check counted in the summary
+  ("…, n ignored") and listed after the findings as "<name>: ignored – not checked" in
+  the normal text colour (also inside an error entry); no influence on the severity.
 - Phone log tile: user top right; one arrow only (none beside the user name when
   opened, the name keeps its place); no expansion when the details only repeat the
   summary (2026-11-19).
