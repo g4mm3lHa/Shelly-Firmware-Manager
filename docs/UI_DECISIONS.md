@@ -29,6 +29,12 @@ not part of this file.
 - **Filter chips (3.5.0):** All, Updates, Errors, Up-To-Date, Unprotected, Ignored.
   "Unprotected" = `auth_enabled` false on the device (unknown does not count); filter
   only, no action. Spelling "Up-To-Date" like the status label.
+- **Battery devices (2026-11-19, 3.5.0):** battery icon (16 px,
+  secondary text colour, tooltip "Battery device: reachable only while it is awake")
+  right after the HA name in the table and the phone tile head (before the "Gen n"
+  label). A battery device that did not answer the last check shows the grey status
+  pill "Asleep" (not listed under "Errors") and its IP dimmed (opacity 0.5). No queue,
+  no "Check queued" pill.
 - Gen1 firmware column: version only.
 - Phone tiles: "Ignored" label wrap and truncated names accepted.
 
@@ -85,8 +91,9 @@ not part of this file.
 - Delete dialog: both steps with red button; the note that a file may not be
   restorable is a red warning box (`warnbox danger`, text in the normal colour).
 - **Filter chips (3.5.0):** All, Provided (provided to a device), Uploaded,
-  Intermediate, Gen1, Unused (no known device of the firmware ID); counts respect the
-  search; a card shows only its matching versions. Summary "n files · x MB stored · y
+  Intermediate, Gen1, Unused (no device of the list has the firmware ID; while a
+  device's firmware ID is unknown – never reached – nothing is unused and the chip's
+  tooltip names the number of these devices, 2026-11-19); counts respect the search; a card shows only its matching versions. Summary "n files · x MB stored · y
   free" (free disk space of the store volume; MB, from 1024 MB on GB).
 - **Sorting (2026-11-19):** the same sort tool as in the Devices tab sorts the cards: Firmware ID, Newest version, Size (all versions), Stored (latest);
   the column titles Version, Size and Stored sort the cards too (coupled, arrow at the
@@ -129,6 +136,13 @@ not part of this file.
   known Shellys), Firmware & Storage (Gen1 updates, Gen1 types, Allow downgrades, block
   "Firmware store" with export/import, Max. import size), Logs, Advanced, Device
   Passwords. Option labels with "Max." in front. Units in texts always "MB".
+- **Changelog hint (3.5.0, 2026-11-19):** last line of the Settings tab, below
+  the Save area: hint "What changed in each version: open the app page in Home
+  Assistant and choose “Changelog” next to the version." – the link opens the info
+  page of the app in the whole window (`/config/app/<slug>/info`, slug from the
+  Supervisor; the list of apps until it is known). The Configuration tab of the app
+  page has the same names, help texts and order as the Settings tab; its last help
+  text ends with the same hint (HA shows no links there).
 
 ## Toolbar and card heads (3.5.0, variant B)
 - Same toolbar in all tabs: search and sort only as small round icons (36 px desktop,
@@ -152,7 +166,8 @@ not part of this file.
   "Import store …" with export/import icons) and card "Device Passwords" (button
   "Device passwords …" with lock icon).
 - **Export (8b B):** dialog with value list (files with downloaded/uploaded, size, file
-  name), the generated password in a read-only field with copy icon (shown only here),
+  name), the generated password in a read-only field with copy icon (shown only here;
+  if the browser refuses copying, the field's text is selected),
   hint that it seals and is stored nowhere, checkbox "I have saved the password";
   "Export" is enabled only after it and starts the browser download.
 - **Import (8c A):** step 1 file + password + "Check file" (the hint names the maximum
@@ -183,10 +198,14 @@ not part of this file.
   and show "Uploading <file> … n %" in the dialog, then "Checking <file> …" (import).
 
 ## Phone tiles (mockups approved 2026-11-12, T1 of 2026-11-19 in 3.5.0)
-- Line 1 checkbox, name (600) and ⋮; line 2 Shelly name + pencil (lighter) left, IP
+- Line 1 = tile head like the head of a firmware card (2026-11-19): checkbox, name
+  (600, card-head size) with the "Gen n" label (omitted while the generation is unknown)
+  and ⋮, divider line over the full tile width; line 2 Shelly name + pencil (lighter) left, IP
   right (grey, no underline, not monospace, ↗, link to the web UI); line 3 firmware
   left, status pill + Install right; then "Details" as outlined button (36 px, full
-  content width, centred text + chevron down/up, like the feature buttons). 12 px
+  content width, centred text + chevron down/up, like the feature buttons). Outline of
+  "Details" and the feature buttons in the tile line colour (at least 3:1 in light and
+  dark themes, 2026-11-19). 12 px
   padding top and bottom, feature buttons 36 px with natural width and every row (incl.
   the last) stretched to the full width, detail list right-aligned with lines; ⋮ keeps
   its 44 px touch target.

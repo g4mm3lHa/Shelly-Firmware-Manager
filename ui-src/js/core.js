@@ -147,6 +147,8 @@ const ICONS = {
   // Settings tab, Firmware store card: export / import
   exportIcon: "M23,12L19,8V11H10V13H19V16M1,18V6C1,4.89 1.9,4 3,4H15A2,2 0 0,1 17,6V9H15V6H3V18H15V15H17V18A2,2 0 0,1 15,20H3A2,2 0 0,1 1,18Z",
   importIcon: "M14,12L10,8V11H2V13H10V16M20,18V6C20,4.89 19.1,4 18,4H6A2,2 0 0,0 4,6V9H6V6H18V18H6V15H4V18A2,2 0 0,0 6,20H18A2,2 0 0,0 20,18Z",
+  // Battery device marker after the device name (outline with a half-full bar)
+  battery: "M16,20H8V6H16M16.67,4H15V2H9V4H7.33A1.33,1.33 0 0,0 6,5.33V20.67C6,21.4 6.6,22 7.33,22H16.67A1.33,1.33 0 0,0 18,20.67V5.33C18,4.6 17.4,4 16.67,4M15,13H9V18H15V13Z",
   pencil: "M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z",
 };
 /** Inline SVG icon from a path. */
@@ -246,11 +248,21 @@ export function keptDetails(key, summary, content) {
   d.ontoggle = () => { d.open ? openDetails.add(key) : openDetails.delete(key); };
   d.append(el("summary", summary), content); return d;
 }
-/** Copy text to the clipboard; fallback for non-secure contexts. */
+/** Copy text to the clipboard. True if copied.
+ *  The Clipboard API is missing or refused outside a secure context (e.g. Home
+ *  Assistant over plain HTTP) and in frames without clipboard permission; then a
+ *  selected helper field is copied. An open modal dialog makes everything outside it
+ *  inert (no selection possible), so the helper field is placed inside the dialog. */
 export async function copyText(text) {
-  try { await navigator.clipboard.writeText(text); return; } catch (e) { /* fallback below */ }
-  const t = el("textarea"); t.value = text; document.body.append(t); t.select();
-  document.execCommand("copy"); t.remove();
+  try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* fallback below */ }
+  const t = el("textarea", null, "copy-helper"); t.value = text; t.readOnly = true;
+  const focused = document.activeElement;
+  (dlg.open ? dlg : document.body).append(t);
+  t.focus(); t.select(); t.setSelectionRange(0, text.length);
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+  t.remove(); if (focused instanceof HTMLElement) focused.focus();
+  return ok;
 }
 
 // ---------------------------------------------------------------- Tooltip

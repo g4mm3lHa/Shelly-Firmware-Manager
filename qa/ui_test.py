@@ -64,7 +64,7 @@ TARGETS_JS = """() => [...document.querySelectorAll('#view-devices button, #view
   return {t: (b.getAttribute('aria-label') || b.textContent || b.id).trim().slice(0, 30), w: Math.round(r.width), h: Math.round(r.height)}; })
   .filter(x => x.h < 44 || x.w < 44)"""
 PILL_TEXTS = {"Up-To-Date", "Available", "Ready", "Queued", "Installing", "Unconfirmed", "Error", "Unregistered", "Skipped",
-              "Updated"}
+              "Updated", "Asleep"}
 TABS_JS = """() => [...document.querySelectorAll('.tab')].map(t => { const r = t.getBoundingClientRect();
   return {id: t.id, left: Math.round(r.left), right: Math.round(r.right), w: Math.round(r.width)}; })"""
 

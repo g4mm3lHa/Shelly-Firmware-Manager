@@ -619,6 +619,11 @@ def _flag(value: object) -> bool | str:
     return value if isinstance(value, bool) else UNSUPPORTED
 
 
+def _positive(value: object) -> bool:
+    """True if a reported period is a number above 0 (a sleeping battery device)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+
+
 async def _list_active(
     read: Callable[[], Awaitable[dict[str, Any]]], key: str, active: Callable[[dict[str, Any]], bool]
 ) -> bool | str | None:
@@ -647,8 +652,13 @@ async def read_settings(
     auth: DeviceAuth | None = None,
     extended: bool = False,
 ) -> dict[str, Any]:
-    """Shelly name, NTP server, eco mode, AP, Bluetooth and websocket debug switch and
-    power-on action of all outputs – one request (Gen2+ Shelly.GetConfig, Gen1 /settings).
+    """Shelly name, NTP server, eco mode, AP, Bluetooth and websocket debug switch,
+    battery flag and power-on action of all outputs – one request (Gen2+
+    Shelly.GetConfig, Gen1 /settings).
+
+    battery is True for a battery device that sleeps between wake-ups (Gen2+
+    sys.wakeup_period > 0, Gen1 sleep_mode.period > 0) – such a device answers only
+    while it is awake, so it is only ever detected from the device itself.
 
     Switch values are True/False or UNSUPPORTED. extended=True (checks and Reload
     Device Info only) also reads whether actions/webhooks and schedules are active:
@@ -668,6 +678,7 @@ async def read_settings(
         # then runs on demand) and ble.rpc.enable is no global switch.
         extra["ble"] = _flag((config.get("ble") or {}).get("enable"))
         extra["debug_ws"] = _flag(((system.get("debug") or {}).get("websocket") or {}).get("enable"))
+        extra["battery"] = _positive(system.get("wakeup_period"))
         if extended:
             extra["actions"] = await _list_active(
                 lambda: _rpc(session, origin, "Webhook.List", auth=auth), "hooks", lambda e: e.get("enable") is True
@@ -695,6 +706,7 @@ async def read_settings(
         extra["ap"] = _flag((settings.get("wifi_ap") or {}).get("enabled"))
         extra["ble"] = UNSUPPORTED  # Gen1 devices have no Bluetooth switch
         extra["debug_ws"] = UNSUPPORTED  # Gen1 devices have no websocket debug log
+        extra["battery"] = _positive((settings.get("sleep_mode") or {}).get("period"))
         if extended:
             channels = [
                 c for c in (settings.get("relays") or []) + (settings.get("lights") or []) if isinstance(c, dict)

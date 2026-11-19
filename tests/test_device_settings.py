@@ -76,6 +76,21 @@ async def test_gen1_capabilities(device_api):
     assert (got["ap"], got["ble"], got["schedules"], got["actions"]) == (False, "unsupported", True, False)
 
 
+async def test_battery_device_detected_from_the_device(device_api):
+    """A battery device is detected only from its own answer: Gen2+ sys.wakeup_period
+    above 0, Gen1 sleep_mode.period above 0; missing or 0 means no battery device."""
+    _calls, answers = device_api
+    answers["Shelly.GetConfig"] = {"sys": {"wakeup_period": 7200}}
+    assert (await shelly.read_settings(None, 2, "http://1.2.3.4", "HTG3", None))["battery"] is True
+    for sys in ({"wakeup_period": 0}, {}, {"wakeup_period": True}):
+        answers["Shelly.GetConfig"] = {"sys": sys}
+        assert (await shelly.read_settings(None, 2, "http://1.2.3.4", "Plus1", None))["battery"] is False
+    answers["/settings"] = {"sleep_mode": {"period": 6, "unit": "h"}}
+    assert (await shelly.read_settings(None, 1, "http://1.2.3.4", "SHHT-1", None))["battery"] is True
+    answers["/settings"] = {}
+    assert (await shelly.read_settings(None, 1, "http://1.2.3.4", "SHSW-1", None))["battery"] is False
+
+
 async def test_ap_and_ble_writes(device_api):
     """Gen2 AP sends only ap.enable; Gen1 AP and BLE are refused."""
     calls, _answers = device_api

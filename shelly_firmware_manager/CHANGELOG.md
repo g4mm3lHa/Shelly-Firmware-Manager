@@ -3,7 +3,34 @@
 ## 3.5.0
 
 Release candidate. Clearer settings, filter chips and one toolbar in all tabs; phone
-header and device tiles reworked.
+header and device tiles reworked; battery devices are recognised.
+
+Changes in rc2
+
+Added
+- Battery devices are recognised while awake (Gen2+ `sys.wakeup_period`, Gen1
+  `sleep_mode`): battery icon after the name in the table and the tile.
+- Battery device not reachable at a check: grey status "Asleep" instead of Error (not
+  counted under "Errors"), IP dimmed.
+- Settings tab, last line: link to the app page in Home Assistant, where "Changelog"
+  next to the version shows the changes of every version.
+
+Changed
+- Devices waiting for a firmware download started by another check show "Downloading…"
+  (full and single-device checks; still one download per firmware ID and version).
+- App configuration in Home Assistant: same order, names and help texts as the Settings
+  tab; the last help text points to the changelog on the app page.
+- Phones, device tiles: Home Assistant name as head with the "Gen n" label, divider over
+  the full tile width.
+- Phones: "Details" and the feature buttons with a stronger outline, also in dark mode.
+- Firmware tab: "For n devices" with one chevron after the text (down closed, up open)
+  instead of two arrows.
+
+Fixed
+- Firmware tab, filter Unused: a file was listed while a device of the list had no
+  known firmware ID; now no file counts as unused then (tooltip names these devices).
+- Store export: the copy button did not copy the password; if copying is refused, the
+  password field is selected for a manual copy.
 
 Changes in rc1
 

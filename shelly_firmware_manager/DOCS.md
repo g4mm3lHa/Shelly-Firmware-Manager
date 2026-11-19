@@ -45,7 +45,7 @@ knows). Only original Shelly firmware is supported for now.
 ## Configuration
 
 All options can be changed in the app's **Settings** tab (or the Configuration tab of
-the app page). Saving restarts the app.
+the app page – same names, help texts and order). Saving restarts the app.
 
 | Option | Meaning |
 |---|---|
@@ -101,6 +101,11 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 - The row menu ⋮ offers: Check for updates (this device only), Install update,
   Downgrade, Reload device info, Ignore / Resume device, Open web UI, device settings,
   Status details and Restart.
+- **Battery devices** (e.g. H&T, door/window sensors) sleep between wake-ups and answer
+  only while they are awake. The app recognises them from the device itself when a check
+  or Reload Device Info reaches them awake (Gen2+: wake-up period, Gen1: sleep mode) and
+  shows a battery icon after the name. A battery device never reached while awake is not
+  marked. To check one, wake it up (e.g. press its button) and check it right away.
 - **Ignored** devices are skipped by automatic checks and cannot be updated until they
   are resumed.
 
@@ -113,6 +118,7 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 | Queued / Installing | Installation waiting for a free slot / running (with progress for Gen2+) |
 | Unconfirmed | The installation ran, but the target version was not confirmed (see the details); stays on top until the next check of the device |
 | Error | Check, download or installation failed; after a failed installation – or with a stored version while the Shelly server could not be asked – the device stays on top and can be installed (again) |
+| Asleep | Battery device that did not answer the last check – it sleeps; the IP is dimmed. Wake it up and check it again |
 | Skipped | Gen1 device while Gen1 updates are disabled |
 | Unregistered | Device is no longer in the Home Assistant device registry |
 
@@ -207,8 +213,9 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
 - All downloaded and uploaded firmware files, grouped by device type, with size, date,
   SHA-256 and the devices they are provided for. The number of files, their total size
   and the free disk space are shown at the top. Filters: Provided (provided to at least
-  one device), Uploaded, Intermediate, Gen1 and Unused (no known device has this
-  firmware ID). Search and sort work as in the Devices tab (sort by firmware ID, newest
+  one device), Uploaded, Intermediate, Gen1 and Unused (no device in the list has this
+  firmware ID; while the firmware ID of a device is not known yet – it was never
+  reached, e.g. a sleeping battery device – no file counts as unused). Search and sort work as in the Devices tab (sort by firmware ID, newest
   version, size or storage date, also with the column titles; kept per device); the
   versions inside a card stay newest first. On phones "Upload firmware" is the upload
   icon at the right end.
@@ -259,7 +266,8 @@ your local network. While installations are disabled because of the download bas
 a notice above the tabs explains why. The card **Firmware & Storage** holds the
 **Firmware store** block (export and import, see [Moving the firmware store](#moving-the-firmware-store)),
 the card **Device Passwords** sets passwords on several devices at once (see
-[Device passwords](#device-passwords)).
+[Device passwords](#device-passwords)). The last line links to the app page in Home
+Assistant, where **Changelog** next to the version lists what changed in each version.
 
 ## Device passwords
 
@@ -301,7 +309,8 @@ unprotected through your network.
 To move to another Home Assistant instance (or keep a copy), export the whole firmware
 store in the Settings tab → **Firmware & Storage** → **Export store …**:
 
-- The app generates an **export password** and shows it once (copy icon). Save it –
+- The app generates an **export password** and shows it once (copy icon; if the browser
+  does not allow copying, the password is selected for copying by hand). Save it –
   it is stored nowhere, and the file cannot be imported without it. **Export** is
   enabled after "I have saved the password"; the browser downloads one ZIP file.
 - The password **seals** the file: the list of all files with their SHA-256 and data
@@ -385,8 +394,8 @@ The app connects only to:
 - **Shelly servers** below `shelly.cloud` – version offers, firmware downloads and the
   official changelog pages. Only the device type (e.g. `Plus1`) is part of the request;
   no other information about your devices or Home Assistant is sent.
-- **Home Assistant** via the Supervisor – device registry, notifications and the app's
-  own settings.
+- **Home Assistant** via the Supervisor – device registry, notifications, the app's
+  own settings and its slug (for the link to the app page).
 
 The user interface loads nothing from the internet. No telemetry.
 

@@ -34,10 +34,15 @@ function compareCards([ta, fa], [tb, fb]) {
 
 // ---------------------------------------------------------------- Filters
 // Filter chips over the stored files (counts respect the search); a card shows only its
-// matching versions. "Unused": no known device has the firmware ID of the file.
+// matching versions. "Unused": no device of the list has the firmware ID of the file –
+// while a device was never reached (firmware ID unknown, e.g. a sleeping battery
+// device) nothing counts as unused, since that device may need any of the files.
+/** Devices of the list whose firmware ID is not known yet. */
+const unidentified = () => (ui.state?.devices || []).filter(d => !d.type);
+const unused = f => !(ui.state?.devices || []).some(d => !d.type || d.type === f.type);
 const FW_FILTERS = {all: ["All", () => true], provided: ["Provided", f => f.devices.length > 0],
   uploaded: ["Uploaded", f => f.source === "upload"], intermediate: ["Intermediate", f => !!f.intermediate],
-  gen1: ["Gen1", f => f.gen === 1], unused: ["Unused", f => !(ui.state?.devices || []).some(d => d.type === f.type)]};
+  gen1: ["Gen1", f => f.gen === 1], unused: ["Unused", unused]};
 
 // ---------------------------------------------------------------- Firmware
 /** Free disk space for the summary: MB, from 1024 MB on in GB (one decimal). */
@@ -49,6 +54,8 @@ export function renderFirmware() {
   $("fw-chips").replaceChildren(...Object.entries(FW_FILTERS).map(([key, [label, fn]]) => {
     const b = el("button", label, "chip" + (ui.fwFilter === key ? " active" : ""));
     b.append(el("span", found.filter(fn).length, "count")); b.onclick = () => { ui.fwFilter = key; render(true); };
+    const open = key === "unused" ? unidentified().length : 0;
+    if (open) b.title = `Firmware ID of ${open} device${open === 1 ? "" : "s"} not known yet (never reached) – no file counts as unused until ${open === 1 ? "it is" : "they are"} checked once`;
     return b;
   }));
   const list = found.filter(FW_FILTERS[ui.fwFilter][1]);

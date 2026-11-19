@@ -95,7 +95,19 @@ export function renderSettings() {
   const markDirty = () => { dirty.hidden = !Object.keys(optionChanges()).length; };
   const wrap = box("div", "settings-grid", ...cards);
   wrap.addEventListener("input", markDirty); wrap.addEventListener("change", markDirty); wrap.addEventListener("click", () => setTimeout(markDirty));
-  $("settings-form").replaceChildren(wrap, box("div", "form-actions", dirty, save));   // common save area
+  $("settings-form").replaceChildren(wrap, box("div", "form-actions", dirty, save), changelogNote());   // common save area
+}
+// Path of this app's page in Home Assistant (server: slug from the Supervisor); the list
+// of apps until it is known
+const APP_LIST_PAGE = "/config/apps";
+let appPage = APP_LIST_PAGE;
+/** Last line of the tab: where the changelog is – the info card of the app page in
+ *  Home Assistant has the link "Changelog" next to the version. The link opens the
+ *  page in the whole window (the app runs in a frame of Home Assistant). */
+function changelogNote() {
+  const link = el("a", "app page in Home Assistant"); link.href = appPage; link.target = "_top"; link.id = "set-changelog";
+  if (appPage === APP_LIST_PAGE) api("api/settings/app-page").then(r => { appPage = r.url; link.href = appPage; }).catch(() => {});
+  return box("p", "hint set-changelog", "What changed in each version: open the ", link, " and choose “Changelog” next to the version.");
 }
 /** Editable list of host + fingerprint rows. */
 function pinsEditor(pins) {
@@ -188,7 +200,8 @@ async function exportDialog() {
   try { x = await api("api/firmware/export", {}); } catch (e) { message(EXPORT_TITLE, e.message, "error", "exportIcon"); return; }
   const out = el("input"); out.type = "text"; out.readOnly = true; out.value = x.password; out.className = "mono";
   out.setAttribute("aria-label", "Export password");
-  const copy = iconButton("copy", "Copy password", () => copyText(x.password));
+  // Not copyable (browser refuses both ways): the password is selected for a manual copy
+  const copy = iconButton("copy", "Copy password", async () => { if (!await copyText(x.password)) { out.focus(); out.select(); } });
   const ack = el("input"); ack.type = "checkbox";
   const files = `${x.files} (${x.downloads} downloaded, ${x.uploads} uploaded)`;
   modal(EXPORT_TITLE, [

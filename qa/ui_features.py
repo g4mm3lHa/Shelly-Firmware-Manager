@@ -464,6 +464,47 @@ def _name_tips(c):
     page.keyboard.press("Escape")
 
 
+def _battery(c):
+    """Battery devices: battery icon right after the name on the same line (table and
+    tile) with a tooltip; a sleeping one shows the grey "Asleep" pill and a dimmed IP
+    and is not listed under "Errors"; an awake one keeps its normal IP."""
+    case, f, page, width = c.case, c.f, c.page, c.width
+    def row(name):
+        return f.locator("#dev-cards tr", has_text=name).first
+    geo = row("Doorbell").evaluate("""r => { const n = r.querySelector('td.c-device .name').getBoundingClientRect(),
+      b = r.querySelector('td.c-device .battery'), g = b && b.getBoundingClientRect(), ip = r.querySelector('td.c-ip .mono');
+      return {icon: !!b, after: !!g && g.left >= n.right - 1 && g.left - n.right <= 12,
+        line: !!g && Math.abs((g.top + g.height / 2) - (n.top + n.height / 2)) < 3,
+        dim: !!ip && ip.classList.contains('dim') && getComputedStyle(ip).opacity === '0.5',
+        pill: r.querySelector('td.c-status .pill').textContent}; }""")
+    check(f"{case}: battery icon right after the name", geo["icon"] and geo["after"] and geo["line"], str(geo))
+    check(f"{case}: sleeping battery device – Asleep pill and dimmed IP", geo["pill"] == "Asleep" and geo["dim"], str(geo))
+    pill = row("Doorbell").locator("td.c-status .pill")
+    grey = pill.evaluate("""p => { const s = getComputedStyle(p);
+      return [s.getPropertyValue('--pill').trim(), s.getPropertyValue('--secondary-text-color').trim()]; }""")
+    check(f"{case}: Asleep pill grey", grey[0] == grey[1] and grey[0] != "", str(grey))
+    awake = row("Carport").evaluate("r => [!!r.querySelector('.battery'), r.querySelector('td.c-ip .mono').classList.contains('dim')]")
+    check(f"{case}: awake battery device – icon, IP not dimmed", awake == [True, False], str(awake))
+    check(f"{case}: no battery icon on other devices", row("Hall").locator(".battery").count() == 0)
+    errors = f.locator("#dev-chips .chip", has_text="Errors")
+    errors.click()
+    check(f"{case}: Asleep is not listed under Errors", f.locator("#dev-cards tr", has_text="Doorbell").count() == 0)
+    f.locator("#dev-chips .chip", has_text="All").click()
+    icon = row("Doorbell").locator(".battery")
+    icon.scroll_into_view_if_needed()
+    if width > 700:
+        icon.hover()
+    else:
+        page.wait_for_timeout(300)
+        icon.tap()
+    check(f"{case}: battery tooltip", tip_text(f) == "Battery device: reachable only while it is awake", str(tip_text(f)))
+    page.screenshot(path=c.out / f"{case}-battery.png")
+    if width > 700:
+        page.mouse.move(5, 5)
+    else:
+        f.locator("#dev-chips .chip").first.tap()
+
+
 def _keep_listed(c):
     """Devices of the updates card stay there while they are checked again (the check
     resets their markers); phone tiles: the Ignored label as high as the status pill."""
@@ -775,6 +816,37 @@ def _checked(f, view):
       .map(b => b.dataset.value)""")
 
 
+def _unused_chip(c):
+    """Firmware chip "Unused": files of a firmware ID no device has; while a device's
+    firmware ID is unknown (never reached) nothing counts as unused (tooltip says why)."""
+    case, f, page = c.case, c.f, c.page
+    unknown = {"on": False}
+
+    def other_types(route):
+        headers = {k: v for k, v in route.request.headers.items() if k.lower() != "if-none-match"}
+        state = route.fetch(headers=headers).json()
+        for d in state["devices"]:
+            d["type"] = "OtherType"
+        if unknown["on"]:
+            state["devices"][0]["type"] = None
+        route.fulfill(json=state)
+
+    def unused():
+        chip = f.locator("#fw-chips .chip", has_text="Unused")
+        return int(chip.locator(".count").inner_text()), chip.get_attribute("title") or ""
+
+    page.route("**/api/state", other_types)
+    refresh_state(page, f)
+    count, title = unused()
+    check(f"{case}: Unused counts files without a device", count == f.locator(".fw-row").count() and not title, f"{count} {title}")
+    unknown["on"] = True
+    refresh_state(page, f)
+    count, title = unused()
+    check(f"{case}: unknown firmware ID blocks Unused", count == 0 and "1 device not known" in title.replace("ID of ", ""), f"{count} {title}")
+    page.unroute("**/api/state")
+    refresh_state(page, f)
+
+
 def _sorting_and_downgrade(c):
     """Toolbar tools (search and sort icons with popovers; Devices and Firmware tab, kept
     per browser, coupled with the column heads on desktop) and the downgrade icon of an
@@ -843,6 +915,7 @@ def _sorting_and_downgrade(c):
     check(f"{case}: sort tool in the Firmware toolbar", _checked(f, "firmware") == ["type", "asc"], str(_checked(f, "firmware")))
     chips = f.evaluate("() => [...document.querySelectorAll('#fw-chips .chip')].map(c => c.firstChild.textContent)")
     check(f"{case}: Firmware filter chips", chips == ["All", "Provided", "Uploaded", "Intermediate", "Gen1", "Unused"], str(chips))
+    _unused_chip(c)
     f.locator("#fw-chips .chip", has_text="Uploaded").click()
     tags = f.evaluate("() => [...document.querySelectorAll('.fw-row')].map(r => !!r.querySelector('.fw-ver .tag.warn'))")
     check(f"{case}: Uploaded filter shows only uploads", tags and all(tags), str(tags))
@@ -998,6 +1071,7 @@ def firmware_store(browser, out):
         _keep_listed(c)
         _action_popups(c)
         _name_tips(c)
+        _battery(c)
         _next_steps(c)
         _downgrade(c)
         rows = _firmware_tab(c)
@@ -1019,6 +1093,13 @@ def _export_import(c, page, f, out):
     check(f"{c}: export dialog", d["title"] == "Export firmware store" and "Files" in d["body"], d["body"][:120])
     check(f"{c}: generated password, 5 groups", len(password) == 24 and password.count("-") == 4, password)
     check(f"{c}: copy button visible", f.locator('#dlg-body .pw-row button[aria-label="Copy password"]').is_visible())
+    # Without the Clipboard API (no secure context, e.g. HA over plain HTTP) the password is
+    # copied through a selected helper field inside the modal dialog (outside it is inert)
+    f.evaluate("""() => { Object.defineProperty(navigator, 'clipboard', {value: undefined, configurable: true});
+      window.__copied = null; document.addEventListener('copy', () => { window.__copied = String(getSelection()); }, {once: true}); }""")
+    f.locator('#dlg-body .pw-row button[aria-label="Copy password"]').click()
+    copied = wait_until(lambda: f.evaluate("() => window.__copied") is not None) and f.evaluate("() => window.__copied")
+    check(f"{c}: copy without Clipboard API", copied == password, str(copied))
     full = f.evaluate("() => { const i = document.querySelector('#dlg-body .pw-row input'); return i.scrollWidth <= i.clientWidth; }")
     check(f"{c}: password not cut off", full)
     check(f"{c}: Export disabled before the acknowledgment", d["buttons"][-1] == ["Export", True], str(d["buttons"]))
