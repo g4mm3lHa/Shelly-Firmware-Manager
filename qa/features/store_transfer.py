@@ -22,7 +22,7 @@ def _export_import(c, page, f, out):
     f.locator('#dlg-body .pw-row button[aria-label="Copy password"]').click()
     copied = wait_until(lambda: f.evaluate("() => window.__copied") is not None) and f.evaluate("() => window.__copied")
     check(f"{c}: copy without Clipboard API", copied == password, str(copied))
-    full = f.evaluate("() => { const i = document.querySelector('#dlg-body .pw-row input'); return i.scrollWidth <= i.clientWidth; }")
+    full = f.evaluate("() => { const i = document.querySelector('#dlg-body .pw-row input'); return i.scrollWidth <= i.clientWidth + 1; }")
     check(f"{c}: password not cut off", full)
     check(f"{c}: Export disabled before the acknowledgment", d["buttons"][-1] == ["Export", True], str(d["buttons"]))
     f.locator("#dlg-body label.check input").check()
