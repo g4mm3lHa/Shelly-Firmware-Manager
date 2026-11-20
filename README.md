@@ -59,7 +59,7 @@ tools/dev/check.sh build    # rebuild app/static from ui-src first
 ```
 
 `tools/dev/` also works offline with the bundled wheels (see `tools/dev/README.md`).
-A map of modules, stored data, API routes and tests is in `docs/CODEMAP.md`. Tool
+A map of modules, stored data, API routes and tests is in `docs/CODEMAP.md` (overview) and `docs/codemap/`. Tool
 settings (ruff, mypy, pytest) are in `pyproject.toml`.
 
 Layout: `shelly_firmware_manager/` (only what Home Assistant needs: app definition,
