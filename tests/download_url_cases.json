@@ -1,0 +1,357 @@
+[
+{
+"url": "http://192.168.1.2:8098",
+"server": "ok",
+"ui": "none"
+},
+{
+"url": "http://10.0.0.1",
+"server": "ok",
+"ui": "none"
+},
+{
+"url": "http://172.16.0.1:8098",
+"server": "ok",
+"ui": "none"
+},
+{
+"url": "http://172.31.255.254",
+"server": "ok",
+"ui": "none"
+},
+{
+"url": "https://192.168.1.2/firmware",
+"server": "ok",
+"ui": "none"
+},
+{
+"url": "http://[fd12:3456::1]:8098",
+"server": "ok",
+"ui": "none"
+},
+{
+"url": "https://[FD00::1]",
+"server": "ok",
+"ui": "none"
+},
+{
+"url": "http://homeassistant.local:8098",
+"server": "ok",
+"ui": "host"
+},
+{
+"url": "https://example.com:8098",
+"server": "ok",
+"ui": "host"
+},
+{
+"url": "https://ha.example.lan",
+"server": "ok",
+"ui": "host"
+},
+{
+"url": "http://ha-buero.local",
+"server": "ok",
+"ui": "host"
+},
+{
+"url": "http://xn--ha-bro-5wa.local",
+"server": "ok",
+"ui": "host"
+},
+{
+"url": "http://homeassistant.local.:8098",
+"server": "ok",
+"ui": "host"
+},
+{
+"url": "http://localhost:8098",
+"server": "ok",
+"ui": "localhost"
+},
+{
+"url": "http://localhost.:8098",
+"server": "ok",
+"ui": "localhost"
+},
+{
+"url": "http://8.8.8.8",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://203.0.113.10:8098",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://127.0.0.1:8098",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://169.254.1.1",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://172.15.0.1",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://172.32.0.1",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://100.64.0.1",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://192.169.0.1",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://0.0.0.0",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://[::1]:8098",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://[fe80::1]:8098",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://[2001:db8::1]",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://[::ffff:192.168.1.2]:8098",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://2130706433",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://0x7f.1",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://0177.0.0.1",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://3232235778",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://0xc0.0xa8.1.2",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://192.168.258",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://192.168.1.2.:8098",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://010.0.0.1",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://10.999.1.1",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://1.2.3.4.5",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://8.8.8.8.",
+"server": "private",
+"ui": "private"
+},
+{
+"url": "http://8.8.8.8\u00a0x",
+"server": "format",
+"ui": "nohint"
+},
+{
+"url": "http://8.8.8.8 :8098",
+"server": "format",
+"ui": "nohint"
+},
+{
+"url": "http://8.8.8.8\u000bx",
+"server": "format",
+"ui": "nohint"
+},
+{
+"url": "http://8.8.8.8..",
+"server": "format",
+"ui": "nohint"
+},
+{
+"url": "http://8.8.8.8\uff0e",
+"server": "format",
+"ui": "nohint"
+},
+{
+"url": "http://8.8.8.8\u3002",
+"server": "format",
+"ui": "nohint"
+},
+{
+"url": "http://127.0.0.1\u200b",
+"server": "format",
+"ui": "nohint"
+},
+{
+"url": "http://%31%32%37.0.0.1",
+"server": "format",
+"ui": "nohint"
+},
+{
+"url": "http://192.168.1.2%2e",
+"server": "format",
+"ui": "nohint"
+},
+{
+"url": "http://\u2460\u2461\u2466.0.0.1",
+"server": "format",
+"ui": "nohint"
+},
+{
+"url": "http://[fd00::1%25eth0]",
+"server": "format",
+"ui": "nohint"
+},
+{
+"url": "http://ha_buero.local",
+"server": "format",
+"ui": "nohint"
+},
+{
+"url": "http://ha-b\u00fcro.local",
+"server": "format",
+"ui": "nohint"
+},
+{
+"url": "http://a..b",
+"server": "format",
+"ui": "nohint"
+},
+{
+"url": "http://-a.local",
+"server": "format",
+"ui": "nohint"
+},
+{
+"url": "http://192.168.1.2\t:8098",
+"server": "format",
+"ui": "nohint"
+},
+{
+"url": "192.168.1.2:8098",
+"server": "format",
+"ui": "nohint"
+},
+{
+"url": "ftp://192.168.1.2",
+"server": "format",
+"ui": "nohint"
+},
+{
+"url": "http://",
+"server": "format",
+"ui": "nohint"
+},
+{
+"url": "http://192.168.1.2:99999",
+"server": "format",
+"ui": "nohint"
+},
+{
+"url": "http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.local",
+"server": "format",
+"ui": "nohint"
+},
+{
+"url": "http://user:pw@192.168.1.2:8098",
+"server": "parts",
+"ui": "credentials"
+},
+{
+"url": "http://user@192.168.1.2:8098",
+"server": "parts",
+"ui": "credentials"
+},
+{
+"url": "http://192.168.1.2@8.8.8.8",
+"server": "parts",
+"ui": "credentials"
+},
+{
+"url": "http://192.168.1.2:8098?x=1",
+"server": "parts",
+"ui": "query"
+},
+{
+"url": "http://192.168.1.2:8098/#top",
+"server": "parts",
+"ui": "query"
+},
+{
+"url": "http://8.8.8.8 ",
+"server": "format",
+"ui": "skip"
+},
+{
+"url": "http://127.0.0.1 ",
+"server": "format",
+"ui": "skip"
+},
+{
+"url": " http://192.168.1.2",
+"server": "format",
+"ui": "skip"
+},
+{
+"url": "http://8.8.8.8\u00a0",
+"server": "format",
+"ui": "skip"
+},
+{
+"url": "http://8.8.8.8\u000b",
+"server": "format",
+"ui": "skip"
+},
+{
+"url": "http://8.8.8.8\u200b",
+"server": "format",
+"ui": "skip"
+}
+]

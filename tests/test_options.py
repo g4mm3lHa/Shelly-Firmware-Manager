@@ -89,6 +89,19 @@ async def test_legacy_value_needs_confirmation_which_persists(net):
     assert m3.download_base_issue is None  # any other address needs no confirmation
 
 
+async def test_stored_public_ip_blocks_installations_until_corrected(net):
+    """An address saved before the rule existed: installations stay disabled, the notice names why."""
+    m = make_manager(net, download_base_url="http://203.0.113.10:8098")
+    assert m.download_base_issue == "not_private"
+    state = m.public_state()["download_base"]
+    assert state["issue"] == "not_private" and "private network" in state["message"]
+    m.devices[A] = {"status": manager_core.STATUS_READY, "sha256": "a" * 64, "gen": 2}
+    assert await m.install(A, "a" * 64, "u") is False
+    with pytest.raises(shelly.ShellyError):
+        m.confirm_download_base("http://203.0.113.10:8098", user="u")  # nothing to confirm
+    assert make_manager(net, download_base_url="http://[fd00::2]:8098").download_base_issue is None
+
+
 async def test_changing_the_url_drops_the_confirmation(net):
     m = make_manager(net, download_base_url=LEGACY)
     m.confirm_download_base(LEGACY)

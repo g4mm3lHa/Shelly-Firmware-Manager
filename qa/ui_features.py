@@ -3,11 +3,12 @@ feature suites; the checks live in qa/features/ (base.py: shared helpers; one mo
 
 Suites, in this order (the last two change the demo state in their last case):
 - download_url_hint   Settings: hints for download_base_url (LAN IP, public IP,
-                      localhost, host names). Demo "idle" on 8801.
+                      credentials, query, localhost, host names). Demo "idle" on 8801.
 - setting_help        Settings: help texts as tooltips of the setting name and its
                       i-icon (mouse, keyboard, touch). Demo "idle" on 8801.
-- download_url_notice notice for a missing / unconfirmed download base URL, device
-                      progress of a Gen2+ installation. Demos "legacy" 8803, "missing" 8804.
+- download_url_notice notice for a missing / unconfirmed / public-IP download base URL,
+                      device progress of a Gen2+ installation. Demos "legacy" 8803,
+                      "missing" 8804, "public" 8807.
 - firmware_store      downgrade from the device menu, upload, two-step delete, the
                       Install button behind a device and the changelog icon in the
                       Firmware tab; 3.1.1: Install button and "Updated" in the device

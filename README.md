@@ -1,9 +1,27 @@
+<p align="center">
+  <img src="shelly_firmware_manager/logo.png" alt="Firmware Manager for Shelly" width="250">
+</p>
+
 # Firmware Manager for Shelly
+
+[![Release](https://img.shields.io/github/v/release/g4mm3lHa/Shelly-Firmware-Manager)](https://github.com/g4mm3lHa/Shelly-Firmware-Manager/releases)
+[![CI](https://github.com/g4mm3lHa/Shelly-Firmware-Manager/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/g4mm3lHa/Shelly-Firmware-Manager/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Supports aarch64](https://img.shields.io/badge/aarch64-yes-green.svg)
+![Supports amd64](https://img.shields.io/badge/amd64-yes-green.svg)
 
 Home Assistant app that keeps your Shelly devices (Gen1 to Gen4) up to date – locally
 and under your control. It finds all Shellys of the Shelly integration, checks for new
 stable firmware, downloads it and serves it to the devices from its own download server
 in your network. Nothing is installed without your approval.
+
+![Devices tab with available updates](docs/images/devices-desktop.png)
+
+<p align="center">
+  <img src="docs/images/devices-phone.png" alt="Devices tab on a phone" width="250">
+</p>
+
+## Features
 
 - Shellys only talk to Home Assistant – they need no internet access.
 - Every installation is approved manually and verified afterwards.
@@ -16,67 +34,75 @@ in your network. Nothing is installed without your approval.
 - The firmware store moves to another Home Assistant instance as one sealed ZIP file;
   device passwords can be stored or set on several devices in one step.
 
-Requires Home Assistant 2026.10 or newer and the Home Assistant Shelly integration (the
-app works with the devices it knows). Only original Shelly firmware is supported for now.
+## Requirements
 
-This is an unofficial community project. It is not affiliated with, endorsed or sponsored by
-Allterco Robotics or Shelly. Shelly is a trademark of its holder.
+- Home Assistant OS or Home Assistant Supervised (apps need the Supervisor; Home
+  Assistant Container and Core cannot run apps), version 2026.10 or newer.
+- A 64-bit system: `aarch64` (e.g. Raspberry Pi 4 or 5) or `amd64`.
+- The Home Assistant Shelly integration – the app works with the devices it knows.
+- The Shellys must reach Home Assistant on TCP port 8098.
 
-- **User documentation:** [`shelly_firmware_manager/DOCS.md`](shelly_firmware_manager/DOCS.md)
-  (also the Documentation tab of the app page in Home Assistant)
-- **Version history:** [`shelly_firmware_manager/CHANGELOG.md`](shelly_firmware_manager/CHANGELOG.md)
-
-## Contents
-
-- [Installation](#installation)
-- [Development](#development)
-- [License](#license)
-
-Credits: see [`DOCS.md`](shelly_firmware_manager/DOCS.md#credits).
+Only original Shelly firmware is supported. More limits:
+[Known limitations](shelly_firmware_manager/DOCS.md#known-limitations).
 
 ## Installation
 
-1. Copy the folder `shelly_firmware_manager` to `/addons/` on your Home Assistant
-   (e.g. with the Samba or SSH app).
-2. Settings → Apps → App store → ⋮ → "Check for updates" → "Local apps" →
-   "Firmware Manager for Shelly" → Install.
-3. Continue with [First start](shelly_firmware_manager/DOCS.md#first-start): start the
-   app and set the **download base URL** in its Settings tab (installations are
-   disabled until it is set).
+1. Add this repository to your Home Assistant app store:
 
-To update the app, replace the folder, run "Check for updates" and then "Update".
+   [![Open your Home Assistant instance and show the add app repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fg4mm3lHa%2FShelly-Firmware-Manager)
 
-## Development
+   Or by hand: **Settings → Apps → App store → ⋮ → Repositories**, enter
+   `https://github.com/g4mm3lHa/Shelly-Firmware-Manager` and click **Add**.
+2. Open **Firmware Manager for Shelly** in the app store and click **Install**. Home
+   Assistant builds the app on your system; this takes a few minutes.
+3. Start the app and set the **download base URL** in its Settings tab – see
+   [Quick start](shelly_firmware_manager/DOCS.md#quick-start). Installations on Shellys
+   are disabled until it is set.
 
-Everything outside `shelly_firmware_manager/` is for development only and is not
-needed for the installation. The UI sources are in `ui-src/` (ES modules in `js/`,
-`style.css`); `tools/build_ui.py` bundles and minifies them into the shipped files in
-`shelly_firmware_manager/app/static/` (pinned esbuild 0.28.2, `--check` verifies them).
-Tests mock all network access. One command runs the checks in the efficient order
-(lint, type check, build check, version match, backend tests, optionally the Playwright
-UI checks against demo servers with fake data):
+Updates of the app are offered by Home Assistant like for any other app.
 
-```
-tools/dev/check.sh          # lint + build check + backend tests (seconds)
-tools/dev/check.sh ui       # ... + UI quick matrix and feature checks (under a minute)
-tools/dev/check.sh full     # ... + full UI matrix, all feature viewports and the layout gate (final gate)
-tools/dev/check.sh build    # rebuild app/static from ui-src first
-```
+## Documentation
 
-`tools/dev/` also works offline with the bundled wheels (see `tools/dev/README.md`).
-A map of modules, stored data, API routes and tests is in `docs/CODEMAP.md` (overview) and `docs/codemap/`. Tool
-settings (ruff, mypy, pytest) are in `pyproject.toml`.
+- [User documentation](shelly_firmware_manager/DOCS.md) – also the Documentation tab of
+  the app page in Home Assistant. It covers the configuration, every tab,
+  [troubleshooting](shelly_firmware_manager/DOCS.md#troubleshooting) and a
+  [FAQ](shelly_firmware_manager/DOCS.md#faq).
+- [Version history](shelly_firmware_manager/CHANGELOG.md)
 
-Layout: `shelly_firmware_manager/` (only what Home Assistant needs: app definition,
-`README.md`/`DOCS.md`/`CHANGELOG.md` for the app store, Dockerfile, AppArmor profile,
-pinned wheels, `app/` with the Python sources and the built UI), `ui-src/` (UI sources),
-`tests/` (by area), `qa/` (UI checks, demo server, screenshots of the current version),
-`tools/`, `docs/` (code map, UI decisions), `candidates/` (test report of a release).
+## Privacy and security
+
+The app connects only to your Shellys in your private network, to the Shelly servers
+below `shelly.cloud` (version offers, firmware, changelogs) and to Home Assistant. Only
+the firmware ID and, for Gen2+, the installed version are sent to Shelly. The user
+interface loads nothing from the internet, and there is no telemetry. Details:
+[Privacy and network connections](shelly_firmware_manager/DOCS.md#privacy-and-network-connections)
+and [Security](shelly_firmware_manager/DOCS.md#security).
+
+## Support
+
+1. Look up the message in
+   [Troubleshooting](shelly_firmware_manager/DOCS.md#troubleshooting) and the
+   [FAQ](shelly_firmware_manager/DOCS.md#faq).
+2. Found a bug or miss a feature? Open an
+   [issue](https://github.com/g4mm3lHa/Shelly-Firmware-Manager/issues/new/choose). A
+   bug report needs the versions of the app and of Home Assistant, the Shelly model and
+   generation, and the entry of the activity log.
+3. Security problems are not reported in public issues – see
+   [`SECURITY.md`](SECURITY.md).
+
+Problems of Home Assistant itself or of the Shelly firmware belong to those projects.
+
+## Contributing
+
+Pull requests are welcome after the change was agreed on in an issue. Setup, checks
+and rules: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## License
 
 Released under the [MIT License](LICENSE). Components used and their licenses are listed
-in [`DOCS.md`](shelly_firmware_manager/DOCS.md#credits). Security reports: see
-[`SECURITY.md`](SECURITY.md).
+in the [credits](shelly_firmware_manager/DOCS.md#credits).
+
+This is an unofficial community project. It is not affiliated with, endorsed or sponsored by
+Allterco Robotics or Shelly. Shelly is a trademark of its holder.
 
 Developed with AI assistance; every change reviewed by the maintainer.

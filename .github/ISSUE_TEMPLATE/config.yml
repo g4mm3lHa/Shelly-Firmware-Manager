@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security problem
+    url: https://github.com/g4mm3lHa/Shelly-Firmware-Manager/security/advisories/new
+    about: Please report vulnerabilities privately, not in a public issue.
+  - name: Documentation, troubleshooting and FAQ
+    url: https://github.com/g4mm3lHa/Shelly-Firmware-Manager/blob/main/shelly_firmware_manager/DOCS.md#troubleshooting
+    about: Many messages of the app are explained here.

@@ -1,5 +1,25 @@
 # Changelog
 
+## 3.6.1
+
+Released 2026-11-21. The download base URL accepts only private IP addresses and plain
+host names, and the Settings tab names the reason while you type; the documentation is
+extended.
+
+Changed
+- Settings tab: the hint under the download base URL names the reason of a rejection
+  while typing.
+- Documentation: Quick start, Requirements, rules of the download base URL, FAQ, Known
+  limitations and Support; the Watchdog note states what the switch does.
+
+Security
+- Option `download_base_url`: an IP address outside 10.0.0.0/8, 172.16.0.0/12,
+  192.168.0.0/16 and fc00::/7 is refused. The host must otherwise be a plain ASCII host
+  name (hint as before); spaces, control and non-ASCII characters, IP addresses in
+  disguise (e.g. 2130706433) and IPv6 zone IDs are refused.
+- A saved address that is no longer allowed disables installations; the notice above
+  the tabs names the reason until the address is corrected.
+
 ## 3.6.0
 
 Released 2026-11-21. Publication preparation: MIT license, new app name, icon and logo;

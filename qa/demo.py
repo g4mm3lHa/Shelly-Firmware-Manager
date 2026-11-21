@@ -1,8 +1,9 @@
 """Local demo server with fake data for UI tests (no network access).
 
-Usage: python demo.py <app_dir> <port> <scenario: idle|busy|legacy|missing|features|first>
+Usage: python demo.py <app_dir> <port> <scenario: idle|busy|legacy|missing|features|first|public>
 legacy: download_base_url is the former example value (not confirmed) and one device
-installs with device progress; missing: download_base_url not set; features: idle
+installs with device progress; missing: download_base_url not set; public: download_base_url is a public IP address (saved
+before it was refused); features: idle
 plus stored older versions (one of them uploaded) for downgrade and upload checks.
 Serves the UI app below /ui/ and a same-origin wrapper /wrap that embeds it in an
 iframe (like the HA Ingress panel)."""
@@ -33,6 +34,8 @@ opts = {"check_interval_days": 7, "check_time": "02:45", "download_base_url": "h
 if scenario == "legacy":
     import app_options
     opts["download_base_url"] = app_options.LEGACY_DOWNLOAD_BASE
+elif scenario == "public":
+    opts["download_base_url"] = "http://203.0.113.10:8098"
 elif scenario == "missing":   # also shows downgrades switched off
     del opts["download_base_url"]
     del opts["allow_downgrade"]

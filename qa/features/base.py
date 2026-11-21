@@ -9,7 +9,8 @@ import zipfile
 
 
 
-IDLE, LEGACY, MISSING, FEATURES, FIRST = (f"http://127.0.0.1:{p}" for p in (8801, 8803, 8804, 8805, 8806))
+IDLE, LEGACY, MISSING, FEATURES, FIRST, PUBLIC = (
+    f"http://127.0.0.1:{p}" for p in (8801, 8803, 8804, 8805, 8806, 8807))
 OVERFLOW_JS = "document.documentElement.scrollWidth - document.documentElement.clientWidth"
 results = []  # (suite: name, ok, detail)
 SUITE = [""]  # name of the running suite (prefix of the result names)

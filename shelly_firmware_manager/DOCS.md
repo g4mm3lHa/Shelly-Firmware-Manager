@@ -5,8 +5,10 @@ Assistant). Version history: `CHANGELOG.md` (Changelog tab).
 
 ## Contents
 
-- [First start](#first-start)
+- [Quick start](#quick-start)
+- [Requirements](#requirements)
 - [Configuration](#configuration)
+  - [Download base URL](#download-base-url)
 - [Using the app](#using-the-app)
   - [Devices](#devices)
   - [How a check works](#how-a-check-works)
@@ -19,29 +21,47 @@ Assistant). Version history: `CHANGELOG.md` (Changelog tab).
 - [Moving the firmware store](#moving-the-firmware-store)
 - [Gen1 firmware](#gen1-firmware)
 - [Troubleshooting](#troubleshooting)
+- [FAQ](#faq)
+- [Known limitations](#known-limitations)
 - [Certificate pinning](#certificate-pinning)
 - [Privacy and network connections](#privacy-and-network-connections)
 - [Security](#security)
 - [Upgrading from older versions](#upgrading-from-older-versions)
+- [Support](#support)
 - [Credits](#credits)
 
-## First start
+## Quick start
 
-Requires the Home Assistant Shelly integration (the app works with the devices it
-knows). Only original Shelly firmware is supported for now.
-
-1. Start the app and enable "Show in sidebar".
+1. Install the app from the app store. Home Assistant builds the app on your system;
+   this takes a few minutes. Start the app and enable "Show in sidebar".
 2. Open the app, go to the **Settings** tab and set the **download base URL**: the LAN
-   IP address of Home Assistant with port 8098, e.g. `http://192.168.1.20:8098`.
-   Installations are disabled until it is set.
+   IP address of Home Assistant with port 8098, e.g. `http://192.168.1.20:8098` (see
+   [Download base URL](#download-base-url)). Installations are disabled until it is set.
 3. If you use a firewall: allow the Shellys to reach Home Assistant on TCP port 8098.
 4. Turn on the **Watchdog** switch on the app page (if it is off): Home Assistant then
-   restarts the app if it stops unexpectedly or no longer accepts connections on port
-   8098 (container health check – nothing is requested or logged).
+   restarts the app if it stops unexpectedly. The app also reports to Home Assistant
+   whether it still accepts connections on port 8098 (container health check – nothing
+   is requested or logged); this is meant to restart an app that hangs as well.
 5. On a fresh installation the app asks once whether to import a firmware store from
    another Home Assistant instance (see [Moving the firmware store](#moving-the-firmware-store)).
    No check runs until you choose **Import store …** or **Skip**; a notice above the
    tabs and a Home Assistant notification remind you. Updates of the app never ask.
+6. Click **Check now** in the **Devices** tab. Devices with an update are listed on
+   top: tick them, click **Review & install** and approve the installation (see
+   [Installing updates](#installing-updates)).
+
+## Requirements
+
+- Home Assistant OS or Home Assistant Supervised, version 2026.10 or newer. Apps need
+  the Supervisor; Home Assistant Container and Core cannot run them.
+- A 64-bit system: `aarch64` or `amd64`.
+- The Home Assistant Shelly integration. The app works with the devices it knows.
+- The Shellys must reach Home Assistant on TCP port 8098.
+- Home Assistant must reach the Shelly servers below `shelly.cloud` (see
+  [Privacy and network connections](#privacy-and-network-connections)). The Shellys
+  themselves need no internet access.
+
+Only original Shelly firmware is supported; see [Known limitations](#known-limitations).
 
 ## Configuration
 
@@ -51,7 +71,7 @@ the app page – same names, help texts and order). Saving restarts the app.
 | Option | Meaning |
 |---|---|
 | Check every (days) / Check time | Automatic check every 1–30 days at a time of day (default: every 7 days at 02:45, Home Assistant time zone) |
-| Download base URL | LAN IP of Home Assistant + port 8098. Use the IP address, not a host name – Shellys often cannot resolve names. Required for installations |
+| Download base URL | LAN IP of Home Assistant + port 8098, e.g. `http://192.168.1.20:8098`. Required for installations; rules below |
 | Serve downloads only to known Shellys | Firmware is only served to the device it is meant for (default on). Switch off if downloads are rejected from a 172.30.x.x address |
 | Max. parallel installations | How many installations run at the same time (1–20, default 5) |
 | Enable Gen1 updates / Allowed Gen1 types | Gen1 support and the Gen1 models to check (see [Gen1 firmware](#gen1-firmware)) |
@@ -59,6 +79,29 @@ the app page – same names, help texts and order). Saving restarts the app.
 | Max. import size (MB) | Largest file accepted by **Import store** (1–2048, default 100) |
 | Max. log size / Log retention | Activity log limits (100–3000 entries, 1–365 days) |
 | Pinned certificates | Certificate fingerprints for Shelly servers (see [Certificate pinning](#certificate-pinning)) |
+
+### Download base URL
+
+The Shellys download the firmware from this address, so it must lead to the download
+server of the app (port 8098) and be reachable from every Shelly.
+
+- Form: `http://<address>:<port>` or `https://<address>:<port>`. A path may follow, e.g.
+  for a reverse proxy; the file name is appended to it.
+- Use the IP address of Home Assistant, not a host name: Shellys often cannot resolve
+  names, the update then fails with a connection error. A host name is accepted, but
+  the Settings tab warns while you type.
+- The address may contain only printable ASCII characters and no spaces. A host name
+  consists of letters, digits, hyphens and dots; write international names in punycode
+  (`xn--…`). IPv6 zone IDs (`%eth0`) are refused.
+- An IP address must be in a private network (`10.0.0.0/8`, `172.16.0.0/12`,
+  `192.168.0.0/16` or IPv6 `fc00::/7`); any other IP address is refused, also in an unusual form such as
+  `2130706433` or `0x7f.1`.
+- User name, password, query (`?…`) and fragment (`#…`) are refused: the address is
+  shown in the app and in the log, and nothing may follow the path.
+
+If an address saved with an older version of the app is no longer allowed,
+installations stay disabled and a notice above the tabs names the reason until you
+correct the address.
 
 ## Using the app
 
@@ -360,6 +403,11 @@ Gen2+ firmware is downloaded over HTTPS only.
 |---|---|
 | Installations are disabled: set the download base URL | Enter the LAN IP of Home Assistant with port 8098 in the Settings tab |
 | The Shelly never requested the firmware / Connection error -14 | The download base URL is wrong or blocked: it must be the IP of Home Assistant, port 8098 must be reachable from the Shelly |
+| download_base_url: http(s)://host:port expected, without user name, query or fragment | The address contains a user name, a password, a query or a fragment – remove them (see [Download base URL](#download-base-url)) |
+| download_base_url: http(s)://host:port expected | The address has a wrong form, a space or a character that is not allowed in a host name – see [Download base URL](#download-base-url) |
+| download_base_url: the IP address is not in a private network | Enter the LAN IP of Home Assistant; only addresses in `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` or `fc00::/7` are accepted (see [Download base URL](#download-base-url)) |
+| Installations are disabled: the download base URL is not a valid address | The saved address contains characters or a host name that are not allowed – correct it in the Settings tab (see [Download base URL](#download-base-url)) |
+| Installations are disabled: the IP address of the download base URL is not in a private network | The saved address was accepted by an older version of the app – correct it in the Settings tab; installations stay disabled until then |
 | Download rejected: request came from 172.30.x.x | Docker hides the device address – turn off "Serve downloads only to known Shellys" |
 | The Shelly downloaded the firmware but still reports … | The device did not install it – check the log in the Shelly web UI |
 | The Shelly reports an update error … It downloaded the firmware but rejected it | The installed firmware may be too old for a direct update to this version: check the device again – the Shelly update server names the required intermediate version (or install one via the web interface of the Shelly or an upload) |
@@ -376,6 +424,59 @@ Gen2+ firmware is downloaded over HTTPS only.
 
 An installation interrupted by a restart of the app is shown as "Unconfirmed" – check
 the device and run "Check for updates".
+
+## FAQ
+
+**Which Shellys does the app list?** Every device of the Home Assistant Shelly
+integration that has its own address in your network, Gen1 to Gen4. Devices that are
+connected through another device (e.g. Bluetooth devices behind a gateway) and devices
+disabled in Home Assistant are not listed. Of Gen1 only the types under **Allowed Gen1
+types** are checked.
+
+**Do the Shellys need internet access?** No. Home Assistant asks the Shelly servers and
+downloads the firmware; the Shellys fetch it from the app on port 8098.
+
+**Does the app install updates on its own?** No. A check only provides the firmware.
+Every installation needs your approval in the installation dialog.
+
+**Does it offer beta firmware?** No, only stable versions.
+
+**Why an IP address instead of a host name?** Many Shellys cannot resolve host names of
+your network. The download then fails with a connection error (see
+[Download base URL](#download-base-url)).
+
+**Why has the download server on port 8098 no login?** Shellys cannot log in to a
+download server. The server only serves files of a running installation and, by
+default, only to the device being updated (see [Security](#security)).
+
+**What happens if an installation is interrupted?** The device is shown as
+"Unconfirmed" or "Error". Check the device again; a failed installation can be repeated
+from the updates card.
+
+**How much disk space does the firmware store need?** The Firmware tab shows the number
+of files, their size and the free disk space. Firmware is never deleted automatically;
+the filter **Unused** lists files no device needs. The store is part of the Home
+Assistant backups of the app.
+
+**Can I go back to an older firmware?** Yes, on Gen2+ devices, if the older version is
+in the firmware store and **Allow downgrades** is switched on (see
+[Downgrade](#downgrade-gen2)).
+
+## Known limitations
+
+- Only original Shelly firmware is supported, and only stable versions.
+- Home Assistant OS or Supervised is required; the user interface is in English only.
+- Only devices with their own address in a private network (`10.0.0.0/8`,
+  `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`) are contacted. Devices connected
+  through another device are not listed.
+- Battery devices can only be checked and updated while they are awake.
+- Gen1: Shelly offers the firmware only over plain HTTP and without a checksum (see
+  [Gen1 firmware](#gen1-firmware)); no downgrade; no installation progress.
+- A downgrade needs the older version in the firmware store – Shelly only offers the
+  current version for download. A device may refuse a downgrade.
+- Communication with the Shellys is unencrypted in your network.
+- Shelly's server interfaces are not officially guaranteed; a change on their side can
+  break checks until the app is updated.
 
 ## Certificate pinning
 
@@ -451,6 +552,18 @@ server interfaces are not officially guaranteed.
   the current version – or
   remove and reinstall the app. Backups made before the 3.0 upgrade still contain the
   old shared password.
+
+## Support
+
+1. Look up the message in [Troubleshooting](#troubleshooting) and the [FAQ](#faq).
+2. Bugs and feature requests: <https://github.com/g4mm3lHa/Shelly-Firmware-Manager/issues>.
+   A bug report needs the versions of the app and of Home Assistant, the Shelly model
+   and generation, the entry of the activity log (Logs tab) and, if there is one, the
+   lines of the app log (Log tab of the app page).
+3. Do not report security problems in a public issue; the repository's `SECURITY.md`
+   describes the private way.
+
+Problems of Home Assistant itself or of the Shelly firmware belong to those projects.
 
 ## Credits
 
