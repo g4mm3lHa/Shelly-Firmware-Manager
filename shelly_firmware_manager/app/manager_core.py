@@ -42,7 +42,7 @@ from tls import CertificatePins
 log = logging.getLogger("sfm.manager")
 
 # A device entry of state.json and a store entry of the firmware store: plain JSON
-# objects whose fields are listed in docs/CODEMAP.md (Stored data).
+# objects whose fields are listed in docs/codemap/data.md.
 Device = dict[str, Any]
 
 FirmwareMeta = dict[str, Any]

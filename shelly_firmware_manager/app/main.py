@@ -21,7 +21,7 @@ from manager import Manager
 from tls import CertificatePins
 from web_ui import build_ui_app
 
-VERSION = "3.5.0"  # must match config.yaml
+VERSION = "3.6.0-rc1"  # must match config.yaml
 
 OPTIONS_FILE = Path("/data/options.json")
 UI_PORT = 8099  # Ingress (internal)
@@ -82,7 +82,7 @@ async def main() -> None:
             await start_site(build_download_app(mgr), DOWNLOAD_PORT),
         ]
         log.info(
-            "Shelly Firmware Manager %s ready – check every %s day(s) at %s (%s), next %s, downloads at %s",
+            "Firmware Manager for Shelly %s ready – check every %s day(s) at %s (%s), next %s, downloads at %s",
             VERSION,
             mgr.check_days,
             mgr.check_time,

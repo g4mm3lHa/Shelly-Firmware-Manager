@@ -1,4 +1,4 @@
-# Shelly Firmware Manager
+# Firmware Manager for Shelly
 
 Keeps your Shelly devices (Gen1 to Gen4) up to date – locally and under your control.
 The app finds all Shellys of the Shelly integration, checks for new stable firmware,
@@ -20,3 +20,6 @@ knows). Only original Shelly firmware is supported for now.
 
 After the installation set the **download base URL** in the app's Settings tab (LAN IP
 address of Home Assistant and port 8098) – see the Documentation tab.
+
+Unofficial community project. It is not affiliated with, endorsed or sponsored by
+Allterco Robotics or Shelly. Shelly is a trademark of its holder.

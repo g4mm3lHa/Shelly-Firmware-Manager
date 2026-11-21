@@ -1,4 +1,4 @@
-# Shelly Firmware Manager – documentation
+# Firmware Manager for Shelly – documentation
 
 User documentation of the app (shown in the Documentation tab of the app page in Home
 Assistant). Version history: `CHANGELOG.md` (Changelog tab).
@@ -35,9 +35,7 @@ knows). Only original Shelly firmware is supported for now.
    IP address of Home Assistant with port 8098, e.g. `http://192.168.1.20:8098`.
    Installations are disabled until it is set.
 3. If you use a firewall: allow the Shellys to reach Home Assistant on TCP port 8098.
-4. Turn on the **Watchdog** switch on the app page (if it is off): Home Assistant then restarts
-   the app if it stops unexpectedly (it only checks that port 8098 accepts connections).
-5. On a fresh installation the app asks once whether to import a firmware store from
+4. On a fresh installation the app asks once whether to import a firmware store from
    another Home Assistant instance (see [Moving the firmware store](#moving-the-firmware-store)).
    No check runs until you choose **Import store …** or **Skip**; a notice above the
    tabs and a Home Assistant notification remind you. Updates of the app never ask.
@@ -98,9 +96,11 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 - Hovering over a device name shows the Home Assistant and the Shelly device name. On
   touch devices a tap shows a tooltip where the tap has no other function, and the
   reason of a disabled button.
-- The row menu ⋮ offers: Check for updates (this device only), Install update,
-  Downgrade, Reload device info, Ignore / Resume device, Open web UI, device settings,
-  Status details and Restart.
+- The row menu ⋮ offers, in five groups: Check for updates (this device only), Install
+  update, Downgrade; Device Details, Reload device info, Open web UI; the device
+  settings (NTP server, power-on action, eco mode, device password); Ignore / Resume
+  device; Restart. Device Details shows status, firmware, model, generation, firmware
+  ID, NTP server and the history of the device.
 - **Battery devices** (e.g. H&T, door/window sensors) sleep between wake-ups and answer
   only while they are awake. The app recognises them from the device itself when a check
   or Reload Device Info reaches them awake (Gen2+: wake-up period, Gen1: sleep mode) and
@@ -428,8 +428,7 @@ server interfaces are not officially guaranteed.
   `http://192.168.178.50:8098` is still set, installations are blocked until you change
   it or confirm it with "This address is correct".
 - **From 3.0.0 or 3.0.1:** nothing to do. From 3.0.0 the activity log is converted once
-  to its new storage format at the first start. 3.1.1 adds a watchdog: check that the
-  **Watchdog** switch on the app page is on. Log entries get an internal ID at the
+  to its new storage format at the first start. Log entries get an internal ID at the
   first start of 3.1.1 (needed to delete single entries).
 - **From 3.1.1 to 3.2.1:** downgrades are off after the update – switch on **Allow
   downgrades** in the Settings tab if you use them. The sort order and column settings
@@ -444,6 +443,30 @@ server interfaces are not officially guaranteed.
 
 ## Credits
 
-- Icons: [Material Design Icons](https://pictogrammers.com/library/mdi/) (Apache 2.0),
-  inlined.
-- Shelly mark in the app icon: [Simple Icons](https://simpleicons.org/) (CC0 1.0).
+Firmware Manager for Shelly is an unofficial community project. It is not affiliated
+with, endorsed or sponsored by Allterco Robotics or Shelly. Shelly is a trademark of its
+holder; the name is used only to say which devices the app works with. No Shelly
+firmware or documentation is part of the app – firmware is downloaded from Shelly's
+servers when you run a check.
+
+The app itself is released under the MIT License (`LICENSE` in the repository). It uses
+the following open-source components:
+
+| Component | License |
+|---|---|
+| [aiohttp](https://github.com/aio-libs/aiohttp) (with llhttp) | Apache-2.0 and MIT |
+| [aiohappyeyeballs](https://github.com/aio-libs/aiohappyeyeballs) | PSF-2.0 |
+| [aiosignal](https://github.com/aio-libs/aiosignal) | Apache-2.0 |
+| [attrs](https://github.com/python-attrs/attrs) | MIT |
+| [frozenlist](https://github.com/aio-libs/frozenlist) | Apache-2.0 |
+| [idna](https://github.com/kjd/idna) | BSD-3-Clause |
+| [multidict](https://github.com/aio-libs/multidict) | Apache-2.0 |
+| [propcache](https://github.com/aio-libs/propcache) | Apache-2.0 |
+| [typing-extensions](https://github.com/python/typing_extensions) | PSF-2.0 |
+| [yarl](https://github.com/aio-libs/yarl) | Apache-2.0 |
+| [Material Design Icons](https://pictogrammers.com/library/mdi/) (inlined icons) | Apache-2.0 |
+| [Python](https://www.python.org/) and [Alpine Linux](https://alpinelinux.org/) (base image) | PSF-2.0 and the licenses of the Alpine packages |
+
+The Python packages are the versions pinned in `requirements.txt`. Their license files
+are part of the image (`/deps/<package>.dist-info/licenses/`), the license texts of the
+app and of the icons are in `/app/licenses/`.

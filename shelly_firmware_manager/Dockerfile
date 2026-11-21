@@ -26,4 +26,8 @@ RUN rm -rf /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.12 \
 COPY --from=deps /deps /deps
 COPY app /app
 WORKDIR /app
+# Container health: the Supervisor restarts the app if the download server stops
+# accepting connections. TCP check only - nothing is requested or logged.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD ["python3", "-c", "import socket; socket.create_connection(('127.0.0.1', 8098), 3).close()"]
 CMD ["python3", "/app/main.py"]

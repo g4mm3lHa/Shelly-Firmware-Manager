@@ -65,7 +65,8 @@ function statusText(d) {
   return [d.message, `Installed: ${d.version || "–"}`, d.offer_version ? `Available: ${d.offer_version}` : null,
     `Last check: ${fmt(d.last_check)}`, lastSuccess(d) && `Last successful check: ${lastSuccess(d)}`].filter(Boolean).join("\n");
 }
-/** Popup with all status details of a device: message left, status right on one line. */
+/** "Device Details" popup: message left, status right on one line, then the sections
+ *  Firmware, Device (model, generation, firmware ID, NTP) and History. */
 function showStatus(d) {
   const key = shownStatus(d), bad = ["error", "unconfirmed"].includes(d.status);
   const head = box("div", "dstatus", el("p", d.message || "", "dmsg" + (bad ? " bad" : "")),
@@ -74,6 +75,7 @@ function showStatus(d) {
   modal(d.name, [head,
     section("Firmware", valueList([["Installed", d.version], ["Available", d.offer_version],
       ["Source", provided ? OFFER_SOURCES[d.offer_source] : null]])),
+    section("Device", valueList([["Model", [d.model, d.gen ? `Gen ${d.gen}` : null].filter(Boolean).join(" · ")], ["Firmware ID", d.type], ["NTP", d.ntp]])),
     section("History", valueList([["Last check", fmt(d.last_check)], ["Last success", d.last_success ? fmt(d.last_success) : "never"],
       ["Last update", d.last_update ? fmt(d.last_update) : "–"]]))],
     // Ready (and installable): red button right of Close opens the existing install dialog
@@ -455,6 +457,7 @@ function openRowMenu(d, anchor) {
   const s = ui.state || {}, running = d.installing || d.status === "installing";
   const blocked = s.scanning ? s.busy || "Check in progress" : running ? "Installation is running" :
     d.activity ? (d.activity === "reloading" ? "Device info is being reloaded" : "Device is being checked") : null;
+  // Group 1: updates
   add("Check for updates", () => checkDevice(d), !blocked);
   if (installable(d, ui.state)) add("Install update", () => openInstall([d]), true);   // only for Ready
   // Downgrade to a stored older version – Gen2+ only, also up to date / ignored devices
@@ -462,17 +465,23 @@ function openRowMenu(d, anchor) {
   // the option "Allow downgrades" is off it is shown disabled with the hint below it
   if (d.gen >= 2 && !s.allow_downgrade) { add("Downgrade", () => {}, false); items.push(el("div", DOWNGRADE_OFF, "menu-hint")); }
   else if (d.gen >= 2) add("Downgrade", () => openDowngrade(d), downgradable(d, ui.state) && d.downgrades > 0);
+  // Group 2: the device itself
+  items.push(el("hr"));
+  add("Device Details", () => showStatus(d), true);
   add("Reload device info", () => reloadDevice(d), !blocked && !!d.ip);
   if (blocked) items.push(el("div", `Not available – ${blocked}`, "menu-hint"));   // reason, also for touch
-  add(d.ignored ? "Resume device" : "Ignore device", () => setIgnored(d, !d.ignored), !d.installing);
-  items.push(el("hr"));
   const url = webUrl(d);
   if (url) { const a = el("a", "Open web UI"); a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.role = "menuitem"; items.push(a); }
+  // Group 3: device settings
+  items.push(el("hr"));
   add("NTP server", () => editValue(d, "ntp"));
   add("Power-on action", () => editAop(d), can && !!(d.outputs && d.outputs.length));
   add("Eco mode", () => editEco(d), can && typeof d.eco === "boolean");
   add(d.password_set ? "Device password (stored)" : "Device password", () => editPassword(d), !!d.ip && !!d.gen);
-  add("Status details", () => showStatus(d), true);
+  // Group 4: ignore
+  items.push(el("hr"));
+  add(d.ignored ? "Resume device" : "Ignore device", () => setIgnored(d, !d.ignored), !d.installing);
+  // Group 5: restart
   items.push(el("hr"));
   add("Restart", () => restartDevice(d), can, "red");
   rowmenu.replaceChildren(...items); rowmenu.hidden = false;

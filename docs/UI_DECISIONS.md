@@ -116,8 +116,14 @@ not part of this file.
   hidden, "Version a → b", model with "Gen n", small SHA-256; buttons unchanged.
 - **Dialog title icon** (20 px, `modal(…, titleIcon)`): changelog, delete (red), upload
   (all steps incl. errors), installation dialog (red chip).
-- Status dialog: title = device name, message left / status pill right, sections
-  Firmware and History.
+- Status dialog (row menu entry "Device Details"): title = device name, message left /
+  status pill right, sections Firmware, Device (Model with "Gen n", Firmware ID, NTP;
+  empty rows hidden) and History. The phone list ("Details" in the tile) shows the same
+  values.
+- **Row menu (⋮), five groups with separators:** 1 Check for updates, Install update,
+  Downgrade (hint below it) | 2 Device Details, Reload device info ("Not available" hint
+  below it), Open web UI | 3 NTP server, Power-on action, Eco mode, Device password |
+  4 Ignore / Resume device | 5 Restart (red).
 - **Message dialogs (2026-11-19, variant B):** large round icon (40 px circle, 24 px
   icon) left of the text, text in the normal colour: success green check, error red X,
   warning yellow "!" (e.g. not applied / not read back). Neutral notes ("Nothing

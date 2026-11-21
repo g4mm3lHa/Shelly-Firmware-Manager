@@ -30,12 +30,14 @@ def wait_for(port, timeout=30):
 
 
 def run(script, *args):
-    """Run one qa script; returns (exit code, last output line)."""
+    """Run one qa script; returns (exit code, last output line). On failure also prints the last lines."""
     proc = subprocess.run([sys.executable, str(ROOT / "qa" / script), *args], capture_output=True, text=True)
     lines = (proc.stdout + proc.stderr).strip().splitlines()
-    for line in lines:
-        if line.startswith(("FAIL", "Traceback")) or " passed" in line:
-            print("   ", line[:300])
+    shown = [line for line in lines if line.startswith("FAIL") or " passed" in line]
+    if proc.returncode and not any(line.startswith("FAIL") for line in shown):
+        shown = lines[-8:]  # a crash: show the end of the output (the exception), not only its first line
+    for line in shown:
+        print("   ", line[:300])
     return proc.returncode, lines[-1] if lines else ""
 
 
