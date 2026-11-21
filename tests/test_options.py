@@ -30,7 +30,7 @@ def test_schedule_option_bounds():
     assert changed == ["check_interval_days", "check_time", "log_entry_limit"]
 
 
-def test_import_size_option():
+def test_import_size_option(net):
     """Max. import size: 1–2048 MB, default 100 MB; used in bytes by the manager."""
     for value in (0, 2049, "100"):
         with pytest.raises(ValueError):
@@ -38,8 +38,8 @@ def test_import_size_option():
     new, changed = app_options.merge(OPTIONS, {"import_max_mb": 2048})
     assert changed == ["import_max_mb"] and new["import_max_mb"] == 2048
     assert app_options.DEFAULTS["import_max_mb"] == 100
-    assert manager.Manager({**OPTIONS, "import_max_mb": 5}, session=None, token="t").import_max == 5 * 1048576
-    assert manager.Manager(dict(OPTIONS), session=None, token="t").import_max == 100 * 1048576
+    assert make_manager(net, import_max_mb=5).import_max == 5 * 1048576
+    assert make_manager(net).import_max == 100 * 1048576
 
 
 def test_removed_options_never_propagate():
