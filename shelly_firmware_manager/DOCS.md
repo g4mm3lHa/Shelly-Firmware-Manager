@@ -562,11 +562,13 @@ Updates from the previous version need no action. Older versions:
 ## Support
 
 1. Look up the message in [Troubleshooting](#troubleshooting) and the [FAQ](#faq).
-2. Bugs and feature requests: <https://github.com/g4mm3lHa/Shelly-Firmware-Manager/issues>.
+2. Questions and discussion: the Home Assistant community thread
+   <https://community.home-assistant.io/t/firmware-manager-for-shelly-devices/1035784>.
+3. Bugs and feature requests: <https://github.com/g4mm3lHa/Shelly-Firmware-Manager/issues>.
    A bug report needs the versions of the app and of Home Assistant, the Shelly model
    and generation, the entry of the activity log (Logs tab) and, if there is one, the
    lines of the app log (Log tab of the app page).
-3. Do not report security problems in a public issue; the repository's `SECURITY.md`
+4. Do not report security problems in a public issue; the repository's `SECURITY.md`
    describes the private way.
 
 Problems of Home Assistant itself or of the Shelly firmware belong to those projects.

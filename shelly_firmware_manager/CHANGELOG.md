@@ -2,21 +2,18 @@
 
 ## 3.7.0
 
-Release candidate. The app is installed from a prebuilt image instead of being built on
-your system, and the Settings tab suggests the download base URL; new icon and logo.
-
-Changes in rc1
+Released 2026-11-21. The app is installed from a prebuilt image instead of being built
+on your system, and the Settings tab suggests the download base URL; new icon and logo.
 
 Added
 - Settings tab: an empty download base URL is filled in with `http://<host>:8098` from
   the address of the Home Assistant page when that host is an IP address in a private
   network; a note names the suggestion, nothing is saved until Save.
-- The app page can be opened from the README with an "open app page" badge.
 
 Changed
 - The app is installed from a prebuilt image on ghcr.io (aarch64, amd64) instead of
   being built on your system; installation takes seconds.
-- New app icon and logo in cobalt blue; the logo follows the light or dark colour scheme.
+- New app icon and logo in cobalt blue.
 - Documentation: options listed one per row with default and range, shorter Devices,
   Firmware and Settings sections, beta channel, backup size and Watchdog rows.
 

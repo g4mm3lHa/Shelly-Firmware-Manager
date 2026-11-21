@@ -75,7 +75,12 @@ def firmware_zip():
 
 def menu_items(f, name):
     """Open the row menu of a device; returns [(text, disabled)]."""
-    f.locator(f'button[aria-label="Actions for {name}"]').first.click()
+    button = f.locator(f'button[aria-label="Actions for {name}"]').first
+    # Scroll first and let the scroll event pass: it closes the menu, so one delivered after
+    # the click (the browser sends it with the next frame) would close the menu again
+    button.scroll_into_view_if_needed()
+    getattr(f, "page", f).wait_for_timeout(300)  # f is a frame (embedded) or the page
+    button.click()
     f.wait_for_selector("#rowmenu button")
     return f.evaluate("() => [...document.querySelectorAll('#rowmenu button')].map(b => [b.textContent, b.disabled])")
 
