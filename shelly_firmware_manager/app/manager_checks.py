@@ -295,14 +295,21 @@ class Checks(DeviceSettings):
     def _shelly_entries(self, registry: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         """Shelly main devices from the registry, ordered by name: {device ID: entry}.
 
-        Sub-devices (channels of e.g. Pro 3EM or Strip) carry via_device_id; only the
-        main device has firmware of its own – stale sub-device entries are removed."""
+        Sub-devices (channels of e.g. Pro 3EM or Strip, BLU devices behind a gateway) carry
+        a via_device_id that points to another Shelly; only the main device has firmware of
+        its own – stale sub-device entries are removed. A via_device_id that points to
+        anything else (router, bridge of another integration) does not make a sub-device."""
+
+        def is_shelly(entry: dict[str, Any]) -> bool:
+            """True for a registry entry of the Shelly integration."""
+            return any(i and i[0] == "shelly" for i in entry.get("identifiers", []))
+
+        shelly_ids = {entry["id"] for entry in registry if is_shelly(entry)}
         entries: dict[str, dict[str, Any]] = {}
         for entry in registry:
-            is_shelly = any(i and i[0] == "shelly" for i in entry.get("identifiers", []))
-            if not is_shelly or entry.get("disabled_by"):
+            if not is_shelly(entry) or entry.get("disabled_by"):
                 continue
-            if entry.get("via_device_id"):
+            if entry.get("via_device_id") in shelly_ids:
                 self.devices.pop(entry["id"], None)
                 self.credentials.remove(entry["id"])
                 continue

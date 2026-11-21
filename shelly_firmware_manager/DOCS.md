@@ -423,7 +423,7 @@ the device and run "Check for updates".
 
 **Which Shellys does the app list?** Every device of the Home Assistant Shelly
 integration that has its own address in your network, Gen1 to Gen4. Devices that are
-connected through another device (e.g. Bluetooth devices behind a gateway) and devices
+connected through another Shelly (e.g. Bluetooth devices behind a gateway) and devices
 disabled in Home Assistant are not listed. Of Gen1 only the types under **Allowed Gen1
 types** are checked.
 
@@ -472,7 +472,7 @@ in the firmware store and **Allow downgrades** is switched on (see
 - Home Assistant OS or Supervised is required; the user interface is in English only.
 - Only devices with their own address in a private network (`10.0.0.0/8`,
   `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`) are contacted. Devices connected
-  through another device are not listed.
+  through another Shelly (e.g. Bluetooth devices behind a gateway) are not listed.
 - Battery devices can only be checked and updated while they are awake.
 - Gen1: Shelly offers the firmware only over plain HTTP and without a checksum (see
   [Gen1 firmware](#gen1-firmware)); no downgrade; no installation progress.
