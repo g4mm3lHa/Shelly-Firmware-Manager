@@ -35,9 +35,7 @@ knows). Only original Shelly firmware is supported for now.
    IP address of Home Assistant with port 8098, e.g. `http://192.168.1.20:8098`.
    Installations are disabled until it is set.
 3. If you use a firewall: allow the Shellys to reach Home Assistant on TCP port 8098.
-4. Turn on the **Watchdog** switch on the app page (if it is off): Home Assistant then restarts
-   the app if it stops unexpectedly (it only checks that port 8098 accepts connections).
-5. On a fresh installation the app asks once whether to import a firmware store from
+4. On a fresh installation the app asks once whether to import a firmware store from
    another Home Assistant instance (see [Moving the firmware store](#moving-the-firmware-store)).
    No check runs until you choose **Import store …** or **Skip**; a notice above the
    tabs and a Home Assistant notification remind you. Updates of the app never ask.
@@ -430,8 +428,7 @@ server interfaces are not officially guaranteed.
   `http://192.168.178.50:8098` is still set, installations are blocked until you change
   it or confirm it with "This address is correct".
 - **From 3.0.0 or 3.0.1:** nothing to do. From 3.0.0 the activity log is converted once
-  to its new storage format at the first start. 3.1.1 adds a watchdog: check that the
-  **Watchdog** switch on the app page is on. Log entries get an internal ID at the
+  to its new storage format at the first start. Log entries get an internal ID at the
   first start of 3.1.1 (needed to delete single entries).
 - **From 3.1.1 to 3.2.1:** downgrades are off after the update – switch on **Allow
   downgrades** in the Settings tab if you use them. The sort order and column settings
