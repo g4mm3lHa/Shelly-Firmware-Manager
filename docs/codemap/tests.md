@@ -37,7 +37,8 @@ paths in tmp via `data_paths`), `mgr`, `client` (UI test client with CSRF token)
 
 `tools/dev/check.sh [tests|ui|full|build]` runs everything in order: ruff → mypy (strict,
 app modules) → build check → version match → pytest → UI. Rules of ruff, mypy and pytest:
-`pyproject.toml`.
+`pyproject.toml`. `tools/dev/bump.py X.Y.Z[-rcN]` sets the version (`config.yaml`,
+`main.py`) and, for a release candidate, the empty changelog block.
 
 App definition besides `config.yaml`: `apparmor.txt` (AppArmor profile: Python, read-only
 image, writable `/data`, network), `README.md` / `DOCS.md` (Info and Documentation tab of

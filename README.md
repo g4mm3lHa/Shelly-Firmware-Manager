@@ -1,4 +1,4 @@
-# Firmware Manager for Shelly 3.6.0-rc1
+# Firmware Manager for Shelly
 
 Home Assistant app that keeps your Shelly devices (Gen1 to Gen4) up to date – locally
 and under your control. It finds all Shellys of the Shelly integration, checks for new
@@ -71,7 +71,7 @@ Layout: `shelly_firmware_manager/` (only what Home Assistant needs: app definiti
 `README.md`/`DOCS.md`/`CHANGELOG.md` for the app store, Dockerfile, AppArmor profile,
 pinned wheels, `app/` with the Python sources and the built UI), `ui-src/` (UI sources),
 `tests/` (by area), `qa/` (UI checks, demo server, screenshots of the current version),
-`tools/`, `docs/` (code map, UI decisions), `candidates/` (current test report).
+`tools/`, `docs/` (code map, UI decisions), `candidates/` (test report of a release).
 
 ## License
 

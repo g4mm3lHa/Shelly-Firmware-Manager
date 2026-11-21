@@ -1,5 +1,6 @@
-# Checks on every push and pull request: the development checks (lint, type check,
-# UI build check, version match, backend tests) and the linter for the app definition.
+# Checks on every push: the development checks (lint, type check, UI build check, version
+# match, backend tests) and the linter for the app definition. Pull requests from forks
+# are checked as well; one from a branch of this repository is covered by its push.
 name: CI
 
 on:
@@ -12,6 +13,8 @@ permissions:
 jobs:
   check:
     name: Lint, build check and tests
+    # A pull request from a branch of this repository is already checked by its push
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     steps:
       # Actions are pinned to a commit (the comment names its release); the check tools
@@ -27,6 +30,7 @@ jobs:
 
   addon-linter:
     name: App definition linter
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
