@@ -246,9 +246,14 @@ not part of this file.
   not in a private network (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7). Use
   the LAN IP of Home Assistant.", "Not accepted: the address must not contain a user
   name or password." and "… a query (?…) or a fragment (#…)."; host names and
-  localhost keep the advice to use the LAN IP. A stored address with a non-private IP
+  localhost keep the advice to use the LAN IP. The hint judges the typed text (number forms
+  such as 3232235778 count as non-private IP addresses, as on the server); other format
+  errors (spaces, non-ASCII, bad host name) get no hint, the server names them on save. A stored address with a non-private IP
   shows the notice above the tabs (message of the server, only "Open settings", no
-  "This address is correct") and installations stay disabled.
+  "This address is correct") and installations stay disabled. A stored address with odd
+  characters or a bad host name shows the same notice with the message "Installations are
+  disabled: the download base URL is not a valid address (http(s)://host:port, letters,
+  digits, dots and hyphens in the host). Correct it in the Settings tab." (rc2, awaits approval).
 - **All other tooltips:** a touch tap shows the tooltip of elements without an own
   action (`attachTip(node, text, true)`: device names, Gen1 version, schedule pill,
   SHA-256, "Uploaded", "intermediate") and the title of a disabled button (pointer events, no click); a

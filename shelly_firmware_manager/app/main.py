@@ -21,7 +21,7 @@ from manager import Manager
 from tls import CertificatePins
 from web_ui import build_ui_app
 
-VERSION = "3.6.1-rc1"  # must match config.yaml
+VERSION = "3.6.1-rc2"  # must match config.yaml
 
 OPTIONS_FILE = Path("/data/options.json")
 UI_PORT = 8099  # Ingress (internal)
@@ -92,8 +92,8 @@ async def main() -> None:
         )
         if mgr.download_base_issue == "unconfirmed":
             log.warning("download_base_url is the former example value – confirm it in the Settings tab")
-        elif mgr.download_base_issue == "not_private":
-            log.warning("download_base_url: the IP address is not in a private network – installations are disabled")
+        elif mgr.download_base_issue in ("not_private", "invalid"):
+            log.warning("download_base_url is not allowed – installations are disabled (see the notice in the app)")
         for host, pin in sorted(pins.pins.items()):
             log.info("Certificate pinning active for %s (%d fingerprint(s))", host, len(pin.digests))
         # SIGTERM (Supervisor stop) and SIGINT end the app cleanly with exit code 0:

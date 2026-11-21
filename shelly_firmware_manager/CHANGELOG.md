@@ -6,6 +6,15 @@ Release candidate. The download base URL refuses IP addresses outside the privat
 networks and the Settings tab names the reason while you type; the documentation is
 extended.
 
+Changes in rc2
+
+Security
+- Option `download_base_url`: the address is checked against an allow-list. The host
+  must be a private IP address or a plain ASCII host name; spaces, control and
+  non-ASCII characters, IP addresses in disguise and IPv6 zone IDs are refused.
+- A saved address that fails this check disables installations; the notice above the
+  tabs names the reason until the address is corrected.
+
 Changes in rc1
 
 Changed

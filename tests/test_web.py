@@ -418,3 +418,37 @@ async def test_http_upload_and_import_in_parts(client, mgr, net, monkeypatch):
     mgr.import_max = 1000
     big = {**binary(client), "X-Upload-Total": "1001"}
     assert (await client.post("/api/firmware/import", data=b"x" * 10, headers=big)).status == 413
+
+
+async def test_http_save_refuses_a_public_ip_download_base_url(client, mgr, net):
+    """POST /api/settings names the reason in the error text and changes nothing."""
+    for url, text in (("http://203.0.113.10:8098", "not in a private network"),
+                      ("http://8.8.8.8 ", "http(s)://host:port expected"),
+                      ("http://user:pw@192.168.1.2:8098", "without user name")):
+        r = await client.post("/api/settings", json={"download_base_url": url}, headers=hdr(client))
+        assert r.status == 400 and text in await r.text(), url
+    assert mgr.download_base == "http://192.168.1.2:8098"
+
+
+async def test_http_install_refused_with_a_stored_bad_download_base_url(net):
+    """An address saved before the rule existed: state shows the issue, install and downgrade answer 409."""
+    from helpers import make_manager, web_client
+    for url, issue in (("http://203.0.113.10:8098", "not_private"), ("http://8.8.8.8 ", "invalid")):
+        m = make_manager(net, download_base_url=url)
+        c = await web_client(m)
+        try:
+            m.devices[A] = {"status": "ready", "sha256": "a" * 64, "gen": 2, "ip": "192.168.1.50"}
+            m.devices[B] = {"status": "up-to-date", "gen": 2, "ip": "192.168.1.51"}
+            state = await (await c.get("/api/state")).json()
+            assert state["download_base"]["issue"] == issue and state["download_base"]["message"]
+            _name, sha = store(m, "Plus1", "1.4.0")
+            r = await c.post(f"/api/devices/{A}/install", json={"sha256": "a" * 64, "confirm": True}, headers=hdr(c))
+            assert r.status == 409 and await r.text() == state["download_base"]["message"]
+            m.allow_downgrade = True
+            r = await c.post(f"/api/devices/{B}/install", json={"sha256": sha, "confirm": True, "downgrade": True,
+                             "acknowledged": True}, headers=hdr(c))
+            assert r.status == 409 and await r.text() == state["download_base"]["message"]
+            r = await c.post("/api/settings/download-base/confirm", json={"url": url}, headers=hdr(c))
+            assert r.status == 409  # nothing to confirm
+        finally:
+            await c.close()

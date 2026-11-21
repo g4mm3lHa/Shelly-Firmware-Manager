@@ -129,6 +129,8 @@ DOWNLOAD_BASE_MESSAGES = {
     "not_private": "Installations are disabled: the IP address of the download base URL is not in a "
     "private network (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7). Correct it in the "
     "Settings tab.",
+    "invalid": "Installations are disabled: the download base URL is not a valid address "
+    "(http(s)://host:port, letters, digits, dots and hyphens in the host). Correct it in the Settings tab.",
 }
 
 # No check before the first-start question is answered (fresh installation)
@@ -516,11 +518,13 @@ class ManagerCore:
         former example value, which is only accepted after an explicit confirmation –
         it may really be the address of Home Assistant (FritzBox default network).
         "not_private": an IP address outside the private networks, saved before the
-        option refused it (no confirmation possible, only a correction)."""
+        option refused it. "invalid": not a usable address (odd characters, bad host name).
+        Neither can be confirmed, only corrected."""
         if not self.download_base:
             return "missing"
-        if app_options.download_base_issue(self.download_base):
-            return "not_private"
+        problem = app_options.download_base_problem(self.download_base)
+        if problem:
+            return "not_private" if problem == app_options.DOWNLOAD_BASE_NOT_PRIVATE else "invalid"
         legacy = app_options.LEGACY_DOWNLOAD_BASE.rstrip("/")
         if self.download_base == legacy and self.download_base_confirmed != legacy:
             return "unconfirmed"

@@ -32,31 +32,40 @@ const STORE_BEFORE = "import_max_mb";
 let settingsInputs = {};
 
 // The Shellys download the firmware from download_base_url, so it must point to Home
-// Assistant in the local network. The server refuses user name/password, query,
-// fragment and every IP address outside the private networks (10/8, 172.16/12,
-// 192.168/16, fc00::/7); the Settings tab names the reason while typing (no blocking).
-// Host names are accepted: every one (also .local, .lan, single-label names, localhost)
-// gets a hint, because Shellys often cannot resolve names.
-const LAN_IPV4 = /^(10\.\d{1,3}|172\.(1[6-9]|2\d|3[01])|192\.168)\.\d{1,3}\.\d{1,3}$/;
+// Assistant in the local network. The server accepts only an IP address in the private
+// networks (10/8, 172.16/12, 192.168/16, fc00::/7) or an ASCII host name, and refuses user
+// name/password, query and fragment; the Settings tab names the reason while typing (no
+// blocking). The checks read the typed text, not the normalised URL, so a number form such
+// as 3232235778 is judged like the server does. A host name gets a hint, because Shellys
+// often cannot resolve names. Other format errors get no hint (the server reports them).
+const OCTET = "(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)";
+const IPV4 = new RegExp(`^${OCTET}(\\.${OCTET}){3}$`);
+const LAN_IPV4 = new RegExp(`^(10\\.${OCTET}|172\\.(1[6-9]|2\\d|3[01])|192\\.168)\\.${OCTET}\\.${OCTET}$`);
 const LAN_IPV6 = /^\[f[cd][0-9a-f]{2}:/i;
-const ANY_IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
+const NUMERIC_HOST = /^(0x[0-9a-f]*|[0-9]+)(\.(0x[0-9a-f]*|[0-9]+))*\.?$/i;
+const LABEL = "[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?";
+const HOST_NAME = new RegExp(`^${LABEL}(\\.${LABEL})*\\.?$`, "i");
 const HINT_NOT_PRIVATE = "Not accepted: this IP address is not in a private network (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7). Use the LAN IP of Home Assistant.";
 const HINT_CREDENTIALS = "Not accepted: the address must not contain a user name or password.";
 const HINT_QUERY = "Not accepted: the address must not contain a query (?…) or a fragment (#…).";
 const HINT_LOCALHOST = "This host is not in your local network. The Shellys download the firmware from this URL – use the LAN IP of Home Assistant.";
 const HINT_HOST_NAME = "Use the LAN IP address of Home Assistant instead of a host name – Shellys often cannot resolve host names, the update then fails with a connection error.";
-/** Hint text for the URL (rejection reason or advice), else "" (also for invalid URLs:
- *  the server validates the format). */
+/** Hint text for the URL (rejection reason or advice), else "". */
 function lanHint(value) {
-  let url;
-  try { url = new URL(value); } catch (e) { return ""; }
-  const host = url.hostname;
-  if (!host) return "";
-  if (url.username || url.password) return HINT_CREDENTIALS;
-  if (url.search || url.hash) return HINT_QUERY;
-  if (LAN_IPV4.test(host) || LAN_IPV6.test(host)) return "";
-  if (ANY_IPV4.test(host) || host.startsWith("[")) return HINT_NOT_PRIVATE;
-  return host === "localhost" ? HINT_LOCALHOST : HINT_HOST_NAME;
+  if (/[^\x21-\x7e]/.test(value)) return "";   // spaces, control or non-ASCII characters: the server refuses
+  let url = null;
+  try { url = new URL(value); } catch (e) { /* invalid: judged by the typed host below */ }
+  if (url && (url.username || url.password)) return HINT_CREDENTIALS;
+  if (url && (url.search || url.hash)) return HINT_QUERY;
+  const authority = (/^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(value) || [])[1];
+  if (authority === undefined) return "";
+  const typed = authority.replace(/^.*@/, "");
+  if (typed.startsWith("[")) return !url ? "" : LAN_IPV6.test(url.hostname) ? "" : HINT_NOT_PRIVATE;
+  const host = typed.replace(/:[^:]*$/, "");
+  if (IPV4.test(host)) return LAN_IPV4.test(host) ? "" : HINT_NOT_PRIVATE;
+  if (NUMERIC_HOST.test(host)) return HINT_NOT_PRIVATE;
+  if (!url || host.length > 253 || !HOST_NAME.test(host)) return "";
+  return host.replace(/\.$/, "").toLowerCase() === "localhost" ? HINT_LOCALHOST : HINT_HOST_NAME;
 }
 
 /** Build the grouped settings cards with one common Save button. */

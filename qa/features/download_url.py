@@ -1,7 +1,22 @@
 """Feature suites download_url_hint and download_url_notice: hints and notice for the download base URL
 (demos "idle" 8801, "legacy" 8803, "missing" 8804)."""
 
+import json
+from pathlib import Path
+
 from features.base import IDLE, LEGACY, MISSING, OVERFLOW_JS, PUBLIC, check, open_page, ui_frame, wait_until
+
+
+# Cases shared with tests/test_guards.py: the hint the Settings tab shows for each address
+URL_CASES = json.loads((Path(__file__).resolve().parents[2] / "tests" / "download_url_cases.json").read_text())
+HINT_WORDS = {"none": None, "private": "private network", "credentials": "user name", "query": "query",
+              "host": "host name", "localhost": "not in your local network", "nohint": None}
+
+
+def hint_matches(kind, text):
+    """True if the hint text is the one expected for the case kind (empty for none / nohint)."""
+    word = HINT_WORDS[kind]
+    return not text if word is None else word in text
 
 
 def download_url_hint(browser, out):
@@ -48,6 +63,15 @@ def download_url_hint(browser, out):
         f.fill("#opt-download_base_url", "http://192.168.1.20:8098")
         check(f"{case}: no hint for a LAN IP", warn.is_hidden())
         check(f"{case}: no console errors", not errors, str(errors[:2]))
+        wrong = []
+        for entry in URL_CASES:
+            if entry["ui"] == "skip":  # edge whitespace: the field is trimmed before the check
+                continue
+            f.fill("#opt-download_base_url", entry["url"])
+            text = warn.text_content() if warn.is_visible() else ""
+            if not hint_matches(entry["ui"], text):
+                wrong.append((entry["url"], entry["ui"], text[:30]))
+        check(f"{case}: hints agree with the shared case list", not wrong, str(wrong[:3]))
         ctx.close()
 
 
