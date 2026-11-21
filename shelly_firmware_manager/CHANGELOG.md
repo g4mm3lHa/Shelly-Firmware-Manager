@@ -2,10 +2,8 @@
 
 ## 3.7.1
 
-Release candidate. Shellys that are connected through a router or another integration
+Released 2026-11-21. Shellys that are connected through a router or another integration
 are listed again.
-
-Changes in rc1
 
 Fixed
 - Devices tab: Shellys that Home Assistant shows as connected through another device
