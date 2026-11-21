@@ -1,5 +1,5 @@
 name: Firmware Manager for Shelly
-version: "3.5.0"
+version: "3.6.0-rc1"
 slug: shelly_firmware_manager
 url: https://github.com/g4mm3lHa/Shelly-Firmware-Manager
 description: >-
