@@ -5,7 +5,7 @@ description: >-
   Downloads Shelly firmware via Home Assistant, provides it through its own
   local download server and installs it after manual approval.
 # Not next to "name": the beta branch changes the name, every release the version
-version: "3.7.1"
+version: "3.8.0-rc1"
 arch:
   - aarch64
   - amd64
