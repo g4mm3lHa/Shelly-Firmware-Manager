@@ -87,11 +87,13 @@ and [Security](shelly_firmware_manager/DOCS.md#security).
 1. Look up the message in
    [Troubleshooting](shelly_firmware_manager/DOCS.md#troubleshooting) and the
    [FAQ](shelly_firmware_manager/DOCS.md#faq).
-2. Found a bug or miss a feature? Open an
+2. Questions and discussion: the
+   [Home Assistant community thread](https://community.home-assistant.io/t/firmware-manager-for-shelly-devices/1035784).
+3. Found a bug or miss a feature? Open an
    [issue](https://github.com/g4mm3lHa/Shelly-Firmware-Manager/issues/new/choose). A
    bug report needs the versions of the app and of Home Assistant, the Shelly model and
    generation, and the entry of the activity log.
-3. Security problems are not reported in public issues – see
+4. Security problems are not reported in public issues – see
    [`SECURITY.md`](SECURITY.md).
 
 Problems of Home Assistant itself or of the Shelly firmware belong to those projects.
