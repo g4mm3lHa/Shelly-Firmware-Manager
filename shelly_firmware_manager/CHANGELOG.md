@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.6.0
+
+In development.
+
+Changed
+- Devices tab: the row menu entry "Status details" is now "Device Details" and also
+  shows model, generation, firmware ID and NTP server (desktop and phone).
+- Devices tab: the row menu ⋮ is ordered in five groups (updates, device, settings,
+  ignore, restart).
+
 ## 3.5.0
 
 Released 2026-11-20. Clearer settings, filter chips and one toolbar in all tabs; phone

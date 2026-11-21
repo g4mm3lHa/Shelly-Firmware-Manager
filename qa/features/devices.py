@@ -324,7 +324,7 @@ def _layout(c):
       right: r(p).left >= r(m).right, title: document.getElementById('dlg-title').textContent,
       sections: [...document.querySelectorAll('#dlg .dsec h3')].map(h => h.textContent)}; }""")
     check(f"{case}: status dialog – message left, status right, sections", pos["right"] and pos["title"] == "Fridge"
-          and pos["sections"] == ["Firmware", "History"], str(pos))
+          and pos["sections"] == ["Firmware", "Device", "History"], str(pos))
     page.screenshot(path=out / f"{case}-status-failed.png")
     f.locator("#dlg-x").click()
     tip_after_tap = None

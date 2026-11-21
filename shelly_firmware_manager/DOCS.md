@@ -98,9 +98,11 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 - Hovering over a device name shows the Home Assistant and the Shelly device name. On
   touch devices a tap shows a tooltip where the tap has no other function, and the
   reason of a disabled button.
-- The row menu ⋮ offers: Check for updates (this device only), Install update,
-  Downgrade, Reload device info, Ignore / Resume device, Open web UI, device settings,
-  Status details and Restart.
+- The row menu ⋮ offers, in five groups: Check for updates (this device only), Install
+  update, Downgrade; Device Details, Reload device info, Open web UI; the device
+  settings (NTP server, power-on action, eco mode, device password); Ignore / Resume
+  device; Restart. Device Details shows status, firmware, model, generation, firmware
+  ID, NTP server and the history of the device.
 - **Battery devices** (e.g. H&T, door/window sensors) sleep between wake-ups and answer
   only while they are awake. The app recognises them from the device itself when a check
   or Reload Device Info reaches them awake (Gen2+: wake-up period, Gen1: sleep mode) and
