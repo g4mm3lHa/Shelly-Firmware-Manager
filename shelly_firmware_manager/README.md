@@ -11,16 +11,20 @@ Nothing is installed without your approval.
   versions); a stored file of that version is used instead of a download. Gen1: stored
   firmware comes first.
 - Older firmware versions stay stored and allow a downgrade (Gen2+, once switched on).
-- Device settings such as name, NTP server, power-on action, eco mode and password
-  protection can be edited directly.
+- Device settings such as name, NTP server, power-on action, eco mode, password
+  protection and the websocket debug log can be edited directly.
 - The firmware store moves to another Home Assistant instance as one sealed ZIP file;
   device passwords can be stored or set on several devices in one step.
 
-Requires the Home Assistant Shelly integration (the app works with the devices it
-knows). Only original Shelly firmware is supported for now.
+Requires Home Assistant 2026.10 or newer and the Home Assistant Shelly integration (the
+app works with the devices it knows). The Shellys must reach Home Assistant on TCP port
+8098. Only original Shelly firmware is supported.
 
 After the installation set the **download base URL** in the app's Settings tab (LAN IP
-address of Home Assistant and port 8098) – see the Documentation tab.
+address of Home Assistant and port 8098) – see "Quick start" in the Documentation tab.
+
+Help: "Troubleshooting" and "FAQ" in the Documentation tab; bugs and feature requests at
+<https://github.com/g4mm3lHa/Shelly-Firmware-Manager/issues>.
 
 Unofficial community project. It is not affiliated with, endorsed or sponsored by
 Allterco Robotics or Shelly. Shelly is a trademark of its holder.
