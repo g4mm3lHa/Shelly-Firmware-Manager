@@ -68,6 +68,15 @@ function lanHint(value) {
   return host.replace(/\.$/, "").toLowerCase() === "localhost" ? HINT_LOCALHOST : HINT_HOST_NAME;
 }
 
+/** Suggestion for an empty download base URL: the address this page was opened with
+ *  (the browser's Home Assistant address) on the download port, only if that host is an IP
+ *  address in a private network; "" otherwise (host name, public address, localhost). */
+function suggestedBaseUrl() {
+  const host = location.hostname;
+  const lan = IPV4.test(host) ? LAN_IPV4.test(host) : LAN_IPV6.test(host);
+  return lan ? `http://${host}:8098` : "";
+}
+
 /** Build the grouped settings cards with one common Save button. */
 export function renderSettings() {
   const o = ui.options; settingsInputs = {};
@@ -84,6 +93,7 @@ export function renderSettings() {
       else if (type === "list") { input = el("input"); input.type = "text"; input.value = (o[key] || []).join(", "); }
       else if (type === "pins") input = pinsEditor(o[key] || []);
       else { input = el("input"); input.type = "text"; input.value = o[key] ?? ""; }
+      if (key === "download_base_url" && !input.value) input.value = suggestedBaseUrl();   // only a suggestion: counts as unsaved
       input.id = id; settingsInputs[key] = input;
       // One block per option: name with help icon, control (and the live warning of
       // the download base URL). On wide screens the block is "display: contents", so the
@@ -112,6 +122,7 @@ export function renderSettings() {
   const wrap = box("div", "settings-grid", ...cards);
   wrap.addEventListener("input", markDirty); wrap.addEventListener("change", markDirty); wrap.addEventListener("click", () => setTimeout(markDirty));
   $("settings-form").replaceChildren(wrap, box("div", "form-actions", dirty, save), changelogNote());   // common save area
+  markDirty();   // a suggested download base URL is an unsaved change
 }
 // Path of this app's page in Home Assistant (server: slug from the Supervisor); the list
 // of apps until it is known

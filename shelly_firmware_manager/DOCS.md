@@ -37,11 +37,11 @@ Assistant). Version history: `CHANGELOG.md` (Changelog tab).
 2. Open the app, go to the **Settings** tab and set the **download base URL**: the LAN
    IP address of Home Assistant with port 8098, e.g. `http://192.168.1.20:8098` (see
    [Download base URL](#download-base-url)). Installations are disabled until it is set.
+   While the field is empty, the tab fills in the address of the page you are using if
+   it is a private IP address – check it, then save.
 3. If you use a firewall: allow the Shellys to reach Home Assistant on TCP port 8098.
 4. Turn on the **Watchdog** switch on the app page (if it is off): Home Assistant then
-   restarts the app if it stops unexpectedly. The app also reports to Home Assistant
-   whether it still accepts connections on port 8098 (container health check – nothing
-   is requested or logged); this is meant to restart an app that hangs as well.
+   restarts the app if it stops unexpectedly or hangs (see [Troubleshooting](#troubleshooting)).
 5. On a fresh installation the app asks once whether to import a firmware store from
    another Home Assistant instance (see [Moving the firmware store](#moving-the-firmware-store)).
    No check runs until you choose **Import store …** or **Skip**; a notice above the
@@ -68,17 +68,20 @@ Only original Shelly firmware is supported; see [Known limitations](#known-limit
 All options can be changed in the app's **Settings** tab (or the Configuration tab of
 the app page – same names, help texts and order). Saving restarts the app.
 
-| Option | Meaning |
-|---|---|
-| Check every (days) / Check time | Automatic check every 1–30 days at a time of day (default: every 7 days at 02:45, Home Assistant time zone) |
-| Download base URL | LAN IP of Home Assistant + port 8098, e.g. `http://192.168.1.20:8098`. Required for installations; rules below |
-| Serve downloads only to known Shellys | Firmware is only served to the device it is meant for (default on). Switch off if downloads are rejected from a 172.30.x.x address |
-| Max. parallel installations | How many installations run at the same time (1–20, default 5) |
-| Enable Gen1 updates / Allowed Gen1 types | Gen1 support and the Gen1 models to check (see [Gen1 firmware](#gen1-firmware)) |
-| Allow downgrades | Installing an older stored firmware on Gen2+ devices (see [Downgrade](#downgrade-gen2)). Off unless switched on, also after an update of the app |
-| Max. import size (MB) | Largest file accepted by **Import store** (1–2048, default 100) |
-| Max. log size / Log retention | Activity log limits (100–3000 entries, 1–365 days) |
-| Pinned certificates | Certificate fingerprints for Shelly servers (see [Certificate pinning](#certificate-pinning)) |
+| Option | Default | Allowed | Meaning |
+|---|---|---|---|
+| Check every (days) | 7 | 1–30 | Interval of the automatic check |
+| Check time | 02:45 | HH:MM | Time of day of the automatic check (Home Assistant time zone) |
+| Download base URL for the Shellys | – | rules below | LAN IP of Home Assistant + port 8098, e.g. `http://192.168.1.20:8098`. Required for installations |
+| Serve downloads only to known Shellys | on | on / off | Firmware is only served to the device it is meant for. Switch off if downloads are rejected from a 172.30.x.x address |
+| Enable Gen1 updates | on | on / off | Gen1 support (see [Gen1 firmware](#gen1-firmware)) |
+| Allowed Gen1 types | SHSW-1, SHSW-PM, SHSW-25, SHPLG-S, SHEM | type names | The Gen1 models that are checked |
+| Allow downgrades | off | on / off | Installing an older stored firmware on Gen2+ devices (see [Downgrade](#downgrade-gen2)). Stays off until you switch it on, also after an update of the app |
+| Max. import size (MB) | 100 | 1–2048 | Largest file accepted by **Import store** |
+| Max. log size (entries) | 1000 | 100–3000 | Size limit of the activity log |
+| Log retention (days) | 90 | 1–365 | Age limit of the activity log |
+| Max. parallel installations | 5 | 1–20 | How many installations (and password changes) run at the same time; further approvals wait |
+| Pinned certificates | two Shelly hosts | host + SHA-256 | Certificate fingerprints for Shelly servers (see [Certificate pinning](#certificate-pinning)) |
 
 ### Download base URL
 
@@ -99,6 +102,11 @@ server of the app (port 8098) and be reachable from every Shelly.
 - User name, password, query (`?…`) and fragment (`#…`) are refused: the address is
   shown in the app and in the log, and nothing may follow the path.
 
+If the field is empty, the Settings tab suggests `http://<address>:8098` from the
+address of the Home Assistant page you are using – only if that address is an IP address
+in a private network, never for a host name. The suggestion is not saved until you click
+**Save settings**; check the port if you changed the host port of the app.
+
 If an address saved with an older version of the app is no longer allowed,
 installations stay disabled and a notice above the tabs names the reason until you
 correct the address.
@@ -113,40 +121,28 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 - **Check now** checks all devices; the header shows the last check and the schedule.
 - Devices with updates are listed on top, then all other devices, ignored devices at
   the end. Search, filters (Updates, Errors, Up-To-Date, Unprotected, Ignored), sorting
-  and a column chooser help with larger installations. **Unprotected** lists the devices
-  without password protection set on the device; set it per device from that list.
-  Search and sort are the two round icons at the start of the toolbar: the magnifier
-  opens the search field (a dot on it shows that a search text is set), the sort icon a
-  list of the columns and the direction. On desktops the column titles sort as well.
-  A click outside the popup or Escape closes it. Sort order, hidden columns and column
-  order are kept in the browser of each device you use (phone and PC can differ); a new
-  device starts sorted by device name. A device you just updated stays on top as "Updated"
-  (or "Unconfirmed" if the target version was not confirmed, or "Error" if the
-  installation failed – then with checkbox and **Install** for another attempt) until
-  you check it again or the next full check runs (it stays there while it is checked).
+  and a column chooser help with larger installations; sort order and columns are kept
+  per browser. **Unprotected** lists devices without password protection – set it per
+  device from that list.
+- A device you just updated stays on top as "Updated" (or "Unconfirmed" if the target
+  version was not confirmed, or "Error" if the installation failed – then with
+  **Install** for another attempt) until you check it again or the next full check runs.
 - The action icons show and change power-on action, eco mode, password protection,
   access point, Bluetooth, actions and schedules and the websocket debug log, and
-  restart the device. Their popups start with a strip that shows the current state. A "?" means
-  the value is currently unknown. Colours: power-on action green = every output
-  restores its last state, red = another value; lock green = protected and the password
-  is stored in the app, yellow = protected but the password is not stored here; access
-  point, actions and schedules red = active; websocket debug log yellow = on. Gen1 devices show the power-on values with
-  the names of their own web interface ("Restore last mode", "Switch"). Every change is
-  read back from the device; a value the device accepted but did not apply is reported
-  as a warning and logged as failed.
+  restart the device. The popup of an icon starts with the current state; "?" means the
+  value is unknown. Every change is read back from the device; a value the device
+  accepted but did not apply is reported as a warning and logged as failed. The lock is
+  green if the device is protected and its password is stored in the app, yellow if the
+  password is not stored here.
 - **Websocket debug log** (Gen2+, bug icon): turns on the debug log that the Shelly
   streams over a websocket; the Diagnostics page of the Shelly web UI (linked in the
   popup) shows it live. Turn it off afterwards – the log may contain network and
   configuration details and streaming uses device resources. Below firmware 1.0.0 the
   stream is not protected by the device password. Gen1 devices have no such log.
-- Hovering over a device name shows the Home Assistant and the Shelly device name. On
-  touch devices a tap shows a tooltip where the tap has no other function, and the
-  reason of a disabled button.
-- The row menu ⋮ offers, in five groups: Check for updates (this device only), Install
-  update, Downgrade; Device Details, Reload device info, Open web UI; the device
-  settings (NTP server, power-on action, eco mode, device password); Ignore / Resume
-  device; Restart. Device Details shows status, firmware, model, generation, firmware
-  ID, NTP server and the history of the device.
+- The row menu ⋮ offers per device: Check for updates, Install update, Downgrade, Device
+  Details (status, firmware, model, generation, firmware ID, NTP server and history),
+  Reload device info, Open web UI, the device settings, Ignore / Resume device and
+  Restart. On touch devices a tap on a disabled button shows the reason.
 - **Battery devices** (e.g. H&T, door/window sensors) sleep between wake-ups and answer
   only while they are awake. The app recognises them from the device itself when a check
   or Reload Device Info reaches them awake (Gen2+: wake-up period, Gen1: sleep mode) and
@@ -258,14 +254,11 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
 ### Firmware
 
 - All downloaded and uploaded firmware files, grouped by device type, with size, date,
-  SHA-256 and the devices they are provided for. The number of files, their total size
-  and the free disk space are shown at the top. Filters: Provided (provided to at least
-  one device), Uploaded, Intermediate, Gen1 and Unused (no device in the list has this
-  firmware ID; while the firmware ID of a device is not known yet – it was never
-  reached, e.g. a sleeping battery device – no file counts as unused). Search and sort work as in the Devices tab (sort by firmware ID, newest
-  version, size or storage date, also with the column titles; kept per device); the
-  versions inside a card stay newest first. On phones "Upload firmware" is the upload
-  icon at the right end.
+  SHA-256 and the devices they are provided for. The top shows the number of files, their
+  total size and the free disk space. Filters: Provided (to at least one device),
+  Uploaded, Intermediate, Gen1 and Unused (no listed device has this firmware ID; no file
+  counts as unused while the ID of a device is unknown, e.g. a sleeping battery device).
+  Search and sort work as in the Devices tab; versions inside a card stay newest first.
 - **Install** behind a device name opens the usual installation dialog for this device
   and this firmware (same conditions as "Install update" in the Devices tab).
 - The **changelog icon** of a version shows the changelog stored with this firmware.
@@ -306,17 +299,16 @@ confirmation). After clearing, one entry remains that names who cleared the log.
 
 ### Settings
 
-All options from [Configuration](#configuration), grouped into the cards **Checks**,
-**Download Server** (download base URL, serve only to known Shellys), **Firmware &
-Storage** (Gen1, downgrades, the firmware store, import size), **Logs** and
-**Advanced**, with one Save button. The i-icon next to a setting (or the setting name) shows its help – on touch
-devices with a tap. A hint warns while typing if the download base URL is a host name or not in
-your local network. While installations are disabled because of the download base URL,
-a notice above the tabs explains why. The card **Firmware & Storage** holds the
-**Firmware store** block (export and import, see [Moving the firmware store](#moving-the-firmware-store)),
-the card **Device Passwords** sets passwords on several devices at once (see
-[Device passwords](#device-passwords)). The last line links to the app page in Home
-Assistant, where **Changelog** next to the version lists what changed in each version.
+All options from [Configuration](#configuration) in the cards **Checks**, **Download
+Server**, **Firmware & Storage**, **Logs** and **Advanced**, with one Save button. The
+i-icon next to a setting shows its help (on touch devices with a tap). While you type, a
+hint warns if the download base URL is a host name or not in your local network; while
+installations are disabled because of it, a notice above the tabs explains why. The card
+**Firmware & Storage** holds the export and import of the firmware store (see [Moving the
+firmware store](#moving-the-firmware-store)), the card **Device Passwords** sets
+passwords on several devices at once (see [Device passwords](#device-passwords)). The
+last line links to the app page in Home Assistant, where **Changelog** next to the
+version lists what changed in each version.
 
 ## Device passwords
 
@@ -419,6 +411,8 @@ Gen2+ firmware is downloaded over HTTPS only.
 | Certificate of … is not publicly trusted | See [Certificate pinning](#certificate-pinning) |
 | The Shelly requires a password | Store the device password (see [Device passwords](#device-passwords)) |
 | Device address … is not in a private network | Only devices in `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` or `fc00::/7` (IPv6) are contacted. Give the Shelly an address in one of these networks |
+| The app stopped and did not start again | Turn on **Watchdog** and **Start on boot** on the app page. With the Watchdog on, Home Assistant restarts the app after it stopped unexpectedly |
+| The app is shown as running but does not respond | The container health check (a TCP connection to port 8098 every 30 seconds) is meant to make Home Assistant restart the app after three failures if the Watchdog is on. Otherwise restart the app by hand and report the lines of the app log if it happens again |
 | Storage error: The state file was unreadable – the backup of the previous save was loaded | The app's state file was damaged (e.g. by a power failure) and the copy of the save before was used. Check the devices again; the message disappears with the next restart |
 | Storage error: The state file was unreadable and no backup could be loaded | The device list starts empty and is filled by the next check. The firmware files are kept on disk but no longer listed; a file is listed again when a check downloads the same version |
 
@@ -441,6 +435,15 @@ Every installation needs your approval in the installation dialog.
 
 **Does it offer beta firmware?** No, only stable versions.
 
+**Is there a beta version of the app?** Release candidates of the next version appear in
+the `beta` branch of the repository. To try one, add
+`https://github.com/g4mm3lHa/Shelly-Firmware-Manager#beta` as a second repository in the
+app store (like the stable one, with `#beta` at the end). It offers **Firmware Manager
+for Shelly (Beta)**, a separate app with its own data and its own firmware store. Only
+one of the two apps can use host port 8098: give the beta app another host port in the
+network section of its Configuration tab (e.g. 8097) and set its download base URL to
+that port. Report problems as issues, with the app version.
+
 **Why an IP address instead of a host name?** Many Shellys cannot resolve host names of
 your network. The download then fails with a connection error (see
 [Download base URL](#download-base-url)).
@@ -455,8 +458,9 @@ from the updates card.
 
 **How much disk space does the firmware store need?** The Firmware tab shows the number
 of files, their size and the free disk space. Firmware is never deleted automatically;
-the filter **Unused** lists files no device needs. The store is part of the Home
-Assistant backups of the app.
+the filter **Unused** lists files no device needs. The store is part of every Home
+Assistant backup of the app, so backups grow with it: the size in the Firmware tab is
+about what a backup of the app adds.
 
 **Can I go back to an older firmware?** Yes, on Gen2+ devices, if the older version is
 in the firmware store and **Allow downgrades** is switched on (see
@@ -535,23 +539,22 @@ server interfaces are not officially guaranteed.
 
 ## Upgrading from older versions
 
+Updates from the previous version need no action. Older versions:
+
+- **From 3.6.0 or older:** an IP address outside the private networks that was saved as
+  download base URL is no longer accepted. Installations stay disabled until you correct
+  it; the notice above the tabs names the reason.
+- **From 3.1.1 or older:** downgrades are off after the update – switch on **Allow
+  downgrades** in the Settings tab if you use them. The sort order and columns of the
+  Devices table start fresh and are then kept per browser. Check that the **Watchdog**
+  switch on the app page is on.
 - **From 3.0.0 release candidates:** if the old example address
   `http://192.168.178.50:8098` is still set, installations are blocked until you change
   it or confirm it with "This address is correct".
-- **From 3.0.0 or 3.0.1:** nothing to do. From 3.0.0 the activity log is converted once
-  to its new storage format at the first start. 3.1.1 adds restart monitoring: check
-  that the **Watchdog** switch on the app page is on. Log entries get an internal ID at
-  the first start of 3.1.1 (needed to delete single entries).
-- **From 3.1.1 to 3.2.1:** downgrades are off after the update – switch on **Allow
-  downgrades** in the Settings tab if you use them. The sort order and column settings
-  of the Devices table start fresh (device name ascending) and are then kept per
-  browser.
-- **From 2.x or 1.x:** since 3.0.1 the conversion code of these versions is no longer
-  included. Update to 3.0.0 first and start it once (it removes the former shared Shelly
-  password from the stored options and converts the table settings), then update to
-  the current version – or
-  remove and reinstall the app. Backups made before the 3.0 upgrade still contain the
-  old shared password.
+- **From 2.x or 1.x:** update to 3.0.0 first and start it once (it removes the former
+  shared Shelly password from the stored options and converts the table settings), then
+  update to the current version – or remove and reinstall the app. Backups made before
+  the 3.0 upgrade still contain the old shared password.
 
 ## Support
 

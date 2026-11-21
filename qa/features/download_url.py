@@ -122,3 +122,28 @@ def download_url_notice(browser, out):
         page.screenshot(path=out / f"notice-public-{case}.png")
         check(f"{case}: no console errors (public)", not errors, str(errors[:2]))
         ctx.close()
+
+
+def serve_as(base):
+    """Route handler that serves the "missing" demo under another host name (its answers do not
+    depend on the host)."""
+    return lambda route: route.fulfill(response=route.fetch(url=route.request.url.replace(base, MISSING)))
+
+
+def download_url_suggestion(browser, out):
+    """An empty download base URL is pre-filled from the address the page was opened with, only for a
+    private IP address (the demo "missing" 8804 is reached under other host names via a route)."""
+    for host, expected in (("192.168.1.20", "http://192.168.1.20:8098"), ("[fd12:3456::1]", "http://[fd12:3456::1]:8098"),
+                           ("203.0.113.10", ""), ("homeassistant.local", ""), ("127.0.0.1", "")):
+        ctx = browser.new_context(viewport={"width": 1440, "height": 900})
+        page = ctx.new_page()
+        base = f"http://{host}:8804"
+        page.route(base + "/**", serve_as(base))
+        page.goto(base + "/ui/", wait_until="commit")
+        page.click("#tab-settings")
+        page.wait_for_selector("#opt-download_base_url")
+        check(f"{host}: suggested URL", wait_until(lambda p=page, e=expected: p.input_value("#opt-download_base_url") == e),
+              page.input_value("#opt-download_base_url"))
+        check(f"{host}: unsaved marker follows the suggestion",
+              page.locator(".unsaved").is_visible() == bool(expected))
+        ctx.close()

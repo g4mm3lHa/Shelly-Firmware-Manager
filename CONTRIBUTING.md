@@ -38,12 +38,12 @@ Rules of the project:
 | `tests/` | Backend tests by area; all network access is mocked |
 | `qa/` | UI checks (Playwright), demo servers with fake data, screenshots of the current version |
 | `tools/` | `build_ui.py` and the development helpers in `dev/` |
-| `docs/` | Code map (`CODEMAP.md`, `codemap/`), approved UI details (`UI_DECISIONS.md`), images of the README (`images/`) |
+| `docs/` | Code map (`CODEMAP.md`, `codemap/`), approved UI details (`UI_DECISIONS.md` and `ui/`), images of the README (`images/`) |
 | `candidates/` | Test report of the current release |
 
 Start with `docs/CODEMAP.md`: it maps modules, stored data, API routes and tests.
-`docs/UI_DECISIONS.md` lists UI details that were decided on purpose – please do not
-change them without an issue.
+`docs/UI_DECISIONS.md` and its parts in `docs/ui/` list UI details that were decided on
+purpose – please do not change them without an issue.
 
 ## Building and checking
 

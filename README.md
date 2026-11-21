@@ -57,7 +57,9 @@ Only original Shelly firmware is supported. More limits:
    Assistant builds the app on your system; this takes a few minutes.
 3. Start the app and set the **download base URL** in its Settings tab – see
    [Quick start](shelly_firmware_manager/DOCS.md#quick-start). Installations on Shellys
-   are disabled until it is set.
+   are disabled until it is set. This badge opens the app page in your Home Assistant:
+
+   [![Open your Home Assistant instance and show the app.](https://my.home-assistant.io/badges/supervisor_addon.svg)](https://my.home-assistant.io/redirect/supervisor_addon/?addon=7bbcfb16_shelly_firmware_manager)
 
 Updates of the app are offered by Home Assistant like for any other app.
 
