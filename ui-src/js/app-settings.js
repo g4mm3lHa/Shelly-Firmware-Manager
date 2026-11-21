@@ -15,7 +15,7 @@ const STORAGE = "Firmware & Storage";
 export const OPTION_FIELDS = [
   ["check_interval_days", "Check every (days)", "number", "1–30 days", "Checks"],
   ["check_time", "Check time", "time", "Local time of Home Assistant", "Checks"],
-  ["download_base_url", "Download base URL for the Shellys", "text", "LAN IP address of Home Assistant + host port 8098, e.g. http://192.168.1.20:8098 (no host name). Required for installations", "Download Server"],
+  ["download_base_url", "Download base URL for the Shellys", "text", "LAN IP address of Home Assistant + host port 8098, e.g. http://192.168.1.20:8098 (no host name; IP addresses only in private networks). Required for installations", "Download Server"],
   ["restrict_downloads_to_devices", "Serve downloads only to known Shellys", "bool", "Switch off if downloads are rejected from 172.30.x.x", "Download Server"],
   ["gen1_updates_enabled", "Enable Gen1 updates", "bool", "Gen1 firmware is only available via plain HTTP without a checksum", STORAGE],
   ["gen1_allowed_types", "Allowed Gen1 types", "list", "Comma-separated, e.g. SHSW-1, SHSW-PM", STORAGE],
@@ -32,24 +32,31 @@ const STORE_BEFORE = "import_max_mb";
 let settingsInputs = {};
 
 // The Shellys download the firmware from download_base_url, so it must point to Home
-// Assistant in the local network. Not enforced (the Supervisor schema only requires a
-// URL); the Settings tab shows a hint while typing. No hint for private IPv4 ranges,
-// IPv6 unique-local (fc00::/7) and link-local (fe80::/10). Any other IP address (and
-// localhost) gets the "not local" hint; every host name (also .local, .lan,
-// single-label names) gets the advice to use the IP: Shellys often cannot resolve names.
+// Assistant in the local network. The server refuses user name/password, query,
+// fragment and every IP address outside the private networks (10/8, 172.16/12,
+// 192.168/16, fc00::/7); the Settings tab names the reason while typing (no blocking).
+// Host names are accepted: every one (also .local, .lan, single-label names, localhost)
+// gets a hint, because Shellys often cannot resolve names.
 const LAN_IPV4 = /^(10\.\d{1,3}|172\.(1[6-9]|2\d|3[01])|192\.168)\.\d{1,3}\.\d{1,3}$/;
-const LAN_IPV6 = /^\[(f[cd][0-9a-f]{2}|fe[89ab][0-9a-f]):/i;
+const LAN_IPV6 = /^\[f[cd][0-9a-f]{2}:/i;
 const ANY_IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
-const HINT_NOT_LOCAL = "This host is not in your local network. The Shellys download the firmware from this URL – use the LAN IP of Home Assistant.";
+const HINT_NOT_PRIVATE = "Not accepted: this IP address is not in a private network (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7). Use the LAN IP of Home Assistant.";
+const HINT_CREDENTIALS = "Not accepted: the address must not contain a user name or password.";
+const HINT_QUERY = "Not accepted: the address must not contain a query (?…) or a fragment (#…).";
+const HINT_LOCALHOST = "This host is not in your local network. The Shellys download the firmware from this URL – use the LAN IP of Home Assistant.";
 const HINT_HOST_NAME = "Use the LAN IP address of Home Assistant instead of a host name – Shellys often cannot resolve host names, the update then fails with a connection error.";
-/** Hint text for the URL's host, else "" (also for invalid URLs: the server validates
- *  the format). */
+/** Hint text for the URL (rejection reason or advice), else "" (also for invalid URLs:
+ *  the server validates the format). */
 function lanHint(value) {
-  let host;
-  try { host = new URL(value).hostname; } catch (e) { return ""; }
-  if (!host || LAN_IPV4.test(host) || LAN_IPV6.test(host)) return "";
-  if (ANY_IPV4.test(host) || host.startsWith("[") || host === "localhost") return HINT_NOT_LOCAL;
-  return HINT_HOST_NAME;
+  let url;
+  try { url = new URL(value); } catch (e) { return ""; }
+  const host = url.hostname;
+  if (!host) return "";
+  if (url.username || url.password) return HINT_CREDENTIALS;
+  if (url.search || url.hash) return HINT_QUERY;
+  if (LAN_IPV4.test(host) || LAN_IPV6.test(host)) return "";
+  if (ANY_IPV4.test(host) || host.startsWith("[")) return HINT_NOT_PRIVATE;
+  return host === "localhost" ? HINT_LOCALHOST : HINT_HOST_NAME;
 }
 
 /** Build the grouped settings cards with one common Save button. */

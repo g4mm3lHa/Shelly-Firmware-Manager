@@ -242,7 +242,13 @@ not part of this file.
   touch tap on the name does not focus/toggle the control (desktop click unchanged);
   the help icon has a 44 px touch target on phones. The text stays the field's
   `aria-describedby` (visually hidden); the live warning of the download base URL stays
-  under the field.
+  under the field. It names the reason while typing: "Not accepted: this IP address is
+  not in a private network (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7). Use
+  the LAN IP of Home Assistant.", "Not accepted: the address must not contain a user
+  name or password." and "… a query (?…) or a fragment (#…)."; host names and
+  localhost keep the advice to use the LAN IP. A stored address with a non-private IP
+  shows the notice above the tabs (message of the server, only "Open settings", no
+  "This address is correct") and installations stay disabled.
 - **All other tooltips:** a touch tap shows the tooltip of elements without an own
   action (`attachTip(node, text, true)`: device names, Gen1 version, schedule pill,
   SHA-256, "Uploaded", "intermediate") and the title of a disabled button (pointer events, no click); a

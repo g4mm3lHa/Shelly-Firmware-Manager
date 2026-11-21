@@ -399,8 +399,9 @@ Gen2+ firmware is downloaded over HTTPS only.
 |---|---|
 | Installations are disabled: set the download base URL | Enter the LAN IP of Home Assistant with port 8098 in the Settings tab |
 | The Shelly never requested the firmware / Connection error -14 | The download base URL is wrong or blocked: it must be the IP of Home Assistant, port 8098 must be reachable from the Shelly |
-| download_base_url: … expected, without user name, query or fragment | The address contains a user name, a password, a query or a fragment – remove them (see [Download base URL](#download-base-url)) |
+| download_base_url: http(s)://host:port expected, without user name, query or fragment | The address contains a user name, a password, a query or a fragment – remove them (see [Download base URL](#download-base-url)) |
 | download_base_url: the IP address is not in a private network | Enter the LAN IP of Home Assistant; only addresses in `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` or `fc00::/7` are accepted (see [Download base URL](#download-base-url)) |
+| Installations are disabled: the IP address of the download base URL is not in a private network | The saved address was accepted by an older version of the app – correct it in the Settings tab; installations stay disabled until then |
 | Download rejected: request came from 172.30.x.x | Docker hides the device address – turn off "Serve downloads only to known Shellys" |
 | The Shelly downloaded the firmware but still reports … | The device did not install it – check the log in the Shelly web UI |
 | The Shelly reports an update error … It downloaded the firmware but rejected it | The installed firmware may be too old for a direct update to this version: check the device again – the Shelly update server names the required intermediate version (or install one via the web interface of the Shelly or an upload) |

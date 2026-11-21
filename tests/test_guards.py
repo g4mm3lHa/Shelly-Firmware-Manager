@@ -271,12 +271,29 @@ def test_file_names_and_options_take_no_trailing_line_break(tmp_path):
 def test_download_base_url_is_a_plain_address():
     """Scheme, host, port and an optional path – no credentials, query or fragment
     (the file name is appended, and the address is shown in the UI and the log)."""
-    for url in ("http://192.168.1.2:8098", "https://ha.example.lan", "http://192.168.1.2:8098/firmware"):
+    for url in ("http://192.168.1.2:8098", "https://ha.example.lan", "http://192.168.1.2:8098/firmware",
+                "http://10.0.0.1", "http://172.16.0.1:8098", "http://172.31.255.254", "http://[fd12:3456::1]:8098",
+                "http://homeassistant.local:8098", "https://example.com:8098"):
         assert app_options.merge(OPTIONS, {"download_base_url": url})[0]["download_base_url"] == url
     for url in ("http://user:pw@192.168.1.2:8098", "http://user@192.168.1.2:8098", "http://192.168.1.2:8098?x=1",
                 "http://192.168.1.2:8098/#top", "ftp://192.168.1.2", "192.168.1.2:8098", "http://192.168.1.2:99999"):
         with pytest.raises(ValueError):
             app_options.merge(OPTIONS, {"download_base_url": url})
+
+
+def test_download_base_url_refuses_ip_addresses_outside_the_lan():
+    """An IP literal must be in shelly.LAN_NETWORKS; host names are not judged. Numbers-only hosts
+    (decimal, octal, hex forms) are IP addresses in disguise and refused as well."""
+    for url in ("http://203.0.113.10:8098", "http://8.8.8.8", "http://127.0.0.1:8098", "http://169.254.1.1",
+                "http://172.15.0.1", "http://172.32.0.1", "http://100.64.0.1", "http://192.169.0.1",
+                "http://0.0.0.0", "http://[::1]:8098", "http://[fe80::1]:8098", "http://[2001:db8::1]",
+                "http://[::ffff:192.168.1.2]:8098", "http://2130706433", "http://0x7f.1", "http://0177.0.0.1",
+                "http://192.168.1.2.:8098"):
+        with pytest.raises(ValueError, match="not in a private network"):
+            app_options.merge(OPTIONS, {"download_base_url": url})
+    assert app_options.download_base_issue("http://203.0.113.10:8098") == app_options.DOWNLOAD_BASE_NOT_PRIVATE
+    assert app_options.download_base_issue("http://192.168.1.2:8098") is None
+    assert app_options.download_base_issue("http://ha.example.com") is None
 
 
 # ---------------------------------------------------------------- ZIP archives

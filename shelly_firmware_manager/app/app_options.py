@@ -7,10 +7,12 @@ validates the options against config.yaml again; the checks here mirror that
 schema to give clear error messages.
 """
 
+import ipaddress
 import re
 from typing import Any
 from urllib.parse import urlsplit
 
+from shelly import is_lan_address
 from tls import is_shelly_host, parse_fingerprint
 
 INT_RANGES = {
@@ -40,6 +42,33 @@ OPTIONAL = ("download_base_url",)  # options that can be removed (empty input)
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 GEN1_TYPE_RE = re.compile(r"^[A-Za-z0-9-]{1,32}$")
 MAX_LIST = 100
+# Host written as numbers only, in any form an address parser may accept (decimal, octal or
+# hex parts, e.g. 2130706433 or 0x7f.1): it is an IP address in disguise, never a host name
+NUMERIC_HOST_RE = re.compile(r"^(0x[0-9a-f]*|\d+)(\.(0x[0-9a-f]*|\d+))*\.?$", re.IGNORECASE)
+# Reasons a download base URL is refused (shown in the Settings tab, the log and the notice)
+DOWNLOAD_BASE_FORMAT = "download_base_url: http(s)://host:port expected"
+DOWNLOAD_BASE_PARTS = "download_base_url: http(s)://host:port expected, without user name, query or fragment"
+DOWNLOAD_BASE_NOT_PRIVATE = "download_base_url: the IP address is not in a private network"
+
+
+def is_private_download_host(host: str) -> bool:
+    """False for an IP address outside shelly.LAN_NETWORKS; host names are not judged.
+
+    An IP literal (also IPv6 with a zone id, or numbers-only forms such as 2130706433) must
+    be a private address: the Shellys fetch the firmware from it, so a public or local
+    address would turn the download into a request to an outside host."""
+    try:
+        return is_lan_address(ipaddress.ip_address(host.split("%", 1)[0]))
+    except ValueError:
+        return not NUMERIC_HOST_RE.fullmatch(host)
+
+
+def download_base_issue(url: str) -> str | None:
+    """Why an already stored download base URL is not allowed anymore, else None.
+
+    Only the address rule: options saved before it existed can hold a public IP."""
+    host = urlsplit(url).hostname
+    return None if not host or is_private_download_host(host) else DOWNLOAD_BASE_NOT_PRIVATE
 
 
 def with_defaults(options: dict[str, Any]) -> dict[str, Any]:
@@ -69,12 +98,14 @@ def _validate(key: str, value: Any) -> Any:
     if key == "download_base_url":
         parts = urlsplit(value) if isinstance(value, str) else None
         if not parts or parts.scheme not in ("http", "https") or not parts.hostname or len(value) > 200:
-            raise ValueError("download_base_url: http(s)://host:port expected")
+            raise ValueError(DOWNLOAD_BASE_FORMAT)
         _ = parts.port  # raises ValueError for an invalid port
         # The file name is appended to this address and the address is shown in the UI
         # and the log: nothing may follow the path, and it must not carry credentials
         if parts.username is not None or parts.password is not None or parts.query or parts.fragment:
-            raise ValueError("download_base_url: http(s)://host:port expected, without user name, query or fragment")
+            raise ValueError(DOWNLOAD_BASE_PARTS)
+        if not is_private_download_host(parts.hostname):
+            raise ValueError(DOWNLOAD_BASE_NOT_PRIVATE)
         return value
     if key == "gen1_allowed_types":
         if not isinstance(value, list) or len(value) > MAX_LIST:

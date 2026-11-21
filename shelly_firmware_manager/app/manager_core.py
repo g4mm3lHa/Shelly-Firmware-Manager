@@ -126,6 +126,9 @@ DOWNLOAD_BASE_MESSAGES = {
     "unconfirmed": "Installations are disabled: the download base URL is still the former example "
     f"value {app_options.LEGACY_DOWNLOAD_BASE}. Change it in the Settings tab or confirm that it "
     "really is the address of Home Assistant.",
+    "not_private": "Installations are disabled: the IP address of the download base URL is not in a "
+    "private network (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7). Correct it in the "
+    "Settings tab.",
 }
 
 # No check before the first-start question is answered (fresh installation)
@@ -511,9 +514,13 @@ class ManagerCore:
 
         "missing": not set (optional option without default). "unconfirmed": still the
         former example value, which is only accepted after an explicit confirmation –
-        it may really be the address of Home Assistant (FritzBox default network)."""
+        it may really be the address of Home Assistant (FritzBox default network).
+        "not_private": an IP address outside the private networks, saved before the
+        option refused it (no confirmation possible, only a correction)."""
         if not self.download_base:
             return "missing"
+        if app_options.download_base_issue(self.download_base):
+            return "not_private"
         legacy = app_options.LEGACY_DOWNLOAD_BASE.rstrip("/")
         if self.download_base == legacy and self.download_base_confirmed != legacy:
             return "unconfirmed"
