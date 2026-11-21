@@ -9,7 +9,9 @@ import base64
 import hashlib
 import io
 import ipaddress
+import json
 import zipfile
+from pathlib import Path
 
 import aiohttp
 import app_options
@@ -268,15 +270,47 @@ def test_file_names_and_options_take_no_trailing_line_break(tmp_path):
             app_options.merge(OPTIONS, changes)
 
 
-def test_download_base_url_is_a_plain_address():
-    """Scheme, host, port and an optional path – no credentials, query or fragment
-    (the file name is appended, and the address is shown in the UI and the log)."""
-    for url in ("http://192.168.1.2:8098", "https://ha.example.lan", "http://192.168.1.2:8098/firmware"):
-        assert app_options.merge(OPTIONS, {"download_base_url": url})[0]["download_base_url"] == url
-    for url in ("http://user:pw@192.168.1.2:8098", "http://user@192.168.1.2:8098", "http://192.168.1.2:8098?x=1",
-                "http://192.168.1.2:8098/#top", "ftp://192.168.1.2", "192.168.1.2:8098", "http://192.168.1.2:99999"):
+# Cases shared with the Settings tab check (qa/features/download_url.py): url, the server's verdict
+# (ok, private, format, parts) and the hint the Settings tab shows while typing
+URL_CASES = json.loads((Path(__file__).parent / "download_url_cases.json").read_text())
+URL_ERRORS = {"private": app_options.DOWNLOAD_BASE_NOT_PRIVATE, "format": app_options.DOWNLOAD_BASE_FORMAT,
+              "parts": app_options.DOWNLOAD_BASE_PARTS}
+
+
+@pytest.mark.parametrize("case", URL_CASES, ids=lambda c: ascii(c["url"]))
+def test_download_base_url_cases(case):
+    """Allow-list: a private IP address or an ASCII host name, no credentials, query or fragment,
+    nothing but printable ASCII without spaces. IP addresses in disguise (number forms) are refused."""
+    if case["server"] == "ok":
+        assert app_options.merge(OPTIONS, {"download_base_url": case["url"]})[0]["download_base_url"] == case["url"]
+        assert app_options.download_base_problem(case["url"]) is None
+    else:
+        with pytest.raises(ValueError) as err:
+            app_options.merge(OPTIONS, {"download_base_url": case["url"]})
+        assert str(err.value) == URL_ERRORS[case["server"]]
+
+
+def test_empty_download_base_url_removes_the_option():
+    """An empty input unsets the optional option instead of being validated."""
+    new, changed = app_options.merge(OPTIONS, {"download_base_url": ""})
+    assert changed == ["download_base_url"] and "download_base_url" not in new
+
+
+def test_download_base_url_wrong_types_and_length():
+    """Only a string of at most 200 characters is an address."""
+    for value in (5, ["http://192.168.1.2"], True, "http://192.168.1.2/" + "a" * 200):
         with pytest.raises(ValueError):
-            app_options.merge(OPTIONS, {"download_base_url": url})
+            app_options.merge(OPTIONS, {"download_base_url": value})
+
+
+def test_stored_download_base_problem():
+    """A stored value is judged by the same address rules, even if the Supervisor accepted it."""
+    assert app_options.download_base_problem("http://203.0.113.10:8098") == app_options.DOWNLOAD_BASE_NOT_PRIVATE
+    assert app_options.download_base_problem("http://8.8.8.8\u00a0") == app_options.DOWNLOAD_BASE_FORMAT
+    assert app_options.download_base_problem("http://[fe80::1%eth0]") == app_options.DOWNLOAD_BASE_FORMAT
+    assert app_options.download_base_problem("http://[fd00::1") == app_options.DOWNLOAD_BASE_FORMAT  # urlsplit raises
+    assert app_options.download_base_problem("http://192.168.1.2:8098") is None
+    assert app_options.download_base_problem("http://ha.example.com") is None
 
 
 # ---------------------------------------------------------------- ZIP archives

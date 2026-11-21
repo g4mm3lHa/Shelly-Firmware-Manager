@@ -7,10 +7,12 @@ validates the options against config.yaml again; the checks here mirror that
 schema to give clear error messages.
 """
 
+import ipaddress
 import re
 from typing import Any
 from urllib.parse import urlsplit
 
+from shelly import is_lan_address
 from tls import is_shelly_host, parse_fingerprint
 
 INT_RANGES = {
@@ -40,6 +42,56 @@ OPTIONAL = ("download_base_url",)  # options that can be removed (empty input)
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 GEN1_TYPE_RE = re.compile(r"^[A-Za-z0-9-]{1,32}$")
 MAX_LIST = 100
+# Host written as numbers only, in any form an address parser may accept (decimal, octal or
+# hex parts, e.g. 2130706433 or 0x7f.1): it is an IP address in disguise, never a host name
+NUMERIC_HOST_RE = re.compile(r"(0x[0-9a-f]*|[0-9]+)(\.(0x[0-9a-f]*|[0-9]+))*\.?", re.IGNORECASE)
+# A host name label: ASCII letters, digits and hyphens (international names only as punycode)
+HOST_LABEL_RE = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?", re.IGNORECASE)
+# Reasons a download base URL is refused (shown in the Settings tab, the log and the notice)
+DOWNLOAD_BASE_FORMAT = "download_base_url: http(s)://host:port expected"
+DOWNLOAD_BASE_PARTS = "download_base_url: http(s)://host:port expected, without user name, query or fragment"
+DOWNLOAD_BASE_NOT_PRIVATE = "download_base_url: the IP address is not in a private network"
+
+
+def download_host_problem(host: str) -> str | None:
+    """Why a host of the download base URL is refused, else None (allow-list).
+
+    Allowed: an IP address inside shelly.LAN_NETWORKS, or an ASCII host name (labels of
+    letters, digits and hyphens, at most one trailing dot). Everything else is refused:
+    a public or local IP address, an IP address in disguise (numbers-only forms such as
+    2130706433 or 0x7f.1), IPv6 zone ids and any other character – the Shellys fetch the
+    firmware from this host, and a parser on the device may read odd text as an address."""
+    if ":" in host:  # IPv6 literal (urlsplit has removed the brackets)
+        if "%" in host:  # zone id: meaningless for a Shelly
+            return DOWNLOAD_BASE_FORMAT
+        try:
+            return None if is_lan_address(ipaddress.IPv6Address(host)) else DOWNLOAD_BASE_NOT_PRIVATE
+        except ValueError:  # includes a zone id (fe80::1%eth0)
+            return DOWNLOAD_BASE_FORMAT
+    try:
+        return None if is_lan_address(ipaddress.IPv4Address(host)) else DOWNLOAD_BASE_NOT_PRIVATE
+    except ValueError:
+        pass
+    if NUMERIC_HOST_RE.fullmatch(host):
+        return DOWNLOAD_BASE_NOT_PRIVATE
+    labels = host.removesuffix(".").split(".")
+    if len(host) > 253 or not all(HOST_LABEL_RE.fullmatch(label) for label in labels):
+        return DOWNLOAD_BASE_FORMAT
+    return None
+
+
+def download_base_problem(url: str) -> str | None:
+    """Why a stored download base URL is not allowed (message), else None.
+
+    The address rules only (printable ASCII without spaces, host allow-list); options
+    saved by an older version can hold anything the Supervisor accepted."""
+    if not url.isascii() or not url.isprintable() or " " in url:
+        return DOWNLOAD_BASE_FORMAT
+    try:
+        host = urlsplit(url).hostname
+    except ValueError:
+        return DOWNLOAD_BASE_FORMAT
+    return download_host_problem(host) if host else DOWNLOAD_BASE_FORMAT
 
 
 def with_defaults(options: dict[str, Any]) -> dict[str, Any]:
@@ -67,14 +119,24 @@ def _validate(key: str, value: Any) -> Any:
             raise ValueError(f"{key}: true or false expected")
         return value
     if key == "download_base_url":
-        parts = urlsplit(value) if isinstance(value, str) else None
-        if not parts or parts.scheme not in ("http", "https") or not parts.hostname or len(value) > 200:
-            raise ValueError("download_base_url: http(s)://host:port expected")
-        _ = parts.port  # raises ValueError for an invalid port
+        # Printable ASCII only, no spaces: nothing the Shelly or a log line could misread
+        text = value if isinstance(value, str) else ""
+        problem = download_base_problem(text)
+        if len(text) > 200 or problem == DOWNLOAD_BASE_FORMAT:
+            raise ValueError(DOWNLOAD_BASE_FORMAT)
+        parts = urlsplit(text)
+        if parts.scheme not in ("http", "https"):
+            raise ValueError(DOWNLOAD_BASE_FORMAT)
+        try:
+            _ = parts.port  # raises ValueError for an invalid port
+        except ValueError:
+            raise ValueError(DOWNLOAD_BASE_FORMAT) from None
         # The file name is appended to this address and the address is shown in the UI
         # and the log: nothing may follow the path, and it must not carry credentials
         if parts.username is not None or parts.password is not None or parts.query or parts.fragment:
-            raise ValueError("download_base_url: http(s)://host:port expected, without user name, query or fragment")
+            raise ValueError(DOWNLOAD_BASE_PARTS)
+        if problem:
+            raise ValueError(problem)
         return value
     if key == "gen1_allowed_types":
         if not isinstance(value, list) or len(value) > MAX_LIST:

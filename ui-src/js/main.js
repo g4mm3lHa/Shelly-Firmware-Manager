@@ -41,8 +41,9 @@ function renderMeta(s) {
   attachTip(cycle, () => `Next automatic check: ${next} (${sc.timezone})`, true); cycle.tabIndex = 0;
   $("meta").replaceChildren(el("span", `Last checked: ${fmt(s.last_scan)}`, "pill meta-pill"), cycle);
 }
-/** Notice while installations are disabled by the download base URL: not set,
- *  or still the former example value that the admin has not confirmed yet. Rebuilt only
+/** Notice while installations are disabled by the download base URL: not set, an IP
+ *  address outside the private networks, or still the former example value that the
+ *  admin has not confirmed yet (only that one has a confirm button). Rebuilt only
  *  when the problem changes, so polling does not steal the focus from its buttons. */
 function renderNotice(info) {
   const n = $("notice"), key = info.issue ? `${info.issue}|${info.url}` : "";

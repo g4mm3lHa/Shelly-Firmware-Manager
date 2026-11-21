@@ -13,7 +13,7 @@ Part of `docs/CODEMAP.md`; read when you change `shelly_firmware_manager/app/*.p
 | `web_ui.py` | Ingress UI + JSON API, CSRF/JSON/size middleware | `build_ui_app` (all handlers inside), `security` (headers also on its own refusals; unexpected error → 500 without details, traceback in the app log), `refusal`, `guarded`, `SECURITY_HEADERS` |
 | `download_server.py` | GET/HEAD `<sha256>.<ext>` for the Shellys; warnings for rejected requests limited per client and 10 min | `build_download_app`, `strip_server_header`, `RejectLog` (`REJECT_WINDOW_S`, `REJECT_MAX_CLIENTS`) |
 | `schedule.py` | every N days at HH:MM, HA time zone, DST, catch-up | `configure`, `status`, `seconds_until`, `next_run`, `local_zone` |
-| `app_options.py` | option validation, merge, log diff | `with_defaults`, `merge`, `change_list`, `LEGACY_DOWNLOAD_BASE` |
+| `app_options.py` | option validation, merge, log diff | `with_defaults`, `merge`, `change_list`, `download_host_problem`, `download_base_problem`, `LEGACY_DOWNLOAD_BASE` |
 | `events.py` | activity log (JSON Lines), severity, entry IDs, delete/clear | `EventLog.add/list/remove/clear`, `worst`, `user_from`, `KINDS`, `ENTRY_ID_RE` |
 | `credentials.py` | per-device passwords (0600; Gen2 HA1 only) | `Credentials.auth_for/candidate/store/remove` (`_save`: fsync; a write error raises `ShellyError`) |
 | `changelog.py` | changelog pages → plain text (parsed in a worker thread), last page per generation | `Changelogs.refresh/version_entry/between`, `marked`, `parse` |

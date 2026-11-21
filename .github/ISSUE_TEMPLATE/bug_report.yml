@@ -1,0 +1,77 @@
+name: Bug report
+description: Something in the app does not work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check the Troubleshooting section and the FAQ of the documentation first.
+        Do not report security problems here – use the private way described in SECURITY.md.
+        Remove passwords, tokens and public IP addresses from everything you paste.
+  - type: input
+    id: app_version
+    attributes:
+      label: Version of the app
+      description: Shown on the app page in Home Assistant.
+      placeholder: "3.6.1"
+    validations:
+      required: true
+  - type: input
+    id: ha_version
+    attributes:
+      label: Version of Home Assistant
+      placeholder: "2026.11.2"
+    validations:
+      required: true
+  - type: dropdown
+    id: installation
+    attributes:
+      label: Installation type
+      options:
+        - Home Assistant OS
+        - Home Assistant Supervised
+    validations:
+      required: true
+  - type: dropdown
+    id: arch
+    attributes:
+      label: Architecture
+      options:
+        - aarch64
+        - amd64
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Shelly model, generation and installed firmware
+      description: From Device Details (row menu of the device). Leave empty if no device is involved.
+      placeholder: "Shelly Plus 1 (Plus1), Gen2, 1.4.0"
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: activity_log
+    attributes:
+      label: Entry of the activity log
+      description: Logs tab of the app – the entry with its details, as text or screenshot.
+      render: text
+  - type: textarea
+    id: app_log
+    attributes:
+      label: App log
+      description: Log tab of the app page in Home Assistant – the lines around the time of the problem.
+      render: text

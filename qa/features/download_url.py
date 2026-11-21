@@ -1,7 +1,22 @@
 """Feature suites download_url_hint and download_url_notice: hints and notice for the download base URL
 (demos "idle" 8801, "legacy" 8803, "missing" 8804)."""
 
-from features.base import IDLE, LEGACY, MISSING, OVERFLOW_JS, check, open_page, ui_frame, wait_until
+import json
+from pathlib import Path
+
+from features.base import IDLE, LEGACY, MISSING, OVERFLOW_JS, PUBLIC, check, open_page, ui_frame, wait_until
+
+
+# Cases shared with tests/test_guards.py: the hint the Settings tab shows for each address
+URL_CASES = json.loads((Path(__file__).resolve().parents[2] / "tests" / "download_url_cases.json").read_text())
+HINT_WORDS = {"none": None, "private": "private network", "credentials": "user name", "query": "query",
+              "host": "host name", "localhost": "not in your local network", "nohint": None}
+
+
+def hint_matches(kind, text):
+    """True if the hint text is the one expected for the case kind (empty for none / nohint)."""
+    word = HINT_WORDS[kind]
+    return not text if word is None else word in text
 
 
 def download_url_hint(browser, out):
@@ -24,13 +39,19 @@ def download_url_hint(browser, out):
         warn = f.locator("#opt-download_base_url-warn")
         check(f"{case}: no hint for the LAN URL", warn.is_hidden())
         f.fill("#opt-download_base_url", "http://203.0.113.10:8098")
-        check(f"{case}: hint for a public IP", warn.is_visible() and "local network" in warn.text_content())
+        check(f"{case}: hint for a public IP", warn.is_visible() and "Not accepted" in warn.text_content() and "private network" in warn.text_content())
         described = f.get_attribute("#opt-download_base_url", "aria-describedby") or ""
         check(f"{case}: hint linked for screen readers", "opt-download_base_url-warn" in described, described)
         overflow = f.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
         check(f"{case}: no horizontal overflow", overflow <= 0, f"{overflow}px")
         f.locator("#opt-download_base_url").scroll_into_view_if_needed()
         page.screenshot(path=out / f"lan-hint-{case}.png")
+        f.fill("#opt-download_base_url", "http://[fe80::1]:8098")
+        check(f"{case}: hint for a link-local IPv6 address", warn.is_visible() and "private network" in warn.text_content())
+        f.fill("#opt-download_base_url", "http://user:pw@192.168.1.20:8098")
+        check(f"{case}: hint for credentials", warn.is_visible() and "user name" in warn.text_content())
+        f.fill("#opt-download_base_url", "http://192.168.1.20:8098/?x=1")
+        check(f"{case}: hint for a query", warn.is_visible() and "query" in warn.text_content())
         f.fill("#opt-download_base_url", "http://localhost:8098")
         check(f"{case}: hint for localhost", warn.is_visible())
         f.fill("#opt-download_base_url", "http://homeassistant.local:8098")
@@ -42,6 +63,15 @@ def download_url_hint(browser, out):
         f.fill("#opt-download_base_url", "http://192.168.1.20:8098")
         check(f"{case}: no hint for a LAN IP", warn.is_hidden())
         check(f"{case}: no console errors", not errors, str(errors[:2]))
+        wrong = []
+        for entry in URL_CASES:
+            if entry["ui"] == "skip":  # edge whitespace: the field is trimmed before the check
+                continue
+            f.fill("#opt-download_base_url", entry["url"])
+            text = warn.text_content() if warn.is_visible() else ""
+            if not hint_matches(entry["ui"], text):
+                wrong.append((entry["url"], entry["ui"], text[:30]))
+        check(f"{case}: hints agree with the shared case list", not wrong, str(wrong[:3]))
         ctx.close()
 
 
@@ -80,4 +110,15 @@ def download_url_notice(browser, out):
         check(f"{case}: empty URL field", f.input_value("#opt-download_base_url") == "")
         page.screenshot(path=out / f"notice-missing-{case}.png")
         check(f"{case}: no console errors (missing)", not errors, str(errors[:2]))
+        ctx.close()
+        # Public IP address saved before it was refused
+        ctx, page, f, errors = open_page(browser, PUBLIC, width, scheme, embedded)
+        notice = f.locator("#notice")
+        check(f"{case}: notice for a public IP", notice.is_visible() and "private network" in notice.text_content())
+        buttons = f.locator("#notice button").all_text_contents()
+        check(f"{case}: no confirm button", buttons == ["Open settings"], str(buttons))
+        check(f"{case}: no install selection (public)", f.locator("td.c-select input:not(.ghost)").count() == 0)
+        check(f"{case}: no horizontal overflow (public)", f.evaluate(OVERFLOW_JS) <= 0)
+        page.screenshot(path=out / f"notice-public-{case}.png")
+        check(f"{case}: no console errors (public)", not errors, str(errors[:2]))
         ctx.close()
