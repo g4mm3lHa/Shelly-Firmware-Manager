@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="shelly_firmware_manager/logo.png" alt="Firmware Manager for Shelly" width="250">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.png">
+    <img src="docs/images/logo-light.png" alt="Firmware Manager for Shelly" width="250">
+  </picture>
 </p>
 
 # Firmware Manager for Shelly
