@@ -2,13 +2,20 @@
 
 ## 3.6.0
 
-Release candidate. Publication preparation: MIT license, new app name, icon and logo; the
-Devices tab gets a Device Details dialog and a regrouped row menu.
+Released 2026-11-21. Publication preparation: MIT license, new app name, icon and logo;
+the Devices tab gets a Device Details dialog; checks and the state file are more robust.
 
-Changes in rc2
+Added
+- The app is released under the MIT License; the credits in the documentation list the
+  components used, their license files are part of the image.
 
 Changed
-- The heading in the app is now "Firmware Manager for Shelly" (sidebar entry unchanged).
+- App name is now "Firmware Manager for Shelly" (app store, app page, Home Assistant
+  notification, log, heading in the app); new app icon and logo.
+- Devices tab: the row menu entry "Status details" is now "Device Details" and also
+  shows model, generation, firmware ID and NTP server (desktop and phone).
+- Devices tab: the row menu ⋮ is ordered in five groups (updates, device, settings,
+  ignore, restart).
 - Firmware tab (info tooltip, upload dialog): the texts name the check rule as it is –
   Gen2+: the Shelly server decides the next version, a stored file of it is used.
 - Store export: too little free disk space is reported when the dialog opens; an export
@@ -17,8 +24,6 @@ Changed
 - Option `download_base_url`: user name, password, query and fragment are refused.
 
 Fixed
-- Restart monitoring (corrects rc1): the **Watchdog** switch on the app page stays and
-  must be on; Home Assistant then restarts the app when the health check fails.
 - Check all: an unexpected error of one device no longer ends the whole check; it is
   shown for that device. Same for installations, Reload Device Info and passwords.
 - A damaged state file no longer empties the firmware store: the previous save is
@@ -35,22 +40,6 @@ Security
   (fixed list); other special ranges that counted as private are refused.
 - Security headers also on refused requests and on unexpected errors; IDs, names,
   versions and times with a trailing line break are refused.
-
-Changes in rc1
-
-Added
-- The app is released under the MIT License; the credits in the documentation list the
-  components used, their license files are part of the image.
-
-Changed
-- App name is now "Firmware Manager for Shelly" (app store, app page, Home Assistant
-  notification, log); new app icon and logo.
-- Devices tab: the row menu entry "Status details" is now "Device Details" and also
-  shows model, generation, firmware ID and NTP server (desktop and phone).
-- Devices tab: the row menu ⋮ is ordered in five groups (updates, device, settings,
-  ignore, restart).
-- Restart monitoring: the app is checked through the container health check (TCP port
-  8098); the **Watchdog** switch on the app page is gone and nothing needs to be set.
 
 ## 3.5.0
 
