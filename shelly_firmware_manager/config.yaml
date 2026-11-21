@@ -1,6 +1,8 @@
-name: Shelly Firmware Manager
+name: Firmware Manager for Shelly
 version: "3.5.0"
 slug: shelly_firmware_manager
+url: https://github.com/g4mm3lHa/Shelly-Firmware-Manager
+stage: stable
 description: >-
   Downloads Shelly firmware via Home Assistant, provides it through its own
   local download server and installs it after manual approval.

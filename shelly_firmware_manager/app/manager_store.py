@@ -983,7 +983,7 @@ class FirmwareStore(ManagerCore):
         if not self.first_start_open or self.first_start_notified:
             return
         await self.notify(
-            "Shelly Firmware Manager",
+            "Firmware Manager for Shelly",
             "Import a firmware store or skip it in the app – no check runs until then.",
             "shelly_firmware_manager_first_start",
         )

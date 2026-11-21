@@ -4,7 +4,13 @@
 
 In development.
 
+Added
+- The app is released under the MIT License; the credits in the documentation list the
+  components used, their license files are part of the image.
+
 Changed
+- App name is now "Firmware Manager for Shelly" (app page, Home Assistant notification,
+  log); new app icon and logo.
 - Devices tab: the row menu entry "Status details" is now "Device Details" and also
   shows model, generation, firmware ID and NTP server (desktop and phone).
 - Devices tab: the row menu ⋮ is ordered in five groups (updates, device, settings,

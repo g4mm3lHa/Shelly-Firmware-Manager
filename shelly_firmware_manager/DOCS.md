@@ -1,4 +1,4 @@
-# Shelly Firmware Manager – documentation
+# Firmware Manager for Shelly – documentation
 
 User documentation of the app (shown in the Documentation tab of the app page in Home
 Assistant). Version history: `CHANGELOG.md` (Changelog tab).
@@ -446,6 +446,30 @@ server interfaces are not officially guaranteed.
 
 ## Credits
 
-- Icons: [Material Design Icons](https://pictogrammers.com/library/mdi/) (Apache 2.0),
-  inlined.
-- Shelly mark in the app icon: [Simple Icons](https://simpleicons.org/) (CC0 1.0).
+Firmware Manager for Shelly is an unofficial community project. It is not affiliated
+with, endorsed or sponsored by Allterco Robotics or Shelly. Shelly is a trademark of its
+holder; the name is used only to say which devices the app works with. No Shelly
+firmware or documentation is part of the app – firmware is downloaded from Shelly's
+servers when you run a check.
+
+The app itself is released under the MIT License (`LICENSE` in the repository). It uses
+the following open-source components:
+
+| Component | License |
+|---|---|
+| [aiohttp](https://github.com/aio-libs/aiohttp) (with llhttp) | Apache-2.0 and MIT |
+| [aiohappyeyeballs](https://github.com/aio-libs/aiohappyeyeballs) | PSF-2.0 |
+| [aiosignal](https://github.com/aio-libs/aiosignal) | Apache-2.0 |
+| [attrs](https://github.com/python-attrs/attrs) | MIT |
+| [frozenlist](https://github.com/aio-libs/frozenlist) | Apache-2.0 |
+| [idna](https://github.com/kjd/idna) | BSD-3-Clause |
+| [multidict](https://github.com/aio-libs/multidict) | Apache-2.0 |
+| [propcache](https://github.com/aio-libs/propcache) | Apache-2.0 |
+| [typing-extensions](https://github.com/python/typing_extensions) | PSF-2.0 |
+| [yarl](https://github.com/aio-libs/yarl) | Apache-2.0 |
+| [Material Design Icons](https://pictogrammers.com/library/mdi/) (inlined icons) | Apache-2.0 |
+| [Python](https://www.python.org/) and [Alpine Linux](https://alpinelinux.org/) (base image) | PSF-2.0 and the licenses of the Alpine packages |
+
+The Python packages are the versions pinned in `requirements.txt`. Their license files
+are part of the image (`/deps/<package>.dist-info/licenses/`), the license texts of the
+app and of the icons are in `/app/licenses/`.

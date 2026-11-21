@@ -82,7 +82,7 @@ async def main() -> None:
             await start_site(build_download_app(mgr), DOWNLOAD_PORT),
         ]
         log.info(
-            "Shelly Firmware Manager %s ready – check every %s day(s) at %s (%s), next %s, downloads at %s",
+            "Firmware Manager for Shelly %s ready – check every %s day(s) at %s (%s), next %s, downloads at %s",
             VERSION,
             mgr.check_days,
             mgr.check_time,
