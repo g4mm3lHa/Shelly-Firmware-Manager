@@ -11,7 +11,7 @@ from typing import Any
 import schedule
 import shelly
 
-from manager_core import DOWNLOAD_BASE_MESSAGES
+from manager_core import BATTERY_FROM_DEVICE, DOWNLOAD_BASE_MESSAGES, section_of
 from manager_installs import Installs
 
 log = logging.getLogger("sfm.manager")
@@ -24,7 +24,10 @@ class Manager(Installs):
         """Only fields the UI needs: no credentials, builds or download diagnosis.
 
         The device's private IP address and its web interface URL are included on
-        purpose (IP column, link to the device); both come from the validated origin."""
+        purpose (IP column, link to the device); both come from the validated origin.
+        Per device "section" names the part of the device list it belongs to
+        (manager_core.section_of); "others" is the read-only list of Shellys the app
+        cannot update (see manager_checks.other_shellys)."""
         fields = (
             "name",
             "shelly_name",
@@ -62,6 +65,9 @@ class Manager(Installs):
             "ota_progress",
             "ota_phase",
             "downgrade",
+            "host_name",
+            "address_issue",
+            "removed_reachable",
         )
         devices: list[dict[str, Any]] = []
         stored = self._downgrade_candidates()
@@ -76,6 +82,11 @@ class Manager(Installs):
                     "installing": key in self.installing,
                     "activity": self.activity.get(key),
                     "ignored": bool(dev.get("ignored")),
+                    # Removed from Home Assistant: since when (seconds) or None
+                    "removed": dev.get("removed") or None,
+                    # Where the battery marker comes from: "device" or "home_assistant"
+                    "battery_source": dev.get("battery_source") or BATTERY_FROM_DEVICE if dev.get("battery") else None,
+                    "section": section_of(dev),
                     "password_set": self.credentials.has_device_password(key),  # flag only
                     "ip": shelly.origin_ip(origin) if origin else None,
                     "web_url": f"{origin}/" if origin else None,
@@ -83,6 +94,7 @@ class Manager(Installs):
             )
         return {
             "devices": devices,
+            "others": self.others,
             "last_scan": self.last_scan,
             "busy": self.busy,
             "schedule": {

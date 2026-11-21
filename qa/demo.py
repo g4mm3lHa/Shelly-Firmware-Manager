@@ -29,7 +29,7 @@ for name, value in {"STATE_FILE": data / "state.json", "FW_DIR": data / "fw", "C
     setattr(data_paths, name, value)
 
 opts = {"check_interval_days": 7, "check_time": "02:45", "download_base_url": "http://192.168.1.2:8098", "restrict_downloads_to_devices": True,
-        "gen1_updates_enabled": True, "gen1_allowed_types": ["SHSW-1"], "max_parallel_installs": 2,
+        "gen1_updates_enabled": True, "max_parallel_installs": 2,
         "log_retention_days": 30, "log_entry_limit": 1000, "allow_downgrade": True, "import_max_mb": 100}
 if scenario == "legacy":
     import app_options

@@ -26,7 +26,6 @@ OPTIONS = {
     "download_base_url": "http://192.168.1.2:8098",
     "restrict_downloads_to_devices": True,
     "gen1_updates_enabled": True,
-    "gen1_allowed_types": ["SHSW-1"],
     "max_parallel_installs": 2,
     "log_retention_days": 30,
     "log_entry_limit": 1000,
@@ -65,13 +64,18 @@ class FakeNet:
         self.info_calls = 0
         self.settings_calls = []  # extended flag of every read_settings call
         self.settings_error = None  # exception raised by read_settings
+        self.removed = set()  # devices removed from the HA registry (still answering unless unreachable)
+        self.ha_battery = set()  # devices with a Shelly battery sensor in Home Assistant
+        self.extra_registry = []  # further registry entries (other integrations, sub-devices)
 
     def registry(self):
         """Registry entries as delivered by HA."""
         return [
-            {"id": i, "name": n, "identifiers": [["shelly", i]], "configuration_url": f"http://{ip}/"}
+            {"id": i, "name": n, "identifiers": [["shelly", i]], "configuration_url": f"http://{ip}/",
+             "connections": [["mac", f"aa:bb:cc:00:00:0{i[-1]}"]]}
             for i, (n, ip, _v, _o) in self.devices.items()
-        ]
+            if i not in self.removed
+        ] + list(self.extra_registry)
 
     def by_origin(self, origin):
         """Device ID for an origin URL."""
@@ -115,7 +119,7 @@ def net(monkeypatch, tmp_path):
             "shelly_id": f"shelly-{device_id}",
             "type": "Plus1",
             "model": "SNSW-001X16EU",
-            "mac": "AABBCC" + device_id[-1].upper(),
+            "mac": "AABBCC00000" + device_id[-1].upper(),
             "version": fake.devices[device_id][2],
             "build": "build-" + fake.devices[device_id][2],
         }
@@ -125,8 +129,8 @@ def net(monkeypatch, tmp_path):
         if fake.settings_error is not None:
             raise fake.settings_error
         answer = {"shelly_name": "plus1", "ntp": "time.local", "eco": False, "ap": False, "ble": "unsupported", "outputs": []}
-        if any(args[2] == f"http://{fake.devices[i][1]}" for i in fake.battery if i in fake.devices):
-            answer["battery"] = True
+        # The device reports its sleep period (battery device) whenever it answers
+        answer["battery"] = any(args[2] == f"http://{fake.devices[i][1]}" for i in fake.battery if i in fake.devices)
         return answer
 
     def offer(version):
@@ -206,8 +210,13 @@ async def mgr(net):
         m.notified.append(args)
         return True
 
+    async def battery_devices():
+        await asyncio.sleep(0)
+        return set(net.ha_battery)
+
     m.notified = []
     m._registry = registry
+    m._battery_devices = battery_devices
     m.notify = notify
     m.changelogs.refresh = net.refresh
     return m

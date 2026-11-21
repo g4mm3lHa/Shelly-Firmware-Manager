@@ -53,11 +53,16 @@ try {
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
 
 // ---------------------------------------------------------------- Helpers
+/** Error of a refused request: the server text, the HTTP status in `status`. */
+async function httpError(r) {
+  const e = new Error(await r.text() || r.status); e.status = r.status;
+  return e;
+}
 /** GET without body, otherwise POST with JSON and CSRF token; errors throw with the server text. */
 export async function api(path, body) {
   const opt = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json", "X-CSRF-Token": CSRF}, body: JSON.stringify(body)};
   const r = await fetch(path, opt);
-  if (!r.ok) throw new Error(await r.text() || r.status);
+  if (!r.ok) throw await httpError(r);
   return r.json();
 }
 // Home Assistant Ingress refuses request bodies above 16 MiB: files are sent in parts
@@ -87,7 +92,7 @@ let stateTag = null;
 export async function getState() {
   const r = await fetch("api/state", stateTag && ui.state ? {headers: {"If-None-Match": stateTag}} : {});
   if (r.status === 304) return ui.state;
-  if (!r.ok) throw new Error(await r.text() || r.status);
+  if (!r.ok) throw await httpError(r);
   stateTag = r.headers.get("ETag");
   return r.json();
 }

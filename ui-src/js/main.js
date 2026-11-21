@@ -121,6 +121,12 @@ function showView(v) {
 for (const v of VIEWS) $("tab-" + v).onclick = () => showView(v);
 
 let timer = 0, inflight = false;
+// Home Assistant renews an expired Ingress session when the page becomes visible again –
+// asynchronously, so the first refreshes after a long time in the background can still be
+// refused with 401. They are repeated silently after these waits; only a refusal that
+// lasts longer is shown.
+const AUTH_RETRY_MS = [1000, 3000, 8000, 15000];
+let authRetry = 0;
 export let queued = false;   // read by devices.js
 const POLL_IDLE_MS = 30000, POLL_BUSY_MS = 3000;
 /** Something runs: a check, an installation or another device activity. */
@@ -136,21 +142,28 @@ function schedule() {
   timer = setTimeout(load, isActive(ui.state) ? POLL_BUSY_MS : POLL_IDLE_MS);
 }
 // Hidden tab / HA panel in background: no requests; visible again: refresh at once
-document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); else clearTimeout(timer); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { authRetry = 0; load(); } else clearTimeout(timer); });
 /** Fetch the state (and the data of the active tab) and render. */
 export async function load(force) {
   if (inflight) { queued = queued || force || "again"; return; }   // never two refreshes at once
   inflight = true;
+  let retry = 0;   // wait before a silent repetition after a refused session (401)
   try {
     const s = await getState();
     if (ui.view === "firmware") { const f = await api("api/firmware"); ui.firmware = f.firmware; ui.firmwareTotal = f.total_size || 0; ui.firmwareFree = f.free_space ?? null; }
     if (ui.view === "logs" && (force || workEnded(ui.state, s) || Date.now() - ui.logsLoaded > 30000)) { ui.logs = (await api("api/logs")).entries; ui.logsLoaded = Date.now(); }
     ui.state = s;
+    authRetry = 0;
     render(force);
-  } catch (e) { $("busy").textContent = "Error: " + e.message; }
+  } catch (e) {
+    if (e.status === 401 && authRetry < AUTH_RETRY_MS.length) retry = AUTH_RETRY_MS[authRetry++];
+    else $("busy").textContent = e.status === 401 ? "Session expired – reload the page" : "Error: " + e.message;
+  }
   finally {
     inflight = false;
-    if (queued) { const f = queued === true; queued = false; load(f); } else schedule();
+    if (queued) { const f = queued === true; queued = false; load(f); }
+    else if (retry && !document.hidden) { clearTimeout(timer); timer = setTimeout(() => load(force), retry); }
+    else schedule();
   }
 }
 loadPrefs(); buildChooser(); syncChooser();

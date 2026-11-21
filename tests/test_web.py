@@ -160,6 +160,40 @@ async def test_ignore_and_reload_endpoints(client, mgr, net):
     assert r.status == 200 and (await r.json())["warning"] is None and net.offer_calls == offers
 
 
+async def test_remove_from_list_endpoint(client, mgr, net):
+    """/forget: only removed devices, only with confirmation (CSRF and JSON rules);
+    the state names the section and the reachability of the removed device."""
+    await mgr.scan()
+    url = f"/api/devices/{C}/forget"
+    assert (await client.post(url, json={"confirm": True})).status == 403
+    assert (await client.post(url, json={"confirm": True}, headers=hdr(client))).status == 400  # not removed
+    net.removed.add(C)
+    await mgr.scan()
+    state = await (await client.get("/api/state")).json()
+    row = next(d for d in state["devices"] if d["id"] == C)
+    assert row["section"] == "removed" and row["removed"] and row["removed_reachable"] is True
+    assert next(d for d in state["devices"] if d["id"] == A)["section"] == "updates" and state["others"] == []
+    assert (await client.post(url, json={}, headers=hdr(client))).status == 400
+    r = await client.post(url, json={"confirm": True}, headers=hdr(client))
+    assert r.status == 200 and C not in mgr.devices
+    assert (await client.post(url, json={"confirm": True}, headers=hdr(client))).status == 404
+
+
+async def test_unknown_file_can_be_deleted_but_not_downloaded(client, mgr, net):
+    """An unknown file of the firmware folder is listed and deletable over HTTP; other
+    firmware routes do not serve it."""
+    name = "e" * 64 + ".zip"
+    (data_paths.FW_DIR / name).write_bytes(b"x" * 100)
+    mgr.cleanup_firmware()
+    listed = (await (await client.get("/api/firmware")).json())["firmware"]
+    assert {"name": name, "unknown": True, "size": 100, "deletable": True, "locked": None} in listed
+    assert (await client.get(f"/api/firmware/{name}/download")).status == 404
+    url = f"/api/firmware/{name}/delete"
+    r = await client.post(url, json={"confirm": True, "acknowledged": True}, headers=hdr(client))
+    assert r.status == 200 and not (data_paths.FW_DIR / name).exists()
+    assert (await client.post(url, json={"confirm": True, "acknowledged": True}, headers=hdr(client))).status == 404
+
+
 async def test_password_endpoint_validation(client, mgr, net):
     """Unknown mode and missing confirmation are refused; no secret is echoed."""
     await mgr.scan()

@@ -33,8 +33,8 @@ async def test_no_automatic_deletion_of_stored_firmware(mgr, net):
 
 
 async def test_housekeeping_keeps_temporary_files_and_drops_orphans(mgr, net):
-    """Unknown files and entries without file are cleaned, temporary files are not
-    (they belong to a running download/upload); leftovers are removed at start."""
+    """Entries without file are dropped; unknown files are kept and listed, temporary
+    files too (they belong to a running download/upload); leftovers are removed at start."""
     name, _ = store(mgr, "Plus1", "1.3.0")
     gone, _ = store(mgr, "Plus1", "1.2.0")
     (data_paths.FW_DIR / gone).unlink()
@@ -43,7 +43,7 @@ async def test_housekeeping_keeps_temporary_files_and_drops_orphans(mgr, net):
     part.write_bytes(b"x")
     mgr.cleanup_firmware()
     assert name in mgr.firmware and gone not in mgr.firmware
-    assert not (data_paths.FW_DIR / ("f" * 64 + ".zip")).exists()
+    assert (data_paths.FW_DIR / ("f" * 64 + ".zip")).exists() and ("f" * 64 + ".zip") in mgr.unknown_files
     assert part.exists()
     manager.Manager(dict(OPTIONS), session=None, token="t")  # restart
     assert not part.exists()
@@ -387,3 +387,78 @@ async def test_deletion_refused_during_check(mgr, net):
     assert all(not f["deletable"] for f in mgr.firmware_list())
     mgr.progress = None
     mgr.activity.clear()
+
+
+# ---------------------------------------------------------------- Files read back from the disk
+
+
+def put_file(data, name=None):
+    """Write a file into the firmware folder under its SHA-256 name (or the given one)."""
+    sha = hashlib.sha256(data).hexdigest()
+    name = name or f"{sha}.zip"
+    (data_paths.FW_DIR / name).write_bytes(data)
+    return name, sha
+
+
+async def test_files_on_disk_are_read_back_at_start(net):
+    """Unlisted files are taken over when their content proves firmware ID and version
+    (manifest of a Gen2+ archive, or a device that holds exactly this file); all other
+    files stay as unknown files. One warning names them, a restart reports nothing new."""
+    m = manager.Manager(dict(OPTIONS), session=None, token="t")
+    by_manifest, sha = put_file(firmware_zip({"name": "Plus1", "version": "1.6.0"}))
+    no_manifest, _ = put_file(firmware_zip(None, size=6000))
+    beta, _ = put_file(firmware_zip({"name": "Plus1", "version": "1.7.0-beta1"}))
+    held, held_sha = put_file(b"g1" * 3000)
+    renamed = "a" * 64 + ".zip"
+    put_file(firmware_zip({"name": "Plus1", "version": "1.8.0"}), renamed)  # content does not match the name
+    m.devices[A] = {"name": "Kitchen", "gen": 1, "type": "SHSW-1", "file": held, "sha256": held_sha,
+                    "pending_version": "v1.14.0", "status": manager_core.STATUS_READY}
+    await m.adopt_files()
+    assert m.firmware[by_manifest]["type"] == "Plus1" and m.firmware[by_manifest]["version"] == "1.6.0"
+    assert m.firmware[by_manifest]["adopted"] is True and m.firmware[by_manifest]["https"] is None
+    assert m.firmware[held]["type"] == "SHSW-1" and m.firmware[held]["gen"] == 1
+    assert set(m.unknown_files) == {no_manifest, beta, renamed}
+    entry = m.events.entries[-1]
+    assert entry["kind"] == "store" and entry["severity"] == "warning" and entry["unknown"] == 3
+    assert {a["version"] for a in entry["adopted"]} == {"1.6.0", "v1.14.0"}
+    listed = {f["name"]: f for f in m.firmware_list()}
+    assert listed[by_manifest]["adopted"] is True and listed[renamed]["unknown"] is True
+    restarted = manager.Manager(dict(OPTIONS), session=None, token="t")
+    count = len(restarted.events.entries)
+    await restarted.adopt_files()
+    assert len(restarted.events.entries) == count and set(restarted.unknown_files) == set(m.unknown_files)
+    assert all((data_paths.FW_DIR / n).exists() for n in (no_manifest, beta, renamed))
+
+
+async def test_file_read_back_is_used_only_for_a_matching_offer(net):
+    """A Gen2+ file read back from the disk is provided only for an offer whose URL names
+    its SHA-256 (then it counts as verified), never as store fallback or downgrade."""
+    m = manager.Manager(dict(OPTIONS), session=None, token="t")
+    name, sha = put_file(firmware_zip({"name": "Plus1", "version": "1.3.0"}))
+    await m.adopt_files()
+    m.devices[A] = {"name": "Kitchen", "gen": 2, "type": "Plus1", "version": "1.4.0"}
+    assert m.downgrade_versions(A) == [] and m._downgrade_candidates() == {}
+    assert await m._store_offer({"type": "Plus1", "gen": 2, "version": "1.2.0"}) is None
+    assert await m._stored_firmware("Plus1", "1.3.0", uploads=True) is None
+    assert await m._stored_firmware("Plus1", "1.3.0", uploads=True, offered_sha="b" * 64) is None
+    found = await m._stored_firmware("Plus1", "1.3.0", uploads=True, offered_sha=sha)
+    assert found and found[0] == name and "adopted" not in m.firmware[name] and m.firmware[name]["https"] is True
+    assert [v["version"] for v in m.downgrade_versions(A)] == ["1.3.0"]
+
+
+async def test_unknown_file_is_deleted_only_on_request(mgr, net):
+    """An unknown file stays until the user deletes it (second confirmation, not during
+    the full check); the log names its SHA-256."""
+    name, sha = put_file(b"unknown" * 500)
+    mgr.cleanup_firmware()
+    assert name in mgr.unknown_files
+    with pytest.raises(ValueError):
+        mgr.delete_firmware(name, confirm=True)
+    mgr.reserve_check("all")
+    with pytest.raises(ShellyError):
+        mgr.delete_firmware(name, confirm=True, acknowledged=True)
+    mgr._end_check()
+    mgr.delete_firmware(name, user="u", confirm=True, acknowledged=True)
+    assert not (data_paths.FW_DIR / name).exists() and name not in mgr.unknown_files
+    entry = mgr.events.entries[-1]
+    assert entry["kind"] == "delete" and entry["unknown"] is True and entry["sha256"] == sha

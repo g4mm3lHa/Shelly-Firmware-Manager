@@ -77,6 +77,9 @@ async def main() -> None:
 
     async with aiohttp.ClientSession(headers={"User-Agent": USER_AGENT}, trust_env=False) as session:
         mgr = Manager(options, session, token, pins)
+        # Firmware files the store does not list (lost or older state): read back
+        # from the disk before the UI lists the store (see FirmwareStore.adopt_files)
+        await mgr.adopt_files()
         runners = [
             await start_site(build_ui_app(mgr, app_version=VERSION), UI_PORT),
             await start_site(build_download_app(mgr), DOWNLOAD_PORT),
