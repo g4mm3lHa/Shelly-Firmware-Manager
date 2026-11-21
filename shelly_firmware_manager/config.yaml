@@ -9,6 +9,9 @@ version: "3.6.1"
 arch:
   - aarch64
   - amd64
+# Prebuilt image per architecture (tag = version), built by .github/workflows/images.yml.
+# Home Assistant replaces {arch}; without "image" it would build the Dockerfile itself.
+image: ghcr.io/g4mm3lha/{arch}-shelly-firmware-manager
 # Minimum Home Assistant version
 homeassistant: "2026.10.0"
 

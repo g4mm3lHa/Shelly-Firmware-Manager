@@ -56,8 +56,7 @@ Only original Shelly firmware is supported. More limits:
 
    Or by hand: **Settings → Apps → App store → ⋮ → Repositories**, enter
    `https://github.com/g4mm3lHa/Shelly-Firmware-Manager` and click **Add**.
-2. Open **Firmware Manager for Shelly** in the app store and click **Install**. Home
-   Assistant builds the app on your system; this takes a few minutes.
+2. Open **Firmware Manager for Shelly** in the app store and click **Install**.
 3. Start the app and set the **download base URL** in its Settings tab – see
    [Quick start](shelly_firmware_manager/DOCS.md#quick-start). Installations on Shellys
    are disabled until it is set. This badge opens the app page in your Home Assistant:

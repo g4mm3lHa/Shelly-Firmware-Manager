@@ -32,8 +32,8 @@ Assistant). Version history: `CHANGELOG.md` (Changelog tab).
 
 ## Quick start
 
-1. Install the app from the app store. Home Assistant builds the app on your system;
-   this takes a few minutes. Start the app and enable "Show in sidebar".
+1. Install the app from the app store. Home Assistant downloads the ready-made image
+   from `ghcr.io`, which takes a few seconds. Start the app and enable "Show in sidebar".
 2. Open the app, go to the **Settings** tab and set the **download base URL**: the LAN
    IP address of Home Assistant with port 8098, e.g. `http://192.168.1.20:8098` (see
    [Download base URL](#download-base-url)). Installations are disabled until it is set.
@@ -514,6 +514,9 @@ The app connects only to:
   own settings and its slug (for the link to the app page).
 
 The user interface loads nothing from the internet. No telemetry.
+
+Home Assistant itself downloads the app image from `ghcr.io` when you install or update
+the app. The app does not connect there and nothing about your system is sent.
 
 ## Security
 

@@ -64,3 +64,14 @@ tools/dev/check.sh full     # ... + full UI matrix, all feature viewports and th
 `tools/dev/` also works offline with the bundled wheels (see `tools/dev/README.md`).
 Tool settings (ruff, mypy, pytest) are in `pyproject.toml`. The same checks run in the
 CI workflow on every push and pull request.
+
+## App image
+
+Home Assistant installs a prebuilt image from `ghcr.io` (the `image` key of
+`shelly_firmware_manager/config.yaml`; tag = version). The workflow
+`.github/workflows/images.yml` builds it for aarch64 and amd64 on every push to `main`,
+`beta` and `release-*`. A version whose image already exists is skipped when the app
+content is identical; changed content under the same version fails the run – bump the
+version. **Run workflow** with *force* replaces an image on purpose. The packages
+`aarch64-shelly-firmware-manager` and `amd64-shelly-firmware-manager` must be public.
+Pull requests from forks build nothing; maintainers push the release branch.
