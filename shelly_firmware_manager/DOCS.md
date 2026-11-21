@@ -300,10 +300,13 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
   Search and sort work as in the Devices tab; versions inside a card stay newest first.
 - **Files on disk:** at start the app scans the firmware folder. A file that is on the
   disk but not listed (for example after a damaged state file) is added again if its
-  content and SHA-256 match a known firmware ID and version; the name alone is not
-  enough. The log then shows a warning that files were read from the disk, because
-  they could have been changed. A file that cannot be matched is shown as **unknown
-  file** so you can delete it; nothing is deleted automatically.
+  SHA-256 equals its file name and a device or the manifest in the file names its
+  firmware ID and version; the name alone is not enough. A Gen2+ file taken over this
+  way is provided only when the Shelly update server offers exactly this SHA-256 – never
+  as stored fallback or for a downgrade. The log then shows a warning that files were
+  read from the disk, because they could have been changed. A file that cannot be
+  matched is shown as **unknown file** so you can delete it; nothing is deleted
+  automatically.
 - **Install** behind a device name opens the usual installation dialog for this device
   and this firmware (same conditions as "Install update" in the Devices tab).
 - The **changelog icon** of a version shows the changelog stored with this firmware.
@@ -456,7 +459,8 @@ Gen2+ firmware is downloaded over HTTPS only.
 | Certificate of … is not publicly trusted | See [Certificate pinning](#certificate-pinning) |
 | The Shelly requires a password | Store the device password (see [Device passwords](#device-passwords)) |
 | No usable address (tile in the Devices tab) | The host name does not resolve, the IP address is outside the private networks or the device has no address. Set an address in the Shelly integration (IP address or a host name that Home Assistant resolves) |
-| Warning: files were read from the disk | The firmware list was rebuilt from files in the firmware folder after the state was lost. They could have been changed – delete and download them again if in doubt |
+| Warning: Firmware files read from the disk: … taken over, … unknown – they could have been changed | The firmware list was rebuilt from files in the firmware folder after the state was lost. Taken-over Gen2+ files are used only when the Shelly update server offers the same SHA-256. Delete files you do not trust in the Firmware tab; unknown files are listed there and never deleted automatically |
+| Session expired – reload the page | The login of Home Assistant ran out while the page was in the background. The page retries silently for about 30 seconds; if the message stays, reload the page |
 | Device address … is not in a private network | Only devices in `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` or `fc00::/7` (IPv6) are contacted. Give the Shelly an address in one of these networks |
 | The app stopped and did not start again | Turn on **Watchdog** and **Start on boot** on the app page. With the Watchdog on, Home Assistant restarts the app after it stopped unexpectedly |
 | The app is shown as running but does not respond | The container health check (a TCP connection to port 8098 every 30 seconds) is meant to make Home Assistant restart the app after three failures if the Watchdog is on. Otherwise restart the app by hand and report the lines of the app log if it happens again |
