@@ -79,4 +79,6 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
 - **Suggested download base URL (2026-11-21):** an empty download base URL field is filled with
   `http://<host>:8098`, the host being the address the page was opened with, only if that host is an
   IP address in a private network (never a host name, public address or localhost). It counts as an
-  unsaved change ("Unsaved changes" shows); nothing is saved until the user clicks Save. No extra text.
+  unsaved change ("Unsaved changes" shows); nothing is saved until the user clicks Save. Grey note under
+  the field while it holds the suggestion: "Suggestion from the address of this page – please check it
+  before saving." (approved 2026-11-21); it disappears when the user edits the field.

@@ -146,4 +146,10 @@ def download_url_suggestion(browser, out):
               page.input_value("#opt-download_base_url"))
         check(f"{host}: unsaved marker follows the suggestion",
               page.locator(".unsaved").is_visible() == bool(expected))
+        note = page.locator("#opt-download_base_url-suggest")
+        check(f"{host}: suggestion note shown only with a suggestion", note.is_visible() == bool(expected))
+        if expected:
+            check(f"{host}: note text", "please check it before saving" in note.text_content())
+            page.fill("#opt-download_base_url", expected + "/x")
+            check(f"{host}: note hidden after an edit", note.is_hidden())
         ctx.close()
