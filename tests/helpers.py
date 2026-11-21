@@ -19,7 +19,7 @@ def make_manager(net, **options):
     """Manager with custom options (net fixture patches files and network)."""
     m = manager.Manager({**OPTIONS, **options}, session=None, token="t")
     m.first_start_open = False
-    m.notify = lambda *_a: asyncio.sleep(0)
+    m.notify = lambda *_a: asyncio.sleep(0, True)
     return m
 
 

@@ -21,7 +21,7 @@ from store_transfer import TransferError
 
 async def export_bytes(mgr):
     """Export the store; returns (ZIP bytes, password)."""
-    prepared = mgr.prepare_export("tester")
+    prepared = await mgr.prepare_export("tester")
     path, filename = await mgr.build_export(prepared["token"], "3.4.0")
     data = path.read_bytes()
     path.unlink()
@@ -190,14 +190,14 @@ async def test_export_token_is_single_use_and_expires(mgr, net, monkeypatch):
     """The download works once; an expired or unknown token is refused; an empty
     store has nothing to export."""
     with pytest.raises(ShellyError, match="empty"):
-        mgr.prepare_export()
+        await mgr.prepare_export()
     store(mgr, "Plus1", "1.3.0")
-    prepared = mgr.prepare_export()
+    prepared = await mgr.prepare_export()
     path, _ = await mgr.build_export(prepared["token"], "3.4.0")
     path.unlink()
     with pytest.raises(ShellyError, match="expired"):
         await mgr.build_export(prepared["token"], "3.4.0")
-    prepared = mgr.prepare_export()
+    prepared = await mgr.prepare_export()
     monkeypatch.setattr(manager_store, "EXPORT_TTL_S", -1)
     with pytest.raises(ShellyError, match="expired"):
         await mgr.build_export(prepared["token"], "3.4.0")
@@ -348,3 +348,56 @@ async def test_parts_out_of_order_or_unknown(mgr, net, monkeypatch):
     with pytest.raises(ShellyError, match="interrupted"):
         await mgr.stage_import_part(chunks(data[100:200]), 100, 300, 100, first["transfer"])
     assert not any(n.startswith(manager_store.IMPORT_PREFIX) for n in os_listdir())
+
+
+async def test_no_check_starts_while_an_import_writes_its_files(mgr, net):
+    """The store must not change during a check – so no check may start while an
+    import is storing its files."""
+    mgr._import_storing = True
+    for args in (("all",), ("device", A)):
+        with pytest.raises(ShellyError, match="Store import in progress"):
+            mgr.reserve_check(*args)
+    mgr._import_storing = False
+    mgr.reserve_check("all")
+
+
+async def test_import_releases_the_check_block(mgr, net):
+    """After an import – successful or refused – checks can start again."""
+    store(mgr, "Plus1", "1.3.0")
+    data, password = await export_bytes(mgr)
+    forget_store(mgr)
+    token = (await mgr.stage_import(chunks(data), len(data)))["token"]
+    with pytest.raises(ShellyError, match="not been checked"):
+        await mgr.confirm_import(token)
+    assert mgr._import_storing is False
+    await mgr.check_import(token, password)
+    assert (await mgr.confirm_import(token))["stored"] == 1 and mgr._import_storing is False
+
+
+async def test_export_is_refused_where_the_dialog_can_show_it(mgr, net, monkeypatch):
+    """Too little free disk space is reported when the export is prepared; the
+    answer names how long the download stays possible."""
+    store(mgr, "Plus1", "1.3.0")
+    prepared = await mgr.prepare_export()
+    assert prepared["expires_in"] == manager_store.EXPORT_TTL_S
+    monkeypatch.setattr(mgr, "_free_space", lambda: 0)
+    with pytest.raises(ShellyError, match="Not enough free disk space"):
+        await mgr.prepare_export()
+
+
+async def test_first_start_notification_is_retried_until_accepted(mgr, net):
+    """A notification Home Assistant did not accept does not count as sent."""
+    mgr.first_start_open = True
+    accepted = []
+
+    async def notify(*_args):
+        accepted.append(len(accepted) > 0)
+        return accepted[-1]
+
+    mgr.notify = notify
+    await mgr.announce_first_start()
+    assert mgr.first_start_notified is False
+    await mgr.announce_first_start()
+    assert mgr.first_start_notified is True
+    await mgr.announce_first_start()
+    assert len(accepted) == 2

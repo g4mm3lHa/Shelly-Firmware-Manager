@@ -7,7 +7,8 @@ DeviceSettings (manager_devices) -> Checks (manager_checks) -> Installs
 (manager_installs) -> Manager (manager). A layer only uses what the layers below it
 provide; the complete object is manager.Manager.
 
-State lives in /data/state.json, firmware in /data/firmware, device passwords in
+State lives in /data/state.json (with the previous save as backup state.bak, see
+ManagerCore.save and _load), firmware in /data/firmware, device passwords in
 /data/credentials.json, changelogs in /data/changelog.json and the activity log in
 /data/events.json (all private to the app, paths in data_paths).
 The full check ("check all") runs exclusively (asyncio.Lock): it starts only while no
@@ -21,11 +22,14 @@ device): the UI shows it while polling, nothing of it is persisted.
 """
 
 import asyncio
+import contextlib
 import json
 import logging
+import os
 import re
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import aiohttp
@@ -42,7 +46,7 @@ from tls import CertificatePins
 log = logging.getLogger("sfm.manager")
 
 # A device entry of state.json and a store entry of the firmware store: plain JSON
-# objects whose fields are listed in docs/CODEMAP.md (Stored data).
+# objects whose fields are listed in docs/codemap/data.md.
 Device = dict[str, Any]
 
 FirmwareMeta = dict[str, Any]
@@ -84,9 +88,15 @@ def holds_file(dev: Device) -> bool:
     failed = dev.get("status") in (STATUS_ERROR, STATUS_ASLEEP)
     return failed and bool(dev.get("install_failed") or dev.get("store_fallback"))
 
+
 SUPERVISOR = "http://supervisor"  # Supervisor API (Core API proxy below /core)
 
 SUPERVISOR_TIMEOUT = aiohttp.ClientTimeout(total=15)
+
+# Largest WebSocket message accepted from Home Assistant: the device registry lists the
+# devices of all integrations in one message (aiohttp's default of 4 MiB is too small
+# for very large installations)
+REGISTRY_MAX = 32 * 1024 * 1024  # bytes
 
 # Pages of the Home Assistant frontend: the page of this app (its info card has the
 # "Changelog" link next to the version) and, if the slug is unknown, the list of apps
@@ -121,12 +131,19 @@ DOWNLOAD_BASE_MESSAGES = {
 # No check before the first-start question is answered (fresh installation)
 FIRST_START_BLOCK = "Not before the first-start question is answered: import a firmware store or skip it"
 
+
 def severity_of(err: BaseException) -> str:
     """Log severity of a device error: authentication and internal errors are
     errors; unreachable devices, timeouts and temporary/missing data warnings."""
     if isinstance(err, AuthError) or not isinstance(err, (TimeoutError, ShellyError, aiohttp.ClientError, OSError)):
         return "error"
     return "warning"
+
+
+def unexpected_text(err: BaseException) -> str:
+    """Status message for an error no code path expects (e.g. a device answer of an
+    unexpected shape): names the error type; the traceback is in the app log."""
+    return clip(f"Unexpected error ({type(err).__name__}: {error_text(err, 300)}) – see the app log", 500)
 
 
 class ManagerCore:
@@ -168,6 +185,13 @@ class ManagerCore:
         self.progress: dict[str, Any] | None = None  # running full check: {"kind", "total", "done", "errors", "phase"}
         self.device_checks: dict[str, str] = {}  # HA device ID -> "queued"/"running" (single-device checks)
         self.storage_error: str | None = None  # last failure writing state.json (shown in the UI)
+        # Set at start if the state file was missing or unreadable although the app
+        # was installed before (see _load); shown in the UI until the next restart
+        self.state_warning: str | None = None
+        # No readable state at all (see _load): files of the firmware store that the
+        # registry does not know are kept by cleanup_firmware; persisted
+        self.keep_unknown_files = False
+        self._state_file_valid = False  # state.json holds a state this run read or wrote
         self.schedule: dict[str, Any] = {}  # automatic check schedule (see schedule.py), persisted
         self.reloading: set[str] = set()  # device IDs whose Reload Device Info is running
         # (firmware ID, version) -> running provide task (single flight)
@@ -198,6 +222,7 @@ class ManagerCore:
         self._export: dict[str, Any] | None = None  # prepared store export (see prepare_export), memory only
         self._import: dict[str, Any] | None = None  # staged store import (see stage_import), memory only
         self._import_lock = asyncio.Lock()  # one import transfer / check / confirmation at a time
+        self._import_storing = False  # confirm_import is writing its files to the store
         # File transfers in parts (upload, import) that are not complete yet, by kind;
         # memory only (see FirmwareStore._receive_part)
         self._receiving: dict[str, dict[str, Any]] = {}
@@ -223,30 +248,77 @@ class ManagerCore:
     # ----------------------------------------------------------------------------------------- Persistence
 
     def _load(self) -> None:
-        """Load the state of the last run; missing or broken file = fresh start."""
+        """Load the state of the last run.
+
+        Neither a state file nor a backup = fresh installation. An unreadable state
+        file is kept as state.damaged and the backup (state.bak: the save before the
+        last one, see save) is loaded instead; so is the backup if only the state
+        file is missing (the app was stopped between the two renames of save).
+        Without any readable state the app starts with an empty device list and an
+        empty store registry and sets keep_unknown_files: the firmware files, which
+        that registry does not know, are then never removed by cleanup_firmware."""
+        state_file = data_paths.STATE_FILE
+        backup = state_file.with_suffix(".bak")
         try:
-            data = json.loads(data_paths.STATE_FILE.read_text())
-            if not isinstance(data, dict):
-                raise ValueError("state is not an object")
-            self.devices = data.get("devices") or {}
-            self.last_scan = data.get("last_scan")
-            self.firmware = data["firmware"] if isinstance(data.get("firmware"), dict) else {}
-            self.schedule = data["schedule"] if isinstance(data.get("schedule"), dict) else {}
-            confirmed = data.get("download_base_confirmed")
-            self.download_base_confirmed = confirmed if isinstance(confirmed, str) else None
-            self.first_start_open = data.get("first_start_open") is True
-            self.first_start_notified = data.get("first_start_notified") is True
+            self._apply_state(self._read_state(state_file))
+            self._state_file_valid = True
         except FileNotFoundError:
-            self.first_start_open = True  # fresh installation (also after an uninstall)
-            return
+            if not backup.is_file():
+                self.first_start_open = True  # fresh installation (also after an uninstall)
+                return
+            log.error("State file missing, loading the backup")
+            self._load_backup(backup)
         except (ValueError, OSError) as err:
-            log.warning("State file unreadable, starting fresh: %s", err)
-            return
+            log.error("State file unreadable, loading the backup: %s", err)
+            with contextlib.suppress(OSError):
+                state_file.replace(state_file.with_suffix(".damaged"))  # kept for a manual look
+            self._load_backup(backup)
         for dev in self.devices.values():
             # A restart during an installation leaves an unclear state
             if dev.get("status") == STATUS_INSTALLING:
                 dev.update(status=STATUS_UNCLEAR, message="App was restarted during the installation")
             dev.pop("downgrade", None)  # marker of a running downgrade, memory semantics
+
+    def _load_backup(self, backup: Path) -> None:
+        """Load the backup because the state file is missing or unreadable (see _load)."""
+        try:
+            self._apply_state(self._read_state(backup))
+        except (ValueError, OSError) as err:
+            log.error("No readable backup of the state (%s): starting without devices, firmware files are kept", err)
+            self.keep_unknown_files = True
+            self.state_warning = (
+                "The state file was unreadable and no backup could be loaded. The devices are found again by "
+                "the next check; the files of the firmware store are kept, but no longer listed."
+            )
+            return
+        self.state_warning = (
+            "The state file was unreadable – the backup of the previous save was loaded. Check the devices again."
+        )
+
+    @staticmethod
+    def _read_state(path: Path) -> dict[str, Any]:
+        """Content of a state file; ValueError if it is not a usable state (so a
+        damaged file is never taken for an empty device list or store registry)."""
+        data = json.loads(path.read_text())
+        if not isinstance(data, dict):
+            raise ValueError("state is not an object")
+        for key in ("devices", "firmware"):
+            value = data.get(key)
+            if value is not None and not (isinstance(value, dict) and all(isinstance(v, dict) for v in value.values())):
+                raise ValueError(f"state: {key} is not a map of objects")
+        return data
+
+    def _apply_state(self, data: dict[str, Any]) -> None:
+        """Take over a state read by _read_state."""
+        self.devices = data.get("devices") or {}
+        self.last_scan = data.get("last_scan")
+        self.firmware = data.get("firmware") or {}
+        self.schedule = data["schedule"] if isinstance(data.get("schedule"), dict) else {}
+        confirmed = data.get("download_base_confirmed")
+        self.download_base_confirmed = confirmed if isinstance(confirmed, str) else None
+        self.first_start_open = data.get("first_start_open") is True
+        self.first_start_notified = data.get("first_start_notified") is True
+        self.keep_unknown_files = data.get("keep_unknown_files") is True
 
     @staticmethod
     def _remove_partial_downloads() -> None:
@@ -258,11 +330,15 @@ class ManagerCore:
                 log.info("Removed incomplete download %s", path.name)
 
     def save(self) -> bool:
-        """Write the state atomically (temporary file first, then rename).
+        """Write the state atomically and durably: temporary file, fsync, then the
+        current state file becomes the backup (state.bak) and the temporary file the
+        state file. A power failure therefore leaves a complete state file or, at
+        worst, the backup of the save before (see _load).
 
         A write error (e.g. full disk) keeps the previous state file intact, is
         logged and shown in the UI – it must not abort a check or installation."""
-        temp = data_paths.STATE_FILE.with_suffix(".tmp")
+        state_file = data_paths.STATE_FILE
+        temp = state_file.with_suffix(".tmp")
         state = {
             "devices": self.devices,
             "last_scan": self.last_scan,
@@ -271,10 +347,20 @@ class ManagerCore:
             "download_base_confirmed": self.download_base_confirmed,
             "first_start_open": self.first_start_open,
             "first_start_notified": self.first_start_notified,
+            "keep_unknown_files": self.keep_unknown_files,
         }
         try:
-            temp.write_text(json.dumps(state, separators=(",", ":")))
-            temp.replace(data_paths.STATE_FILE)
+            with temp.open("w") as handle:
+                handle.write(json.dumps(state, separators=(",", ":")))
+                handle.flush()
+                os.fsync(handle.fileno())
+            # Only a state file this run read or wrote becomes the backup – never a
+            # file that could not be read at start
+            if self._state_file_valid and state_file.is_file():
+                state_file.replace(state_file.with_suffix(".bak"))
+            temp.replace(state_file)
+            self._state_file_valid = True
+            self._sync_directory(state_file.parent)
         except OSError as err:
             temp.unlink(missing_ok=True)
             self.storage_error = clip(f"State could not be saved: {err}", 300)
@@ -283,28 +369,58 @@ class ManagerCore:
         self.storage_error = None
         return True
 
+    @staticmethod
+    def _sync_directory(path: Path) -> None:
+        """Make the renames of save durable (best effort: not every file system
+        supports syncing a directory)."""
+        with contextlib.suppress(OSError):
+            fd = os.open(path, os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+
     # -------------------------------------------------------------------------------------- Home Assistant
 
     async def _registry(self) -> list[dict[str, Any]]:
-        """Device registry via the Core WebSocket API (through the Supervisor proxy)."""
+        """Device registry via the Core WebSocket API (through the Supervisor proxy).
+        The registry of all integrations arrives as one message (REGISTRY_MAX)."""
         ws_url = SUPERVISOR.replace("http", "ws", 1) + "/core/websocket"
-        async with self.session.ws_connect(ws_url, timeout=aiohttp.ClientWSTimeout(ws_close=30)) as ws:
-            if (await ws.receive_json(timeout=30)).get("type") != "auth_required":
+
+        async def receive(ws: aiohttp.ClientWebSocketResponse) -> dict[str, Any]:
+            """Next JSON object from Home Assistant; anything else is a ShellyError."""
+            msg = await ws.receive(timeout=30)
+            if msg.type is not aiohttp.WSMsgType.TEXT:
+                # e.g. closed by aiohttp because the message exceeds REGISTRY_MAX
+                raise ShellyError(f"Home Assistant did not answer the device registry request ({msg.type.name})")
+            try:
+                data = json.loads(msg.data)
+            except ValueError:
+                raise ShellyError("Unreadable answer of Home Assistant") from None
+            if not isinstance(data, dict):
+                raise ShellyError("Unexpected answer of Home Assistant")
+            return data
+
+        async with self.session.ws_connect(
+            ws_url, timeout=aiohttp.ClientWSTimeout(ws_close=30), max_msg_size=REGISTRY_MAX
+        ) as ws:
+            if (await receive(ws)).get("type") != "auth_required":
                 raise ShellyError("Unexpected WebSocket greeting")
             await ws.send_json({"type": "auth", "access_token": self.token})
-            if (await ws.receive_json(timeout=30)).get("type") != "auth_ok":
+            if (await receive(ws)).get("type") != "auth_ok":
                 raise ShellyError("Authentication with Home Assistant failed")
             await ws.send_json({"id": 1, "type": "config/device_registry/list"})
             while True:
-                msg = await ws.receive_json(timeout=30)
+                msg = await receive(ws)
                 if msg.get("id") == 1:
                     if not msg.get("success"):
                         raise ShellyError(clip(msg.get("error")))
-                    result = msg["result"]
+                    result = msg.get("result")
                     return result if isinstance(result, list) else []
 
-    async def notify(self, title: str, message: str, notification_id: str) -> None:
-        """Persistent notification in Home Assistant (errors are only logged)."""
+    async def notify(self, title: str, message: str, notification_id: str) -> bool:
+        """Persistent notification in Home Assistant. True if Home Assistant accepted
+        it; errors are only logged."""
         try:
             async with self.session.post(
                 f"{SUPERVISOR}/core/api/services/persistent_notification/create",
@@ -315,6 +431,8 @@ class ManagerCore:
                 resp.raise_for_status()
         except (TimeoutError, aiohttp.ClientError) as err:
             log.warning("Notification failed: %s", err)
+            return False
+        return True
 
     async def _supervisor_post(self, path: str, body: dict[str, Any] | None) -> None:
         """POST to the Supervisor API (only /addons/self/* is used); errors -> ShellyError."""
@@ -438,11 +556,14 @@ class ManagerCore:
         kind "all": only while nothing else runs (no single-device check, installation
         or Reload Device Info). kind "device": not during the full check, and not for
         a device that is being checked, installed or reloaded – other devices may be
-        checked or installed at the same time. Raises ShellyError otherwise."""
+        checked or installed at the same time. No check starts while a store import
+        writes its files. Raises ShellyError otherwise."""
         if self.first_start_open:
             raise ShellyError(FIRST_START_BLOCK)
         if self.checking:
             raise ShellyError("Check in progress – please try again afterwards")
+        if self._import_storing:
+            raise ShellyError("Store import in progress – please try again in a moment")
         if self.reloading and (kind != "device" or device_id in self.reloading):
             raise ShellyError("Device info is being reloaded – please try again in a moment")
         if kind == "device":

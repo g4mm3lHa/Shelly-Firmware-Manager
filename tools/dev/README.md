@@ -7,6 +7,8 @@ Only `shelly_firmware_manager/` is built into the image; nothing here is shipped
 | `check.sh [tests\|ui\|full\|build]` | all checks in the efficient order: ruff → mypy (if installed; required for a release) → build check → version match (config.yaml = main.py) → pytest → UI (`ui`: quick, `full`: final gate); `build` rebuilds `app/static` first |
 | `run.sh <cmd>` | runs a command with the pinned dependencies from the bundled wheels (extracted once to `.devdeps/`, pure-Python mode, no install) |
 | `asyncio_shim.py` | stand-in for pytest-asyncio's auto mode where it is not installed (`-p asyncio_shim`, used by `check.sh` automatically) |
+| `mockup.py new\|sheet` | UI mockups in one command: `new DIR` makes a scratch copy of HEAD; after changing `ui-src` there, `sheet OUT.png LABEL=DIR [...] [--shot NAME=STEPS]` builds every copy, captures 1440 / 412 / 360 embedded and writes one labelled contact sheet (only look at that sheet) |
+| `bump.py X.Y.Z[-rcN]` | sets the version in `config.yaml` and `app/main.py`; for a release candidate it also puts an empty block "Changes in rcN" on top of the changelog section of the version (texts are written by hand) |
 | `bin/npx` | offline stand-in for `npx --yes esbuild@0.28.2`: runs a local esbuild of exactly that version (`ESBUILD_BIN` overrides the path) |
 
 Typical use (repository root):

@@ -23,7 +23,7 @@ from shelly import DeviceAuth, ShellyError, error_text
 from manager_checks import Checks
 from manager_core import (
     PENDING, Device, STATUS_AVAILABLE, STATUS_CURRENT, STATUS_ERROR, STATUS_INSTALLING, STATUS_READY,
-    STATUS_UNCLEAR, holds_file,
+    STATUS_UNCLEAR, holds_file, unexpected_text,
 )
 
 log = logging.getLogger("sfm.manager")
@@ -35,9 +35,10 @@ INSTALL_FIRST_CHECK_S = 30  # polling: wait after the update command
 
 INSTALL_POLL_S = 10  # polling: then check every 10 s
 
-INSTALL_NO_DOWNLOAD_S = 120  # no download request: give up after 2 min (a Shelly may
+# No download request: give up after 2 min (a Shelly may still answer with the old
+# version for a while after accepting the update)
+INSTALL_NO_DOWNLOAD_S = 120
 
-# still answer with the old version for a while after accepting the update)
 INSTALL_WAIT_S = 300  # polling: upper limit (5 min) in case the Shelly gets stuck
 
 OTA_STALL_S = 60  # events: no new progress for 60 s = the update got stuck
@@ -175,19 +176,29 @@ class Installs(Checks):
                 self.events.add("install", ok=ok, event=event, detail=diagnosis, **entry)
                 return ok
         except (TimeoutError, ShellyError, aiohttp.ClientError, OSError, KeyError, ValueError) as err:
-            dev.update(status=STATUS_ERROR, message=error_text(err, 500) or type(err).__name__)
-            if not downgrade and dev.get("file"):
-                # Stays in "Updates available" with its file for a retry until the next
-                # full check or a single check of this device
-                dev["install_failed"] = True
-            if entry:
-                self.events.add("install", ok=False, event="failed", detail=dev["message"], **entry)
+            self._install_failed(dev, entry, downgrade, error_text(err, 500) or type(err).__name__)
+            return False
+        except Exception as err:
+            # An error no code path expects must not leave the device "installing"
+            log.exception("%s: unexpected error during the installation", dev.get("name"))
+            self._install_failed(dev, entry, downgrade, unexpected_text(err))
             return False
         finally:
             self.installing.discard(device_id)
             dev.pop("downgrade", None)
             self.cleanup_firmware()  # housekeeping only, stored firmware stays
             self.save()
+
+    def _install_failed(self, dev: Device, entry: dict[str, Any] | None, downgrade: bool, message: str) -> None:
+        """Record a failed installation on the device and in the activity log (entry:
+        log context, None if the installation never started)."""
+        dev.update(status=STATUS_ERROR, message=message)
+        if not downgrade and dev.get("file"):
+            # Stays in "Updates available" with its file for a retry until the next
+            # full check or a single check of this device
+            dev["install_failed"] = True
+        if entry:
+            self.events.add("install", ok=False, event="failed", detail=message, **entry)
 
     @staticmethod
     def _after_downgrade(dev: Device) -> None:

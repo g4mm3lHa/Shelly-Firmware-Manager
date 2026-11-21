@@ -1,6 +1,6 @@
 #include <tunables/global>
 
-# AppArmor profile of the Shelly Firmware Manager.
+# AppArmor profile of the Firmware Manager for Shelly.
 #
 # Loaded by the Supervisor when the host supports AppArmor; the profile name is
 # replaced by the app's full slug when it is loaded. Only what the app needs:
@@ -9,8 +9,9 @@
 # - read and write its private storage (/data) – nothing else is writable,
 # - TCP/UDP networking (Supervisor, Shellys, shelly.cloud, its two web servers).
 # No capabilities, no raw sockets, no mounts, no ptrace, no other programs.
-# The container init (docker-init, init: true in config.yaml) starts Python and
-# forwards the stop signal of the Supervisor.
+# The container init (docker-init, the Supervisor's default "init: true") starts
+# Python and forwards the stop signal of the Supervisor. The container health check
+# of the Dockerfile runs the same Python interpreter.
 
 profile shelly_firmware_manager flags=(attach_disconnected,mediate_deleted) {
   #include <abstractions/base>

@@ -1,0 +1,5 @@
+# Built UI files (tools/build_ui.py writes them from ui-src/): shown as changed without a
+# text diff and never merged line by line. After a merge conflict keep either side,
+# run tools/build_ui.py and commit the result.
+shelly_firmware_manager/app/static/app.js -diff -merge linguist-generated
+shelly_firmware_manager/app/static/style.css -diff -merge linguist-generated

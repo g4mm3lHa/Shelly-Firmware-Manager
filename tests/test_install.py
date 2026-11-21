@@ -587,3 +587,22 @@ async def test_download_server_limits_rejection_warnings(mgr, caplog):
         for _ in range(20):
             assert (await client.get(f"/{name}")).status == 404
     assert len([r for r in caplog.records if r.name == "sfm.download"]) == 1
+
+
+async def test_unexpected_error_ends_the_installation_as_failed(mgr, net, monkeypatch):
+    """An error no code path expects must not leave the device "installing": it is
+    shown and logged as a failed installation that can be retried."""
+    await mgr.scan()
+    sha = mgr.devices[A]["sha256"]
+
+    async def broken(*_args):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(mgr, "_install", broken)
+    assert await mgr.install(A, sha, "alice") is False
+    dev = mgr.devices[A]
+    assert dev["status"] == manager_core.STATUS_ERROR and dev["install_failed"] is True
+    assert "Unexpected error (RuntimeError: boom)" in dev["message"]
+    assert A not in mgr.installing and mgr.approval_matches(A, sha)
+    failed = [e for e in mgr.events.entries if e["kind"] == "install"][-1]
+    assert failed["event"] == "failed" and failed["ok"] is False and failed["user"] == "alice"

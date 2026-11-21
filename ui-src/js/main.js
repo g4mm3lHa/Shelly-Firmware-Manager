@@ -101,8 +101,8 @@ function renderProgress(p) {
   const box_ = $("progress");
   box_.hidden = !p;
   if (!p) return;
-  const parts = [p.kind === "device" ? `Checking ${p.device || "device"}` : "Checking devices"];
-  if (p.kind !== "device" && p.total) parts.push(`${p.done}/${p.total} completed`);
+  const parts = ["Checking devices"];
+  if (p.total) parts.push(`${p.done}/${p.total} completed`);
   if (p.errors) parts.push(`${p.errors} unavailable`);
   parts.push(PHASES[p.phase] || p.phase || "");
   $("progress-text").textContent = parts.filter(Boolean).join(" · ");

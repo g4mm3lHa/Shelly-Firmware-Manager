@@ -1,5 +1,46 @@
 # Changelog
 
+## 3.6.0
+
+Released 2026-11-21. Publication preparation: MIT license, new app name, icon and logo;
+the Devices tab gets a Device Details dialog; checks and the state file are more robust.
+
+Added
+- The app is released under the MIT License; the credits in the documentation list the
+  components used, their license files are part of the image.
+
+Changed
+- App name is now "Firmware Manager for Shelly" (app store, app page, Home Assistant
+  notification, log, heading in the app); new app icon and logo.
+- Devices tab: the row menu entry "Status details" is now "Device Details" and also
+  shows model, generation, firmware ID and NTP server (desktop and phone).
+- Devices tab: the row menu ⋮ is ordered in five groups (updates, device, settings,
+  ignore, restart).
+- Firmware tab (info tooltip, upload dialog): the texts name the check rule as it is –
+  Gen2+: the Shelly server decides the next version, a stored file of it is used.
+- Store export: too little free disk space is reported when the dialog opens; an export
+  older than 10 minutes is refused in the dialog instead of a failed download.
+- Firmware upload and store import refuse ZIP64 archives and oversized file lists.
+- Option `download_base_url`: user name, password, query and fragment are refused.
+
+Fixed
+- Check all: an unexpected error of one device no longer ends the whole check; it is
+  shown for that device. Same for installations, Reload Device Info and passwords.
+- A damaged state file no longer empties the firmware store: the previous save is
+  loaded (storage warning); without a readable state no firmware file is deleted.
+- Device password: a change the device confirmed but the app could not save is
+  reported with the reason instead of a general error.
+- Home Assistant with very many devices: device registry answers up to 32 MiB are read.
+- First start: the notification is sent again at the next start if it was not accepted.
+- Activity log: a damaged log file or entry no longer stops the app at start.
+- No check can start while a store import writes its files.
+
+Security
+- Shellys are contacted only in 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 and fc00::/7
+  (fixed list); other special ranges that counted as private are refused.
+- Security headers also on refused requests and on unexpected errors; IDs, names,
+  versions and times with a trailing line break are refused.
+
 ## 3.5.0
 
 Released 2026-11-20. Clearer settings, filter chips and one toolbar in all tabs; phone

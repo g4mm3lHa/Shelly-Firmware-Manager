@@ -29,7 +29,7 @@ def app_env(net, monkeypatch, tmp_path):
         return net.registry()
 
     async def notify(_self, *_args):
-        return None
+        return True
 
     monkeypatch.setattr(manager.Manager, "_registry", registry)
     monkeypatch.setattr(manager.Manager, "notify", notify)
@@ -84,6 +84,7 @@ async def test_fresh_installation_waits_for_the_first_start_answer(app_env, monk
 
     async def notify(_self, *args):
         sent.append(args)
+        return True
 
     real_init = manager.Manager.__init__
 

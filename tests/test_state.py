@@ -3,6 +3,7 @@
 All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test servers."""
 
 import json
+import os
 from datetime import UTC, datetime
 
 import data_paths
@@ -31,20 +32,20 @@ async def test_save_failure_keeps_previous_state(mgr, net, monkeypatch):
     """Write error (e.g. disk full): old state.json intact, error shown, check continues."""
     await mgr.scan()
     old = data_paths.STATE_FILE.read_text()
-    real = type(data_paths.STATE_FILE).write_text
+    backup = data_paths.STATE_FILE.with_suffix(".bak").read_text()
+    real = os.fsync
 
-    def failing(self, *args, **kwargs):
-        if self.suffix == ".tmp":
-            raise OSError(28, "No space left on device")
-        return real(self, *args, **kwargs)
+    def failing(_fd):
+        raise OSError(28, "No space left on device")
 
-    monkeypatch.setattr(type(data_paths.STATE_FILE), "write_text", failing)
+    monkeypatch.setattr(os, "fsync", failing)
     assert await mgr.scan() is True
     assert data_paths.STATE_FILE.read_text() == old
+    assert data_paths.STATE_FILE.with_suffix(".bak").read_text() == backup
     assert "No space left" in mgr.storage_error
     assert mgr.public_state()["storage_error"]
     assert not data_paths.STATE_FILE.with_suffix(".tmp").exists()
-    monkeypatch.setattr(type(data_paths.STATE_FILE), "write_text", real)
+    monkeypatch.setattr(os, "fsync", real)
     assert mgr.save() and mgr.storage_error is None
 
 
@@ -183,3 +184,122 @@ def test_log_skips_a_damaged_line(tmp_path):
     log = EventLog(path, 90, 1000)
     assert without_id(log.entries) == [good]
     assert without_id([json.loads(line) for line in path.read_text().splitlines()]) == [good]
+
+
+# ---------------------------------------------------------------- State file: backup and recovery
+
+
+def firmware_files():
+    """Names of the files in the firmware store."""
+    return sorted(p.name for p in data_paths.FW_DIR.iterdir())
+
+
+async def test_every_save_keeps_the_previous_state_as_backup(mgr, net):
+    """state.bak is the state of the save before the last one; no temporary file stays."""
+    await mgr.scan()
+    before = data_paths.STATE_FILE.read_text()
+    mgr.devices[A]["name"] = "Renamed"
+    assert mgr.save()
+    assert data_paths.STATE_FILE.with_suffix(".bak").read_text() == before
+    assert json.loads(data_paths.STATE_FILE.read_text())["devices"][A]["name"] == "Renamed"
+    assert not data_paths.STATE_FILE.with_suffix(".tmp").exists()
+
+
+@pytest.mark.parametrize("damage", ["{ truncated", "", "[]", '{"devices": [], "firmware": {}}', '{"firmware": {"x": 1}}'])
+async def test_damaged_state_loads_the_backup_and_keeps_the_store(mgr, net, damage):
+    """An unreadable state file – also one whose device list or store registry is
+    not usable – is set aside; the backup is loaded and the firmware files stay."""
+    await mgr.scan()
+    mgr.save()  # the backup now holds the checked devices and the store registry
+    files = firmware_files()
+    assert files
+    data_paths.STATE_FILE.write_text(damage)
+    m = manager.Manager(dict(OPTIONS), session=None, token="t")
+    assert set(m.devices) == set(mgr.devices) and set(m.firmware) == set(mgr.firmware)
+    assert not m.first_start_open and not m.keep_unknown_files
+    assert "backup of the previous save was loaded" in m.public_state()["storage_error"]
+    assert data_paths.STATE_FILE.with_suffix(".damaged").read_text() == damage
+    m.cleanup_firmware()
+    assert firmware_files() == files
+    # The next save writes a state file again and leaves the good backup untouched
+    backup = data_paths.STATE_FILE.with_suffix(".bak").read_text()
+    assert m.save() and data_paths.STATE_FILE.with_suffix(".bak").read_text() == backup
+    assert set(json.loads(data_paths.STATE_FILE.read_text())["firmware"]) == set(files)
+
+
+async def test_missing_state_with_backup_is_no_fresh_installation(mgr, net):
+    """Stopped between the two renames of a save: the backup is loaded, the
+    first-start question is not asked."""
+    await mgr.scan()
+    mgr.save()
+    data_paths.STATE_FILE.unlink()
+    m = manager.Manager(dict(OPTIONS), session=None, token="t")
+    assert set(m.devices) == set(mgr.devices) and not m.first_start_open
+    assert m.public_state()["storage_error"]
+
+
+async def test_no_readable_state_never_deletes_firmware(mgr, net):
+    """State file and backup unreadable: the app starts without devices, but the
+    firmware files – unknown to the empty registry – are kept, also after restarts."""
+    await mgr.scan()
+    mgr.save()
+    files = firmware_files()
+    data_paths.STATE_FILE.write_text("{ truncated")
+    data_paths.STATE_FILE.with_suffix(".bak").write_text("")
+    m = manager.Manager(dict(OPTIONS), session=None, token="t")
+    assert m.devices == {} and m.firmware == {} and m.keep_unknown_files and not m.first_start_open
+    assert "no backup could be loaded" in m.public_state()["storage_error"]
+    m.cleanup_firmware()
+    assert firmware_files() == files
+    m._registry, m.notify, m.changelogs.refresh = mgr._registry, mgr.notify, net.refresh
+    assert await m.scan() is True  # downloads the offered version again: listed once more
+    assert firmware_files() == files and set(m.firmware) == set(files)
+    restarted = manager.Manager(dict(OPTIONS), session=None, token="t")
+    assert restarted.keep_unknown_files and restarted.public_state()["storage_error"] is None
+    (data_paths.FW_DIR / ("b" * 64 + ".zip")).write_bytes(b"unlisted")
+    restarted.cleanup_firmware()
+    assert ("b" * 64 + ".zip") in firmware_files()
+
+
+async def test_unknown_files_are_removed_only_while_no_download_runs(mgr, net):
+    """Housekeeping: a file the registry does not know is removed – but not while a
+    check downloads, when a finished file may not be registered yet."""
+    await mgr.scan()
+    stray = data_paths.FW_DIR / ("c" * 64 + ".zip")
+    stray.write_bytes(b"x")
+    mgr._downloads_running = 1
+    mgr.cleanup_firmware()
+    assert stray.exists()
+    mgr._downloads_running = 0
+    mgr.cleanup_firmware()
+    assert not stray.exists()
+
+
+def test_log_skips_entries_without_a_numeric_time(tmp_path):
+    """A log line whose time is no number, and a file that is no text, do not stop
+    the start; the usable entries are kept."""
+    path = tmp_path / "events.json"
+    now = int(datetime.now(UTC).timestamp())
+    lines = [{"ts": now, "kind": "check", "ok": True}, {"ts": "yesterday", "kind": "check"}, {"ts": True, "kind": "check"},
+             {"kind": "check"}, {"ts": now + 0.5, "kind": "upload", "ok": True}]
+    path.write_text("".join(json.dumps(line) + "\n" for line in lines))
+    assert [e["kind"] for e in EventLog(path, 90, 1000).entries] == ["check", "upload"]
+    path.write_bytes(b"\xff\xfe\x00binary")
+    assert EventLog(path, 90, 1000).entries == []
+
+
+def test_credentials_write_error_is_reported(tmp_path):
+    """A password file that cannot be written raises an error with a readable text
+    (never silently); the previous file stays as it was."""
+    from shelly import DeviceAuth, ShellyError
+
+    path = tmp_path / "c.json"
+    creds = Credentials(path)
+    creds.store(A, DeviceAuth(gen=1, password="first"))
+    saved = path.read_text()
+    assert oct(path.stat().st_mode & 0o777) == "0o600"
+    path.unlink()
+    path.mkdir()  # a directory in its place: the rename fails
+    with pytest.raises(ShellyError, match="could not be saved"):
+        creds.store(A, DeviceAuth(gen=1, password="second"))
+    assert not path.with_suffix(".tmp").exists() and "first" in saved

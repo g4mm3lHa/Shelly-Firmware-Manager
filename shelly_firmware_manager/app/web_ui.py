@@ -105,22 +105,31 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
 
+    def refusal(status: int, text: str) -> web.Response:
+        """Plain-text answer of the middleware itself, with the security headers."""
+        return web.Response(status=status, text=text, headers=SECURITY_HEADERS)
+
     @web.middleware
     async def security(request: web.Request, handler: Handler) -> web.StreamResponse:
-        """Ingress-only access, CSRF + JSON for writes, security headers on every answer."""
+        """Ingress-only access, CSRF + JSON for writes, security headers on every
+        answer – also on refusals and on the answer to an unexpected error."""
         if request.remote != ingress_ip:
-            return web.Response(status=403, text="Only reachable via Home Assistant Ingress")
+            return refusal(403, "Only reachable via Home Assistant Ingress")
         if request.method not in ("GET", "HEAD"):
             if not hmac.compare_digest(request.headers.get("X-CSRF-Token", ""), csrf_token):
-                return web.Response(status=403, text="Invalid CSRF token")
+                return refusal(403, "Invalid CSRF token")
             upload = request.match_info.route.name in BINARY_ROUTES
             if request.content_type != (UPLOAD_TYPE if upload else "application/json"):
-                return web.Response(status=415, text="Binary file expected" if upload else "JSON expected")
+                return refusal(415, "Binary file expected" if upload else "JSON expected")
         try:
             response = await handler(request)
         except web.HTTPException as exc:  # error responses get the headers too
             exc.headers.update(SECURITY_HEADERS)
             raise
+        except Exception as err:
+            # An error no handler expects: details only in the app log
+            log.exception("Unexpected error in %s %s", request.method, request.path)
+            return refusal(500, f"Unexpected error ({type(err).__name__}) – see the app log")
         response.headers.update(SECURITY_HEADERS)
         if request.match_info.route.name == "static" and request.query.get("v") == version:
             response.headers["Cache-Control"] = STATIC_CACHE
@@ -129,7 +138,7 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
     def device_id_from(request: web.Request) -> str:
         """Validated HA device ID from the URL; unknown IDs -> 404."""
         device_id = request.match_info["id"]
-        if not DEVICE_ID_RE.match(device_id) or device_id not in mgr.devices:
+        if not DEVICE_ID_RE.fullmatch(device_id) or device_id not in mgr.devices:
             raise web.HTTPNotFound(text="Unknown device")
         return device_id
 
@@ -163,7 +172,8 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
         return web.Response(text=index_html, content_type="text/html")
 
     async def state(request: web.Request) -> web.StreamResponse:
-        """Device list and status (no credentials, no internal addresses).
+        """Device list and status – no credentials. The devices' LAN addresses are
+        part of it on purpose (IP column, link to the web interface of the device).
 
         Conditional: the ETag is a hash of the body; a matching If-None-Match gets an
         empty 304, so an unchanged state is neither sent nor parsed by the UI."""
@@ -191,10 +201,12 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
         except ShellyError as err:
             raise web.HTTPConflict(text=str(err)) from None
 
+        user = user_from(request.headers)  # read now: the check outlives the request
+
         async def run() -> None:
             """Single-device check; failures are already logged by the manager."""
             with contextlib.suppress(ShellyError, KeyError):
-                await mgr.check_device(device_id, user=user_from(request.headers))
+                await mgr.check_device(device_id, user=user)
 
         background(run())
         return web.json_response({"started": True})
@@ -207,7 +219,7 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
         device_id = device_id_from(request)
         body = await json_body(request)
         sha = body.get("sha256")
-        if body.get("confirm") is not True or not isinstance(sha, str) or not SHA_RE.match(sha):
+        if body.get("confirm") is not True or not isinstance(sha, str) or not SHA_RE.fullmatch(sha):
             raise web.HTTPBadRequest(text="Confirmation incomplete")
         if body.get("downgrade") is True:
             if body.get("acknowledged") is not True:
@@ -328,7 +340,7 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
     def firmware_name_from(request: web.Request) -> str:
         """Validated firmware file name from the URL; unknown names -> 404."""
         name = request.match_info["name"]
-        if not FW_NAME_RE.match(name) or name not in mgr.firmware:
+        if not FW_NAME_RE.fullmatch(name) or name not in mgr.firmware:
             raise web.HTTPNotFound(text="Unknown firmware")
         return name
 
@@ -390,7 +402,7 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
         except ValueError:
             raise web.HTTPBadRequest(text="Invalid part of the file transfer") from None
         transfer = request.headers.get("X-Upload-Transfer")
-        if transfer is not None and not TRANSFER_ID_RE.match(transfer):
+        if transfer is not None and not TRANSFER_ID_RE.fullmatch(transfer):
             raise web.HTTPBadRequest(text="Invalid part of the file transfer")
         if total > limit:
             raise web.HTTPRequestEntityTooLarge(max_size=limit, actual_size=total, text=too_large)
@@ -431,16 +443,13 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
         """Step 1 of a store export: generate the export password (returned once) and
         a single-use token for the download."""
         await json_body(request)
-        try:
-            return web.json_response(mgr.prepare_export(user_from(request.headers)))
-        except ShellyError as err:
-            raise web.HTTPConflict(text=str(err)) from None
+        return web.json_response(await guarded(mgr.prepare_export(user_from(request.headers))))
 
     async def store_export_download(request: web.Request) -> web.StreamResponse:
         """Step 2: the export ZIP as download (token from step 1, single use). The
         temporary file is deleted after sending, also when the transfer breaks."""
         token = request.match_info["token"]
-        if not EXPORT_TOKEN_RE.match(token):
+        if not EXPORT_TOKEN_RE.fullmatch(token):
             raise web.HTTPNotFound(text="Unknown export")
         try:
             path, filename = await mgr.build_export(token, app_version)
@@ -535,7 +544,7 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
         entry_id = request.match_info["id"]
         if (await json_body(request)).get("confirm") is not True:
             raise web.HTTPBadRequest(text="Confirmation incomplete")
-        if not ENTRY_ID_RE.match(entry_id) or not mgr.events.remove(entry_id):
+        if not ENTRY_ID_RE.fullmatch(entry_id) or not mgr.events.remove(entry_id):
             raise web.HTTPNotFound(text="Unknown log entry")
         log.info("Log entry %s deleted by %s", entry_id, user_from(request.headers))
         return web.json_response({"deleted": True})

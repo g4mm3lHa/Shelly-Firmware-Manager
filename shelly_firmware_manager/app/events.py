@@ -8,10 +8,10 @@ module; for secret options only the key is logged).
 Retention: entries older than retention_days and beyond max_entries are dropped.
 
 Storage: JSON Lines – one entry per line, a new entry is appended, so adding
-an entry no longer rewrites the whole log. The file is rewritten (atomically) only
+an entry does not rewrite the whole log. The file is rewritten (atomically) only
 when the dropped entries on disk exceed COMPACT_SLACK lines, at start after a trim,
 and once to convert the JSON array written by 3.0.0. A damaged line (e.g. a write cut
-off by a power loss) is skipped.
+off by a power loss) and an entry without a numeric time are skipped.
 
 Severity: every new entry carries "severity" = success | warning | error.
 Historic entries without it are never rewritten; readers derive it from "ok".
@@ -55,6 +55,12 @@ def _line(entry: dict[str, Any]) -> str:
     return json.dumps(entry, separators=(",", ":")) + "\n"
 
 
+def _has_time(entry: dict[str, Any]) -> bool:
+    """True if the entry carries a numeric time "ts" (the retention compares it)."""
+    ts = entry.get("ts")
+    return isinstance(ts, (int, float)) and not isinstance(ts, bool)
+
+
 class EventLog:
     """Log entries with time and size based retention; new entries are appended, single
     entries or the whole log can be deleted by an administrator."""
@@ -71,7 +77,7 @@ class EventLog:
             text = self.path.read_text()
         except FileNotFoundError:
             text = ""
-        except OSError as err:
+        except (OSError, UnicodeDecodeError) as err:
             log.warning("Log file unreadable, starting a new one: %s", err)
             text, rewrite = "", True
         if text.lstrip().startswith("["):  # JSON array of 3.0.0: convert once
@@ -90,9 +96,9 @@ class EventLog:
                     rows.append(json.loads(raw))
                 except ValueError:
                     rewrite = True  # damaged line: dropped by the next rewrite
-        self.entries = [e for e in rows if isinstance(e, dict) and e.get("kind") in KINDS]
+        self.entries = [e for e in rows if isinstance(e, dict) and e.get("kind") in KINDS and _has_time(e)]
         for entry in self.entries:  # entries written before 3.1.1 (or with a damaged ID)
-            if not ENTRY_ID_RE.match(str(entry.get("id") or "")):
+            if not ENTRY_ID_RE.fullmatch(str(entry.get("id") or "")):
                 entry["id"] = secrets.token_hex(6)
                 rewrite = True
         if self._prune() or rewrite or len(self.entries) != self._lines:
