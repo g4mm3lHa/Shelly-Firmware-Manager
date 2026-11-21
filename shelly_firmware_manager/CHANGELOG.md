@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.7.1
+
+Released 2026-11-21. Shellys that are connected through a router or another integration
+are listed again.
+
+Fixed
+- Devices tab: Shellys that Home Assistant shows as connected through another device
+  that is not a Shelly (e.g. a FRITZ!Box) were missing; they are listed and checked
+  again. Only devices behind a Shelly gateway stay hidden.
+- Stored device data and passwords of such Shellys are no longer removed at each
+  check. Passwords already removed must be entered again.
+
 ## 3.7.0
 
 Released 2026-11-21. The app is installed from a prebuilt image instead of being built

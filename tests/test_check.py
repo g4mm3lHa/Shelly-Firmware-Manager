@@ -889,3 +889,26 @@ async def test_unexpected_error_while_reading_settings_keeps_the_firmware_check(
     dev = mgr.devices[A]
     assert dev["status"] == manager_core.STATUS_READY
     assert dev["settings_error"]["severity"] == "error" and "TypeError" in dev["settings_error"]["message"]
+
+
+def _entry(device_id, via=None, domain="shelly"):
+    """Registry entry of the given integration, optionally connected via another device."""
+    return {"id": device_id, "name": device_id, "identifiers": [[domain, device_id]], "via_device_id": via}
+
+
+async def test_shelly_via_router_is_listed_and_keeps_its_data(mgr):
+    """A Shelly connected via a router or another integration is a main device: it is
+    listed and its stored data stays."""
+    mgr.devices["s1"] = {"name": "s1"}
+    entries = mgr._shelly_entries([_entry("router", domain="fritz"), _entry("s1", via="router")])
+    assert list(entries) == ["s1"]
+    assert "s1" in mgr.devices
+
+
+async def test_shelly_via_shelly_gateway_is_hidden_and_cleaned(mgr):
+    """A sub-device behind a Shelly gateway is not listed; its stored data is removed,
+    the gateway itself stays."""
+    mgr.devices["blu"] = {"name": "blu"}
+    entries = mgr._shelly_entries([_entry("gw"), _entry("blu", via="gw")])
+    assert list(entries) == ["gw"]
+    assert "blu" not in mgr.devices
