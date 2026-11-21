@@ -123,12 +123,16 @@ class FirmwareStore(ManagerCore):
         """Housekeeping of the store – never deletes a registered firmware.
 
         Store entries whose file is missing are dropped; files on disk that are not
-        in the store are removed. Temporary files (running downloads and staged
-        uploads, PART_PREFIX) are left alone: they are removed by their own code
-        path or at the next start."""
+        in the store are removed – unless the registry itself was lost
+        (keep_unknown_files, see ManagerCore._load): then every file is kept.
+        Temporary files (running downloads and staged uploads, PART_PREFIX) are left
+        alone: they are removed by their own code path or at the next start."""
         self.firmware = {n: m for n, m in self.firmware.items() if (data_paths.FW_DIR / n).is_file()}
+        # While a check downloads, a file may already carry its final name without
+        # being registered yet: unknown files are only removed when no download runs
+        keep_unknown = self.keep_unknown_files or self._downloads_running > 0
         for path in data_paths.FW_DIR.iterdir():
-            if path.name in self.firmware or path.name.startswith(PART_PREFIX):
+            if keep_unknown or path.name in self.firmware or path.name.startswith(PART_PREFIX):
                 continue
             if path.is_file() or path.is_symlink():
                 path.unlink(missing_ok=True)
@@ -533,6 +537,7 @@ class FirmwareStore(ManagerCore):
         Returns {"type": str|None, "version": str|None}; never raises."""
         found: dict[str, str | None] = {"type": None, "version": None}
         try:
+            store_transfer.check_directory(path)  # no hints from an archive with an oversized file list
             with zipfile.ZipFile(path) as archive:
                 member = next(
                     (
@@ -665,7 +670,7 @@ class FirmwareStore(ManagerCore):
         types = self.upload_types()
         if not isinstance(fw_type, str) or fw_type not in types:
             raise ValueError("Choose the firmware ID of a known Gen2+ device")
-        if not isinstance(version, str) or not STABLE_VERSION_RE.match(version.strip()):
+        if not isinstance(version, str) or not STABLE_VERSION_RE.fullmatch(version.strip()):
             raise ValueError("Version must be a stable release number such as 1.4.4")
         version = version.strip()
         checked = False
@@ -716,20 +721,26 @@ class FirmwareStore(ManagerCore):
         except OSError:
             return None
 
-    def prepare_export(self, user: str = "unknown") -> dict[str, Any]:
-        """Step 1 of an export: generate the export password and derive the seal key.
+    async def prepare_export(self, user: str = "unknown") -> dict[str, Any]:
+        """Step 1 of an export: generate the export password and derive the seal key
+        (in a worker thread: scrypt takes a moment and much memory).
 
         The password is returned once (shown in the dialog) and kept nowhere – only
-        the derived key stays in memory until the download (EXPORT_TTL_S). Returns
-        {"token", "password", "files", "downloads", "uploads", "size", "filename"}."""
+        the derived key stays in memory until the download (EXPORT_TTL_S). What can
+        be refused is refused here, where the dialog shows it: the download itself
+        runs through a browser link that cannot show an error. Returns {"token",
+        "password", "files", "downloads", "uploads", "size", "filename", "expires_in"}."""
         if not self.firmware:
             raise ShellyError("The firmware store is empty – nothing to export")
+        if self._free_space() < self.store_size() + SPACE_MARGIN:
+            raise ShellyError("Not enough free disk space for the export")
         password = store_transfer.generate_password()
         salt = secrets.token_bytes(store_transfer.SALT_BYTES)
+        key = await asyncio.to_thread(store_transfer.derive_key, password, salt)
         uploads = sum(1 for m in self.firmware.values() if self._source(m) == SOURCE_UPLOAD)
         self._export = {
             "token": secrets.token_hex(16),
-            "key": store_transfer.derive_key(password, salt),
+            "key": key,
             "salt": salt,
             "created": time.monotonic(),
             "user": user,
@@ -742,6 +753,7 @@ class FirmwareStore(ManagerCore):
             "uploads": uploads,
             "size": self.store_size(),
             "filename": time.strftime("shelly-firmware-store-%Y-%m-%d.zip"),
+            "expires_in": EXPORT_TTL_S,  # seconds the download stays possible
         }
 
     async def build_export(self, token: object, app_version: str) -> tuple[Path, str]:
@@ -876,6 +888,7 @@ class FirmwareStore(ManagerCore):
             staged["checked"] = checked
             staged["created"] = time.monotonic()  # the confirmation gets the full time
         groups = self._classify(checked["entries"])
+
         def brief(e: dict[str, Any], note: str = "") -> dict[str, Any]:
             """Summary row of an entry."""
             return {"type": e["type"], "version": e["version"], "gen": e["gen"], "source": e["source"], "note": note}
@@ -892,65 +905,70 @@ class FirmwareStore(ManagerCore):
     async def confirm_import(self, token: object, user: str = "unknown") -> dict[str, int]:
         """Step 3: store the new files of the checked import, add missing data to
         already stored ones, keep conflicting stored files. Refused during a check
-        (the store must not change then). Answers an open first-start question."""
+        (the store must not change then); while it runs no check can start. Answers
+        an open first-start question."""
         if self.checking or self.device_checks:
             raise ShellyError("Not possible during a check – please try again afterwards")
         if self._import_lock.locked():
             raise ShellyError("Another import is in progress – please wait")
         async with self._import_lock:
-            staged = self._staged_import(token)
-            checked = staged.get("checked")
-            if not checked:
-                raise ShellyError("The file has not been checked yet")
-            groups = self._classify(checked["entries"])
-            # The sizes are sealed; a compressed archive can unpack to more than its size
-            if self._free_space() < sum(e["size"] for e in groups["new"]) + SPACE_MARGIN:
-                raise ShellyError("Not enough free disk space for the files of this import")
-            stored = 0
-            for entry in groups["new"]:
-                name = f"{entry['sha256']}{entry['ext']}"
-                part = data_paths.FW_DIR / f"{PART_PREFIX}import-file-{secrets.token_hex(6)}"
-                try:
-                    await asyncio.to_thread(
-                        store_transfer.extract_entry, staged["path"], checked["prefix"], entry, part
+            self._import_storing = True  # no check may start while the store changes (reserve_check)
+            try:
+                staged = self._staged_import(token)
+                checked = staged.get("checked")
+                if not checked:
+                    raise ShellyError("The file has not been checked yet")
+                groups = self._classify(checked["entries"])
+                # The sizes are sealed; a compressed archive can unpack to more than its size
+                if self._free_space() < sum(e["size"] for e in groups["new"]) + SPACE_MARGIN:
+                    raise ShellyError("Not enough free disk space for the files of this import")
+                stored = 0
+                for entry in groups["new"]:
+                    name = f"{entry['sha256']}{entry['ext']}"
+                    part = data_paths.FW_DIR / f"{PART_PREFIX}import-file-{secrets.token_hex(6)}"
+                    try:
+                        await asyncio.to_thread(
+                            store_transfer.extract_entry, staged["path"], checked["prefix"], entry, part
+                        )
+                        part.replace(data_paths.FW_DIR / name)  # same directory: atomic
+                    except BaseException:
+                        part.unlink(missing_ok=True)
+                        self.save()
+                        raise
+                    self._register_firmware(
+                        name, entry["type"], entry["gen"], entry["version"], entry["sha256"], entry["size"],
+                        https=entry.get("https"), source=entry["source"], sha_checked=entry.get("sha_checked"),
                     )
-                    part.replace(data_paths.FW_DIR / name)  # same directory: atomic
-                except BaseException:
-                    part.unlink(missing_ok=True)
-                    self.save()
-                    raise
-                self._register_firmware(
-                    name, entry["type"], entry["gen"], entry["version"], entry["sha256"], entry["size"],
-                    https=entry.get("https"), source=entry["source"], sha_checked=entry.get("sha_checked"),
-                )
-                meta = self.firmware[name]
-                if entry["downloaded"]:
-                    meta["downloaded"] = entry["downloaded"]  # original date of the download / upload
-                if entry.get("intermediate"):
-                    meta["intermediate"] = True
-                if "changelog" in entry:
-                    meta["changelog"] = entry["changelog"]
-                stored += 1
-            merged = 0
-            for entry in groups["same"]:
-                known = self._by_sha(entry["sha256"])
-                if known is None or not self._merge_note(entry):
-                    continue
-                meta = known
-                if entry["source"] == SOURCE_DOWNLOAD and self._source(meta) == SOURCE_UPLOAD:
-                    meta.update(source=SOURCE_DOWNLOAD, https=entry.get("https"))
-                    meta.pop("sha_checked", None)
+                    meta = self.firmware[name]
                     if entry["downloaded"]:
-                        meta["downloaded"] = entry["downloaded"]
-                if "changelog" in entry and "changelog" not in meta:
-                    meta["changelog"] = entry["changelog"]
-                if entry.get("intermediate"):
-                    meta["intermediate"] = True
-                merged += 1
-            self._drop_import()
-            if self.first_start_open:
-                self.first_start_open = False
-                self.schedule_changed.set()
+                        meta["downloaded"] = entry["downloaded"]  # original date of the download / upload
+                    if entry.get("intermediate"):
+                        meta["intermediate"] = True
+                    if "changelog" in entry:
+                        meta["changelog"] = entry["changelog"]
+                    stored += 1
+                merged = 0
+                for entry in groups["same"]:
+                    known = self._by_sha(entry["sha256"])
+                    if known is None or not self._merge_note(entry):
+                        continue
+                    meta = known
+                    if entry["source"] == SOURCE_DOWNLOAD and self._source(meta) == SOURCE_UPLOAD:
+                        meta.update(source=SOURCE_DOWNLOAD, https=entry.get("https"))
+                        meta.pop("sha_checked", None)
+                        if entry["downloaded"]:
+                            meta["downloaded"] = entry["downloaded"]
+                    if "changelog" in entry and "changelog" not in meta:
+                        meta["changelog"] = entry["changelog"]
+                    if entry.get("intermediate"):
+                        meta["intermediate"] = True
+                    merged += 1
+                self._drop_import()
+                if self.first_start_open:
+                    self.first_start_open = False
+                    self.schedule_changed.set()
+            finally:
+                self._import_storing = False
         counts: dict[str, Any] = {
             "stored": stored, "updated": merged, "same": len(groups["same"]), "conflicts": len(groups["conflict"]),
         }
@@ -979,13 +997,15 @@ class FirmwareStore(ManagerCore):
         self.schedule_changed.set()
 
     async def announce_first_start(self) -> None:
-        """One HA notification while the first-start question is open (sent once)."""
+        """One HA notification while the first-start question is open (sent once; a
+        notification Home Assistant did not accept is tried again at the next start)."""
         if not self.first_start_open or self.first_start_notified:
             return
-        await self.notify(
+        sent = await self.notify(
             "Firmware Manager for Shelly",
             "Import a firmware store or skip it in the app – no check runs until then.",
             "shelly_firmware_manager_first_start",
         )
-        self.first_start_notified = True
-        self.save()
+        if sent:
+            self.first_start_notified = True
+            self.save()

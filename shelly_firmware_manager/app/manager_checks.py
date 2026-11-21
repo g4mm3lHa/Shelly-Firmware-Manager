@@ -45,6 +45,7 @@ from manager_core import (
     STATUS_UNREGISTERED,
     holds_file,
     severity_of,
+    unexpected_text,
 )
 from manager_devices import DeviceSettings
 
@@ -334,6 +335,12 @@ class Checks(DeviceSettings):
                 dev.update(status=STATUS_ASLEEP, message=ASLEEP_MESSAGE.format(error=text), error_level="warning")
             else:
                 dev.update(status=STATUS_ERROR, message=text, error_level=severity_of(err))
+            return False
+        except Exception as err:
+            # Anything else (e.g. an answer of an unexpected shape) stays an error of
+            # this device: the other devices of the check are not affected
+            log.exception("%s: unexpected error during the check", dev["name"])
+            dev.update(status=STATUS_ERROR, message=unexpected_text(err), error_level="error")
             return False
         else:
             dev["last_success"] = dev["last_check"]

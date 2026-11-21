@@ -35,7 +35,10 @@ knows). Only original Shelly firmware is supported for now.
    IP address of Home Assistant with port 8098, e.g. `http://192.168.1.20:8098`.
    Installations are disabled until it is set.
 3. If you use a firewall: allow the Shellys to reach Home Assistant on TCP port 8098.
-4. On a fresh installation the app asks once whether to import a firmware store from
+4. Turn on the **Watchdog** switch on the app page (if it is off): Home Assistant then
+   restarts the app if it stops unexpectedly or no longer accepts connections on port
+   8098 (container health check – nothing is requested or logged).
+5. On a fresh installation the app asks once whether to import a firmware store from
    another Home Assistant instance (see [Moving the firmware store](#moving-the-firmware-store)).
    No check runs until you choose **Import store …** or **Skip**; a notice above the
    tabs and a Home Assistant notification remind you. Updates of the app never ask.
@@ -188,9 +191,10 @@ check. **Check all** runs alone: it cannot start while single checks, installati
 Reload Device Info run, and it blocks all of them while it runs. A scheduled check that
 is due while other work runs is cancelled and logged; the next date counts.
 
-No check runs after an installation. The next stored version – or the offer of the
-Shelly server – is provided when you check the device again (row menu ⋮ → Check for
-updates) or at the next full check.
+No check runs after an installation – except after an intermediate version, which is
+followed by a check of that device at once (see [How a check works](#how-a-check-works)).
+The next stored version – or the offer of the Shelly server – is provided when you check
+the device again (row menu ⋮ → Check for updates) or at the next full check.
 
 ### Downgrade (Gen2+)
 
@@ -237,9 +241,10 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
 
   Uploaded files are marked "Uploaded". A file that a check provided as an
   intermediate version is marked "intermediate" (files provided before this app version
-  are not marked). A version newer than the installed one is
-  provided as update by the next check (see [How a check works](#how-a-check-works)),
-  an older one allows a downgrade. The app cannot verify where an uploaded file comes
+  are not marked). An uploaded version is used when the Shelly update server offers
+  exactly this version, or for a manual installation while the server cannot be
+  reached (see [How a check works](#how-a-check-works)); an older one allows a
+  downgrade. The app cannot verify where an uploaded file comes
   from, and the version is the one you confirmed – only use files you trust.
 
 ### Logs
@@ -365,6 +370,9 @@ Gen2+ firmware is downloaded over HTTPS only.
 | The Shelly reports X instead of the target version Y | Check the device; run "Check for updates" again |
 | Certificate of … is not publicly trusted | See [Certificate pinning](#certificate-pinning) |
 | The Shelly requires a password | Store the device password (see [Device passwords](#device-passwords)) |
+| Device address … is not in a private network | Only devices in `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` or `fc00::/7` (IPv6) are contacted. Give the Shelly an address in one of these networks |
+| Storage error: The state file was unreadable – the backup of the previous save was loaded | The app's state file was damaged (e.g. by a power failure) and the copy of the save before was used. Check the devices again; the message disappears with the next restart |
+| Storage error: The state file was unreadable and no backup could be loaded | The device list starts empty and is filled by the next check. The firmware files are kept on disk but no longer listed; a file is listed again when a check downloads the same version |
 
 An installation interrupted by a restart of the app is shown as "Unconfirmed" – check
 the device and run "Check for updates".
@@ -390,11 +398,13 @@ Only hosts below `shelly.cloud` can be pinned.
 
 The app connects only to:
 
-- **Your Shellys** (private IP addresses from the Home Assistant device registry) – to
-  read their state, change settings you approve and start installations.
+- **Your Shellys** (private IP addresses from the Home Assistant device registry:
+  `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, IPv6 `fc00::/7`) – to read their
+  state, change settings you approve and start installations.
 - **Shelly servers** below `shelly.cloud` – version offers, firmware downloads and the
-  official changelog pages. Only the device type (e.g. `Plus1`) is part of the request;
-  no other information about your devices or Home Assistant is sent.
+  official changelog pages. Only the firmware ID (e.g. `Plus1`) and, for Gen2+ devices,
+  the installed firmware version are part of the request; no other information about
+  your devices or Home Assistant is sent.
 - **Home Assistant** via the Supervisor – device registry, notifications, the app's
   own settings and its slug (for the link to the app page).
 
@@ -428,8 +438,9 @@ server interfaces are not officially guaranteed.
   `http://192.168.178.50:8098` is still set, installations are blocked until you change
   it or confirm it with "This address is correct".
 - **From 3.0.0 or 3.0.1:** nothing to do. From 3.0.0 the activity log is converted once
-  to its new storage format at the first start. Log entries get an internal ID at the
-  first start of 3.1.1 (needed to delete single entries).
+  to its new storage format at the first start. 3.1.1 adds restart monitoring: check
+  that the **Watchdog** switch on the app page is on. Log entries get an internal ID at
+  the first start of 3.1.1 (needed to delete single entries).
 - **From 3.1.1 to 3.2.1:** downgrades are off after the update – switch on **Allow
   downgrades** in the Settings tab if you use them. The sort order and column settings
   of the Devices table start fresh (device name ascending) and are then kept per

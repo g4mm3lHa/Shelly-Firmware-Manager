@@ -196,7 +196,7 @@ function deleteFirmware(f) {
 function openUpload() {
   const title = "Upload firmware", input = el("input"); input.type = "file"; input.accept = ".zip,.bin,.gbl";
   modal(title, [box("label", "field", "Firmware file (.zip, .bin or .gbl, max. 64 MB)", input),
-    el("p", "Only for Gen2+ devices known to this app and stable versions. A version newer than the installed one is provided as update by the next check, an older one allows a downgrade. Use files from a source you trust.", "hint"), el("div", UPLOAD_HINT, "warnbox")],
+    el("p", "Only for Gen2+ devices known to this app and stable versions. An uploaded version is used when the Shelly update server offers exactly this version, or for a manual installation while the server cannot be reached; an older one allows a downgrade. Use files from a source you trust.", "hint"), el("div", UPLOAD_HINT, "warnbox")],
   [{text: "Cancel"}, {text: "Upload", kind: "primary", action: async () => {
     const file = input.files && input.files[0];
     if (!file) { message(title, "No file selected.", "error", "upload"); return; }

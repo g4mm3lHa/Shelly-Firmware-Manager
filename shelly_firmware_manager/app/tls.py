@@ -27,7 +27,7 @@ PIN_HOST_RE = re.compile(r"^([a-z0-9-]+\.)*shelly\.cloud$")
 
 def is_shelly_host(host: str | None) -> bool:
     """Only hosts below shelly.cloud may be pinned."""
-    return bool(PIN_HOST_RE.match((host or "").lower()))
+    return bool(PIN_HOST_RE.fullmatch((host or "").lower()))
 
 
 def format_fingerprint(digest: bytes) -> str:

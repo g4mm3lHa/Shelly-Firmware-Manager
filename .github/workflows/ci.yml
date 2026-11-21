@@ -14,15 +14,14 @@ jobs:
     name: Lint, build check and tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      # Actions are pinned to a commit (the comment names its release); the check tools
+      # to the versions the checks were last run with. Update both on purpose only.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
       - name: Install the check tools
-        run: pip install ruff mypy pytest
+        run: pip install ruff==0.16.9 mypy==2.3.1 pytest==9.1.1
       - name: Run tools/dev/check.sh
         run: tools/dev/check.sh
 
@@ -30,8 +29,8 @@ jobs:
     name: App definition linter
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Lint config.yaml and the app folder
-        uses: frenck/action-addon-linter@v2
+        uses: frenck/action-addon-linter@d51677290aef26cdfc835271dd3c7343ce502809 # v2.21.2
         with:
           path: ./shelly_firmware_manager

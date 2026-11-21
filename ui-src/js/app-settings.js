@@ -198,6 +198,7 @@ const EXPORT_TITLE = "Export firmware store", IMPORT_TITLE = "Import firmware st
 async function exportDialog() {
   let x;
   try { x = await api("api/firmware/export", {}); } catch (e) { message(EXPORT_TITLE, e.message, "error", "exportIcon"); return; }
+  const prepared = Date.now();
   const out = el("input"); out.type = "text"; out.readOnly = true; out.value = x.password; out.className = "mono";
   out.setAttribute("aria-label", "Export password");
   // Not copyable (browser refuses both ways): the password is selected for a manual copy
@@ -210,6 +211,9 @@ async function exportDialog() {
     el("p", "The password seals the file: the import checks that no file and no entry was changed. It is not stored anywhere – the file cannot be imported without it.", "hint"),
     box("label", "check", ack, " I have saved the password")],
   [{text: "Cancel"}, {text: "Export", kind: "primary", action: () => {
+    // The server refuses the download of an expired export; a download through a link
+    // cannot show that answer, so the dialog checks the time itself
+    if (Date.now() - prepared > x.expires_in * 1000) { message(EXPORT_TITLE, "Export expired – please start it again.", "error", "exportIcon"); return; }
     // Download through a link: the file is streamed to disk by the browser, never held in memory
     const a = el("a"); a.href = `api/firmware/export/${encodeURIComponent(x.token)}`; a.download = x.filename;
     document.body.append(a); a.click(); a.remove();

@@ -5,7 +5,7 @@
 <title>Shelly Firmware</title><link rel="stylesheet" href="static/style.css?v=__ASSET_VERSION__"></head>
 <body>
 <header class="titlebar">
-<div><h1>Shelly Firmware Manager</h1><div class="meta" id="meta"></div><div class="meta busy" id="busy"></div></div>
+<div><h1>Firmware Manager for Shelly</h1><div class="meta" id="meta"></div><div class="meta busy" id="busy"></div></div>
 <button id="scan" class="primary">Check now</button>
 </header>
 <!-- Progress of a running check (full or single device), filled by app.js -->
@@ -37,7 +37,7 @@
 <div id="fw-sort"></div>
 <div class="chips" id="fw-chips"></div></div>
 <div class="tb-extra"><span class="meta" id="fw-summary"></span>
-<button class="icon" id="fw-info" aria-label="Storage" data-tip="Firmware is never deleted automatically – delete files here when they are no longer needed. Older versions allow a downgrade of Gen2+ devices (device menu “Downgrade” or the downgrade icon of a version) once “Allow downgrades” is switched on in Settings. The store comes first: a check provides the next higher stored version of a device (downloads and uploads, after a SHA-256 check) and asks the Shelly update server only if nothing newer is stored."></button>
+<button class="icon" id="fw-info" aria-label="Storage" data-tip="Firmware is never deleted automatically – delete files here when they are no longer needed. Older versions allow a downgrade of Gen2+ devices (device menu “Downgrade” or the downgrade icon of a version) once “Allow downgrades” is switched on in Settings. Gen2+: the Shelly update server decides which version is next; a stored file of that version (download or upload, after a SHA-256 check) is used instead of a download. Gen1: the store comes first."></button>
 <button id="fw-upload" aria-label="Upload firmware"><span>Upload firmware</span></button></div>
 </div>
 <div id="fw-cards"></div>

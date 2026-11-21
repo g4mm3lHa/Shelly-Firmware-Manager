@@ -17,7 +17,7 @@ from shelly import UNSUPPORTED, AuthError, DeviceAuth, ShellyError, clip, error_
 
 from manager_core import (
     ACTIVITY_CHECKING, ACTIVITY_DOWNLOADING, ACTIVITY_RELOADING, Device, STATUS_AVAILABLE, STATUS_CURRENT,
-    STATUS_INSTALLING, STATUS_READY, STATUS_UNCLEAR, severity_of,
+    STATUS_INSTALLING, STATUS_READY, STATUS_UNCLEAR, severity_of, unexpected_text,
 )
 from manager_store import FirmwareStore
 
@@ -57,6 +57,11 @@ class DeviceSettings(FirmwareStore):
             log.warning("%s: reading settings failed: %s", dev.get("name"), err)
             message = error_text(err, 300) or type(err).__name__
             dev["settings_error"] = {"message": message, "severity": severity_of(err)}
+            return False
+        except Exception as err:
+            # An answer of an unexpected shape: the values stay unknown as well
+            log.exception("%s: unexpected error while reading the settings", dev.get("name"))
+            dev["settings_error"] = {"message": unexpected_text(err), "severity": "error"}
             return False
         dev.pop("settings_error", None)
         return True
@@ -115,6 +120,8 @@ class DeviceSettings(FirmwareStore):
                     reached = False
                 if reached:
                     dev.update(status=STATUS_CURRENT, file=None, sha256=None, message="Known offer installed")
+                    for marker in ("install_failed", "store_fallback", "step_target"):
+                        dev.pop(marker, None)  # they belong to the offer that is installed now
             dev["info_refreshed"] = int(time.time())
         except (TimeoutError, aiohttp.ClientError, KeyError, ValueError, OSError) as err:
             raise ShellyError(f"Device not reachable: {error_text(err, 200) or type(err).__name__}") from None
@@ -380,6 +387,11 @@ class DeviceSettings(FirmwareStore):
                 except (TimeoutError, ShellyError, aiohttp.ClientError, ValueError, KeyError) as err:
                     message = error_text(err, 300) or type(err).__name__
                     return {"id": device_id, "name": name, "result": "error", "action": single, "message": message}
+                except Exception as err:
+                    # An error no code path expects stays the result of this device
+                    log.exception("%s: unexpected error while setting the password", name)
+                    message = unexpected_text(err)
+                    return {"id": device_id, "name": name, "result": "error", "action": single, "message": message}
                 return {"id": device_id, "name": name, "result": "ok", "action": single, "message": ""}
 
         results = await asyncio.gather(*(one(i) for i in ids))
@@ -442,10 +454,18 @@ class DeviceSettings(FirmwareStore):
             raise ShellyError(self._unverified("Password protection was not confirmed as removed", answer))
         if protected is True and new is not None and await self._auth_works(dev, new):
             # Replaces (or, if not kept, deletes) the old credential only now
-            if keep:
-                self.credentials.store(device_id, new)
-            else:
-                self.credentials.remove(device_id)
+            try:
+                if keep:
+                    self.credentials.store(device_id, new)
+                else:
+                    self.credentials.remove(device_id)
+            except ShellyError as err:
+                # The device has the new password, only the file could not be written
+                raise ShellyError(
+                    f"The device confirmed the new password, but this app could not save the change: {err}. "
+                    "It applies only until the app restarts – solve the storage problem, then check the "
+                    "stored password of this device"
+                ) from None
             return {"protected": True}
         if mode == "change" and await self._auth_works(dev, current):
             raise ShellyError(
