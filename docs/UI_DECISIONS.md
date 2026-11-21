@@ -253,7 +253,7 @@ not part of this file.
   "This address is correct") and installations stay disabled. A stored address with odd
   characters or a bad host name shows the same notice with the message "Installations are
   disabled: the download base URL is not a valid address (http(s)://host:port, letters,
-  digits, dots and hyphens in the host). Correct it in the Settings tab." (rc2, awaits approval).
+  digits, dots and hyphens in the host). Correct it in the Settings tab." (approved).
 - **All other tooltips:** a touch tap shows the tooltip of elements without an own
   action (`attachTip(node, text, true)`: device names, Gen1 version, schedule pill,
   SHA-256, "Uploaded", "intermediate") and the title of a disabled button (pointer events, no click); a
