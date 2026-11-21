@@ -2,7 +2,7 @@
 
 Part of `docs/CODEMAP.md`; read when you change routes in `web_ui.py`.
 
-**HTTP API (`web_ui.py`, Ingress only; writes need `X-CSRF-Token` + JSON ≤ 32 KB; binary bodies only on `BINARY_ROUTES`)**
+**HTTP API (`web_ui.py`, Ingress only; writes need `X-CSRF-Token` + JSON ≤ 32 KB; binary bodies only on `BINARY_ROUTES`; every answer – also refusals of the middleware and the 500 for an unexpected error – carries `SECURITY_HEADERS`)**
 
 | Route | Handler → Manager |
 |---|---|
@@ -23,7 +23,7 @@ Part of `docs/CODEMAP.md`; read when you change routes in `web_ui.py`.
 | `GET /api/firmware` | `firmware_list` (per file `devices`: `id`, `name` of the devices it is provided for; `changelog` flag), `store_size`, `free_space` |
 | `GET /api/firmware/{name}/changelog` | `firmware_changelog` (stored changelog of this file, no request) |
 | `POST /api/firmware/upload` | `stage_upload_part` (octet-stream, ≤ 64 MiB in all, streamed; parts ≤ 8 MiB with `X-Upload-Total`, `X-Upload-Offset`, `X-Upload-Transfer` – `part_headers`) |
-| `POST /api/firmware/export` | `prepare_export` (generated password returned once, token) |
+| `POST /api/firmware/export` | `prepare_export` (generated password returned once, token, `expires_in`; empty store and too little free space refused here) |
 | `GET /api/firmware/export/{token}` | `build_export` → ZIP stream (single use; temporary file deleted after sending) |
 | `POST /api/firmware/import` | `stage_import_part` (octet-stream, ≤ `import_max_mb` in all, parts like the upload) |
 | `POST /api/firmware/import/check` · `/confirm` · `/cancel` | `check_import` (`token`, `password`) · `confirm_import` · `cancel_import` |

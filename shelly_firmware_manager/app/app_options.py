@@ -71,11 +71,15 @@ def _validate(key: str, value: Any) -> Any:
         if not parts or parts.scheme not in ("http", "https") or not parts.hostname or len(value) > 200:
             raise ValueError("download_base_url: http(s)://host:port expected")
         _ = parts.port  # raises ValueError for an invalid port
+        # The file name is appended to this address and the address is shown in the UI
+        # and the log: nothing may follow the path, and it must not carry credentials
+        if parts.username is not None or parts.password is not None or parts.query or parts.fragment:
+            raise ValueError("download_base_url: http(s)://host:port expected, without user name, query or fragment")
         return value
     if key == "gen1_allowed_types":
         if not isinstance(value, list) or len(value) > MAX_LIST:
             raise ValueError("gen1_allowed_types: list expected")
-        if not all(isinstance(t, str) and GEN1_TYPE_RE.match(t) for t in value):
+        if not all(isinstance(t, str) and GEN1_TYPE_RE.fullmatch(t) for t in value):
             raise ValueError("gen1_allowed_types: letters, digits and '-' only (max. 32)")
         return sorted(set(value))
     if key == "pinned_certificates":
@@ -92,7 +96,7 @@ def _validate(key: str, value: Any) -> Any:
             clean.append({"host": host, "sha256": sha})
         return clean
     if key == "check_time":
-        if not isinstance(value, str) or not TIME_RE.match(value):
+        if not isinstance(value, str) or not TIME_RE.fullmatch(value):
             raise ValueError("check_time: time HH:MM (00:00–23:59) expected")
         return value
     raise ValueError(f"Unknown option: {str(key)[:40]}")

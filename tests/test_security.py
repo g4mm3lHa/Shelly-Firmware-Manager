@@ -52,3 +52,47 @@ async def test_download_server_serves_nothing_unprovided(dl, mgr):
     assert (await dl.post("/" + "a" * 64 + ".bin", data=b"x")).status in (405, 413)
     assert mgr.downloads == {}  # nothing recorded for unknown files
 
+
+
+async def test_refusals_carry_the_security_headers(client, mgr):
+    """Answers of the access checks themselves – wrong CSRF token, wrong content
+    type – carry the same headers as every other answer."""
+    wrong_token = await client.post("/api/scan", json={}, headers={"X-CSRF-Token": "0" * 64})
+    wrong_type = await client.post("/api/scan", data="x", headers={"X-CSRF-Token": client.csrf, "Content-Type": "text/plain"})
+    assert (wrong_token.status, wrong_type.status) == (403, 415)
+    for answer in (wrong_token, wrong_type):
+        assert "default-src 'none'" in answer.headers["Content-Security-Policy"]
+        assert answer.headers["X-Content-Type-Options"] == "nosniff" and "Server" not in answer.headers
+
+
+async def test_foreign_address_is_refused_with_the_security_headers(mgr):
+    """A request that does not come from the Ingress proxy gets 403 with the headers."""
+    import web_ui
+
+    async with TestClient(TestServer(web_ui.build_ui_app(mgr, ingress_ip="172.30.32.2"))) as c:
+        answer = await c.get("/")
+        assert answer.status == 403 and "default-src 'none'" in answer.headers["Content-Security-Policy"]
+
+
+async def test_unexpected_error_is_answered_without_details(client, mgr, monkeypatch):
+    """An error no handler expects: 500 with the headers, the error type only – the
+    details go to the app log."""
+    def broken():
+        raise RuntimeError("internal detail")
+
+    monkeypatch.setattr(mgr, "firmware_list", broken)
+    answer = await client.get("/api/firmware")
+    text = await answer.text()
+    assert answer.status == 500 and "RuntimeError" in text and "internal detail" not in text
+    assert "default-src 'none'" in answer.headers["Content-Security-Policy"]
+
+
+async def test_ids_from_the_url_take_no_trailing_line_break(client, mgr, net):
+    """A device ID or file name followed by an encoded line break is unknown."""
+    await mgr.scan()
+    device = next(iter(mgr.devices))
+    name = next(iter(mgr.firmware))
+    assert (await client.get(f"/api/devices/{device}/changelog")).status == 200
+    assert (await client.get(f"/api/devices/{device}%0A/changelog")).status == 404
+    assert (await client.get(f"/api/firmware/{name}/changelog")).status == 200
+    assert (await client.get(f"/api/firmware/{name}%0A/changelog")).status == 404

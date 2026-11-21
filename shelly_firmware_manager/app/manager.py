@@ -93,7 +93,7 @@ class Manager(Installs):
             },
             "scanning": self.checking,
             "progress": dict(self.progress) if self.progress else None,
-            "storage_error": self.storage_error,
+            "storage_error": self.storage_error or self.state_warning,
             "gen1_enabled": self.gen1_enabled,
             "allow_downgrade": self.allow_downgrade,
             "first_start_open": self.first_start_open,  # import question of a fresh installation

@@ -204,6 +204,7 @@ async def mgr(net):
 
     async def notify(*args):
         m.notified.append(args)
+        return True
 
     m.notified = []
     m._registry = registry

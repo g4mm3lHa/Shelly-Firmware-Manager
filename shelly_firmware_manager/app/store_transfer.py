@@ -27,6 +27,7 @@ import hmac
 import json
 import re
 import secrets
+import struct
 import time
 import zipfile
 from pathlib import Path
@@ -47,6 +48,16 @@ SUMS = "SHA256SUMS.txt"
 MAX_MANIFEST = 8 * 1024 * 1024  # bytes; upper limit for the manifest of an import
 
 MAX_ENTRIES = 5000  # upper limit for the entries of one export
+
+# Upper limit for the central directory (the list of entries) of a ZIP that is opened:
+# far above an export with MAX_ENTRIES entries, far below what could exhaust memory
+MAX_DIRECTORY = 2 * 1024 * 1024  # bytes
+
+ZIP_END = b"PK\x05\x06"  # signature of the end record of a ZIP
+
+ZIP64_LOCATOR = b"PK\x06\x07"  # signature that precedes the end record of a ZIP64 archive
+
+ZIP_END_SIZE = 22  # bytes of the end record without its comment (at most 65535 bytes)
 
 SCRYPT = {"n": 2**15, "r": 8, "p": 1}  # scrypt cost; only exactly these values are accepted
 
@@ -78,6 +89,26 @@ def normalize_password(password: object) -> str:
     if not text or len(text) > 128:
         raise TransferError("Enter the export password")
     return text
+
+
+def check_directory(path: Path) -> None:
+    """Refuse a ZIP whose list of entries is larger than MAX_DIRECTORY – before
+    zipfile reads that list into memory (a crafted archive can name millions of
+    entries). ZIP64 archives are refused: their size fields live in another record,
+    and no file handled by this app needs them. Raises TransferError."""
+    with path.open("rb") as handle:
+        size = handle.seek(0, 2)
+        tail = min(size, ZIP_END_SIZE + 65535)
+        handle.seek(size - tail)
+        data = handle.read(tail)
+    pos = data.rfind(ZIP_END)
+    if pos < 0 or len(data) - pos < ZIP_END_SIZE:
+        raise TransferError("The file is no ZIP archive")
+    if data[max(pos - 20, 0) : pos].startswith(ZIP64_LOCATOR):
+        raise TransferError("ZIP64 archives are not supported – pack the file as a normal ZIP")
+    (directory_size,) = struct.unpack_from("<L", data, pos + 12)
+    if directory_size > MAX_DIRECTORY:
+        raise TransferError("The ZIP archive lists too many files")
 
 
 def derive_key(password: str, salt: bytes) -> bytes:
@@ -297,6 +328,7 @@ def read_export(path: Path, password: str) -> dict[str, Any]:
 
     Returns {"exported", "app_version", "prefix", "entries": [cleaned entries]}."""
     try:
+        check_directory(path)
         with zipfile.ZipFile(path) as archive:
             member, prefix = _manifest_member(archive)
             if member.file_size > MAX_MANIFEST:

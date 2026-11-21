@@ -61,6 +61,7 @@ class RejectLog:
                     since = time.strftime("%H:%M", time.localtime(start))
                     log.warning("%d more rejected download request(s) from %s since %s", count, key, since)
 
+
 HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "Cache-Control": "no-store",
@@ -81,7 +82,7 @@ def build_download_app(mgr: Manager) -> web.Application:
         """Serve a provided firmware file to the Shelly it is meant for."""
         name = request.match_info["name"]
         client = request.remote or "?"
-        if not FW_NAME_RE.match(name) or not mgr.may_download(name, client):
+        if not FW_NAME_RE.fullmatch(name) or not mgr.may_download(name, client):
             rejects.rejected(name, client)
             raise web.HTTPNotFound
         path = data_paths.FW_DIR / name

@@ -854,3 +854,38 @@ async def test_download_must_match_the_sha256_of_its_url(monkeypatch, tmp_path):
     with pytest.raises(ShellyError, match="does not match the SHA-256"):
         await shelly.download_firmware(None, f"https://fwcdn.shelly.cloud/Plus1/{bad}", tmp_path)
     assert sorted(p.name for p in tmp_path.iterdir()) == [name]  # nothing else stored, no temp file
+
+
+# ---------------------------------------------------------------- Unexpected errors stay with their device
+
+
+async def test_unexpected_error_of_one_device_does_not_stop_the_check(mgr, net, monkeypatch):
+    """A device whose answer no code path expects is an error of this device only:
+    the other devices of the full check get their result."""
+    real = shelly.device_info
+
+    async def device_info(session, origin, *args, **kwargs):
+        if origin == "http://192.168.1.11":  # Hall
+            raise AttributeError("'str' object has no attribute 'get'")
+        return await real(session, origin, *args, **kwargs)
+
+    monkeypatch.setattr(shelly, "device_info", device_info)
+    assert await mgr.scan(user="u")
+    assert mgr.devices[A]["status"] == manager_core.STATUS_READY
+    assert mgr.devices[C]["status"] == manager_core.STATUS_READY
+    hall = mgr.devices[B]
+    assert hall["status"] == manager_core.STATUS_ERROR and hall["error_level"] == "error"
+    assert "Unexpected error (AttributeError" in hall["message"] and "last_success" not in hall
+    [check] = [e for e in mgr.events.entries if e["kind"] == "check"]
+    assert check["devices"] == 3 and "TaskGroup" not in str(check)
+    assert mgr.progress is None and mgr.activity == {} and not mgr.checking
+
+
+async def test_unexpected_error_while_reading_settings_keeps_the_firmware_check(mgr, net):
+    """Settings of an unexpected shape: the values are marked unknown, the firmware
+    check of the device still completes."""
+    net.settings_error = TypeError("can only concatenate list (not \"dict\") to list")
+    assert await mgr.scan()
+    dev = mgr.devices[A]
+    assert dev["status"] == manager_core.STATUS_READY
+    assert dev["settings_error"]["severity"] == "error" and "TypeError" in dev["settings_error"]["message"]

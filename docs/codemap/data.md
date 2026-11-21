@@ -6,7 +6,7 @@ Part of `docs/CODEMAP.md`; read when you change stored fields or files below `/d
 
 | File | Content |
 |---|---|
-| `state.json` | `{devices, last_scan, firmware, schedule, download_base_confirmed, first_start_open, first_start_notified}` (`ui`/`ui_version` of versions before 3.3.0 are ignored and dropped at the next save) |
+| `state.json` | `{devices, last_scan, firmware, schedule, download_base_confirmed, first_start_open, first_start_notified, keep_unknown_files}` (`ui`/`ui_version` of versions before 3.3.0 are ignored and dropped at the next save); written with fsync. `state.bak` = the save before the last one (loaded when `state.json` is missing or unreadable), `state.damaged` = an unreadable state file set aside at start. `keep_unknown_files`: no readable state was found once – files the registry does not know are never removed |
 | `firmware/` | `<sha256>.<zip\|bin\|gbl>`; temporary `.part-*` (downloads, staged uploads, staged store imports and exports; removed at start) |
 | `events.json` | activity log, one JSON object per line with `id` (3.0.0: one JSON array, converted once; IDs added once by 3.1.1) |
 | `credentials.json` | `{device id: {"gen": 1, "password"} \| {"gen": 2, "realm", "ha1"}}` |

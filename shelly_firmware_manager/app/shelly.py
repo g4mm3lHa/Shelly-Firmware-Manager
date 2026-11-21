@@ -142,14 +142,22 @@ def parse_version(text: object) -> tuple[int, int, int, int, int]:
 # --------------------------------------------------------------------------- Devices
 
 
-def is_lan_address(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    """True for addresses of a private network (no loopback, link-local, multicast …).
+# Networks a Shelly may be in: the private IPv4 ranges (RFC 1918) and the unique local
+# IPv6 addresses (RFC 4193). A fixed list on purpose: the result does not depend on what
+# the Python version in use counts as "private". Everything else is refused – loopback,
+# link-local, carrier-grade NAT, multicast, public addresses, and IPv4 addresses written
+# as IPv6 (::ffff:a.b.c.d).
+LAN_NETWORKS: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("fc00::/7"),
+)
 
-    is_private alone is not enough: Python also counts loopback/link-local as private.
-    """
-    return ip.is_private and not (
-        ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified or ip.is_reserved
-    )
+
+def is_lan_address(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """True only for an address inside one of LAN_NETWORKS."""
+    return any(ip in network for network in LAN_NETWORKS)
 
 
 async def resolve_device_origin(configuration_url: str | None) -> str:
@@ -765,12 +773,12 @@ def validate_settings(changes: dict[str, Any], outputs: list[dict[str, Any]]) ->
     clean: dict[str, Any] = {}
     if "name" in changes:
         name = changes["name"]
-        if not isinstance(name, str) or not NAME_RE.match(name):
+        if not isinstance(name, str) or not NAME_RE.fullmatch(name):
             raise ValueError("Invalid name (max. 64 printable characters)")
         clean["name"] = name.strip()
     if "ntp" in changes:
         ntp = changes["ntp"]
-        if not isinstance(ntp, str) or not NTP_RE.match(ntp.strip()):
+        if not isinstance(ntp, str) or not NTP_RE.fullmatch(ntp.strip()):
             raise ValueError("Invalid NTP server (host name or IP address, optional :port)")
         clean["ntp"] = ntp.strip()
     for key, label in (
@@ -862,7 +870,7 @@ async def protection_status(session: aiohttp.ClientSession, origin: str) -> bool
     """Password protection as reported by /shelly (no authentication needed):
     True/False, None if the device does not report it."""
     info = await _device_json(session, origin, "/shelly")
-    value = info.get("auth_en" if int(info.get("gen") or 1) >= 2 else "auth")
+    value = info.get("auth_en" if _int_field(info, "gen", 1) >= 2 else "auth")
     return value if isinstance(value, bool) else None
 
 
@@ -1110,7 +1118,7 @@ async def _store(
 
 def file_sha256(target_dir: Path, name: str) -> str:
     """Checksum of a stored file; rejects foreign file names."""
-    if not FW_NAME_RE.match(name or ""):
+    if not FW_NAME_RE.fullmatch(name or ""):
         raise ShellyError("Invalid firmware file name")
     digest = hashlib.sha256()
     with (target_dir / name).open("rb") as handle:

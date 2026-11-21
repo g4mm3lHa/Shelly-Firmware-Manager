@@ -89,6 +89,12 @@ not part of this file.
   inside the version tile (`data-label`).
 - "Upload firmware" button: upload icon of its dialog title after the text (16 px,
   `aria-hidden`, vertically centred).
+- **Check rule in the texts (2026-11-21):** the tooltip of the info icon and the hint
+  of the upload dialog name the rule as it is: Gen2+ – the Shelly update server decides
+  which version is next, a stored file of that version (download or upload) is used
+  instead of a download; Gen1 – the store comes first. An upload is used when the
+  server offers exactly this version, or for a manual installation while the server
+  cannot be reached; an older one allows a downgrade.
 - Delete dialog: both steps with red button; the note that a file may not be
   restorable is a red warning box (`warnbox danger`, text in the normal colour).
 - **Filter chips (3.5.0):** All, Provided (provided to a device), Uploaded,
@@ -163,6 +169,8 @@ not part of this file.
   chooser) is not shown.
 - Card heads (device groups, firmware IDs, settings cards) in Title Case and the same
   weight (600).
+- App title (H1, 2026-11-21): "Firmware Manager for Shelly"; the sidebar entry
+  (`panel_title`) stays "Shelly Firmware".
 - Phones, title bar (H1): inside HA the app title is hidden; the pills "Last checked …"
   and "Every n days · HH:MM" stacked on the left (ellipsis if too long), "Check now"
   right, vertically centred, never wraps.
@@ -176,7 +184,10 @@ not part of this file.
   name), the generated password in a read-only field with copy icon (shown only here;
   if the browser refuses copying, the field's text is selected),
   hint that it seals and is stored nowhere, checkbox "I have saved the password";
-  "Export" is enabled only after it and starts the browser download.
+  "Export" is enabled only after it and starts the browser download. A prepared export
+  that is older than its download period is refused in the dialog ("Export expired –
+  please start it again.", 2026-11-21); too little free disk space is reported when the
+  dialog opens.
 - **Import (8c A):** step 1 file + password + "Check file" (the hint names the maximum
   import size). Step 2: success icon, value list (file, exported, size), section
   "Result" with counts new / already stored – data added if missing / conflict – stored
