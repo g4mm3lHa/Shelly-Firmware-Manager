@@ -4,7 +4,9 @@
 # the image exists before a version becomes visible in the app store. An image that
 # already exists for the version is kept when the app content is identical (the same
 # version arrives again via beta or main); different content fails the run - bump the
-# version instead. "Run workflow" with "force" replaces an existing image on purpose.
+# version instead. A branch other than main that still carries the version of main is
+# work in progress before the version bump and builds nothing. "Run workflow" with
+# "force" replaces an existing image on purpose.
 name: Images
 
 on:
@@ -59,19 +61,30 @@ jobs:
           # Hash of everything the Dockerfile copies into the image (not docs, config or UI sources)
           content=$(git ls-tree HEAD shelly_firmware_manager/Dockerfile shelly_firmware_manager/requirements.txt \
             shelly_firmware_manager/wheels shelly_firmware_manager/app | sha256sum | cut -d' ' -f1)
+          # Development on a branch before its version bump: the version is still the one of main
+          git fetch --quiet --depth=1 origin main
+          released=$(git show origin/main:shelly_firmware_manager/config.yaml \
+            | sed -n 's/^version: *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p')
+          if [ "${GITHUB_REF_NAME}" != "main" ] && [ "$version" = "$released" ] && [ "${{ inputs.force }}" != "true" ]; then
+            echo "Version $version is the one of main - waiting for the version bump, nothing to build."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "content=$content" >> "$GITHUB_OUTPUT"
           echo "image=ghcr.io/$account/${{ matrix.arch }}-shelly-firmware-manager" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        if: steps.meta.outputs.skip != 'true'
 
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        if: steps.meta.outputs.skip != 'true'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check for an existing image of this version
+        if: steps.meta.outputs.skip != 'true'
         id: existing
         env:
           IMAGE: ${{ steps.meta.outputs.image }}
@@ -116,6 +129,7 @@ jobs:
 
       # Home Assistant pulls without credentials: the package must be public
       - name: Check anonymous access
+        if: steps.meta.outputs.skip != 'true'
         env:
           IMAGE: ${{ steps.meta.outputs.image }}
           VERSION: ${{ steps.meta.outputs.version }}
