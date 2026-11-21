@@ -81,13 +81,25 @@ def asset_version() -> str:
     return digest.hexdigest()[:16]
 
 
+# Red "(beta)" next to the app title (phones inside Home Assistant: above the header
+# pills) for a pre-release version only; a final version never shows it
+BETA_MARK = '<sup class="beta">(beta)</sup>'
+
+
+def is_beta(app_version: str) -> bool:
+    """True for a pre-release version (X.Y.Z with a suffix, e.g. "3.8.0-rc1" of the beta
+    channel); False for a final version X.Y.Z."""
+    return "-" in app_version
+
+
 def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: str = "") -> web.Application:
     """aiohttp application with the UI page, static files and the JSON API
-    (app_version: written into store exports)."""
+    (app_version: written into store exports; a pre-release shows the beta mark)."""
     csrf_token = secrets.token_hex(32)  # new on every app start
     version = asset_version()
     index_html = (
         (STATIC_DIR / "index.html").read_text().replace("__CSRF__", csrf_token).replace("__ASSET_VERSION__", version)
+        .replace("__BETA__", BETA_MARK if is_beta(app_version) else "")
     )
     tasks: set[asyncio.Task[Any]] = set()  # keep references so tasks are not garbage collected
 

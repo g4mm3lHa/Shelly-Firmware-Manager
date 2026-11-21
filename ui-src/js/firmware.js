@@ -1,7 +1,7 @@
 // Firmware tab: stored files, changelog, Install button per device, delete and upload.
 import {
-  $, api, attachTip, box, closeModal, collator, copyText, el, fmt, icon, iconButton, keptDetails, loadLocal, mb, message,
-  modal, saveLocal, searchTool, section, shaRow, sortControl, toast, ui, uploadFile, valueList,
+  $, api, attachTip, box, closeModal, collator, copyText, el, filterControl, fmt, icon, iconButton, keptDetails, loadLocal, mb,
+  message, modal, saveLocal, searchTool, section, shaRow, sortControl, toast, ui, uploadFile, valueList,
 } from "./core.js";
 import {installable, installBlocker} from "./devices.js";
 import {changelogNodes, DOWNGRADE_OFF, DOWNGRADE_WARNING, downgradeConfirm, fwSource, openInstall, UPLOAD_HINT} from "./install.js";
@@ -33,8 +33,8 @@ function compareCards([ta, fa], [tb, fb]) {
 }
 
 // ---------------------------------------------------------------- Filters
-// Filter chips over the stored files (counts respect the search); a card shows only its
-// matching versions. "Unused": no device of the list has the firmware ID of the file –
+// Filter (popover of the toolbar) over the stored files (counts respect the search); a
+// card shows only its matching versions. "Unused": no device of the list has the firmware ID of the file –
 // while a device was never reached (firmware ID unknown, e.g. a sleeping battery
 // device) nothing counts as unused, since that device may need any of the files.
 /** Devices of the list whose firmware ID is not known yet. */
@@ -43,6 +43,14 @@ const unused = f => !(ui.state?.devices || []).some(d => !d.type || d.type === f
 const FW_FILTERS = {all: ["All", () => true], provided: ["Provided", f => f.devices.length > 0],
   uploaded: ["Uploaded", f => f.source === "upload"], intermediate: ["Intermediate", f => !!f.intermediate],
   gen1: ["Gen1", f => f.gen === 1], unused: ["Unused", unused]};
+/** Tooltip of "Unused" while the firmware ID of a device is not known yet (else none). */
+function unusedTip() {
+  const open = unidentified().length;
+  return open ? `Firmware ID of ${open} device${open === 1 ? "" : "s"} not known yet (never reached) – no file counts as unused until ${open === 1 ? "it is" : "they are"} checked once` : null;
+}
+const fwFilter = filterControl(Object.entries(FW_FILTERS).map(([key, [label]]) => [key, label, key === "unused" ? unusedTip : null]),
+  key => { ui.fwFilter = key; render(true); });
+$("fw-filter").replaceWith(fwFilter.node);
 
 // ---------------------------------------------------------------- Firmware
 /** Free disk space for the summary: MB, from 1024 MB on in GB (one decimal). */
@@ -50,17 +58,14 @@ const freeText = bytes => bytes >= 1024 * 1048576 ? `${(bytes / 1073741824).toFi
 /** Firmware tab: one card per firmware ID, versions as rows, newest first. */
 export function renderFirmware() {
   const q = $("fw-search").value.trim().toLowerCase();
-  const found = ui.firmware.filter(f => !q || [f.type, f.version, ...f.devices.map(d => d.name)].some(v => String(v || "").toLowerCase().includes(q)));
-  $("fw-chips").replaceChildren(...Object.entries(FW_FILTERS).map(([key, [label, fn]]) => {
-    const b = el("button", label, "chip" + (ui.fwFilter === key ? " active" : ""));
-    b.append(el("span", found.filter(fn).length, "count")); b.onclick = () => { ui.fwFilter = key; render(true); };
-    const open = key === "unused" ? unidentified().length : 0;
-    if (open) b.title = `Firmware ID of ${open} device${open === 1 ? "" : "s"} not known yet (never reached) – no file counts as unused until ${open === 1 ? "it is" : "they are"} checked once`;
-    return b;
-  }));
+  // Files in the firmware folder the store does not list (marker unknown): own card, only under "All"
+  const stored = ui.firmware.filter(f => !f.unknown), unknown = ui.firmware.filter(f => f.unknown && (!q || f.name.toLowerCase().includes(q)));
+  const found = stored.filter(f => !q || [f.type, f.version, ...f.devices.map(d => d.name)].some(v => String(v || "").toLowerCase().includes(q)));
+  fwFilter.set(ui.fwFilter, Object.fromEntries(Object.entries(FW_FILTERS).map(([key, [, fn]]) => [key, found.filter(fn).length])));
   const list = found.filter(FW_FILTERS[ui.fwFilter][1]);
   const total = ui.firmwareTotal, free = ui.firmwareFree;
-  $("fw-summary").textContent = `${ui.firmware.length} file${ui.firmware.length === 1 ? "" : "s"} · ${mb(total)} stored` +
+  // Files of the store (unknown files are listed in their own card, not counted here)
+  $("fw-summary").textContent = `${stored.length} file${stored.length === 1 ? "" : "s"} · ${mb(total)} stored` +
     (typeof free === "number" ? ` · ${freeText(free)}` : "");
   const groups = new Map();
   for (const f of list) { if (!groups.has(f.type)) groups.set(f.type, []); groups.get(f.type).push(f); }
@@ -73,8 +78,31 @@ export function renderFirmware() {
     files.forEach((f, i) => card.append(firmwareRow(f, i === 0, i > 0 && f.gen >= 2)));
     return card;
   });
+  if (unknown.length && ui.fwFilter === "all") cards.push(unknownCard(unknown));
   if (!cards.length) cards.push(box("div", "card", el("div", ui.firmware.length ? "No firmware matches." : "No firmware stored.", "empty")));
   $("fw-cards").replaceChildren(...cards);
+}
+/** Card of the unknown files: file name, size and a delete icon each. */
+function unknownCard(files) {
+  const head = box("div", "card-head", el("h2", `Unknown Files · ${files.length}`),
+    el("span", "In the firmware folder, not part of the store – delete them when they are not needed", "sub"));
+  return box("div", "card", head, ...files.map(f => {
+    const del = iconButton("delete", f.deletable ? "Delete" : (f.locked || "Locked"), () => deleteUnknown(f), "red");
+    del.disabled = !f.deletable; del.setAttribute("aria-label", f.deletable ? `Delete ${f.name}` : (f.locked || "Locked"));
+    return box("div", "unk-row", el("span", f.name, "mono unk-name"), el("span", mb(f.size || 0), "nowrap unk-size"), box("div", "actions", del));
+  }));
+}
+/** Delete an unknown file after a confirmation with acknowledgment. */
+function deleteUnknown(f) {
+  const title = "Delete unknown file?", ack = el("input"); ack.type = "checkbox";
+  modal(title, [valueList([["File", f.name], ["Size", mb(f.size || 0)]]),
+    el("div", "The file is not part of the firmware store; it is deleted for good.", "warnbox danger"),
+    box("label", "check", ack, " I understand that this file cannot be restored by the app")],
+  [{text: "Cancel"}, {text: "Delete", kind: "danger", action: async () => {
+    try { await api(`api/firmware/${encodeURIComponent(f.name)}/delete`, {confirm: true, acknowledged: ack.checked}); closeModal(); }
+    catch (e) { message(title, e.message, "error", "delete"); }
+  }}], "delete");
+  const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; };
 }
 /** Column titles over the version rows (wide screens; phones label the values in the tile). */
 const FW_COLUMNS = ["Version", "Size", "Stored", "SHA-256", "Devices", ""];

@@ -1,6 +1,7 @@
 // Logs tab: activity log with filters, grouping per device and deleting entries.
 import {
-  $, api, box, closeModal, el, fmt, iconButton, keptDetails, mb, message, modal, openDetails, pad, searchTool, ui, valueList,
+  $, api, box, closeModal, el, filterControl, fmt, iconButton, keptDetails, mb, message, modal, openDetails, pad, searchTool, ui,
+  valueList,
 } from "./core.js";
 import {OFFER_SOURCES} from "./install.js";
 import {OPTION_FIELDS} from "./app-settings.js";
@@ -13,8 +14,16 @@ const SEVERITY_LABELS = {success: "Success", warning: "Warning", error: "Error"}
 const LOG_FILTERS = {all: ["All", () => true], checks: ["Checks", e => e.kind === "check"],
   installs: ["Installations", e => e.kind === "install"], settings: ["Settings", e => ["setting", "password", "options"].includes(e.kind)],
   warnings: ["Warnings", e => severity(e) === "warning"], errors: ["Errors", e => severity(e) === "error"]};
+const logFilter = filterControl(Object.entries(LOG_FILTERS).map(([key, [label]]) => [key, label]),
+  key => { ui.logFilter = key; render(true); });
+$("log-filter").replaceWith(logFilter.node);
 const KIND_LABELS = {check: "Check", download: "Download", upload: "Upload", install: "Installation", delete: "Deleted", setting: "Setting",
-  password: "Password", options: "App settings", log: "Log", export: "Store export", import: "Store import", setup: "First start"};
+  password: "Password", options: "App settings", log: "Log", export: "Store export", import: "Store import", setup: "First start",
+  store: "Firmware store", device: "Device"};
+/** Firmware files read back from the disk after the store lost its list (kind "store"). */
+const adoptedCount = e => (e.adopted || []).length;
+const adoptedLine = e => `${adoptedCount(e)} file${adoptedCount(e) === 1 ? "" : "s"} read from the disk – they could have been changed` +
+  (e.unknown ? ` · ${e.unknown} unknown file${e.unknown === 1 ? "" : "s"} (Firmware tab)` : "");
 // Successful actions, failed actions are logged with the mode; older entries: set/removed/test_failed
 const PASSWORD_ACTIONS = {stored: "password stored", enabled: "password protection enabled", changed: "password changed",
   removed: "password protection removed", forgotten: "stored password forgotten",
@@ -48,6 +57,7 @@ function logContent(e) {
       return [box("div", null, `${e.device}: ${e.downgrade ? "downgrade" : "installation"} ${INSTALL_EVENTS[e.event] || e.event} · ${arrow(e.old, e.new)} `,
         e.unverified ? el("span", "Not verified by the update server", "tag warn") : null), e.detail ? el("div", e.detail, "sub") : null].filter(Boolean);
     case "delete":
+      if (e.unknown) return [el("div", `Unknown file deleted · ${mb(e.size || 0)} · SHA ${(e.sha256 || "").slice(0, 12)}…`)];
       return [el("div", `Firmware deleted: ${e.type} ${e.version}${e.source === "upload" ? " (uploaded)" : ""}`),
         e.released?.length ? el("div", `No longer provided for: ${e.released.join(", ")}`, "sub") : null].filter(Boolean);
     case "upload":
@@ -71,6 +81,11 @@ function logContent(e) {
     }
     case "setup":
       return [el("div", "First start: firmware store import skipped")];
+    case "store":   // the list of the store was lost: files taken over from the disk
+      return [el("div", `Firmware store list was lost: ${adoptedLine(e)}`),
+        ...(e.adopted || []).map(f => el("div", `${f.type} ${f.version} · SHA ${(f.sha256 || "").slice(0, 12)}…`, "sub"))];
+    case "device":
+      return [el("div", `${e.device}: removed from the list`)];
     case "log":
       return [el("div", `Log cleared · ${e.entries ?? 0} entr${e.entries === 1 ? "y" : "ies"} deleted`)];
     default:
@@ -101,7 +116,7 @@ function logSummary(e) {
       return [first, counts];
     }
     case "download": return [`${e.type} ${e.version}`];
-    case "delete": return [`${e.type} ${e.version}`];
+    case "delete": return [e.unknown ? "Unknown file" : `${e.type} ${e.version}`];
     case "upload": return [`${e.type} ${e.version}`];
     case "install": return [`${e.device}: ${e.downgrade ? "downgrade " : ""}${INSTALL_EVENTS[e.event] || e.event}`];
     case "setting": return [e.device];
@@ -111,6 +126,8 @@ function logSummary(e) {
     case "export": return [`${e.files ?? 0} file${e.files === 1 ? "" : "s"} exported`];
     case "import": return [`${e.stored ?? 0} new · ${e.conflicts ?? 0} conflict${e.conflicts === 1 ? "" : "s"}`];
     case "setup": return ["Import skipped"];
+    case "store": return [`${adoptedCount(e)} read from the disk${e.unknown ? ` · ${e.unknown} unknown` : ""}`];
+    case "device": return [`${e.device}: removed from the list`];
     default: return [e.kind];
   }
 }
@@ -162,16 +179,12 @@ function logTile(e, d, group) {
   det.append(sum, body);
   return box("div", "log-m" + (group ? ` grp grp-${group}` : ""), head, det);
 }
-/** Logs tab: grouped by day, filters, device search, quiet checks. */
+/** Logs tab: grouped by day, filter, device search, quiet checks. */
 export function renderLogs() {
   const q = $("log-search").value.trim().toLowerCase(), quiet = $("log-quiet").checked;
   const devMatch = e => !q || [e.device, ...(e.findings || []).map(f => f.device), ...(e.ignored || [])].some(v => String(v || "").toLowerCase().includes(q));
   const base = ui.logs.filter(e => devMatch(e) && !(quiet && e.kind === "check" && !(e.findings || []).length));
-  $("log-chips").replaceChildren(...Object.entries(LOG_FILTERS).map(([key, [label, fn]]) => {
-    const b = el("button", label, "chip" + (ui.logFilter === key ? " active" : ""));
-    b.append(el("span", base.filter(fn).length, "count")); b.onclick = () => { ui.logFilter = key; render(true); };
-    return b;
-  }));
+  logFilter.set(ui.logFilter, Object.fromEntries(Object.entries(LOG_FILTERS).map(([key, [, fn]]) => [key, base.filter(fn).length])));
   const out = [], shown = base.filter(LOG_FILTERS[ui.logFilter][1]);
   const dayOf = e => { const d = new Date(e.ts * 1000); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
   // Directly consecutive entries of the same device on the same day form a group

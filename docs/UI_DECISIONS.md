@@ -7,7 +7,7 @@ store, downloads) are not part of these files.
 
 | Part | Content | Read when you change |
 |---|---|---|
-| `docs/ui/devices.md` | Devices table, filter chips, sorting, battery devices, action icons, device settings dialog, phone tiles | Devices tab, `devices.js`, `device-settings.js` |
-| `docs/ui/firmware.md` | Firmware tab: cards, filters, sorting, upload, downgrade icon | Firmware tab, `firmware.js` |
+| `docs/ui/devices.md` | Devices table, sections, filter, removed devices, no usable address, Other Shellys, host name column, sorting, battery devices, action icons, device settings dialog, phone tiles | Devices tab, `devices.js`, `device-settings.js` |
+| `docs/ui/firmware.md` | Firmware tab: cards, filter, unknown files, sorting, upload, downgrade icon | Firmware tab, `firmware.js` |
 | `docs/ui/settings.md` | Settings cards, changelog hint, firmware store export/import, device passwords for several devices, setting help and download base URL hints | Settings tab, `app-settings.js` |
-| `docs/ui/common.md` | Dialogs (title icons, message dialogs, password dialog, row menu), toolbar and card heads, tooltips on touch | any dialog, toolbar, tooltips, `core.js`, `main.js` |
+| `docs/ui/common.md` | Dialogs (title icons, message dialogs, password dialog, row menu), toolbar (search, sort, filter popovers) and card heads, beta mark, tooltips on touch | any dialog, toolbar, tooltips, `core.js`, `main.js` |

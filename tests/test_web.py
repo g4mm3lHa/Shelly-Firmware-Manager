@@ -115,6 +115,21 @@ async def test_shutdown_cancels_running_check(mgr, net):
     assert mgr.activity == {} and mgr.progress is None and not mgr.checking
 
 
+async def test_beta_mark_only_in_pre_releases(mgr):
+    """The red "(beta)" next to the title: shown for an RC, never for a final version
+    (an empty version, e.g. tests and demos, counts as final)."""
+
+    async def page(version):
+        async with TestClient(TestServer(web_ui.build_ui_app(mgr, ingress_ip="127.0.0.1", app_version=version))) as c:
+            return await (await c.get("/")).text()
+
+    assert web_ui.BETA_MARK in await page("3.8.0-rc1")
+    for final in ("3.8.0", "10.0.0", ""):
+        html = await page(final)
+        assert "(beta)" not in html and "__BETA__" not in html
+    assert not web_ui.is_beta("3.8.0") and web_ui.is_beta("3.8.0-rc2")
+
+
 async def test_state_etag_304(client, mgr):
     """Unchanged state: 304 without body; changed state: new ETag and full body."""
     await mgr.scan()

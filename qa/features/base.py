@@ -95,3 +95,19 @@ def dialog(f):
 def tip_text(f):
     """Text of the shown tooltip, None if hidden."""
     return f.evaluate("() => { const t = document.getElementById('tip'); return t.hidden ? null : t.textContent; }")
+
+
+def filter_entries(f, view):
+    """Entries of the filter popover of a tab (devices, firmware, logs) without opening
+    it: [(label, count, checked)]."""
+    return f.evaluate("""view => [...document.querySelectorAll(`#view-${view} .filter-item`)].map(b =>
+      [b.firstChild.textContent, b.lastChild.textContent, b.getAttribute('aria-checked') === 'true'])""", view)
+
+
+def pick_filter(f, view, label):
+    """Choose a filter in the popover of a tab (opens it, clicks the entry, closes it)."""
+    tool = f.locator(f'#view-{view} .tool-btn[aria-label^="Filter"]')
+    if not f.locator(f"#view-{view} .tool.open .filter-item").count():
+        tool.click()
+    f.locator(f"#view-{view} .filter-item", has=f.locator(f'span:text-is("{label}")')).click()
+    tool.click()   # a second click on the icon closes the popover

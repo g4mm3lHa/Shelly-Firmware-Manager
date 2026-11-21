@@ -27,11 +27,18 @@ as the UI change). Read when you change the Firmware tab.
   cannot be reached; an older one allows a downgrade.
 - Delete dialog: both steps with red button; the note that a file may not be
   restorable is a red warning box (`warnbox danger`, text in the normal colour).
-- **Filter chips (3.5.0):** All, Provided (provided to a device), Uploaded,
+- **Filter (3.5.0, popover since 3.8.0, mockup `3.8.0/06`):** All, Provided (provided to a device), Uploaded,
   Intermediate, Gen1, Unused (no device of the list has the firmware ID; while a
-  device's firmware ID is unknown – never reached – nothing is unused and the chip's
+  device's firmware ID is unknown – never reached – nothing is unused and the entry's
   tooltip names the number of these devices, 2026-11-19); counts respect the search; a card shows only its matching versions. Summary "n files · x MB stored · y
-  free" (free disk space of the store volume; MB, from 1024 MB on GB).
+  free" (files of the store only; free disk space of the store volume; MB, from 1024 MB
+  on GB).
+- **Unknown files (3.8.0):** files in the firmware folder the store does not list: last
+  card "Unknown Files · n" with the hint "In the firmware folder, not part of the store –
+  delete them when they are not needed"; per file name (monospace), size and a red
+  delete icon (disabled with the reason during a check); delete dialog "Delete unknown
+  file?" with a red box and the acknowledgment checkbox before "Delete". Shown under
+  "All" only (search by file name).
 - **Sorting (2026-11-19):** the same sort tool as in the Devices tab sorts the cards: Firmware ID, Newest version, Size (all versions), Stored (latest);
   the column titles Version, Size and Stored sort the cards too (coupled, arrow at the
   same column in every card); versions inside a card stay newest first. Kept per

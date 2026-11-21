@@ -128,6 +128,10 @@ const ICONS = {
   // Toolbar tools: search (magnify) and sort (lines of falling length); sort directions
   search: "M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.44,13.73L14.71,14H15.5L20.5,19L19,20.5L14,15.5V14.71L13.73,14.44C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5C7,5 5,7 5,9.5C5,12 7,14 9.5,14C12,14 14,12 14,9.5C14,7 12,5 9.5,5Z",
   sort: "M3,13H15V11H3M3,6V8H21V6M3,18H9V16H3V18Z",
+  // Filter tool of the toolbars (MDI "filter-variant")
+  filter: "M6,13H18V11H6M3,6V8H21V6M10,18H14V16H10V18Z",
+  // Device without usable address (MDI "alert", warning triangle)
+  warn: "M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z",
   up: "M13,20H11V8L5.5,13.5L4.08,12.08L12,4.16L19.92,12.08L18.5,13.5L13,8V20Z",
   down: "M11,4H13V16L18.5,10.5L19.92,11.92L12,19.84L4.08,11.92L5.5,10.5L11,16V4Z",
   // Message dialogs: success check and warning exclamation mark (errors use "close")
@@ -177,7 +181,7 @@ export function saveLocal(key, value) {
   try { localStorage.setItem(`shelly-firmware-manager:${key}`, JSON.stringify(value)); } catch (e) { /* page only */ }
 }
 // ---- Toolbar tools
-// Search and sort are small round icons at the start of a toolbar; a click opens a
+// Search, sort and filter are small round icons at the start of a toolbar; a click opens a
 // popover below the icon (phones: full width below the first toolbar row). Only one
 // popover is open at a time; a click outside it or Escape closes it.
 /** Close every open toolbar popover. */
@@ -245,6 +249,33 @@ export function sortControl(fields, onChange) {
     t.button.title = text; t.button.setAttribute("aria-label", text);
   };
   set(current);
+  return {node: t.node, set};
+}
+/** Filter tool of a toolbar: popover "Filter" with one entry per filter (label, count
+ *  right, check mark at the chosen one, optional tooltip on hover/focus) – look and
+ *  behaviour of the sort tool; a dot on the icon while another filter than the first
+ *  ("All") is chosen. items: [[key, label, tip?], …] (tip: function returning the
+ *  text or null); onChange(key) is called on a choice. Returns the node and
+ *  set(key, counts) to show the choice and the counts ({key: number}). */
+export function filterControl(items, onChange) {
+  const buttons = items.map(([key, label, tip]) => {
+    const b = el("button", null, "sort-item filter-item"); b.type = "button"; b.role = "menuitemradio"; b.dataset.value = key;
+    b.append(el("span", label), el("span", null, "count"));
+    if (tip) attachTip(b, tip);
+    b.onclick = () => onChange(key); return b;
+  });
+  const menu = box("div", "sort-menu", el("div", "Filter", "pop-title"), ...buttons);
+  menu.role = "menu";
+  const t = toolButton("filter", "Filter", menu);
+  const set = (current, counts) => {
+    for (const b of buttons) {
+      b.setAttribute("aria-checked", String(b.dataset.value === current));
+      b.lastChild.textContent = String(counts[b.dataset.value] ?? "");
+    }
+    const label = (items.find(i => i[0] === current) || items[0])[1];
+    t.button.classList.toggle("has-value", current !== items[0][0]);
+    t.button.title = `Filter: ${label}`; t.button.setAttribute("aria-label", `Filter: ${label}`);
+  };
   return {node: t.node, set};
 }
 /** <details> whose open state survives re-rendering. */
