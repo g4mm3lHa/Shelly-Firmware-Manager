@@ -20,6 +20,7 @@ def make_manager(net, **options):
     m = manager.Manager({**OPTIONS, **options}, session=None, token="t")
     m.first_start_open = False
     m.notify = lambda *_a: asyncio.sleep(0, True)
+    m._battery_devices = lambda: asyncio.sleep(0, set(net.ha_battery))
     return m
 
 

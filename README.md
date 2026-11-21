@@ -42,7 +42,9 @@ in your network. Nothing is installed without your approval.
 - Home Assistant OS or Home Assistant Supervised (apps need the Supervisor; Home
   Assistant Container and Core cannot run apps), version 2026.10 or newer.
 - A 64-bit system: `aarch64` (e.g. Raspberry Pi 4 or 5) or `amd64`.
-- The Home Assistant Shelly integration – the app works with the devices it knows.
+- The Home Assistant Shelly integration – the app works with the devices it knows: Shellys
+  on Wi-Fi/LAN. Not supported: Shelly BLU, Zigbee, Matter and MQTT-only devices (Gen4
+  with Zigbee/Matter firmware only when also set up in the Shelly integration).
 - The Shellys must reach Home Assistant on TCP port 8098.
 
 Only original Shelly firmware is supported. More limits:

@@ -32,15 +32,15 @@ DEFAULTS = {
     "import_max_mb": 100,
 }
 # All option keys of config.yaml. Anything else in options.json is ignored everywhere,
-# so an unknown (e.g. removed) key can never reach the UI, the log or a save request.
-KEYS = frozenset({*INT_RANGES, *BOOLS, *DEFAULTS, "download_base_url", "gen1_allowed_types", "pinned_certificates"})
+# so an unknown (e.g. removed) key can never reach the UI, the log or a save request –
+# e.g. the removed list of allowed Gen1 types (gen1_allowed_types) of older versions.
+KEYS = frozenset({*INT_RANGES, *BOOLS, *DEFAULTS, "download_base_url", "pinned_certificates"})
 # Former default/example of download_base_url (release candidates of 3.0.0). The option
 # is optional without default; this value only counts after an explicit confirmation.
 LEGACY_DOWNLOAD_BASE = "http://192.168.178.50:8098"
 OPTIONAL = ("download_base_url",)  # options that can be removed (empty input)
 # allow_downgrade has no default either: missing = off (also for existing installations)
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
-GEN1_TYPE_RE = re.compile(r"^[A-Za-z0-9-]{1,32}$")
 MAX_LIST = 100
 # Host written as numbers only, in any form an address parser may accept (decimal, octal or
 # hex parts, e.g. 2130706433 or 0x7f.1): it is an IP address in disguise, never a host name
@@ -138,12 +138,6 @@ def _validate(key: str, value: Any) -> Any:
         if problem:
             raise ValueError(problem)
         return value
-    if key == "gen1_allowed_types":
-        if not isinstance(value, list) or len(value) > MAX_LIST:
-            raise ValueError("gen1_allowed_types: list expected")
-        if not all(isinstance(t, str) and GEN1_TYPE_RE.fullmatch(t) for t in value):
-            raise ValueError("gen1_allowed_types: letters, digits and '-' only (max. 32)")
-        return sorted(set(value))
     if key == "pinned_certificates":
         if not isinstance(value, list) or len(value) > MAX_LIST:
             raise ValueError("pinned_certificates: list expected")

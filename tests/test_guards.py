@@ -10,11 +10,13 @@ import hashlib
 import io
 import ipaddress
 import json
+import socket
 import zipfile
 from pathlib import Path
 
 import aiohttp
 import app_options
+import manager
 import pytest
 import shelly
 import store_transfer
@@ -265,7 +267,7 @@ def test_file_names_and_options_take_no_trailing_line_break(tmp_path):
     assert shelly.file_sha256(tmp_path, name) == hashlib.sha256(b"x").hexdigest()
     with pytest.raises(ShellyError):
         shelly.file_sha256(tmp_path, name + "\n")
-    for changes in ({"check_time": "02:45\n"}, {"gen1_allowed_types": ["SHSW-1\n"]}):
+    for changes in ({"check_time": "02:45\n"}, {"download_base_url": "http://192.168.1.2:8098\n"}):
         with pytest.raises(ValueError):
             app_options.merge(OPTIONS, changes)
 
@@ -347,3 +349,59 @@ def test_zip_directory_limit(tmp_path, monkeypatch):
         path.write_bytes(content)
         with pytest.raises(TransferError, match="no ZIP"):
             store_transfer.check_directory(path)
+
+
+async def test_device_address_problems_have_a_reason(monkeypatch):
+    """No usable address in the registry: AddressError with the reason (missing, a
+    host name that does not resolve, an address outside the private networks)."""
+    for url in (None, "", "https://192.168.1.5/", "http://user:pw@192.168.1.5/", "http://[::1"):
+        with pytest.raises(shelly.AddressError) as err:
+            await shelly.resolve_device_origin(url)
+        assert err.value.reason == shelly.ADDRESS_MISSING
+    with pytest.raises(shelly.AddressError) as err:
+        await shelly.resolve_device_origin("http://8.8.8.8/")
+    assert err.value.reason == shelly.ADDRESS_NOT_PRIVATE
+    loop = asyncio.get_running_loop()
+
+    async def unresolved(*_args, **_kwargs):
+        raise socket.gaierror(-2, "Name or service not known")
+
+    monkeypatch.setattr(loop, "getaddrinfo", unresolved)
+    with pytest.raises(shelly.AddressError) as err:
+        await shelly.resolve_device_origin("http://garage.local/")
+    assert err.value.reason == shelly.ADDRESS_UNRESOLVED and "garage.local" in str(err.value)
+
+
+def test_host_name_of_the_registry_entry():
+    """Host name column: the host name of configuration_url, never an IP address."""
+    assert shelly.host_name_of("http://shellyplus1-abc.local/") == "shellyplus1-abc.local"
+    assert shelly.host_name_of("http://192.168.1.5:8080/") is None
+    assert shelly.host_name_of("http://[fd00::5]/") is None
+    assert shelly.host_name_of(None) is None and shelly.host_name_of("http://[::1") is None
+
+
+async def test_battery_sensors_of_the_entity_registry(net):
+    """Battery hint of HA: sensor entities of the Shelly integration whose unique ID ends
+    in -battery (Gen1 device_0, Gen2+ devicepower:0); a failed request gives no hint."""
+    m = manager.Manager(dict(OPTIONS), session=None, token="t")
+    entities = [
+        {"platform": "shelly", "entity_id": "sensor.ht_battery", "unique_id": "AABB-devicepower:0-battery", "device_id": "d1"},
+        {"platform": "shelly", "entity_id": "sensor.dw_battery", "unique_id": "AABB-device_0-battery", "device_id": "d2"},
+        {"platform": "shelly", "entity_id": "binary_sensor.x_battery", "unique_id": "C-x-battery", "device_id": "d3"},
+        {"platform": "shelly", "entity_id": "sensor.trv_battery", "unique_id": "C-blutrv:200-blutrv_battery", "device_id": "d4"},
+        {"platform": "zha", "entity_id": "sensor.z_battery", "unique_id": "z-battery", "device_id": "d5"},
+        {"platform": "shelly", "entity_id": "sensor.y_battery", "unique_id": "y-battery", "device_id": None},
+    ]
+
+    async def answer(request):
+        assert request == "config/entity_registry/list"
+        return entities
+
+    m._ha_list = answer
+    assert await m._battery_devices() == {"d1", "d2"}
+
+    async def failing(_request):
+        raise ShellyError("no connection")
+
+    m._ha_list = failing
+    assert await m._battery_devices() == set()

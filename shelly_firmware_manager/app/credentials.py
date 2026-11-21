@@ -90,6 +90,14 @@ class Credentials:
         if self.entries.pop(device_id, None) is not None:
             self._save()
 
+    def rename(self, old_id: str, new_id: str) -> None:
+        """Move a stored password to a new HA device ID (the same Shelly was added to
+        Home Assistant again and got a new ID); nothing to do without one."""
+        entry = self.entries.pop(old_id, None)
+        if entry is not None:
+            self.entries[new_id] = entry
+            self._save()
+
     def _save(self) -> None:
         """Write atomically and durably with mode 0600 (created with that mode, never
         wider; fsync before the rename, so a power failure cannot leave an empty file).

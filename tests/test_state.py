@@ -216,7 +216,7 @@ async def test_damaged_state_loads_the_backup_and_keeps_the_store(mgr, net, dama
     data_paths.STATE_FILE.write_text(damage)
     m = manager.Manager(dict(OPTIONS), session=None, token="t")
     assert set(m.devices) == set(mgr.devices) and set(m.firmware) == set(mgr.firmware)
-    assert not m.first_start_open and not m.keep_unknown_files
+    assert not m.first_start_open and not m.unknown_files
     assert "backup of the previous save was loaded" in m.public_state()["storage_error"]
     assert data_paths.STATE_FILE.with_suffix(".damaged").read_text() == damage
     m.cleanup_firmware()
@@ -240,39 +240,45 @@ async def test_missing_state_with_backup_is_no_fresh_installation(mgr, net):
 
 async def test_no_readable_state_never_deletes_firmware(mgr, net):
     """State file and backup unreadable: the app starts without devices, but the
-    firmware files – unknown to the empty registry – are kept, also after restarts."""
+    firmware files – unknown to the empty registry – are kept and listed as unknown
+    files (their content proves no firmware ID here), also after restarts."""
     await mgr.scan()
     mgr.save()
     files = firmware_files()
     data_paths.STATE_FILE.write_text("{ truncated")
     data_paths.STATE_FILE.with_suffix(".bak").write_text("")
     m = manager.Manager(dict(OPTIONS), session=None, token="t")
-    assert m.devices == {} and m.firmware == {} and m.keep_unknown_files and not m.first_start_open
+    await m.adopt_files()
+    assert m.devices == {} and m.firmware == {} and set(m.unknown_files) == set(files) and not m.first_start_open
     assert "no backup could be loaded" in m.public_state()["storage_error"]
     m.cleanup_firmware()
     assert firmware_files() == files
     m._registry, m.notify, m.changelogs.refresh = mgr._registry, mgr.notify, net.refresh
+    m._battery_devices = mgr._battery_devices
     assert await m.scan() is True  # downloads the offered version again: listed once more
-    assert firmware_files() == files and set(m.firmware) == set(files)
+    assert firmware_files() == files and set(m.firmware) == set(files) and not m.unknown_files
     restarted = manager.Manager(dict(OPTIONS), session=None, token="t")
-    assert restarted.keep_unknown_files and restarted.public_state()["storage_error"] is None
+    assert restarted.public_state()["storage_error"] is None
     (data_paths.FW_DIR / ("b" * 64 + ".zip")).write_bytes(b"unlisted")
     restarted.cleanup_firmware()
-    assert ("b" * 64 + ".zip") in firmware_files()
+    assert ("b" * 64 + ".zip") in firmware_files() and ("b" * 64 + ".zip") in restarted.unknown_files
 
 
-async def test_unknown_files_are_removed_only_while_no_download_runs(mgr, net):
-    """Housekeeping: a file the registry does not know is removed – but not while a
-    check downloads, when a finished file may not be registered yet."""
+async def test_unknown_files_are_kept_and_listed_when_no_download_runs(mgr, net):
+    """Housekeeping: a file the registry does not know is never removed; it is listed
+    as unknown file – but not while a check downloads, when a finished file may not be
+    registered yet."""
     await mgr.scan()
     stray = data_paths.FW_DIR / ("c" * 64 + ".zip")
     stray.write_bytes(b"x")
     mgr._downloads_running = 1
     mgr.cleanup_firmware()
-    assert stray.exists()
+    assert stray.exists() and stray.name not in mgr.unknown_files
     mgr._downloads_running = 0
     mgr.cleanup_firmware()
-    assert not stray.exists()
+    assert stray.exists() and mgr.unknown_files == {stray.name: 1}
+    [entry] = [f for f in mgr.firmware_list() if f.get("unknown")]
+    assert entry == {"name": stray.name, "unknown": True, "size": 1, "deletable": True, "locked": None}
 
 
 def test_log_skips_entries_without_a_numeric_time(tmp_path):

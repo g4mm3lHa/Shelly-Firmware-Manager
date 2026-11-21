@@ -17,9 +17,6 @@ configuration:
   gen1_updates_enabled:
     name: Enable Gen1 updates
     description: Gen1 firmware is only available via plain HTTP without a checksum
-  gen1_allowed_types:
-    name: Allowed Gen1 types
-    description: One type per entry, e.g. SHSW-1, SHSW-PM
   allow_downgrade:
     name: Allow downgrades
     description: >-

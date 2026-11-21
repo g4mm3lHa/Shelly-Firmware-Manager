@@ -110,6 +110,14 @@ class FirmwareStore(ManagerCore):
         self.firmware[name] = meta
 
     @staticmethod
+    def _adopted_unconfirmed(meta: FirmwareMeta) -> bool:
+        """True for a Gen2+ file read back from the disk (marker adopted, see
+        adopt_files) that no manufacturer offer has confirmed yet: it is provided only
+        for an offer whose URL names exactly its SHA-256, never as a store fallback or
+        downgrade."""
+        return meta.get("adopted") is True and (meta.get("gen") or 1) >= 2
+
+    @staticmethod
     def _source(meta: FirmwareMeta) -> str:
         """Origin of a store entry; entries without the field (3.0.0 candidates) were downloaded."""
         return SOURCE_UPLOAD if meta.get("source") == SOURCE_UPLOAD else SOURCE_DOWNLOAD
@@ -120,26 +128,100 @@ class FirmwareStore(ManagerCore):
         return {d["file"] for d in self.devices.values() if holds_file(d)}
 
     def cleanup_firmware(self) -> None:
-        """Housekeeping of the store – never deletes a registered firmware.
+        """Housekeeping of the store – never deletes a file.
 
-        Store entries whose file is missing are dropped; files on disk that are not
-        in the store are removed – unless the registry itself was lost
-        (keep_unknown_files, see ManagerCore._load): then every file is kept.
-        Temporary files (running downloads and staged uploads, PART_PREFIX) are left
-        alone: they are removed by their own code path or at the next start."""
+        Store entries whose file is missing are dropped; firmware files on disk that
+        the store does not list are kept and listed as unknown files (see
+        _unknown_on_disk) for a manual deletion in the Firmware tab."""
         self.firmware = {n: m for n, m in self.firmware.items() if (data_paths.FW_DIR / n).is_file()}
         # While a check downloads, a file may already carry its final name without
-        # being registered yet: unknown files are only removed when no download runs
-        keep_unknown = self.keep_unknown_files or self._downloads_running > 0
-        for path in data_paths.FW_DIR.iterdir():
-            if keep_unknown or path.name in self.firmware or path.name.startswith(PART_PREFIX):
-                continue
-            if path.is_file() or path.is_symlink():
-                path.unlink(missing_ok=True)
-                log.info("Removed unknown file %s from the firmware store", path.name)
+        # being registered yet: the unknown files are only listed anew when no download runs
+        if not self._downloads_running:
+            self.unknown_files = self._unknown_on_disk()
         # Download diagnosis only for files currently provided
         in_use = self._in_use()
         self.downloads = {k: v for k, v in self.downloads.items() if k in in_use}
+
+    def _unknown_on_disk(self) -> dict[str, int]:
+        """Firmware files (<sha256>.<ext>, regular files) in the firmware folder that
+        the store does not list: name -> size. Temporary files (PART_PREFIX) and
+        other names are left alone – the app never wrote them under such a name."""
+        unknown: dict[str, int] = {}
+        for path in data_paths.FW_DIR.iterdir():
+            if path.name in self.firmware or not shelly.FW_NAME_RE.fullmatch(path.name):
+                continue
+            with contextlib.suppress(OSError):
+                if path.is_file() and not path.is_symlink():
+                    unknown[path.name] = path.stat().st_size
+        return unknown
+
+    async def adopt_files(self) -> None:
+        """Read firmware files back from the disk that the store does not list (after
+        a lost or older state, e.g. the backup was loaded); runs once at the start.
+
+        A file is taken over only if its content matches: the SHA-256 of the file
+        must equal its name, and the firmware ID and version come from a device that
+        holds exactly this file (state) or from the manifest.json in the archive
+        (Gen2+, stable version, not stored yet). Taken over files carry the marker
+        adopted: a Gen2+ file is provided only once a manufacturer offer names its
+        SHA-256 (see _stored_firmware), never as store fallback or downgrade. All
+        other files stay on disk as unknown files (listed, deleted only manually).
+        One warning in the activity log names the files read from the disk – they
+        could have been changed – and the new unknown files."""
+        reported = set(self.unknown_files)  # unknown at the last run (persisted names)
+        unknown = self._unknown_on_disk()
+        adopted: list[dict[str, Any]] = []
+        for name, size in sorted(unknown.items()):
+            meta = await asyncio.to_thread(self._identify_file, name)
+            if meta is None:
+                continue
+            self._register_firmware(name, meta["type"], meta["gen"], meta["version"], meta["sha256"], size)
+            self.firmware[name].update(adopted=True, https=None)
+            unknown.pop(name)
+            adopted.append({"type": meta["type"], "version": meta["version"], "sha256": meta["sha256"]})
+        self.unknown_files = unknown
+        new_unknown = sorted(set(unknown) - reported)
+        if adopted or new_unknown:
+            log.warning(
+                "Firmware files read from the disk: %d taken over, %d unknown – they could have been changed",
+                len(adopted),
+                len(new_unknown),
+            )
+            self.events.add(
+                "store",
+                severity="warning",
+                action="adopted",
+                adopted=adopted,
+                unknown=len(new_unknown),
+                user="App start",
+            )
+        if adopted or set(unknown) != reported:
+            self.save()
+
+    def _identify_file(self, name: str) -> dict[str, Any] | None:
+        """Firmware ID, generation, version and SHA-256 of an unlisted file, or None
+        if its content does not prove them (runs in a worker thread, see adopt_files)."""
+        path = data_paths.FW_DIR / name
+        try:
+            sha = self._sha256_of(path)
+        except OSError:
+            return None
+        if sha != name.split(".", 1)[0] or self._by_sha(sha):
+            return None  # content does not match the name, or already stored under another name
+        for dev in self.devices.values():
+            version = dev.get("pending_version")
+            if dev.get("file") == name and dev.get("sha256") == sha and dev.get("type") and isinstance(version, str):
+                return {"type": dev["type"], "gen": int(dev.get("gen") or 1), "version": version, "sha256": sha}
+        if not name.endswith(".zip"):
+            return None
+        found = self._read_manifest(path)
+        fw_type, version = found.get("type"), found.get("version")
+        if not fw_type or not version or not STABLE_VERSION_RE.fullmatch(version):
+            return None
+        if any(m.get("type") == fw_type and m.get("version") == version for m in self.firmware.values()):
+            return None
+        gens = [int(d.get("gen") or 2) for d in self.devices.values() if d.get("type") == fw_type]
+        return {"type": fw_type, "gen": max(max(gens, default=2), 2), "version": version, "sha256": sha}
 
     @staticmethod
     def _file_matches(name: str, sha: object) -> bool:
@@ -167,21 +249,28 @@ class FirmwareStore(ManagerCore):
         return False
 
     async def _stored_firmware(
-        self, fw_type: str, version: str, uploads: bool = False
+        self, fw_type: str, version: str, uploads: bool = False, offered_sha: str | None = None
     ) -> tuple[str, FirmwareMeta] | None:
         """Stored firmware for exactly this ID and version offered by the manufacturer's
         server – after checksum verification. Downloads only, with uploads=True an
-        uploaded file too (a download of the same version is preferred)."""
+        uploaded file too (a download of the same version is preferred).
+        offered_sha: SHA-256 named by the offer URL; an unverified file read back from
+        the disk (see _adopted_unconfirmed) is used only with exactly this SHA-256 – it
+        then counts as a verified download (marker adopted removed)."""
         matches = [
             (name, meta)
             for name, meta in list(self.firmware.items())
             if meta.get("type") == fw_type
             and meta.get("version") == version
             and (uploads or self._source(meta) == SOURCE_DOWNLOAD)
+            and (not self._adopted_unconfirmed(meta) or (offered_sha is not None and meta.get("sha256") == offered_sha))
         ]
         matches.sort(key=lambda item: self._source(item[1]) != SOURCE_DOWNLOAD)  # downloads first
         for name, meta in matches:
             if await self._intact(name, meta):
+                if self._adopted_unconfirmed(meta):
+                    meta.pop("adopted", None)
+                    meta["https"] = True  # the SHA-256 came over TLS with the offer
                 return name, meta
         return None
 
@@ -201,6 +290,8 @@ class FirmwareStore(ManagerCore):
         for name, meta in self.firmware.items():
             if meta.get("type") != info["type"] or ((meta.get("gen") or 1) >= 2) != (info["gen"] >= 2):
                 continue
+            if self._adopted_unconfirmed(meta):
+                continue  # Gen2+ file read back from the disk: only for a matching offer
             try:
                 parsed = shelly.parse_version(meta.get("version"))
             except ShellyError:
@@ -249,7 +340,8 @@ class FirmwareStore(ManagerCore):
         return sorted(released, key=str.lower)
 
     def firmware_list(self) -> list[dict[str, Any]]:
-        """Stored firmwares for the "Firmware" tab."""
+        """Stored firmwares for the "Firmware" tab, followed by the unknown files
+        (marker unknown: only name, size and whether it can be deleted now)."""
         users: dict[str, list[dict[str, str]]] = {}  # file name -> devices it is provided for
         for device_id, dev in self.devices.items():
             if holds_file(dev):
@@ -271,9 +363,15 @@ class FirmwareStore(ManagerCore):
                     "devices": holders,
                     "changelog": "changelog" in meta,  # flag only; text: firmware_changelog
                     "intermediate": meta.get("intermediate") is True,  # once provided as an intermediate version
+                    "adopted": meta.get("adopted") is True,  # read back from the disk, see adopt_files
                     "deletable": lock is None,
                     "locked": lock,
                 }
+            )
+        unknown_lock = "Locked during a check" if self.checking else None
+        for name, size in sorted(self.unknown_files.items()):
+            result.append(
+                {"name": name, "unknown": True, "size": size, "deletable": unknown_lock is None, "locked": unknown_lock}
             )
         return result
 
@@ -301,7 +399,11 @@ class FirmwareStore(ManagerCore):
         Refused during a check and for a file that is being installed. A file that
         is only provided to devices can be deleted: they lose the provided update
         (see _release_file; named in the log entry). Devices that may later need the
-        version download it again at a check."""
+        version download it again at a check. An unknown file (see unknown_files)
+        is deleted the same way, refused only during the full check."""
+        if name in self.unknown_files and name not in self.firmware:
+            self._delete_unknown(name, user, confirm, acknowledged)
+            return
         if name not in self.firmware:
             raise KeyError(name)
         lock = self._delete_lock(name)
@@ -326,6 +428,18 @@ class FirmwareStore(ManagerCore):
         )
         self.save()
 
+    def _delete_unknown(self, name: str, user: str, confirm: object, acknowledged: object) -> None:
+        """Delete an unknown file of the firmware folder (see delete_firmware)."""
+        if self.checking:
+            raise ShellyError("Firmware cannot be deleted during a check")
+        if confirm is not True or acknowledged is not True:
+            raise ValueError("Deletion not confirmed")
+        (data_paths.FW_DIR / name).unlink(missing_ok=True)
+        size = self.unknown_files.pop(name, 0)
+        log.info("Unknown file %s deleted by %s", name, user)
+        self.events.add("delete", unknown=True, sha256=name.split(".", 1)[0], size=size, user=user)
+        self.save()
+
     # ------------------------------------------------------------------------------------------- Downgrade
 
     def downgrade_versions(self, device_id: str) -> list[dict[str, Any]]:
@@ -343,7 +457,7 @@ class FirmwareStore(ManagerCore):
             return []
         best: dict[str, tuple[str, FirmwareMeta]] = {}  # version -> (name, meta)
         for name, meta in self.firmware.items():
-            if meta.get("type") != dev["type"] or (meta.get("gen") or 1) < 2:
+            if meta.get("type") != dev["type"] or (meta.get("gen") or 1) < 2 or self._adopted_unconfirmed(meta):
                 continue
             version = str(meta.get("version") or "")
             try:
@@ -375,7 +489,7 @@ class FirmwareStore(ManagerCore):
         without one request per device (same rules as downgrade_versions)."""
         stored: dict[str, set[tuple[int, ...]]] = {}
         for name, meta in self.firmware.items():
-            if (meta.get("gen") or 1) < 2:
+            if (meta.get("gen") or 1) < 2 or self._adopted_unconfirmed(meta):
                 continue
             try:
                 parsed = shelly.parse_version(meta.get("version"))

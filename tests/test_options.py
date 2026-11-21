@@ -224,7 +224,4 @@ def test_app_configuration_matches_settings_tab():
     for key, name, desc in fields:
         tname, tdesc = texts[key]
         assert tname == name, key
-        if key == "gen1_allowed_types":
-            assert tdesc == "One type per entry, e.g. SHSW-1, SHSW-PM"
-        else:
-            assert tdesc == desc, key
+        assert tdesc == desc, key

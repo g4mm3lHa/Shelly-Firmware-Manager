@@ -6,7 +6,7 @@ Part of `docs/CODEMAP.md`; read when you change stored fields or files below `/d
 
 | File | Content |
 |---|---|
-| `state.json` | `{devices, last_scan, firmware, schedule, download_base_confirmed, first_start_open, first_start_notified, keep_unknown_files}` (`ui`/`ui_version` of versions before 3.3.0 are ignored and dropped at the next save); written with fsync. `state.bak` = the save before the last one (loaded when `state.json` is missing or unreadable), `state.damaged` = an unreadable state file set aside at start. `keep_unknown_files`: no readable state was found once – files the registry does not know are never removed |
+| `state.json` | `{devices, last_scan, firmware, schedule, download_base_confirmed, first_start_open, first_start_notified, unknown_files, others}` (`ui`/`ui_version` of versions before 3.3.0 and `keep_unknown_files` are ignored and dropped at the next save); written with fsync. `state.bak` = the save before the last one (loaded when `state.json` is missing or unreadable), `state.damaged` = an unreadable state file set aside at start. `unknown_files`: names of firmware files the store does not list (never deleted automatically; reported in the log once); `others`: read-only list of other Shellys `{id, name, kind, model, firmware, gateway}` (`manager_checks.other_shellys`) |
 | `firmware/` | `<sha256>.<zip\|bin\|gbl>`; temporary `.part-*` (downloads, staged uploads, staged store imports and exports; removed at start) |
 | `events.json` | activity log, one JSON object per line with `id` (3.0.0: one JSON array, converted once; IDs added once by 3.1.1) |
 | `credentials.json` | `{device id: {"gen": 1, "password"} \| {"gen": 2, "realm", "ha1"}}` |
@@ -15,14 +15,14 @@ Part of `docs/CODEMAP.md`; read when you change stored fields or files below `/d
 Device entry (`state.devices[<HA device id>]`): identity `name`, `shelly_name`,
 `gen`, `type` (firmware ID / app), `model`, `mac`, `shelly_id` (Gen2+ realm),
 `origin` (`http://<private ip>:<port>`), `version`, `build`; check `status`
-(`up-to-date|available|ready|installing|unconfirmed|error|asleep|unregistered|skipped`),
+(`up-to-date|available|ready|installing|unconfirmed|error|asleep|unregistered|skipped`; `unregistered` only from older versions, shown as not checked),
 `message`, `error_level`, `last_check`, `last_success`, `last_update`,
 `info_refreshed`, `offer_version`, `notified_version`; provided update `file`,
 `sha256`, `size`, `pending_version`, `pending_build`, `source_url`, `offer_source`
 (`manufacturer|store|upload`); settings `ntp`,
 `eco`, `ap`, `ble`, `debug_ws` (websocket debug log, Gen1 unsupported), `outputs`, `actions`, `schedules`, `auth_enabled`,
 `battery` (sleeping battery device, read from the device while awake: Gen2+ `wakeup_period` > 0 in `Sys.GetStatus` (checks and reloads) or the sys config, Gen1
-`sleep_mode.period` > 0; kept while the device does not answer), `settings_error`; flags `ignored`; runtime only (not trusted after a restart)
+`sleep_mode.period` > 0; kept while the device does not answer; without a value of the device a Shelly battery sensor in HA sets it), `battery_source` (`device|home_assistant`), `settings_error`; registry `host_name` (host name of `configuration_url`, None for an IP address), `address_issue` (`{reason: missing|unresolved|not_private, message}` while the registry gives no usable address); removed `removed` (time it left the registry; Ignored mark dropped), `removed_reachable` (answered at its last address at the last check); flags `ignored`; runtime only (not trusted after a restart)
 `ota_progress`, `ota_phase` ("restarting"), `downgrade`; `updated` (confirmed or unconfirmed installation, until the next full
 check or single check of the device), `install_failed` (failed installation, not a downgrade: file stays
 provided for a retry, same lifetime as `updated`), `store_fallback` (Gen2+: server not reachable,
@@ -35,4 +35,6 @@ Firmware entry (`state.firmware[<file name>]`): `type`, `gen`, `version`, `sha25
 `size`, `downloaded`, `https` (downloads), `source` (`download|upload`),
 `sha_checked` (uploads), `changelog` (`{"date", "entries"}` of this version, set once
 the changelog page lists it; never requested again), `intermediate` (true once a check
-provided the file as an intermediate version; never set for older files).
+provided the file as an intermediate version; never set for older files), `adopted` (read back from the
+disk at the start; Gen2+: removed once an offer URL names its SHA-256 – until then not provided, no store
+fallback or downgrade).

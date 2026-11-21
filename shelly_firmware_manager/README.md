@@ -17,8 +17,10 @@ Nothing is installed without your approval.
   device passwords can be stored or set on several devices in one step.
 
 Requires Home Assistant 2026.10 or newer and the Home Assistant Shelly integration (the
-app works with the devices it knows). The Shellys must reach Home Assistant on TCP port
-8098. Only original Shelly firmware is supported.
+app works with the devices it knows: Shellys on Wi-Fi/LAN; not Shelly BLU, Zigbee, Matter
+or MQTT-only devices – Gen4 with Zigbee/Matter firmware only when also set up in the
+Shelly integration). The Shellys must reach Home Assistant on TCP port 8098. Only original
+Shelly firmware is supported.
 
 After the installation set the **download base URL** in the app's Settings tab (LAN IP
 address of Home Assistant and port 8098) – see "Quick start" in the Documentation tab.

@@ -56,6 +56,12 @@ Assistant). Version history: `CHANGELOG.md` (Changelog tab).
   the Supervisor; Home Assistant Container and Core cannot run them.
 - A 64-bit system: `aarch64` or `amd64`.
 - The Home Assistant Shelly integration. The app works with the devices it knows.
+  Supported are Shellys that connect over Wi-Fi/LAN and are set up in this integration.
+  Not supported: Shelly BLU (Bluetooth, updated in the Shelly app), Zigbee (Zigbee OTA via
+  ZHA or Zigbee2MQTT), Matter (Home Assistant Matter server) and devices connected only
+  through MQTT. Gen4 devices with Zigbee or Matter firmware keep Wi-Fi and are supported
+  when they are also set up in the Shelly integration. The app lists the unsupported
+  Shellys it finds in Home Assistant under **Other Shellys**, for information only.
 - The Shellys must reach Home Assistant on TCP port 8098.
 - Home Assistant must reach the Shelly servers below `shelly.cloud` (see
   [Privacy and network connections](#privacy-and-network-connections)). The Shellys
@@ -74,8 +80,7 @@ the app page – same names, help texts and order). Saving restarts the app.
 | Check time | 02:45 | HH:MM | Time of day of the automatic check (Home Assistant time zone) |
 | Download base URL for the Shellys | – | rules below | LAN IP of Home Assistant + port 8098, e.g. `http://192.168.1.20:8098`. Required for installations |
 | Serve downloads only to known Shellys | on | on / off | Firmware is only served to the device it is meant for. Switch off if downloads are rejected from a 172.30.x.x address |
-| Enable Gen1 updates | on | on / off | Gen1 support (see [Gen1 firmware](#gen1-firmware)) |
-| Allowed Gen1 types | SHSW-1, SHSW-PM, SHSW-25, SHPLG-S, SHEM | type names | The Gen1 models that are checked |
+| Enable Gen1 updates | on | on / off | Gen1 support: all Gen1 devices of the Shelly integration are checked (see [Gen1 firmware](#gen1-firmware)) |
 | Allow downgrades | off | on / off | Installing an older stored firmware on Gen2+ devices (see [Downgrade](#downgrade-gen2)). Stays off until you switch it on, also after an update of the app |
 | Max. import size (MB) | 100 | 1–2048 | Largest file accepted by **Import store** |
 | Max. log size (entries) | 1000 | 100–3000 | Size limit of the activity log |
@@ -119,11 +124,47 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 ### Devices
 
 - **Check now** checks all devices; the header shows the last check and the schedule.
-- Devices with updates are listed on top, then all other devices, ignored devices at
-  the end. Search, filters (Updates, Errors, Up-To-Date, Unprotected, Ignored), sorting
-  and a column chooser help with larger installations; sort order and columns are kept
-  per browser. **Unprotected** lists devices without password protection – set it per
-  device from that list.
+- The list is split into sections, each shown only when it has devices: **Updates
+  Available**, **Attention**, **Not Checked**, **Up-To-Date**, **Asleep**, **Ignored**,
+  **Removed** and, at the end, **Other Shellys**. A device appears in the first section
+  that fits (see the status table below).
+- Search, the **Filter** icon, sorting and a column chooser help with larger
+  installations; sort order and columns are kept per browser. The **Filter** icon next to
+  **Sort** opens a popover with the filters **All**, **Updates**, **Attention**, **Not
+  checked**, **Up-To-Date**, **Unprotected**, **Asleep**, **Ignored**, **Removed** and
+  **Other Shellys**, each with its count. A dot on the icon shows that a filter other than
+  **All** is active. The Firmware and Logs tabs have the same Filter icon with their own
+  filters. **Unprotected** lists devices without password protection – set it per device
+  from that list.
+- **Attention** collects devices whose last check ended in an error, whose installation
+  was not confirmed, that could not be reached, or that have no usable address.
+  **Not Checked** holds devices that were never checked and Gen1 devices that are skipped
+  while "Enable Gen1 updates" is off.
+- **Removed** holds devices that were once listed but are no longer in the Home
+  Assistant Shelly integration. Their data is kept. If the device is set up in Home
+  Assistant again, the mark disappears with the next check; data and stored password
+  are matched by MAC address, also when Home Assistant gives the device a new ID.
+  If it is still reachable at its last address, all actions stay available. A full
+  check (**Check now** or the schedule) does not check removed devices for updates: it
+  only tests whether they still answer at their last address and logs a warning if they
+  do, an error if not. A single check checks a reachable removed device there. The
+  tooltip of the **Removed** pill says whether the device is still reachable. The row
+  menu of a removed device has **Remove from list**, which deletes it and its stored
+  password from the app after a confirmation. Removed wins over Ignored: a removed
+  device loses its Ignored mark.
+- **No usable address:** if the address of a device cannot be used – the host name does
+  not resolve, the IP address is outside the private networks, or the device has no
+  address – the tile shows **No usable address** in the IP column (on a phone only this
+  text); on the desktop a line below the name and the tooltip give the reason. Fix the
+  address in the Shelly integration (see
+  [Troubleshooting](#troubleshooting)).
+- **Other Shellys** lists Shelly devices that Home Assistant knows but this app cannot
+  update (BLU, Zigbee, Matter, MQTT): name, kind, model, firmware and **Where to
+  update**. The section is display only, has no actions and is shown only with the
+  filter **All** or **Other Shellys**; the search applies to it. The app recognises
+  these devices by the manufacturer text in Home Assistant, so a device may be missing.
+- **Host name** (Columns chooser, off by default; on a phone a row in the details) shows
+  the host name of the device. It is checked on every single check and on **Check all**.
 - A device you just updated stays on top as "Updated" (or "Unconfirmed" if the target
   version was not confirmed, or "Error" if the installation failed – then with
   **Install** for another attempt) until you check it again or the next full check runs.
@@ -144,10 +185,13 @@ the Home Assistant theme (colours, light/dark) and works on phones.
   Reload device info, Open web UI, the device settings, Ignore / Resume device and
   Restart. On touch devices a tap on a disabled button shows the reason.
 - **Battery devices** (e.g. H&T, door/window sensors) sleep between wake-ups and answer
-  only while they are awake. The app recognises them from the device itself when a check
-  or Reload Device Info reaches them awake (Gen2+: wake-up period, Gen1: sleep mode) and
-  shows a battery icon after the name. A battery device never reached while awake is not
-  marked. To check one, wake it up (e.g. press its button) and check it right away.
+  only while they are awake. The app recognises them from Home Assistant (the battery
+  sensor that the Shelly integration creates for the device) or from the device itself
+  when a check or Reload Device Info reaches them awake (Gen2+: wake-up period, Gen1:
+  sleep mode) and shows a battery icon after the name. What the device reports wins;
+  the tooltip says which source applied (**Detected from Home Assistant** or **Detected
+  from the device**). To check one,
+  wake it up (e.g. press its button) and check it right away.
 - **Ignored** devices are skipped by automatic checks and cannot be updated until they
   are resumed.
 
@@ -161,8 +205,8 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 | Unconfirmed | The installation ran, but the target version was not confirmed (see the details); stays on top until the next check of the device |
 | Error | Check, download or installation failed; after a failed installation – or with a stored version while the Shelly server could not be asked – the device stays on top and can be installed (again) |
 | Asleep | Battery device that did not answer the last check – it sleeps; the IP is dimmed. Wake it up and check it again |
-| Skipped | Gen1 device while Gen1 updates are disabled |
-| Unregistered | Device is no longer in the Home Assistant device registry |
+| Not checked | The device was never checked, or it is a Gen1 device skipped while Gen1 updates are off |
+| Removed | Device is no longer in the Home Assistant Shelly integration; see **Removed** above |
 
 ### How a check works
 
@@ -259,6 +303,16 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
   Uploaded, Intermediate, Gen1 and Unused (no listed device has this firmware ID; no file
   counts as unused while the ID of a device is unknown, e.g. a sleeping battery device).
   Search and sort work as in the Devices tab; versions inside a card stay newest first.
+- **Files on disk:** at start the app scans the firmware folder. A file that is on the
+  disk but not listed (for example after a damaged state file) is added again if its
+  SHA-256 equals its file name and a device or the manifest in the file names its
+  firmware ID and version; the name alone is not enough. A Gen2+ file taken over this
+  way is provided only when the Shelly update server offers exactly this SHA-256 – never
+  as stored fallback or for a downgrade. The log then shows a warning that files were
+  read from the disk, because they could have been changed. Files that cannot be
+  matched are listed in the card **Unknown Files** (filter **All** only) with name and
+  size; delete them there with the bin icon (one confirmation). Nothing is deleted
+  automatically.
 - **Install** behind a device name opens the usual installation dialog for this device
   and this firmware (same conditions as "Install update" in the Devices tab).
 - The **changelog icon** of a version shows the changelog stored with this firmware.
@@ -286,12 +340,14 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
 ### Logs
 
 The activity log records checks, downloads, uploads, installations and downgrades,
-deleted firmware, setting and password changes on devices, store exports and imports
-and changes of the app settings – each with time, user and result (success, warning, error). A download names
+deleted firmware, setting and password changes on devices, store exports and imports,
+firmware files read back from the disk, devices removed from the list and changes of the
+app settings – each with time, user and result (success, warning, error). A download names
 the user of the check that fetched it; scheduled checks and their downloads name
 "Schedule". A full check also counts the ignored devices ("2 ignored") and names them
 in its details in the normal text colour – they are not contacted and never make the
-entry a warning or error. Filters and a device search help to find entries. Passwords never appear in the log. Consecutive
+entry a warning or error. Removed devices are counted too ("1 removed"); each one is a
+warning if it still answers at its last address and an error if not. Filters and a device search help to find entries. Passwords never appear in the log. Consecutive
 entries of the same device are marked by a bar at the side.
 
 The bin icon deletes a single entry, **Delete all logs** the whole log (each after a
@@ -410,11 +466,14 @@ Gen2+ firmware is downloaded over HTTPS only.
 | The Shelly reports X instead of the target version Y | Check the device; run "Check for updates" again |
 | Certificate of … is not publicly trusted | See [Certificate pinning](#certificate-pinning) |
 | The Shelly requires a password | Store the device password (see [Device passwords](#device-passwords)) |
+| No usable address (tile in the Devices tab) | The host name does not resolve, the IP address is outside the private networks or the device has no address. Set an address in the Shelly integration (IP address or a host name that Home Assistant resolves) |
+| … files read from the disk – they could have been changed (Logs tab, warning) | The firmware list was rebuilt from files in the firmware folder after the state was lost. Taken-over Gen2+ files are used only when the Shelly update server offers the same SHA-256. Delete files you do not trust in the Firmware tab; unknown files are listed there and never deleted automatically |
+| Session expired – reload the page | The login of Home Assistant ran out while the page was in the background. The page retries silently for about 30 seconds; if the message stays, reload the page |
 | Device address … is not in a private network | Only devices in `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` or `fc00::/7` (IPv6) are contacted. Give the Shelly an address in one of these networks |
 | The app stopped and did not start again | Turn on **Watchdog** and **Start on boot** on the app page. With the Watchdog on, Home Assistant restarts the app after it stopped unexpectedly |
 | The app is shown as running but does not respond | The container health check (a TCP connection to port 8098 every 30 seconds) is meant to make Home Assistant restart the app after three failures if the Watchdog is on. Otherwise restart the app by hand and report the lines of the app log if it happens again |
 | Storage error: The state file was unreadable – the backup of the previous save was loaded | The app's state file was damaged (e.g. by a power failure) and the copy of the save before was used. Check the devices again; the message disappears with the next restart |
-| Storage error: The state file was unreadable and no backup could be loaded | The device list starts empty and is filled by the next check. The firmware files are kept on disk but no longer listed; a file is listed again when a check downloads the same version |
+| Storage error: The state file was unreadable and no backup could be loaded | The device list starts empty and is filled by the next check. The firmware files stay on disk; at the start the app reads back those whose content names firmware ID and version, the others are listed as **Unknown Files** in the Firmware tab (see [Firmware](#firmware)) |
 
 An installation interrupted by a restart of the app is shown as "Unconfirmed" – check
 the device and run "Check for updates".
@@ -424,8 +483,14 @@ the device and run "Check for updates".
 **Which Shellys does the app list?** Every device of the Home Assistant Shelly
 integration that has its own address in your network, Gen1 to Gen4. Devices that are
 connected through another Shelly (e.g. Bluetooth devices behind a gateway) and devices
-disabled in Home Assistant are not listed. Of Gen1 only the types under **Allowed Gen1
-types** are checked.
+disabled in Home Assistant are not listed. Shellys that Home Assistant knows but the
+app cannot update (BLU, Zigbee, Matter, MQTT) appear under **Other Shellys**, display
+only. A Gen4 with Zigbee or Matter firmware is supported when it is also set up in the
+Shelly integration over Wi-Fi.
+
+**Why is a device under "Removed"?** It is no longer in the Home Assistant Shelly
+integration. The app keeps it so it does not vanish unnoticed. Set it up in Home
+Assistant again and the mark disappears, or use **Remove from list** in its row menu.
 
 **Do the Shellys need internet access?** No. Home Assistant asks the Shelly servers and
 downloads the firmware; the Shellys fetch it from the app on port 8098.
@@ -442,7 +507,8 @@ app store (like the stable one, with `#beta` at the end). It offers **Firmware M
 for Shelly (Beta)**, a separate app with its own data and its own firmware store. Only
 one of the two apps can use host port 8098: give the beta app another host port in the
 network section of its Configuration tab (e.g. 8097) and set its download base URL to
-that port. Report problems as issues, with the app version.
+that port. The beta app shows a red **(beta)** next to its title. Report problems as
+issues, with the app version.
 
 **Why an IP address instead of a host name?** Many Shellys cannot resolve host names of
 your network. The download then fails with a connection error (see
@@ -470,9 +536,15 @@ in the firmware store and **Allow downgrades** is switched on (see
 
 - Only original Shelly firmware is supported, and only stable versions.
 - Home Assistant OS or Supervised is required; the user interface is in English only.
+- Only Shellys on Wi-Fi/LAN that are set up in the Home Assistant Shelly integration are
+  supported. Not supported: Shelly BLU (updated in the Shelly app), Zigbee (Zigbee OTA
+  via ZHA or Zigbee2MQTT), Matter (Home Assistant Matter server) and MQTT-only
+  devices; they are shown under **Other Shellys** without update function. Gen4 with
+  Zigbee or Matter firmware is supported when it is also in the Shelly integration.
 - Only devices with their own address in a private network (`10.0.0.0/8`,
   `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`) are contacted. Devices connected
-  through another Shelly (e.g. Bluetooth devices behind a gateway) are not listed.
+  through another Shelly (e.g. Bluetooth devices behind a gateway) are not listed as
+  devices on purpose.
 - Battery devices can only be checked and updated while they are awake.
 - Gen1: Shelly offers the firmware only over plain HTTP and without a checksum (see
   [Gen1 firmware](#gen1-firmware)); no downgrade; no installation progress.
@@ -544,6 +616,10 @@ server interfaces are not officially guaranteed.
 
 Updates from the previous version need no action. Older versions:
 
+- **From 3.7.1 or older:** the list **Allowed Gen1 types** is gone; all Gen1 devices of
+  the Shelly integration are checked. Turn off **Enable Gen1 updates** to skip them
+  (they then show as **Not checked**). A saved value is ignored. Devices that disappear
+  from Home Assistant now stay in the list under **Removed**.
 - **From 3.6.0 or older:** an IP address outside the private networks that was saved as
   download base URL is no longer accepted. Installations stay disabled until you correct
   it; the notice above the tabs names the reason.
