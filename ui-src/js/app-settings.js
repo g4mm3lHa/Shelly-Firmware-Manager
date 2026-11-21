@@ -49,6 +49,7 @@ const HINT_NOT_PRIVATE = "Not accepted: this IP address is not in a private netw
 const HINT_CREDENTIALS = "Not accepted: the address must not contain a user name or password.";
 const HINT_QUERY = "Not accepted: the address must not contain a query (?…) or a fragment (#…).";
 const HINT_LOCALHOST = "This host is not in your local network. The Shellys download the firmware from this URL – use the LAN IP of Home Assistant.";
+const SUGGESTION_NOTE = "Suggestion from the address of this page – please check it before saving.";
 const HINT_HOST_NAME = "Use the LAN IP address of Home Assistant instead of a host name – Shellys often cannot resolve host names, the update then fails with a connection error.";
 /** Hint text for the URL (rejection reason or advice), else "". */
 function lanHint(value) {
@@ -68,6 +69,15 @@ function lanHint(value) {
   return host.replace(/\.$/, "").toLowerCase() === "localhost" ? HINT_LOCALHOST : HINT_HOST_NAME;
 }
 
+/** Suggestion for an empty download base URL: the address this page was opened with
+ *  (the browser's Home Assistant address) on the download port, only if that host is an IP
+ *  address in a private network; "" otherwise (host name, public address, localhost). */
+function suggestedBaseUrl() {
+  const host = location.hostname;
+  const lan = IPV4.test(host) ? LAN_IPV4.test(host) : LAN_IPV6.test(host);
+  return lan ? `http://${host}:8098` : "";
+}
+
 /** Build the grouped settings cards with one common Save button. */
 export function renderSettings() {
   const o = ui.options; settingsInputs = {};
@@ -84,6 +94,7 @@ export function renderSettings() {
       else if (type === "list") { input = el("input"); input.type = "text"; input.value = (o[key] || []).join(", "); }
       else if (type === "pins") input = pinsEditor(o[key] || []);
       else { input = el("input"); input.type = "text"; input.value = o[key] ?? ""; }
+      if (key === "download_base_url" && !input.value) input.value = suggestedBaseUrl();   // only a suggestion: counts as unsaved
       input.id = id; settingsInputs[key] = input;
       // One block per option: name with help icon, control (and the live warning of
       // the download base URL). On wide screens the block is "display: contents", so the
@@ -94,14 +105,20 @@ export function renderSettings() {
       const info = el("button", null, "icon help"); info.type = "button"; info.append(icon("info"));
       info.setAttribute("aria-label", `Help: ${label}`); info.setAttribute("aria-describedby", help.id);
       attachTip(lab, () => desc, true); attachTip(info, () => desc, true);
-      let warn = null;
+      let warn = null, suggest = null;
       if (key === "download_base_url") {   // live hint while typing, no blocking
         warn = el("div", null, "desc warnc"); warn.id = id + "-warn"; warn.setAttribute("role", "status");
-        const update = () => { warn.textContent = lanHint(input.value.trim()); warn.hidden = !warn.textContent; };
+        // Note under the field while it still holds the suggested address
+        const suggested = !o[key] && input.value;
+        suggest = el("div", SUGGESTION_NOTE, "desc"); suggest.id = id + "-suggest";
+        const update = () => {
+          warn.textContent = lanHint(input.value.trim()); warn.hidden = !warn.textContent;
+          suggest.hidden = !(suggested && input.value === suggested);
+        };
         input.addEventListener("input", update); update();
-        input.setAttribute("aria-describedby", `${help.id} ${warn.id}`);
+        input.setAttribute("aria-describedby", `${help.id} ${warn.id} ${suggest.id}`);
       }
-      form.append(box("div", `set-field t-${type}`, box("div", "set-name", lab, info), box("div", "set-control", input), help, warn));
+      form.append(box("div", `set-field t-${type}`, box("div", "set-name", lab, info), box("div", "set-control", input), help, warn, suggest));
     }
     return box("div", "card", box("div", "card-head", el("h2", group)), box("div", "card-body", form));
   });
@@ -112,6 +129,7 @@ export function renderSettings() {
   const wrap = box("div", "settings-grid", ...cards);
   wrap.addEventListener("input", markDirty); wrap.addEventListener("change", markDirty); wrap.addEventListener("click", () => setTimeout(markDirty));
   $("settings-form").replaceChildren(wrap, box("div", "form-actions", dirty, save), changelogNote());   // common save area
+  markDirty();   // a suggested download base URL is an unsaved change
 }
 // Path of this app's page in Home Assistant (server: slug from the Supervisor); the list
 // of apps until it is known

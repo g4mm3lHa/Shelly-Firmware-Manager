@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="shelly_firmware_manager/logo.png" alt="Firmware Manager for Shelly" width="250">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.png">
+    <img src="docs/images/logo-light.png" alt="Firmware Manager for Shelly" width="250">
+  </picture>
 </p>
 
 # Firmware Manager for Shelly
@@ -53,11 +56,12 @@ Only original Shelly firmware is supported. More limits:
 
    Or by hand: **Settings → Apps → App store → ⋮ → Repositories**, enter
    `https://github.com/g4mm3lHa/Shelly-Firmware-Manager` and click **Add**.
-2. Open **Firmware Manager for Shelly** in the app store and click **Install**. Home
-   Assistant builds the app on your system; this takes a few minutes.
+2. Open **Firmware Manager for Shelly** in the app store and click **Install**.
 3. Start the app and set the **download base URL** in its Settings tab – see
    [Quick start](shelly_firmware_manager/DOCS.md#quick-start). Installations on Shellys
-   are disabled until it is set.
+   are disabled until it is set. This badge opens the app page in your Home Assistant:
+
+   [![Open your Home Assistant instance and show the app.](https://my.home-assistant.io/badges/supervisor_addon.svg)](https://my.home-assistant.io/redirect/supervisor_addon/?addon=7bbcfb16_shelly_firmware_manager)
 
 Updates of the app are offered by Home Assistant like for any other app.
 
@@ -83,11 +87,13 @@ and [Security](shelly_firmware_manager/DOCS.md#security).
 1. Look up the message in
    [Troubleshooting](shelly_firmware_manager/DOCS.md#troubleshooting) and the
    [FAQ](shelly_firmware_manager/DOCS.md#faq).
-2. Found a bug or miss a feature? Open an
+2. Questions and discussion: the
+   [Home Assistant community thread](https://community.home-assistant.io/t/firmware-manager-for-shelly-devices/1035784).
+3. Found a bug or miss a feature? Open an
    [issue](https://github.com/g4mm3lHa/Shelly-Firmware-Manager/issues/new/choose). A
    bug report needs the versions of the app and of Home Assistant, the Shelly model and
    generation, and the entry of the activity log.
-3. Security problems are not reported in public issues – see
+4. Security problems are not reported in public issues – see
    [`SECURITY.md`](SECURITY.md).
 
 Problems of Home Assistant itself or of the Shelly firmware belong to those projects.

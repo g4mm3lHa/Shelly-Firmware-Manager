@@ -9,6 +9,8 @@ Suites, in this order (the last two change the demo state in their last case):
 - download_url_notice notice for a missing / unconfirmed / public-IP download base URL,
                       device progress of a Gen2+ installation. Demos "legacy" 8803,
                       "missing" 8804, "public" 8807.
+- download_url_suggestion  empty download base URL pre-filled from the browser's private LAN
+                      IP address (not for host names, public IPs, localhost). Demo "missing" 8804.
 - firmware_store      downgrade from the device menu, upload, two-step delete, the
                       Install button behind a device and the changelog icon in the
                       Firmware tab; 3.1.1: Install button and "Updated" in the device
@@ -39,13 +41,14 @@ from pathlib import Path
 
 from common import launch
 from features.base import SUITE, results
-from features.download_url import download_url_hint, download_url_notice
+from features.download_url import download_url_hint, download_url_notice, download_url_suggestion
 from features.firmware_store import firmware_store
 from features.setting_help import setting_help
 from features.store_transfer import store_transfer
 from playwright.sync_api import sync_playwright
 
 SUITES = {"download_url_hint": download_url_hint, "setting_help": setting_help, "download_url_notice": download_url_notice,
+          "download_url_suggestion": download_url_suggestion,
           "firmware_store": firmware_store, "store_transfer": store_transfer}
 
 
