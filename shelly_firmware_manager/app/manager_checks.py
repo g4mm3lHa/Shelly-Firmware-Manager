@@ -12,8 +12,9 @@ names its SHA-256 (or it is the user's own upload). If the server cannot be aske
 newer stored version is only offered for a manual installation at the user's risk
 (marker store_fallback). After a confirmed intermediate version the device is checked
 again at once (see manager_installs).
-Gen1: the firmware store comes first – the next higher stored download is provided; the
-manufacturer's list is only asked for devices without such a file, once per check.
+Gen1: the firmware store comes first – the next higher stored download or upload is
+provided; the manufacturer's list is only asked for devices without such a file, once
+per check.
 Imported files are never provided this way: only as store fallback while the list
 cannot be asked (see manager_store._store_offer).
 A check never installs anything.
@@ -45,6 +46,7 @@ from manager_core import (
     BATTERY_FROM_DEVICE,
     BATTERY_FROM_HA,
     Device,
+    SOURCE_DOWNLOAD,
     SOURCE_IMPORT,
     SOURCE_UPLOAD,
     STATUS_ASLEEP,
@@ -771,15 +773,22 @@ class Checks(DeviceSettings):
                 await self._keep_installed(device_id, dev, info, offer)
             return
         built = shelly.build_date(offer.get("build")) or shelly.build_date(offer["version"])
-        if self._hold_back(dev, offer["version"], built):
+        # The user's own upload of exactly this version is never held back (as for Gen1)
+        if not self._has_upload(info, offer["version"]) and self._hold_back(dev, offer["version"], built):
             return
         dev["offer_date"] = built
 
-        # Already provided and device unchanged -> download nothing again
+        # Already provided and device unchanged -> download nothing again. The provided
+        # file must still be one the offer allows (_replaces_download): a file provided
+        # under older rules (e.g. an imported file) is replaced by the regular provide.
+        meta = self.firmware.get(str(dev.get("file")))
         already = (
             dev.get("status") == STATUS_READY
             and dev.get("pending_version") == offer["version"]
             and dev.get("pending_build") == info["build"]
+            and meta is not None
+            and meta.get("sha256") == dev.get("sha256")
+            and self._replaces_download(meta, info["gen"], shelly.url_sha256(offer["url"]))
             and (data_paths.FW_DIR / str(dev.get("file"))).is_file()
         )
         if not already:
@@ -835,14 +844,32 @@ class Checks(DeviceSettings):
         """Option keep_installed (Gen2+): the server offers exactly the installed version
         (the device is up to date) – store that file as the device's way back, so that a
         downgrade stays possible after the next update. Nothing is provided to the
-        device; a stored file the offer names is only verified. A failure is logged and
-        does not change the result of the check."""
+        device; a stored file the offer names is only verified. If the offer URL names
+        no SHA-256, a stored download of the version is kept as it is (no new download
+        at every check). A failure is logged and does not change the result of the check."""
         if not self.keep_installed or shelly.parse_version(offer["version"]) != shelly.parse_version(info["version"]):
             return
+        if shelly.url_sha256(offer["url"]) is None and any(
+            meta.get("type") == info["type"] and meta.get("version") == offer["version"]
+            and (meta.get("gen") or 1) >= 2 and self._source(meta) == SOURCE_DOWNLOAD
+            and not self._adopted_unconfirmed(meta)
+            for meta in self.firmware.values()
+        ):
+            return  # the URL names no SHA-256: a stored download is kept, not loaded again each check
         try:
             await self._shared_provide(device_id, dev, info, offer)
         except (TimeoutError, ShellyError, aiohttp.ClientError, OSError, ValueError) as err:
             log.warning("%s: installed version %s not stored: %s", dev["name"], offer["version"], err)
+
+    def _has_upload(self, info: dict[str, Any], version: str) -> bool:
+        """An upload of exactly this firmware ID and version is stored (Gen2+, not a
+        file read back from the disk): the user's own file, never held back."""
+        return any(
+            meta.get("type") == info["type"] and meta.get("version") == version
+            and (meta.get("gen") or 1) >= 2 and self._source(meta) == SOURCE_UPLOAD
+            and not self._adopted_unconfirmed(meta)
+            for meta in self.firmware.values()
+        )
 
     def _hold_back(self, dev: Device, version: str, built: str | None) -> bool:
         """Option offer_after_days: a new version (not an upload) is offered only once
@@ -871,17 +898,25 @@ class Checks(DeviceSettings):
         )
         return True
 
-    def release_hold(self, device_id: str) -> str:
+    def held_version(self, device_id: str) -> str | None:
+        """The version held back for this device (option offer_after_days), else None."""
+        hold = self.devices.get(device_id, {}).get("hold")
+        return str(hold["version"]) if isinstance(hold, dict) and hold.get("version") else None
+
+    def release_hold(self, device_id: str, user: str) -> str:
         """"Offer update now": lift the hold of the held version for this device (the
-        caller starts a check of the device, which then provides it). Returns the
-        version; ValueError if no version is held back."""
-        dev = self.devices[device_id]
-        hold = dev.get("hold")
-        if not isinstance(hold, dict) or not hold.get("version"):
+        caller has reserved the check of the device, which then provides it); logged
+        in the activity log. Returns the version; ValueError if no version is held
+        back."""
+        version = self.held_version(device_id)
+        if version is None:
             raise ValueError("No update is held back for this device")
-        dev["hold_released"] = hold["version"]
+        dev = self.devices[device_id]
+        dev["hold_released"] = version
+        log.info("%s: held update %s offered now by %s", dev.get("name"), version, user)
+        self.events.add("device", action="offered_now", device=dev.get("name"), version=version, user=user)
         self.save()
-        return str(hold["version"])
+        return version
 
     def _offer_source(self, name: str) -> str:
         """Source of the file provided for the manufacturer's offer: downloaded by this

@@ -335,8 +335,9 @@ Devices without this connection (Gen1, or when it is not available) are checked 
 does not happen, the status becomes "Unconfirmed" with a diagnosis – see
 [Troubleshooting](#troubleshooting). A failed installation can be retried from
 **Updates Available**. The dialog of a retry shows the reason of the last attempt and offers
-**Restart the device first** (ticked): the app restarts the Shelly, waits up to two
-minutes until it answers again and then starts the installation (**Restart & install**). Scheduled checks create a
+**Restart the device first** (ticked): the app checks that the same device still runs
+the checked firmware, restarts the Shelly, waits until it has gone down and answers again
+(at most two minutes) and then starts the installation (**Restart & install**). Scheduled checks create a
 Home Assistant notification when they find new updates.
 
 While a device is installed or checked, other devices can be checked and installed.
@@ -414,8 +415,8 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
 
 The activity log records checks, downloads, uploads, installations and downgrades,
 deleted firmware, setting and password changes on devices, store exports and imports,
-firmware files read back from the disk, devices removed from the list and changes of the
-app settings – each with time, user and result (success, warning, error). A download names
+firmware files read back from the disk, devices removed from the list, held-back updates
+offered now and changes of the app settings – each with time, user and result (success, warning, error). A download names
 the user of the check that fetched it; scheduled checks and their downloads name
 "Schedule". A full check also counts the ignored devices ("2 ignored") and names them
 in its details in the normal text colour – they are not contacted and never make the
@@ -726,8 +727,10 @@ What changes when you update from an older version:
 
 - **From 3.8.0 or older:** these versions stored imported files as downloads, and a
   Gen1 file cannot be checked against Shelly. At the first start all stored Gen1 files
-  are therefore marked as imported; a Gen1 update provided from them is withdrawn
-  until the next check, which downloads Shelly's current file again. Delete stored
+  are therefore marked as imported; a Gen1 update provided from them, also one whose
+  installation failed, is withdrawn until the next check, which downloads Shelly's
+  current file again. A Gen2+ update provided from a file the Shelly update server does
+  not name is replaced by Shelly's file at the next check. Delete stored
   files you imported from an export you do not fully trust. **Keep installed versions**
   is on after the update: the next check also downloads the version each up-to-date
   Gen2+ device runs (about 1–2 MB per version). Switch it off if you do not need it.

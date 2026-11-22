@@ -465,6 +465,24 @@ async def test_unknown_file_is_deleted_only_on_request(mgr, net):
     assert entry["kind"] == "delete" and entry["unknown"] is True and entry["sha256"] == sha
 
 
+@pytest.mark.parametrize("marker", ["install_failed", "store_fallback"])
+async def test_gen1_marking_also_takes_the_file_of_a_failed_installation(net, marker):
+    """A Gen1 device that still holds its file after a failed installation (retry
+    possible) or as store fallback loses it too: no retry with a now imported file."""
+    m = manager.Manager(dict(OPTIONS), session=None, token="t")
+    gen1, sha = store(m, "SHSW-1", "20230913-112003/v1.14.0-gcb84623", gen=1)
+    m.devices[A] = {"name": "Hall", "status": manager_core.STATUS_ERROR, marker: True, "file": gen1, "sha256": sha}
+    m.save()
+    state = json.loads(data_paths.STATE_FILE.read_text())
+    state.pop("gen1_imports_marked")  # as written by 3.8.0
+    data_paths.STATE_FILE.write_text(json.dumps(state))
+    old = manager.Manager(dict(OPTIONS), session=None, token="t")
+    await old.adopt_files()
+    dev = old.devices[A]
+    assert dev["status"] == manager_core.STATUS_AVAILABLE and dev["file"] is None and marker not in dev
+    assert not old.approval_matches(A, sha)
+
+
 async def test_gen1_entries_of_an_older_state_are_marked_imported_once(net):
     """A state of 3.8.0 or older (no marker): every Gen1 store entry becomes an imported
     file once – those versions stored imports as downloads; a device it was provided

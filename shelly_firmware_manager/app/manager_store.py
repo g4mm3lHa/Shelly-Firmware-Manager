@@ -38,7 +38,7 @@ from shelly import ShellyError, clip
 
 from manager_core import (
     DOWNLOAD_BASE_MESSAGES, Device, FirmwareMeta, ManagerCore, PART_PREFIX, SOURCE_DOWNLOAD,
-    SOURCE_IMPORT, SOURCE_UPLOAD, STATUS_AVAILABLE, STATUS_CURRENT, STATUS_INSTALLING, STATUS_READY, holds_file,
+    SOURCE_IMPORT, SOURCE_UPLOAD, STATUS_AVAILABLE, STATUS_CURRENT, STATUS_INSTALLING, holds_file,
 )
 
 log = logging.getLogger("sfm.manager")
@@ -180,7 +180,8 @@ class FirmwareStore(ManagerCore):
         imported file. Those versions stored imported files as downloads, and Gen1
         offers name no SHA-256, so no later check could tell them apart; a file Shelly
         still offers is downloaded again by the next check and is a download again.
-        Devices it was provided for lose the provision until their next check."""
+        Devices holding such a file (provided, or a failed installation that could be
+        retried) lose it until their next check."""
         if not self.gen1_marking_due:
             return
         marked = [
@@ -191,11 +192,14 @@ class FirmwareStore(ManagerCore):
             self.firmware[name].update(source=SOURCE_IMPORT, https=None)
             self.firmware[name].pop("sha_checked", None)
             for dev in self.devices.values():
-                if dev.get("file") == name and dev.get("status") == STATUS_READY:
+                # Every holder: provided, or a failed installation that could be retried
+                if dev.get("file") == name and holds_file(dev):
                     dev.update(
                         status=STATUS_AVAILABLE, message=GEN1_MARKED_MESSAGE, file=None, sha256=None, size=None,
                         source_url=None,
                     )
+                    dev.pop("install_failed", None)
+                    dev.pop("store_fallback", None)
         if marked:
             log.warning("%d stored Gen1 firmware file(s) marked as imported (origin cannot be verified)", len(marked))
         self.gen1_marking_due = False
@@ -295,6 +299,17 @@ class FirmwareStore(ManagerCore):
             log.warning("Stored firmware %s is damaged and is not used anymore", name)
         return False
 
+    def _replaces_download(self, meta: FirmwareMeta, gen: int, offered_sha: str | None) -> bool:
+        """The rule of _stored_firmware for one store entry of the offered version: Gen2+
+        the file the offer URL names (offered_sha) or the user's own upload; Gen1 a
+        stored download only. Also decides whether a file provided before stays
+        provided (see manager_checks._provide)."""
+        if gen < 2:
+            return self._source(meta) == SOURCE_DOWNLOAD
+        if offered_sha is not None and meta.get("sha256") == offered_sha:
+            return True
+        return self._source(meta) == SOURCE_UPLOAD and not self._adopted_unconfirmed(meta)
+
     async def _stored_firmware(
         self, fw_type: str, version: str, gen: int, offered_sha: str | None = None
     ) -> tuple[str, FirmwareMeta] | None:
@@ -316,9 +331,7 @@ class FirmwareStore(ManagerCore):
             """May replace the download of the offered version."""
             if meta.get("type") != fw_type or meta.get("version") != version:
                 return False
-            if gen < 2:
-                return self._source(meta) == SOURCE_DOWNLOAD
-            return named(meta) or (self._source(meta) == SOURCE_UPLOAD and not self._adopted_unconfirmed(meta))
+            return self._replaces_download(meta, gen, offered_sha)
 
         matches = [(name, meta) for name, meta in list(self.firmware.items()) if usable(meta)]
         matches.sort(key=lambda item: not named(item[1]))  # the file the offer names first

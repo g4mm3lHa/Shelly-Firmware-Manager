@@ -409,8 +409,10 @@ class ManagerCore:
         self.others = [o for o in others if isinstance(o, dict)] if isinstance(others, list) else []
         listing = data.get("listing")
         if isinstance(listing, dict) and isinstance(listing.get("missing"), list):
+            listed = listing.get("listed")
             self.listing = {
-                "listed": int(listing.get("listed") or 0),
+                # Only a whole number is taken over; anything else counts as 0
+                "listed": listed if isinstance(listed, int) and not isinstance(listed, bool) and listed >= 0 else 0,
                 "missing": [m for m in listing["missing"] if isinstance(m, dict)],
             }
 

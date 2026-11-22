@@ -20,6 +20,9 @@ $("log-filter").replaceWith(logFilter.node);
 const KIND_LABELS = {check: "Check", download: "Download", upload: "Upload", install: "Installation", delete: "Deleted", setting: "Setting",
   password: "Password", options: "App settings", log: "Log", export: "Store export", import: "Store import", setup: "First start",
   store: "Firmware store", device: "Device"};
+/** Device entry: removed from the list, or a held-back update offered now. */
+const deviceAction = e => e.action === "offered_now" ? `${e.device}: held update ${e.version || ""} offered now`
+  : `${e.device}: removed from the list`;
 /** Firmware files read back from the disk after the store lost its list (kind "store"). */
 const adoptedCount = e => (e.adopted || []).length;
 const adoptedLine = e => `${adoptedCount(e)} file${adoptedCount(e) === 1 ? "" : "s"} read from the disk – they could have been changed` +
@@ -94,7 +97,7 @@ function logContent(e) {
       return [el("div", `Firmware store list was lost: ${adoptedLine(e)}`),
         ...(e.adopted || []).map(f => el("div", `${f.type} ${f.version} · SHA ${(f.sha256 || "").slice(0, 12)}…`, "sub"))];
     case "device":
-      return [el("div", `${e.device}: removed from the list`)];
+      return [el("div", deviceAction(e))];
     case "log":
       return [el("div", `Log cleared · ${e.entries ?? 0} entr${e.entries === 1 ? "y" : "ies"} deleted`)];
     default:
@@ -132,7 +135,7 @@ function logSummary(e) {
     case "import": return [`${e.stored ?? 0} new · ${e.conflicts ?? 0} conflict${e.conflicts === 1 ? "" : "s"}`];
     case "setup": return ["Import skipped"];
     case "store": return [`${adoptedCount(e)} read from the disk${e.unknown ? ` · ${e.unknown} unknown` : ""}`];
-    case "device": return [`${e.device}: removed from the list`];
+    case "device": return [deviceAction(e)];
     default: return [e.kind];
   }
 }
