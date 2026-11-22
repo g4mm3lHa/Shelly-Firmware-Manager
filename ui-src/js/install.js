@@ -62,7 +62,7 @@ export function daysAgo(day) {
   const days = Math.round((Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) - Date.UTC(y, m - 1, dd)) / 86400000);
   return days <= 0 ? "today" : days === 1 ? "1 day ago" : `${days} days ago`;
 }
-export const buildAge = day => `${day} · ${daysAgo(day)}`;
+const buildAge = day => `${day} · ${daysAgo(day)}`;
 /** One line of the check list: state icon (green check or yellow exclamation mark), title, text. */
 function checkLine(ok, title, text) {
   return box("li", ok === null ? "wait" : ok ? "ok" : "warn",
@@ -185,7 +185,7 @@ export const UPLOAD_HINT = "An uploaded file does not come from the Shelly updat
 export const fwSource = v => v.source === "import" ? "Imported (not confirmed by the Shelly update server)"
   : v.source === "upload" ? (v.sha_checked ? "Uploaded (SHA-256 checked)" : "Uploaded (SHA-256 not checked)") : "Downloaded from Shelly";
 /** Tag of a stored version that does not come from Shelly's download (lists and dialogs). */
-export const sourceTag = v => v.source === "upload" ? el("span", "Uploaded", "tag warn") : v.source === "import" ? el("span", "Imported", "tag warn") : null;
+const sourceTag = v => v.source === "upload" ? el("span", "Uploaded", "tag warn") : v.source === "import" ? el("span", "Imported", "tag warn") : null;
 /** Step 1: choose one of the stored older versions. */
 export async function openDowngrade(d) {
   const title = `Downgrade – ${d.name}`;
