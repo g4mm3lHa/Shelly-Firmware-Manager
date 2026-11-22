@@ -12,7 +12,9 @@ def _device_list(c):
     # Device list – Install button next to "Ready", "Updated" stays on top, icon colours
     card = f.locator("#dev-cards .card").first
     install = card.locator(".status-cell button.install")
-    check(f"{case}: Install button for every ready device, the failed installation and the store fallback", install.count() == 7
+    # features demo: one ready device offers a beta (own section), one has a scheduled installation (no button)
+    expected = 5 if "features" in case else 7
+    check(f"{case}: Install button for every ready device, the failed installation and the store fallback", install.count() == expected
           and install.first.is_enabled(), str(install.count()))
     check(f"{case}: Install button is red", "danger" in install.first.get_attribute("class"))
     updated = card.locator("tr", has_text="Bedroom shutter")
@@ -262,9 +264,9 @@ def _battery(c):
         page.keyboard.press("Escape")
 
 
-SECTION_TITLES = ["Updates Available", "Attention", "Not Checked", "Up-To-Date", "Asleep", "Ignored", "Removed", "Other Shellys"]
-FILTER_LABELS = ["All", "Updates", "Attention", "Not checked", "Up-To-Date", "Unprotected", "Cloud on", "On hold", "Asleep",
-                 "Ignored", "Removed", "Other Shellys"]
+SECTION_TITLES = ["Updates Available", "Beta Updates", "Attention", "Not Checked", "Up-To-Date", "Asleep", "Ignored", "Removed", "Other Shellys"]
+FILTER_LABELS = ["All", "Updates", "Beta updates", "Scheduled", "Attention", "Not checked", "Up-To-Date", "Unprotected", "Cloud on",
+                 "On hold", "Asleep", "Ignored", "Removed", "Other Shellys"]
 
 
 def _host_names(c):
@@ -444,7 +446,7 @@ def _next_steps(c):
     approve = [b for b in d["buttons"] if b[0] == "Approve installation"]
     check(f"{case}: store fallback needs the risk acknowledgment", "at your own risk" in d["body"]
           and approve == [["Approve installation", True]], str(d["buttons"]))
-    f.locator("#dlg-body label.check input").check()
+    f.locator("#dlg-body label.check input[type=checkbox]").check()
     check(f"{case}: acknowledgment enables the approval",
           f.locator("#dlg-btns button", has_text="Approve installation").is_enabled())
     c.page.screenshot(path=c.out / f"{case}-install-store-fallback.png")
@@ -484,7 +486,7 @@ def _layout(c):
         check(f"{case}: no tooltip after a tap", tip_after_tap is True)
     card.locator("button.install").first.click()
     heads = f.evaluate("[...document.querySelectorAll('#dlg .dsec h3')].map(h => h.textContent)")
-    check(f"{case}: installation dialog in sections", heads == ["Device", "Firmware", "Before installing", "Changelog"], str(heads))
+    check(f"{case}: installation dialog in sections", heads == ["Device", "Firmware", "Before installing", "Changelog", "Start"], str(heads))
     page.screenshot(path=out / f"{case}-install-dialog.png")
     f.locator("#dlg-btns button", has_text="Cancel").click()
     if width < 700:   # phone tile: lines, flush button rows, Details button

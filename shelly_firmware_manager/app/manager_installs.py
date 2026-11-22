@@ -1,4 +1,4 @@
-"""Manager, layer 5 of 6: installations and downgrades, and what the download server
+"""Manager, layer 5 of 7: installations and downgrades, and what the download server
 needs to serve the files.
 
 Installations are always started manually and bound to the SHA-256 of the provided

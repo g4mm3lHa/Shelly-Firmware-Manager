@@ -25,6 +25,10 @@ configuration:
     name: Allow downgrades
     description: >-
       Installing an older stored firmware on Gen2+ devices (device menu and Firmware tab); off by default
+  beta_firmware:
+    name: Offer beta firmware
+    description: >-
+      Also offers beta versions of the Shelly update server – Gen2+ only, Gen1 devices get no beta versions. They are marked “Beta”, listed under “Beta Updates” and installed only after your approval and an extra confirmation; the offer delay does not apply to them. Off by default
   keep_installed:
     name: Keep installed versions
     description: >-

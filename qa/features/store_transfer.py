@@ -133,7 +133,7 @@ def store_transfer(browser, out):
         f.wait_for_selector("#store-export")
         heads = f.locator("#settings-form h2").all_text_contents()
         check(f"{c}: cards in the Settings tab", heads == ["Device Passwords", "Checks", "Download Server", "Firmware & Storage", "Logs",
-                                                          "Advanced"], str(heads))
+                                                          "Advanced", "Display"], str(heads))
         order = f.evaluate("""() => [...document.querySelectorAll('#settings-form .form > *')]
           .map(e => e.classList.contains('set-store') ? 'store' : (e.querySelector('input,select,textarea,.pins') || {}).id || '')
           .filter(x => ['opt-allow_downgrade', 'store', 'opt-import_max_mb'].includes(x))""")

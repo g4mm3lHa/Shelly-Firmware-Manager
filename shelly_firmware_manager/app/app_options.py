@@ -27,6 +27,7 @@ BOOLS = (
     "restrict_downloads_to_devices",
     "gen1_updates_enabled",
     "allow_downgrade",
+    "beta_firmware",
     "resolve_host_names",
     "keep_installed",
 )
@@ -49,7 +50,8 @@ KEYS = frozenset({*INT_RANGES, *BOOLS, *DEFAULTS, "download_base_url", "pinned_c
 # is optional without default; this value only counts after an explicit confirmation.
 LEGACY_DOWNLOAD_BASE = "http://192.168.178.50:8098"
 OPTIONAL = ("download_base_url",)  # options that can be removed (empty input)
-# allow_downgrade has no default either: missing = off (also for existing installations)
+# allow_downgrade and beta_firmware have no default either: missing = off (also for
+# existing installations)
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 MAX_LIST = 100
 # Host written as numbers only, in any form an address parser may accept (decimal, octal or

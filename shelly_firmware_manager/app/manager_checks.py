@@ -1,4 +1,4 @@
-"""Manager, layer 4 of 6: checks – which firmware is installed, which one is provided.
+"""Manager, layer 4 of 7: checks – which firmware is installed, which one is provided.
 
 Within a check up to CHECK_PARALLEL devices are queried at the same time; offers and
 firmware downloads are shared (single flight), so parallelism never duplicates a
@@ -11,7 +11,9 @@ file of exactly the offered version is used instead of a download only if the of
 names its SHA-256 (or it is the user's own upload). If the server cannot be asked, a
 newer stored version is only offered for a manual installation at the user's risk
 (marker store_fallback). After a confirmed intermediate version the device is checked
-again at once (see manager_installs).
+again at once (see manager_installs). With the option beta_firmware the beta version of
+the same answer is offered instead of the stable one when it is higher – never before a
+required intermediate version, never held back by offer_after_days (marker beta).
 Gen1: the firmware store comes first – the next higher stored download or upload is
 provided; the manufacturer's list is only asked for devices without such a file, once
 per check.
@@ -740,6 +742,7 @@ class Checks(DeviceSettings):
 
         dev.pop("store_fallback", None)  # set again below if it still applies
         dev.pop("step_target", None)
+        dev.pop("beta", None)
         dev.pop("hold", None)
         dev.pop("offer_date", None)
         if info["gen"] == 1:
@@ -760,6 +763,9 @@ class Checks(DeviceSettings):
                 raise
         else:
             offer = await self._step_offer(dev, info, offers)
+            if offer is not None and self.beta_firmware:
+                offer = await self._beta_choice(dev, info, offer, offers)
+        beta = offer is not None and offer.get("channel") == "beta"
         dev["offer_version"] = offer["version"] if offer else None
         if not offer or shelly.parse_version(offer["version"]) <= shelly.parse_version(info["version"]):
             dev.update(
@@ -769,13 +775,17 @@ class Checks(DeviceSettings):
                 file=None,
                 sha256=None,
             )
-            if offer and info["gen"] >= 2:
+            if offer and info["gen"] >= 2 and not beta:  # only stable versions are kept as way back
                 await self._keep_installed(device_id, dev, info, offer)
             return
         built = shelly.build_date(offer.get("build")) or shelly.build_date(offer["version"])
-        # The user's own upload of exactly this version is never held back (as for Gen1)
-        if not self._has_upload(info, offer["version"]) and self._hold_back(dev, offer["version"], built):
+        # The user's own upload of exactly this version is never held back (as for Gen1),
+        # nor is a beta version (the offer delay applies to stable versions only)
+        held = not beta and not self._has_upload(info, offer["version"])
+        if held and self._hold_back(dev, offer["version"], built):
             return
+        if beta:
+            dev["beta"] = True
         dev["offer_date"] = built
 
         # Already provided and device unchanged -> download nothing again. The provided
@@ -811,6 +821,8 @@ class Checks(DeviceSettings):
                 meta["intermediate"] = True
             towards = f" on the way to {dev['step_target']}" if dev["step_target"] else ""
             message += f" – intermediate version{towards}; the device is checked again after its installation"
+        if beta:
+            message += " – beta version"
         dev.update(status=STATUS_READY, offer_source=source, message=message)
 
     async def _shared_provide(
@@ -960,7 +972,9 @@ class Checks(DeviceSettings):
         key = ("step", str(info["type"]), str(info["version"]))
         if key not in offers:
             offers[key] = asyncio.ensure_future(
-                shelly.fetch_offer(self.session, info["type"], self.pins, str(info["version"]))
+                shelly.fetch_offer(
+                    self.session, info["type"], self.pins, str(info["version"]), beta=self.beta_firmware
+                )
             )
             self._start_header_check()
         try:
@@ -978,15 +992,48 @@ class Checks(DeviceSettings):
     async def _newest_version(self, info: dict[str, Any], offers: OfferTasks) -> str | None:
         """Newest version of a Gen2+ firmware ID (request without installed version,
         once per check and firmware ID); None if the server could not be asked."""
+        newest = await self._newest_offer(info, offers)
+        return newest["version"] if newest else None
+
+    async def _newest_offer(self, info: dict[str, Any], offers: OfferTasks) -> dict[str, str] | None:
+        """Answer of the request without installed version (see _newest_version), with
+        the beta offer while the option beta_firmware is on; None if the server could not
+        be asked or names no stable version."""
         key = ("newest", str(info["type"]))
         if key not in offers:
-            offers[key] = asyncio.ensure_future(shelly.fetch_offer(self.session, info["type"], self.pins))
+            offers[key] = asyncio.ensure_future(
+                shelly.fetch_offer(self.session, info["type"], self.pins, beta=self.beta_firmware)
+            )
         try:
             newest: dict[str, str] | None = await offers[key]
         except (TimeoutError, ShellyError, aiohttp.ClientError, OSError) as err:
             log.warning("Newest version of %s not available: %s", info["type"], err)
             return None
-        return newest["version"] if newest else None
+        return newest
+
+    async def _beta_choice(
+        self, dev: Device, info: dict[str, Any], offer: dict[str, str], offers: OfferTasks
+    ) -> dict[str, str]:
+        """Option beta_firmware (Gen2+): the offer to provide – a required intermediate
+        version always first (step_target set), otherwise the highest version: the beta
+        version of the server's answer when it is higher than the stable offer and the
+        installed version. The beta is taken from the answer for the installed version,
+        else from the answer without it. A beta offer carries "channel": "beta"."""
+        if dev.get("step_target") is not None:
+            return offer
+        source = offer if offer.get("beta_url") else await self._newest_offer(info, offers) or {}
+        version, url = source.get("beta_version"), source.get("beta_url")
+        if not version or not url:
+            return offer
+        try:
+            newer = shelly.parse_version(version) > max(
+                shelly.parse_version(offer["version"]), shelly.parse_version(info["version"])
+            )
+        except ShellyError:
+            return offer  # unknown version format: the stable offer stays
+        if not newer:
+            return offer
+        return {"version": version, "url": url, "steps": "1", "build": source.get("beta_build", ""), "channel": "beta"}
 
     async def _store_fallback(self, dev: Device, info: dict[str, Any], err: BaseException) -> None:
         """The manufacturer's server could not be asked: a newer stored version –
@@ -1103,6 +1150,7 @@ class Checks(DeviceSettings):
             size=size,
             sha256=sha,
             https=https,
+            beta=True if offer.get("channel") == "beta" else None,  # source "Shelly server (beta)"
             user=self._check_users.get(device_id, self._scan_user),
         )
         return name, sha, size
@@ -1162,6 +1210,7 @@ class Checks(DeviceSettings):
                         "version": dev.get("version"),
                         "offer": dev.get("offer_version"),
                         "source": dev.get("offer_source") or OFFER_MANUFACTURER,
+                        "beta": True if dev.get("beta") else None,
                         "severity": "success",
                     }
                 )
@@ -1245,7 +1294,8 @@ class Checks(DeviceSettings):
 
     async def _notify_new_updates(self) -> None:
         """One HA notification if an automatic check found versions not reported before.
-        Lists all open updates so that a replaced notification loses nothing."""
+        Lists all open updates so that a replaced notification loses nothing; beta
+        versions are counted separately and marked."""
         open_updates = [d for d in self.devices.values() if d.get("status") in (STATUS_READY, STATUS_AVAILABLE)]
         new = [d for d in open_updates if d.get("notified_version") != d.get("offer_version")]
         if not new:
@@ -1255,11 +1305,16 @@ class Checks(DeviceSettings):
         self.save()
         lines = "\n".join(
             f"- {markdown_text(d.get('name'), 120)}: {markdown_text(d.get('version'))} → "
-            f"{markdown_text(d.get('offer_version'))}"
+            f"{markdown_text(d.get('offer_version'))}" + (" (beta)" if d.get("beta") else "")
             for d in sorted(open_updates, key=lambda d: (d.get("name") or "").lower())
         )
+        betas = sum(1 for d in new if d.get("beta"))
+        counts = [f"{len(new) - betas} new update(s)"] if len(new) > betas else []
+        if betas:
+            counts.append(f"{betas} new beta update(s)")
+        found = ", ".join(counts)
         await self.notify(
-            f"Shelly firmware: {len(new)} new update(s) found",
+            f"Shelly firmware: {found} found",
             f"{lines}\n\nReview and install in the “Shelly Firmware” panel.",
             "sfm_updates",
         )

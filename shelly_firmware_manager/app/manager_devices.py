@@ -1,4 +1,4 @@
-"""Manager, layer 3 of 6: reading and changing a single Shelly – identity, settings,
+"""Manager, layer 3 of 7: reading and changing a single Shelly – identity, settings,
 feature states, restart and the device password. The device password can also be
 stored or set on several devices in one step (set_passwords): each device is still
 set, verified, stored and logged on its own.
@@ -182,7 +182,7 @@ class DeviceSettings(FirmwareStore):
         self.save()
 
     async def change_settings(
-        self, device_id: str, changes: dict[str, Any], user: str = "unknown"
+        self, device_id: str, changes: dict[str, Any], user: str = "unknown", log_entry: bool = True
     ) -> tuple[dict[str, Any], bool, bool, list[str]]:
         """Validate, send to the Shelly, read back.
 
@@ -190,7 +190,8 @@ class DeviceSettings(FirmwareStore):
         if the read-back failed (the change is then unconfirmed); not_applied names the
         settings the device accepted but reports with another value afterwards. Every
         attempt that reaches the device is written to the activity log – as failed if
-        a value was not applied."""
+        a value was not applied. log_entry False: no entry of its own (the run of a
+        schedule writes one entry for all its devices)."""
         dev = self._settings_device(device_id)
         clean = shelly.validate_settings(changes, dev.get("outputs") or [])
         if "ap" in clean and dev.get("gen") == 1:
@@ -210,7 +211,8 @@ class DeviceSettings(FirmwareStore):
             )
         except (TimeoutError, ShellyError, aiohttp.ClientError, ValueError) as err:
             error = error_text(err, 300) or type(err).__name__
-            self.events.add("setting", ok=False, device=dev.get("name"), changes=diff, user=user, error=error)
+            if log_entry:
+                self.events.add("setting", ok=False, device=dev.get("name"), changes=diff, user=user, error=error)
             raise
         if "eco" in clean:  # the device may restart and miss the read-back
             dev["eco"] = clean["eco"]
@@ -219,10 +221,12 @@ class DeviceSettings(FirmwareStore):
         if not_applied:
             error = "Not applied by the Shelly: " + ", ".join(not_applied)
             log.warning("%s: %s (changed by %s)", dev.get("name"), error, user)
-            self.events.add("setting", ok=False, device=dev.get("name"), changes=diff, user=user, error=error)
+            if log_entry:
+                self.events.add("setting", ok=False, device=dev.get("name"), changes=diff, user=user, error=error)
         else:
             log.info("%s: settings changed by %s (%s)", dev.get("name"), user, ", ".join(sorted(clean)))
-            self.events.add("setting", device=dev.get("name"), changes=diff, user=user)
+            if log_entry:
+                self.events.add("setting", device=dev.get("name"), changes=diff, user=user)
         self.save()
         settings = {k: dev.get(k) for k in SETTINGS_ANSWER}
         return settings, restart, verified, not_applied

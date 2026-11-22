@@ -1,5 +1,7 @@
 // Core of the Ingress UI: shared state, HA theme, API calls, DOM helpers, tooltip and dialogs.
 import {load} from "./main.js";
+import {t} from "./i18n.js";
+export {t};
 
 // Frontend of the Ingress UI.
 // Security: all values are inserted via textContent (no innerHTML), so device
@@ -103,7 +105,7 @@ export function box(tag, cls, ...children) { const e = el(tag, null, cls); e.app
 export const pad = n => String(n).padStart(2, "0");
 /** YYYY-MM-DD HH:MM in local time. */
 export function fmt(ts) {
-  if (!ts) return "never";
+  if (!ts) return t("never");
   const d = new Date(ts * 1000);
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
@@ -162,6 +164,8 @@ const ICONS = {
   battery: "M16,20H8V6H16M16.67,4H15V2H9V4H7.33A1.33,1.33 0 0,0 6,5.33V20.67C6,21.4 6.6,22 7.33,22H16.67A1.33,1.33 0 0,0 18,20.67V5.33C18,4.6 17.4,4 16.67,4M15,13H9V18H15V13Z",
   // Column chooser of the Devices tab (MDI "view-column-outline")
   columns: "M4,5V18H21V5H4M14,7V16H11V7H14M6,7H9V16H6V7M19,16H16V7H19V16Z",
+  plus: "M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z",
+  play: "M8,5.14V19.14L19,12.14L8,5.14Z",
   pencil: "M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z",
 };
 /** Inline SVG icon from a path. */
@@ -220,12 +224,12 @@ document.addEventListener("keydown", e => {
  *  place of the input); a dot on the icon marks a set search text. Enter closes it. */
 export function searchTool(input) {
   const parent = input.parentNode, next = input.nextSibling;
-  const t = toolButton("search", input.getAttribute("aria-label") || "Search", input);
-  parent.insertBefore(t.node, next);
-  const mark = () => t.button.classList.toggle("has-value", !!input.value.trim());
+  const tool = toolButton("search", input.getAttribute("aria-label") || t("Search"), input);
+  parent.insertBefore(tool.node, next);
+  const mark = () => tool.button.classList.toggle("has-value", !!input.value.trim());
   input.addEventListener("input", mark);
   // preventDefault: the key press would otherwise reach the focused icon and reopen it
-  input.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); closeTools(); t.button.focus(); } });
+  input.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); closeTools(); tool.button.focus(); } });
   mark();
 }
 /** Sort tool of a toolbar: popover with the fields and the direction (Ascending /
@@ -238,22 +242,22 @@ export function sortControl(fields, onChange) {
     b.onclick = () => onChange(pick()); return b;
   };
   const byField = fields.map(([key, label]) => item(label, key, () => [key, current[1]]));
-  const byDir = [["asc", "Ascending", "up"], ["desc", "Descending", "down"]].map(([dir, label, arrow]) => {
+  const byDir = [["asc", t("Ascending"), "up"], ["desc", t("Descending"), "down"]].map(([dir, label, arrow]) => {
     const b = item(label, dir, () => [current[0], dir]); b.prepend(icon(arrow)); return b;
   });
-  const menu = box("div", "sort-menu", el("div", "Sort by", "pop-title"), ...byField, el("hr"), ...byDir);
+  const menu = box("div", "sort-menu", el("div", t("Sort by"), "pop-title"), ...byField, el("hr"), ...byDir);
   menu.role = "menu";
-  const t = toolButton("sort", "Sort", menu);
+  const tool = toolButton("sort", t("Sort"), menu);
   const set = value => {
     current = value;
     for (const b of byField) b.setAttribute("aria-checked", String(b.dataset.value === value[0]));
     for (const b of byDir) b.setAttribute("aria-checked", String(b.dataset.value === value[1]));
     const field = (fields.find(f => f[0] === value[0]) || fields[0])[1];
-    const text = `Sort: ${field} · ${value[1] === "desc" ? "Descending" : "Ascending"}`;
-    setTip(t.button, text); t.button.setAttribute("aria-label", text);
+    const text = t("Sort: {field} · {direction}", {field, direction: value[1] === "desc" ? t("Descending") : t("Ascending")});
+    setTip(tool.button, text); tool.button.setAttribute("aria-label", text);
   };
   set(current);
-  return {node: t.node, set};
+  return {node: tool.node, set};
 }
 /** Filter tool of a toolbar: popover "Filter" with one entry per filter (label, count
  *  right, check mark at the chosen one, optional tooltip on hover/focus) – look and
@@ -268,19 +272,20 @@ export function filterControl(items, onChange) {
     if (tip) attachTip(b, tip);
     b.onclick = () => onChange(key); return b;
   });
-  const menu = box("div", "sort-menu", el("div", "Filter", "pop-title"), ...buttons);
+  const menu = box("div", "sort-menu", el("div", t("Filter"), "pop-title"), ...buttons);
   menu.role = "menu";
-  const t = toolButton("filter", "Filter", menu);
+  const tool = toolButton("filter", t("Filter"), menu);
   const set = (current, counts) => {
     for (const b of buttons) {
       b.setAttribute("aria-checked", String(b.dataset.value === current));
       b.lastChild.textContent = String(counts[b.dataset.value] ?? "");
     }
     const label = (items.find(i => i[0] === current) || items[0])[1];
-    t.button.classList.toggle("has-value", current !== items[0][0]);
-    setTip(t.button, `Filter: ${label}`); t.button.setAttribute("aria-label", `Filter: ${label}`);
+    tool.button.classList.toggle("has-value", current !== items[0][0]);
+    const text = t("Filter: {label}", {label});
+    setTip(tool.button, text); tool.button.setAttribute("aria-label", text);
   };
-  return {node: t.node, set};
+  return {node: tool.node, set};
 }
 /** <details> whose open state survives re-rendering. */
 export function keptDetails(key, summary, content) {
@@ -295,13 +300,13 @@ export function keptDetails(key, summary, content) {
  *  inert (no selection possible), so the helper field is placed inside the dialog. */
 export async function copyText(text) {
   try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* fallback below */ }
-  const t = el("textarea", null, "copy-helper"); t.value = text; t.readOnly = true;
+  const helper = el("textarea", null, "copy-helper"); helper.value = text; helper.readOnly = true;
   const focused = document.activeElement;
-  (dlg.open ? dlg : document.body).append(t);
-  t.focus(); t.select(); t.setSelectionRange(0, text.length);
+  (dlg.open ? dlg : document.body).append(helper);
+  helper.focus(); helper.select(); helper.setSelectionRange(0, text.length);
   let ok = false;
   try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
-  t.remove(); if (focused instanceof HTMLElement) focused.focus();
+  helper.remove(); if (focused instanceof HTMLElement) focused.focus();
   return ok;
 }
 
@@ -374,7 +379,7 @@ attachTip($("fw-info"), () => $("fw-info").dataset.tip);
 const dlg = $("dlg");
 /** Open (or replace the content of) the dialog. titleIcon: optional icon name before
  *  the title; its colour comes from the class ti-<name> (style.css). */
-export function modal(title, content, buttons = [{text: "Close"}], titleIcon) {
+export function modal(title, content, buttons = [{text: t("Close")}], titleIcon) {
   const head = $("dlg-title");
   head.replaceChildren(el("span", title));
   if (titleIcon) { const i = icon(titleIcon); i.classList.add("ti", "ti-" + titleIcon); head.prepend(i); }
@@ -409,8 +414,8 @@ export function messageBody(text, kind = "info") {
 // Short, non-blocking feedback (e.g. Reload Device Info – no popup)
 let toastTimer = 0;
 export function toast(text, warn) {
-  const t = $("toast"); t.textContent = text; t.classList.toggle("warn", !!warn); t.hidden = false;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, warn ? 8000 : 4000);
+  const node = $("toast"); node.textContent = text; node.classList.toggle("warn", !!warn); node.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { node.hidden = true; }, warn ? 8000 : 4000);
 }
 /** Two-column value list: [label, value, optional value class]; rows without a
  *  value (null or "") are left out. cls: extra class of the list (e.g. the phone tile). */

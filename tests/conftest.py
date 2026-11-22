@@ -64,6 +64,9 @@ class FakeNet:
         self.offer_version = "1.5.0"  # stable version offered by the manufacturer's server
         self.steps = {}  # installed version -> next step offered for it (else offer_version)
         self.newest_version = None  # answer without installed version (None: offer_version)
+        self.beta_version = None  # beta of the server's answers when asked with beta (None: no beta)
+        self.beta_newest_only = False  # the beta only in the answer without installed version
+        self.beta_requests = []  # beta flag of every offer request
         self.newest_calls = 0
         self.offer_error = None  # exception raised by requests with the installed version
         self.reference_answer = "1.3.3"  # answer to the reference request (Plus1 1.0.7)
@@ -153,23 +156,31 @@ def net(monkeypatch, tmp_path):
         return {"version": version, "url": f"https://fw.example/Plus1-{version}/{sha}", "steps": "1",
                 "build": fake.builds.get(version, "")}
 
-    async def fetch_offer(_session, fw_type, _pins=None, version=None):
+    def with_beta(answer, beta):
+        # Option beta_firmware: the beta of the server's answer (fake.beta_version)
+        if answer is not None and beta and fake.beta_version:
+            beta_offer = offer(fake.beta_version)
+            answer.update(beta_version=fake.beta_version, beta_url=beta_offer["url"], beta_build=beta_offer["build"])
+        return answer
+
+    async def fetch_offer(_session, fw_type, _pins=None, version=None, beta=False):
+        fake.beta_requests.append(beta)
         if (fw_type, version) == ("Plus1", "1.0.7"):  # reference request of every check
             fake.reference_calls += 1
             return offer(fake.reference_answer) if fake.reference_answer else None
         if version is None:  # newest version
             fake.newest_calls += 1
-            return offer(fake.newest_version or fake.offer_version)
+            return with_beta(offer(fake.newest_version or fake.offer_version), beta)
         fake.offer_calls += 1
         if fake.offer_error is not None:
             raise fake.offer_error
-        return offer(fake.steps.get(version, fake.offer_version))
+        return with_beta(offer(fake.steps.get(version, fake.offer_version)), beta and not fake.beta_newest_only)
 
     async def download_firmware(_session, url, target_dir, _pins=None, https_only=False):
         fake.downloads += 1
         if fake.download_gate is not None:
             await fake.download_gate.wait()
-        version = url.rsplit("/", 2)[-2].rsplit("-", 1)[-1]
+        version = url.rsplit("/", 2)[-2].split("-", 1)[-1]
         content = vendor_content(version)
         sha = hashlib.sha256(content).hexdigest()
         (target_dir / f"{sha}.zip").write_bytes(content)

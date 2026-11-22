@@ -16,8 +16,10 @@ Protection layers:
    only password in an answer is a newly generated export password, returned once
    by /api/firmware/export and kept nowhere.
 5. Device-side password changes, deleting stored firmware and downgrades need
-   explicit confirmation flags (confirm + acknowledged), deleting log entries the
-   flag confirm – checked on the server (never inferred from the UI alone).
+   explicit confirmation flags (confirm + acknowledged), a beta installation (also a
+   scheduled one) the flag beta_acknowledged; deleting log entries or a schedule,
+   "Run now" and cancelling a scheduled installation the flag confirm – checked on
+   the server (never inferred from the UI alone).
 """
 
 import asyncio
@@ -41,6 +43,7 @@ from manager import Manager
 from manager_core import DOWNLOAD_BASE_MESSAGES
 from manager_store import PART_MAX, TRANSFER_ID_RE
 from shelly import FW_NAME_RE, MAX_FW_SIZE, ShellyError, parse_json, same_secret
+from timetable import ID_RE as SCHEDULE_ID_RE
 
 log = logging.getLogger("sfm.ui")
 
@@ -252,12 +255,18 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
         """Start an approved installation, bound to the SHA-256 shown to the user.
 
         {"downgrade": true} (Gen2+): install the stored older version with that
-        SHA-256; needs the second confirmation ("acknowledged": true) as well."""
+        SHA-256; needs the second confirmation ("acknowledged": true) as well.
+        {"at": "YYYY-MM-DDTHH:MM"}: schedule the installation instead (local time of
+        Home Assistant, at most 7 days ahead; updates only). A beta version needs
+        "beta_acknowledged": true, also when scheduled. Installing a device now drops
+        its scheduled installation."""
         device_id = device_id_from(request)
         body = await json_body(request)
         sha = body.get("sha256")
         if body.get("confirm") is not True or not isinstance(sha, str) or not SHA_RE.fullmatch(sha):
             raise web.HTTPBadRequest(text="Confirmation incomplete")
+        if mgr.schedule_running is not None:
+            raise web.HTTPConflict(text=f"Schedule “{mgr.schedule_running}” is running – please try again afterwards")
         if body.get("downgrade") is True:
             if body.get("acknowledged") is not True:
                 raise web.HTTPBadRequest(text="Confirmation incomplete")
@@ -286,7 +295,82 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
             raise web.HTTPBadRequest(text="restart: true or false expected")
         if restart_first and not mgr.devices[device_id].get("install_failed"):
             raise web.HTTPBadRequest(text="A restart first is only offered after a failed installation")
-        background(mgr.install(device_id, sha, approved_by=user_from(request.headers), restart_first=restart_first))
+        if mgr.devices[device_id].get("beta") and body.get("beta_acknowledged") is not True:
+            raise web.HTTPBadRequest(text="Confirmation incomplete")
+        user = user_from(request.headers)
+        if "at" in body:
+            try:
+                at = mgr.plan_install(device_id, sha, body["at"], user, restart_first)
+            except ValueError as err:
+                raise web.HTTPBadRequest(text=str(err)) from None
+            except ShellyError as err:
+                raise web.HTTPConflict(text=str(err)) from None
+            return web.json_response({"scheduled": True, "at": int(at)})
+        mgr.cancel_plan(device_id, user, reason="installed_now")
+        background(mgr.install(device_id, sha, approved_by=user, restart_first=restart_first))
+        return web.json_response({"started": True})
+
+    async def planned_cancel(request: web.Request) -> web.StreamResponse:
+        """Cancel the scheduled installation of a device."""
+        device_id = device_id_from(request)
+        if (await json_body(request)).get("confirm") is not True:
+            raise web.HTTPBadRequest(text="Confirmation incomplete")
+        if not mgr.cancel_plan(device_id, user_from(request.headers)):
+            raise web.HTTPConflict(text="No installation is scheduled for this device (anymore)")
+        return web.json_response({"cancelled": True})
+
+    # ---------------------------------------------------------------- Schedules tab
+
+    def schedule_id_from(request: web.Request) -> str:
+        """Validated schedule ID from the URL; unknown IDs -> 404."""
+        sid = request.match_info["sid"]
+        if not SCHEDULE_ID_RE.fullmatch(sid) or not any(s.get("id") == sid for s in mgr.schedules):
+            raise web.HTTPNotFound(text="Unknown schedule")
+        return sid
+
+    def schedule_answer(item: dict[str, Any]) -> web.Response:
+        """The saved schedule in the form of the state (see Manager.schedules_view)."""
+        view = next((v for v in mgr.schedules_view() if v["id"] == item.get("id")), None)
+        return web.json_response(view)
+
+    async def schedule_create(request: web.Request) -> web.StreamResponse:
+        """Add a schedule."""
+        body = await json_body(request)
+        try:
+            item = mgr.create_schedule(body, user_from(request.headers))
+        except ValueError as err:
+            raise web.HTTPBadRequest(text=str(err)) from None
+        return schedule_answer(item)
+
+    async def schedule_update(request: web.Request) -> web.StreamResponse:
+        """Change a schedule (all user-editable fields)."""
+        sid = schedule_id_from(request)
+        body = await json_body(request)
+        try:
+            item = mgr.update_schedule(sid, body, user_from(request.headers))
+        except ValueError as err:
+            raise web.HTTPBadRequest(text=str(err)) from None
+        return schedule_answer(item)
+
+    async def schedule_delete(request: web.Request) -> web.StreamResponse:
+        """Delete a schedule (after a confirmation)."""
+        sid = schedule_id_from(request)
+        if (await json_body(request)).get("confirm") is not True:
+            raise web.HTTPBadRequest(text="Confirmation incomplete")
+        mgr.delete_schedule(sid, user_from(request.headers))
+        return web.json_response({"deleted": True})
+
+    async def schedule_run(request: web.Request) -> web.StreamResponse:
+        """"Run now" (after a confirmation): refused while a check, an installation or
+        another run is going on."""
+        sid = schedule_id_from(request)
+        if (await json_body(request)).get("confirm") is not True:
+            raise web.HTTPBadRequest(text="Confirmation incomplete")
+        try:
+            mgr.reserve_schedule_run(sid)  # synchronous: a second request gets 409
+        except ShellyError as err:
+            raise web.HTTPConflict(text=str(err)) from None
+        background(mgr.run_schedule_now(sid, user_from(request.headers)))
         return web.json_response({"started": True})
 
     async def wifi_signal(request: web.Request) -> web.StreamResponse:
@@ -666,6 +750,11 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
     app.router.add_post("/api/scan", scan)
     app.router.add_post("/api/devices/{id}/check", check_device)
     app.router.add_post("/api/devices/{id}/install", install)
+    app.router.add_post("/api/devices/{id}/planned/cancel", planned_cancel)
+    app.router.add_post("/api/schedules", schedule_create)
+    app.router.add_post("/api/schedules/{sid}", schedule_update)
+    app.router.add_post("/api/schedules/{sid}/delete", schedule_delete)
+    app.router.add_post("/api/schedules/{sid}/run", schedule_run)
     app.router.add_post("/api/devices/{id}/offer-now", offer_now)
     app.router.add_get("/api/devices/{id}/signal", wifi_signal)
     app.router.add_get("/api/devices/{id}/changelog", changelog)
