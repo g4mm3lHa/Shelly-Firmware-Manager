@@ -74,6 +74,9 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
 - Phones, title bar (H1): inside HA the app title is hidden; the pills "Last checked …"
   and "Every n days · HH:MM" stacked on the left (ellipsis if too long), "Check now"
   right, vertically centred, never wraps.
+- **"Check now" in the Settings tab (2026-11-22):** hidden there (it belongs to the
+  device data), its place is kept so the header does not move when the tab changes; all
+  other tabs show it.
 
 ## Texts, controls and design basics (2026-11-22, `reports/3.8.0-design`)
 - **Spelling (T1–T3, T6):** card titles and status labels in Title Case; menus, buttons,

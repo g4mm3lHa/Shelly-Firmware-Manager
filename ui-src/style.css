@@ -56,6 +56,8 @@ a{color:var(--primary-color)}
 
 /* Header and tabs */
 .titlebar{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+/* "Check now" in the Settings tab: invisible and not focusable, its place stays (no jump) */
+#scan.off-view{visibility:hidden}
 .tabs{display:flex;gap:4px;margin:12px 0 16px;border-bottom:1px solid var(--line);overflow-x:auto}
 .tab{background:none;color:var(--secondary-text-color);border-radius:0;border:0;border-bottom:2px solid transparent;
   padding:8px 16px;display:flex;align-items:center;gap:6px}
