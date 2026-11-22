@@ -23,7 +23,6 @@ Protection layers:
 import asyncio
 import contextlib
 import hashlib
-import hmac
 import json
 import logging
 import re
@@ -41,7 +40,7 @@ from events import ENTRY_ID_RE, user_from
 from manager import Manager
 from manager_core import DOWNLOAD_BASE_MESSAGES
 from manager_store import PART_MAX, TRANSFER_ID_RE
-from shelly import FW_NAME_RE, MAX_FW_SIZE, ShellyError
+from shelly import FW_NAME_RE, MAX_FW_SIZE, ShellyError, parse_json, same_secret
 
 log = logging.getLogger("sfm.ui")
 
@@ -127,13 +126,13 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
         answer – also on refusals and on the answer to an unexpected error."""
         if request.remote != ingress_ip:
             return refusal(403, "Only reachable via Home Assistant Ingress")
-        if request.method not in ("GET", "HEAD"):
-            if not hmac.compare_digest(request.headers.get("X-CSRF-Token", ""), csrf_token):
-                return refusal(403, "Invalid CSRF token")
-            upload = request.match_info.route.name in BINARY_ROUTES
-            if request.content_type != (UPLOAD_TYPE if upload else "application/json"):
-                return refusal(415, "Binary file expected" if upload else "JSON expected")
         try:
+            if request.method not in ("GET", "HEAD"):
+                if not same_secret(request.headers.get("X-CSRF-Token", ""), csrf_token):
+                    return refusal(403, "Invalid CSRF token")
+                upload = request.match_info.route.name in BINARY_ROUTES
+                if request.content_type != (UPLOAD_TYPE if upload else "application/json"):
+                    return refusal(415, "Binary file expected" if upload else "JSON expected")
             response = await handler(request)
         except web.HTTPException as exc:  # error responses get the headers too
             exc.headers.update(SECURITY_HEADERS)
@@ -155,10 +154,11 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
         return device_id
 
     async def json_body(request: web.Request) -> dict[str, Any]:
-        """Request body as JSON object; anything else -> 400."""
+        """Request body as JSON object; anything else -> 400 (also a value nested too
+        deeply and an unknown charset in the Content-Type)."""
         try:
-            body = await request.json()
-        except ValueError:
+            body = parse_json(await request.text())
+        except (ValueError, LookupError):
             raise web.HTTPBadRequest(text="Invalid JSON") from None
         if not isinstance(body, dict):
             raise web.HTTPBadRequest(text="JSON object expected")
@@ -208,12 +208,38 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
         """Start the check of a single device in the background (no installation)."""
         device_id = device_id_from(request)
         await json_body(request)  # no parameters, but the JSON/CSRF rules apply
+        start_device_check(device_id, user_from(request.headers))
+        return web.json_response({"started": True})
+
+    async def offer_now(request: web.Request) -> web.StreamResponse:
+        """"Offer update now": lift the hold of the version held back for this device
+        (option offer_after_days) and check the device in the background, which then
+        provides it (installed only after an approval)."""
+        device_id = device_id_from(request)
+        await json_body(request)  # no parameters, but the JSON/CSRF rules apply
+        user = user_from(request.headers)
+        if not mgr.held_version(device_id):
+            raise web.HTTPConflict(text="No update is held back for this device")
+        # Reserve the check first: if it cannot start now (409), the hold stays as it is
+        try:
+            mgr.reserve_check("device", device_id)
+        except ShellyError as err:
+            raise web.HTTPConflict(text=str(err)) from None
+        mgr.release_hold(device_id, user)
+        run_device_check(device_id, user)
+        return web.json_response({"started": True})
+
+    def start_device_check(device_id: str, user: str) -> None:
+        """Reserve and start the check of one device in the background (409 if it
+        cannot start now)."""
         try:
             mgr.reserve_check("device", device_id)  # synchronous: no double start
         except ShellyError as err:
             raise web.HTTPConflict(text=str(err)) from None
+        run_device_check(device_id, user)
 
-        user = user_from(request.headers)  # read now: the check outlives the request
+    def run_device_check(device_id: str, user: str) -> None:
+        """Run the reserved check of one device in the background."""
 
         async def run() -> None:
             """Single-device check; failures are already logged by the manager."""
@@ -221,7 +247,6 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
                 await mgr.check_device(device_id, user=user)
 
         background(run())
-        return web.json_response({"started": True})
 
     async def install(request: web.Request) -> web.StreamResponse:
         """Start an approved installation, bound to the SHA-256 shown to the user.
@@ -256,8 +281,18 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
         # A stored version offered without the server's answer needs the risk acknowledgment
         if mgr.devices[device_id].get("store_fallback") and body.get("acknowledged") is not True:
             raise web.HTTPBadRequest(text="Confirmation incomplete")
-        background(mgr.install(device_id, sha, approved_by=user_from(request.headers)))
+        restart_first = body.get("restart", False)  # "Restart the device first"
+        if not isinstance(restart_first, bool):
+            raise web.HTTPBadRequest(text="restart: true or false expected")
+        if restart_first and not mgr.devices[device_id].get("install_failed"):
+            raise web.HTTPBadRequest(text="A restart first is only offered after a failed installation")
+        background(mgr.install(device_id, sha, approved_by=user_from(request.headers), restart_first=restart_first))
         return web.json_response({"started": True})
+
+    async def wifi_signal(request: web.Request) -> web.StreamResponse:
+        """Wi-Fi signal of the device, read now (installation dialog)."""
+        device_id = device_id_from(request)
+        return web.json_response(await guarded(mgr.wifi_signal(device_id)))
 
     async def downgrades(request: web.Request) -> web.StreamResponse:
         """Stored older stable versions for a downgrade (Gen1: none)."""
@@ -519,10 +554,12 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
         return web.json_response(await guarded(mgr.check_import(body.get("token"), body.get("password"))))
 
     async def store_import_confirm(request: web.Request) -> web.StreamResponse:
-        """Step 3: store the checked import (new files, missing data)."""
+        """Step 3: store the checked import (new files, missing data) – only with the
+        user's statement that they created the export or trust its source
+        ("acknowledged": true): a sealed export proves no origin."""
         body = await json_body(request)
         try:
-            counts = await mgr.confirm_import(body.get("token"), user_from(request.headers))
+            counts = await mgr.confirm_import(body.get("token"), user_from(request.headers), body.get("acknowledged"))
         except ValueError as err:
             raise web.HTTPBadRequest(text=str(err)) from None
         except (ShellyError, OSError) as err:
@@ -588,7 +625,8 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
 
     async def options_get(_request: web.Request) -> web.StreamResponse:
         """App options (there are no secret options)."""
-        return web.json_response(mgr.options_view())
+        # installed_versions: storage of the option "Keep installed versions" (not an option)
+        return web.json_response({**mgr.options_view(), "installed_versions": mgr.installed_versions()})
 
     async def app_page(_request: web.Request) -> web.StreamResponse:
         """Path of this app's page in the Home Assistant frontend (changelog link)."""
@@ -628,6 +666,8 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
     app.router.add_post("/api/scan", scan)
     app.router.add_post("/api/devices/{id}/check", check_device)
     app.router.add_post("/api/devices/{id}/install", install)
+    app.router.add_post("/api/devices/{id}/offer-now", offer_now)
+    app.router.add_get("/api/devices/{id}/signal", wifi_signal)
     app.router.add_get("/api/devices/{id}/changelog", changelog)
     app.router.add_get("/api/devices/{id}/downgrades", downgrades)
     app.router.add_post("/api/devices/{id}/settings/refresh", settings_refresh)

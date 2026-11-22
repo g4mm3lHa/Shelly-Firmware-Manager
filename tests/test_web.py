@@ -3,6 +3,7 @@
 All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test servers."""
 
 import asyncio
+import datetime
 import json
 import re
 
@@ -316,7 +317,7 @@ async def test_http_install_of_a_store_fallback_needs_acknowledgment(client, mgr
     await mgr.scan()
     started = []
 
-    async def install(device_id, sha, approved_by, downgrade=False):
+    async def install(device_id, sha, approved_by, downgrade=False, restart_first=False):
         started.append(device_id)
         return True
 
@@ -400,6 +401,10 @@ async def test_http_store_export_and_import(client, mgr, net):
     )
     assert r.status == 200 and len((await r.json())["new"]) == 1
     r = await client.post("/api/firmware/import/confirm", json={"token": token}, headers=hdr(client))
+    assert r.status == 400  # without "I created this export myself or I trust its source"
+    r = await client.post(
+        "/api/firmware/import/confirm", json={"token": token, "acknowledged": True}, headers=hdr(client)
+    )
     assert r.status == 200 and (await r.json())["stored"] == 1
     blobs = json.dumps(mgr.public_state()) + json.dumps(mgr.events.list())
     assert prepared["password"] not in blobs
@@ -501,3 +506,62 @@ async def test_http_install_refused_with_a_stored_bad_download_base_url(net):
             assert r.status == 409  # nothing to confirm
         finally:
             await c.close()
+
+
+async def test_http_offer_now_lifts_the_hold_and_checks_the_device(client, mgr, net):
+    """"Offer update now": 409 while nothing is held back or the check cannot start
+    (the hold stays then); otherwise the hold of this version is lifted and the device
+    checked, which provides it."""
+    mgr.offer_after_days = 7
+    net.builds["1.5.0"] = f"{datetime.date.today():%Y%m%d}-101500/1.5.0-gabc"
+    await mgr.scan()
+    r = await client.post(f"/api/devices/{B}/offer-now", json={}, headers=hdr(client))
+    assert r.status == 409  # Hall is up to date
+    mgr.device_checks[A] = "running"  # the check cannot start now: 409, the hold stays
+    r = await client.post(f"/api/devices/{A}/offer-now", json={}, headers=hdr(client))
+    assert r.status == 409 and "hold_released" not in mgr.devices[A]
+    del mgr.device_checks[A]
+    r = await client.post(f"/api/devices/{A}/offer-now", json={}, headers=hdr(client))
+    assert r.status == 200
+    for _ in range(100):
+        if mgr.devices[A]["status"] == "ready":
+            break
+        await asyncio.sleep(0.01)
+    assert mgr.devices[A]["status"] == "ready" and "hold" not in mgr.devices[A]
+
+
+async def test_http_wifi_signal_and_restart_flag(client, mgr, net, monkeypatch):
+    """Wi-Fi signal read now; the install request passes "restart" – only after a failed
+    installation – and refuses other values than true/false."""
+    await mgr.scan()
+
+    async def signal(*_args, **_kwargs):
+        return -71
+
+    monkeypatch.setattr(shelly, "wifi_signal", signal)
+    r = await client.get(f"/api/devices/{A}/signal")
+    assert r.status == 200 and await r.json() == {"rssi": -71}
+
+    async def unreadable(*_args, **_kwargs):
+        raise shelly.ShellyError("The device reported no usable Wi-Fi signal")
+
+    monkeypatch.setattr(shelly, "wifi_signal", unreadable)  # the dialog shows "unknown"
+    r = await client.get(f"/api/devices/{A}/signal")
+    assert r.status == 409
+    started = []
+
+    async def install(device_id, sha, approved_by, downgrade=False, restart_first=False):
+        started.append(restart_first)
+        return True
+
+    monkeypatch.setattr(mgr, "install", install)
+    body = {"sha256": mgr.devices[A]["sha256"], "confirm": True}
+    r = await client.post(f"/api/devices/{A}/install", json={**body, "restart": "yes"}, headers=hdr(client))
+    assert r.status == 400
+    r = await client.post(f"/api/devices/{A}/install", json={**body, "restart": True}, headers=hdr(client))
+    assert r.status == 400  # a restart first only after a failed installation
+    mgr.devices[A]["install_failed"] = True
+    r = await client.post(f"/api/devices/{A}/install", json={**body, "restart": True}, headers=hdr(client))
+    assert r.status == 200
+    await asyncio.sleep(0.01)
+    assert started == [True]

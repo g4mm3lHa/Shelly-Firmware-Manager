@@ -8,15 +8,28 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   with fixed label column (34 %, min 96 px), 4 px rows and thin lines, empty rows
   hidden, "Version a → b", model with "Gen n", small SHA-256; buttons unchanged.
 - **Dialog title icon** (20 px, `modal(…, titleIcon)`): changelog, delete (red), upload
-  (all steps incl. errors), installation dialog (red chip).
-- Status dialog (row menu entry "Device Details"): title = device name, message left /
+  (all steps incl. errors), installation dialog (red chip), downgrade (history icon).
+- **Dialog rules (2026-11-22, `reports/3.8.0-design` U8, U9, T4):** (a) every delete dialog
+  has the red trash icon before the title ("Delete firmware?", "Delete unknown file?",
+  "Delete log entry?", "Delete all logs?", "Remove from list?"), every downgrade dialog the
+  downgrade (history) icon, in all steps incl. errors. (b) Multi-step dialogs: step 1 is
+  always "Continue" in blue; only the last button that triggers the action is red. (c) An
+  error dialog keeps the title (and icon) of the dialog it comes from (e.g. "Install
+  update?", "Delete firmware?", "Save settings?"); errors without a dialog keep their
+  short title ("Check", "Ignore", "Settings").
+- **Tables in dialogs (2026-11-22, F1, U7):** plain tables, left-aligned, on every width
+  (not the Devices table or phone tile layout). Phones: "Install n updates?" shows two-line
+  entries (name; below it IP · installed → target · source, mockup `M9`); desktop keeps
+  the table; "Power-on action" stays a table.
+- Status dialog (row menu entry "Device details"): title = device name, message left /
   status pill right, sections Firmware, Device (Model with "Gen n", Firmware ID, NTP;
   empty rows hidden) and History. The phone list ("Details" in the tile) shows the same
   values.
 - **Row menu (⋮), five groups with separators:** 1 Check for updates, Install update,
-  Downgrade (hint below it) | 2 Device Details, Reload device info ("Not available" hint
+  Offer update now (only while an update is on hold), Downgrade (hint below it) | 2 Device details, Reload device info ("Not available" hint
   below it), Open web UI | 3 NTP server, Power-on action, Eco mode, Device password |
-  4 Ignore / Resume device (removed devices: Remove from list) | 5 Restart (red).
+  4 Ignore / Resume device (removed devices: Remove from list) | 5 Restart (red). Phones:
+  every entry incl. "Open web UI" 44 px high.
 - **Message dialogs (2026-11-19, variant B):** large round icon (40 px circle, 24 px
   icon) left of the text, text in the normal colour: success green check, error red X,
   warning yellow "!" (e.g. not applied / not read back). Neutral notes ("Nothing
@@ -28,7 +41,9 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   the reminder for the HA Shelly integration; unchecked → red box "Not stored in this
   app: …" plus the reminder. Result of enable/change/remove: success icon plus a yellow
   box to update the password in the HA Shelly integration. The yellow "Keep the
-  password safe …" warning stays.
+  password safe …" warning stays. Value list under the strip: only "Stored in this app"
+  (the protection state stands in the strip, 2026-11-22). Storing an existing password:
+  button "Test & store".
 - Phones (2026-11-19): `#dlg-body` top padding 12 px; warning toast as wide as its
   text, at most the width minus 16 px on each side.
 
@@ -59,11 +74,45 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
 - Phones, title bar (H1): inside HA the app title is hidden; the pills "Last checked …"
   and "Every n days · HH:MM" stacked on the left (ellipsis if too long), "Check now"
   right, vertically centred, never wraps.
+- **"Check now" in the Settings tab (2026-11-22):** hidden there (it belongs to the
+  device data), its place is kept so the header does not move when the tab changes; all
+  other tabs show it.
 
-## Tooltips on touch devices
-- **All other tooltips:** a touch tap shows the tooltip of elements without an own
+## Texts, controls and design basics (2026-11-22, `reports/3.8.0-design`)
+- **Spelling (T1–T3, T6):** card titles and status labels in Title Case; menus, buttons,
+  filters and tags in sentence case with a capital start ("Device details", "Latest",
+  "Intermediate"). "Gen 2" for one device; "Gen1"/"Gen2+" only as a group in running text.
+  One ellipsis form with a space ("Checking …", "Loading changelog …"); a shortened value
+  keeps "…" without space (SHA). Buttons carry no "…" (a dialog may follow). "Save" for
+  settings, "Store" for keeping something in this app ("Test & store").
+- **Icons in buttons (T8):** before the text ("Upload firmware", "Export store", "Import
+  store", "Device passwords").
+- **Controls:** fields and selects with the strong line colour on every width (at least
+  3:1, mockup `M6`); buttons, cards and checkboxes keep the fine line. Heights (U10): desktop
+  33 px for text buttons (also "Check now" and dialog buttons), fields, selects and the
+  time field (mockup `M8`; icons, pills, "Install" and tabs unchanged); phones 44 px for
+  all of them and the file chooser. Checkboxes and radios in the theme's primary colour;
+  the file chooser's button like a normal button.
+- **One disclosure sign (U3):** a chevron after the text (down when closed, up when open):
+  "Details" of the phone tiles, "For n devices", log entries (desktop and phone tiles),
+  changelogs and groups in dialogs.
+- **IP addresses (U11):** normal font with equal-width digits everywhere (table, tiles,
+  dialogs); the link of the table stays blue and underlined.
+- **Design tokens (`ui-src/style.css` `:root`):** four font sizes (11 tags and section
+  titles, 12 secondary and hint text, 14 text, 15 card titles; app and dialog titles
+  apart), three radii (8 fields/menus/popovers/notices/tooltips, 12 pills/tags/tiles/
+  cards/dialogs, the theme's button radius for buttons and outlined tile buttons), two
+  lines (fine = theme divider, strong = at least 3:1), one warning text colour (warning
+  mixed half towards the text colour, also for tags, "Unsaved changes" and the header
+  status), control height (33 / 44 px). New styles use these tokens.
+
+## Tooltips
+- **One tooltip (2026-11-22, U4):** every tooltip is the app's own dark tooltip, none
+  uses the browser's `title` (icon buttons, toolbar tools, "Install", IP link, column
+  heads, "Check now"): `setTip` (text in `data-tip`) or `attachTip`.
+- **Touch devices:** a touch tap shows the tooltip of elements without an own
   action (`attachTip(node, text, true)`: device names, Gen1 version, schedule pill,
-  SHA-256, "Uploaded", "intermediate") and the title of a disabled button (pointer events, no click); a
+  SHA-256, "Uploaded", "Intermediate") and the tooltip of a disabled button (pointer events, no click); a
   tap that opens a popup or triggers another action is unchanged; the Firmware-tab info
   icon stays as it is. Touch is detected by the last `pointerdown` type; a second tap
   hides only a tooltip shown by a tap.

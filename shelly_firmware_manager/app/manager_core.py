@@ -39,7 +39,7 @@ import schedule
 from changelog import Changelogs
 from credentials import Credentials
 from events import EventLog
-from shelly import AuthError, DeviceAuth, ShellyError, clip, error_text
+from shelly import AuthError, DeviceAuth, ShellyError, clip, error_text, plain
 from tls import CertificatePins
 
 
@@ -156,9 +156,24 @@ ACTIVITY_RELOADING = "reloading"  # Reload Device Info is reading the device
 
 PART_PREFIX = ".part-"  # temporary download files (see shelly._store)
 
+# ASCII punctuation: escaped with a backslash in texts of the Home Assistant notification,
+# which renders Markdown (links, images, emphasis, HTML, autolinks); shown unchanged
+MARKDOWN_PUNCTUATION = re.compile(r"([!-/:-@\[-`{-~])")
+
+
+def markdown_text(value: object, limit: int = 64) -> str:
+    """A device name or version as literal text in Markdown: control and format
+    characters removed (see shelly.plain), every ASCII punctuation character escaped."""
+    return MARKDOWN_PUNCTUATION.sub(r"\\\1", plain(value, limit))
+
 SOURCE_DOWNLOAD = "download"  # downloaded from the manufacturer by a check
 
 SOURCE_UPLOAD = "upload"  # uploaded manually in the Firmware tab
+
+# Taken over from a store import: unverified like an upload (the seal of an export only
+# proves knowledge of its password, not who made it) until a manufacturer offer names
+# its SHA-256; it never replaces a manufacturer download otherwise
+SOURCE_IMPORT = "import"
 
 # download_base_url problems that block installations
 DOWNLOAD_BASE_MESSAGES = {
@@ -217,6 +232,10 @@ class ManagerCore:
         # Host name column: look up host names at every check (off: no lookup, no column)
         self.resolve_host_names = options["resolve_host_names"] is True
         self.import_max = int(options["import_max_mb"]) * 1024 * 1024  # bytes; largest store import
+        # Gen2+: also store the version a device runs while Shelly still offers it (way back)
+        self.keep_installed = options["keep_installed"] is True
+        # A new version is offered only once it is this many days old (build date); 0 = at once
+        self.offer_after_days = int(options["offer_after_days"])
         self.session = session
         self.token = token
         self.pins = pins  # certificate pins for shelly.cloud
@@ -244,7 +263,15 @@ class ManagerCore:
         # behind a Shelly gateway: read-only list for the UI, taken from the registry at
         # every check (see Checks._other_shellys); persisted
         self.others: list[dict[str, Any]] = []
+        # Shellys Home Assistant knows but the app does not list, with the reason:
+        # {"listed": n, "missing": [{"name", "model", "reason"}]} (MISSING_*), taken
+        # at every full check (see Checks._missing_shellys); persisted
+        self.listing: dict[str, Any] = {"listed": 0, "missing": []}
         self._state_file_valid = False  # state.json holds a state this run read or wrote
+        # Gen1 store entries of a state written by 3.8.0 or older are marked as imported
+        # once at the start (FirmwareStore.mark_gen1_imported): imports of these versions
+        # were stored as downloads and cannot be told apart
+        self.gen1_marking_due = False
         self.schedule: dict[str, Any] = {}  # automatic check schedule (see schedule.py), persisted
         self.reloading: set[str] = set()  # device IDs whose Reload Device Info is running
         # (firmware ID, version) -> running provide task (single flight)
@@ -374,11 +401,20 @@ class ManagerCore:
         self.download_base_confirmed = confirmed if isinstance(confirmed, str) else None
         self.first_start_open = data.get("first_start_open") is True
         self.first_start_notified = data.get("first_start_notified") is True
+        self.gen1_marking_due = data.get("gen1_imports_marked") is not True
         unknown = data.get("unknown_files")
         if isinstance(unknown, list):
             self.unknown_files = {str(n): 0 for n in unknown if isinstance(n, str)}
         others = data.get("others")
         self.others = [o for o in others if isinstance(o, dict)] if isinstance(others, list) else []
+        listing = data.get("listing")
+        if isinstance(listing, dict) and isinstance(listing.get("missing"), list):
+            listed = listing.get("listed")
+            self.listing = {
+                # Only a whole number is taken over; anything else counts as 0
+                "listed": listed if isinstance(listed, int) and not isinstance(listed, bool) and listed >= 0 else 0,
+                "missing": [m for m in listing["missing"] if isinstance(m, dict)],
+            }
 
     @staticmethod
     def _remove_partial_downloads() -> None:
@@ -407,8 +443,10 @@ class ManagerCore:
             "download_base_confirmed": self.download_base_confirmed,
             "first_start_open": self.first_start_open,
             "first_start_notified": self.first_start_notified,
+            "gen1_imports_marked": not self.gen1_marking_due,
             "unknown_files": sorted(self.unknown_files),
             "others": self.others,
+            "listing": self.listing,
         }
         try:
             with temp.open("w") as handle:
@@ -475,9 +513,19 @@ class ManagerCore:
                 found.add(device_id)
         return found
 
-    async def _ha_list(self, request: str) -> list[Any]:
+    async def _ha_setup_state(self) -> tuple[list[Any], list[Any]]:
+        """Config entries of the Shelly integration (config_entries/get; ignored
+        discoveries have source "ignore") and the flows in progress (discoveries
+        not set up yet, config_entries/flow/progress) – for the Shellys Home
+        Assistant knows but the app does not list. Raises like _ha_list."""
+        entries = await self._ha_list("config_entries/get", domain="shelly")
+        flows = await self._ha_list("config_entries/flow/progress")
+        return entries, flows
+
+    async def _ha_list(self, request: str, **params: str) -> list[Any]:
         """Answer of one list request of the Core WebSocket API (device or entity
-        registry); anything but a successful list answer is a ShellyError."""
+        registry, config entries, flows); params are added to the request; anything
+        but a successful list answer is a ShellyError."""
         ws_url = SUPERVISOR.replace("http", "ws", 1) + "/core/websocket"
 
         async def receive(ws: aiohttp.ClientWebSocketResponse) -> dict[str, Any]:
@@ -502,7 +550,7 @@ class ManagerCore:
             await ws.send_json({"type": "auth", "access_token": self.token})
             if (await receive(ws)).get("type") != "auth_ok":
                 raise ShellyError("Authentication with Home Assistant failed")
-            await ws.send_json({"id": 1, "type": request})
+            await ws.send_json({"id": 1, "type": request, **params})
             while True:
                 msg = await receive(ws)
                 if msg.get("id") == 1:

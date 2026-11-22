@@ -61,6 +61,19 @@ def test_resolve_host_names_is_off_by_default():
     assert new["resolve_host_names"] is True and changed == ["resolve_host_names"]
 
 
+def test_keep_installed_and_offer_after_days():
+    """keep_installed: default on; offer_after_days: 0–60 days, default 0 (offer at once)."""
+    base = {k: v for k, v in OPTIONS.items() if k not in ("keep_installed", "offer_after_days")}
+    view = app_options.public_view(base)
+    assert view["keep_installed"] is True and view["offer_after_days"] == 0
+    for bad in (-1, 61, "7", True):
+        with pytest.raises(ValueError):
+            app_options.merge(base, {"offer_after_days": bad})
+    new, changed = app_options.merge(base, {"offer_after_days": 60, "keep_installed": False})
+    assert (new["offer_after_days"], new["keep_installed"]) == (60, False)
+    assert changed == ["keep_installed", "offer_after_days"]
+
+
 def test_allow_downgrade_is_an_optional_switch():
     """allow_downgrade: no default (missing = off), only true/false accepted."""
     without = {k: v for k, v in OPTIONS.items() if k != "allow_downgrade"}

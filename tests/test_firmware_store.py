@@ -4,6 +4,7 @@ manual upload (stage + confirm).
 All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test servers."""
 
 import hashlib
+import json
 
 import data_paths
 import manager
@@ -439,9 +440,9 @@ async def test_file_read_back_is_used_only_for_a_matching_offer(net):
     m.devices[A] = {"name": "Kitchen", "gen": 2, "type": "Plus1", "version": "1.4.0"}
     assert m.downgrade_versions(A) == [] and m._downgrade_candidates() == {}
     assert await m._store_offer({"type": "Plus1", "gen": 2, "version": "1.2.0"}) is None
-    assert await m._stored_firmware("Plus1", "1.3.0", uploads=True) is None
-    assert await m._stored_firmware("Plus1", "1.3.0", uploads=True, offered_sha="b" * 64) is None
-    found = await m._stored_firmware("Plus1", "1.3.0", uploads=True, offered_sha=sha)
+    assert await m._stored_firmware("Plus1", "1.3.0", 2) is None
+    assert await m._stored_firmware("Plus1", "1.3.0", 2, offered_sha="b" * 64) is None
+    found = await m._stored_firmware("Plus1", "1.3.0", 2, offered_sha=sha)
     assert found and found[0] == name and "adopted" not in m.firmware[name] and m.firmware[name]["https"] is True
     assert [v["version"] for v in m.downgrade_versions(A)] == ["1.3.0"]
 
@@ -462,3 +463,66 @@ async def test_unknown_file_is_deleted_only_on_request(mgr, net):
     assert not (data_paths.FW_DIR / name).exists() and name not in mgr.unknown_files
     entry = mgr.events.entries[-1]
     assert entry["kind"] == "delete" and entry["unknown"] is True and entry["sha256"] == sha
+
+
+@pytest.mark.parametrize("marker", ["install_failed", "store_fallback"])
+async def test_gen1_marking_also_takes_the_file_of_a_failed_installation(net, marker):
+    """A Gen1 device that still holds its file after a failed installation (retry
+    possible) or as store fallback loses it too: no retry with a now imported file."""
+    m = manager.Manager(dict(OPTIONS), session=None, token="t")
+    gen1, sha = store(m, "SHSW-1", "20230913-112003/v1.14.0-gcb84623", gen=1)
+    m.devices[A] = {"name": "Hall", "status": manager_core.STATUS_ERROR, marker: True, "file": gen1, "sha256": sha}
+    m.save()
+    state = json.loads(data_paths.STATE_FILE.read_text())
+    state.pop("gen1_imports_marked")  # as written by 3.8.0
+    data_paths.STATE_FILE.write_text(json.dumps(state))
+    old = manager.Manager(dict(OPTIONS), session=None, token="t")
+    await old.adopt_files()
+    dev = old.devices[A]
+    assert dev["status"] == manager_core.STATUS_AVAILABLE and dev["file"] is None and marker not in dev
+    assert not old.approval_matches(A, sha)
+
+
+async def test_gen1_entries_of_an_older_state_are_marked_imported_once(net):
+    """A state of 3.8.0 or older (no marker): every Gen1 store entry becomes an imported
+    file once – those versions stored imports as downloads; a device it was provided
+    for loses the provision. Gen2+ entries stay; later Gen1 downloads stay downloads."""
+    m = manager.Manager(dict(OPTIONS), session=None, token="t")
+    gen1, gen1_sha = store(m, "SHSW-1", "20230913-112003/v1.14.0-gcb84623", gen=1)
+    gen2, _ = store(m, "Plus1", "1.5.0")
+    m.devices[A] = {"name": "Hall", "status": manager_core.STATUS_READY, "file": gen1, "sha256": gen1_sha}
+    m.save()
+    state = json.loads(data_paths.STATE_FILE.read_text())
+    state.pop("gen1_imports_marked")  # as written by 3.8.0
+    data_paths.STATE_FILE.write_text(json.dumps(state))
+    old = manager.Manager(dict(OPTIONS), session=None, token="t")
+    await old.adopt_files()
+    assert old.firmware[gen1]["source"] == manager_core.SOURCE_IMPORT and old.firmware[gen1]["https"] is None
+    assert old.firmware[gen2]["source"] == manager_core.SOURCE_DOWNLOAD
+    assert old.devices[A]["status"] == manager_core.STATUS_AVAILABLE and old.devices[A]["file"] is None
+    assert json.loads(data_paths.STATE_FILE.read_text())["gen1_imports_marked"] is True
+    later, _ = store(old, "SHSW-25", "20230913-112003/v1.14.0-gcb84623", gen=1)
+    old.save()
+    again = manager.Manager(dict(OPTIONS), session=None, token="t")
+    await again.adopt_files()
+    assert again.firmware[later]["source"] == manager_core.SOURCE_DOWNLOAD  # marked only once
+
+
+async def test_installed_versions_are_marked_and_counted(mgr, net):
+    """Firmware tab: a stored Gen2+ version that listed devices run is marked with their
+    names; Settings: stored installed versions and those the next check downloads."""
+    await mgr.scan()  # Kitchen and Garage run 1.4.0, Hall 1.5.0 (up to date); 1.5.0 is downloaded
+    name, _ = store(mgr, "Plus1", "1.4.0")
+    listed = {f["version"]: f for f in mgr.firmware_list()}
+    assert listed["1.4.0"]["installed"] == ["Garage", "Kitchen"] and listed["1.5.0"]["installed"] == ["Hall"]
+    usage = mgr.installed_versions()
+    assert (usage["stored"], usage["pending"]) == (2, 0)
+    assert usage["stored_size"] == listed["1.4.0"]["size"] + listed["1.5.0"]["size"]
+    (data_paths.FW_DIR / name).unlink()
+    usage = mgr.installed_versions()
+    assert (usage["stored"], usage["pending"]) == (1, 0)  # 1.4.0 is no longer offered: not counted
+    del mgr.firmware[[n for n, m in mgr.firmware.items() if m["version"] == "1.5.0"][0]]
+    usage = mgr.installed_versions()
+    assert (usage["stored"], usage["pending"], usage["pending_size"]) == (0, 1, None)
+    ways = {d["name"]: d["way_back"] for d in mgr.public_state()["devices"]}
+    assert ways["Hall"] == {"version": "1.5.0", "stored": False}

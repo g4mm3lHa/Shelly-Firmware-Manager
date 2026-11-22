@@ -21,7 +21,7 @@ from manager import Manager
 from tls import CertificatePins
 from web_ui import build_ui_app
 
-VERSION = "3.8.0"  # must match config.yaml
+VERSION = "3.9.0"  # must match config.yaml
 
 OPTIONS_FILE = Path("/data/options.json")
 UI_PORT = 8099  # Ingress (internal)

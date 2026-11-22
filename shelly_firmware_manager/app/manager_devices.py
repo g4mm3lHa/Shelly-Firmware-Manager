@@ -27,6 +27,11 @@ PASSWORD_MODES = ("store", "enable", "change", "remove", "forget")
 
 BULK_MODES = ("store", "set")  # several devices: store the existing password, or set one (enable or change)
 
+# Settings returned after a change (the device dialogs show what the device stored)
+SETTINGS_ANSWER = (
+    "shelly_name", "ntp", "eco", "ap", "ble", "ble_proxy", "cloud", "cloud_connected", "debug_ws", "outputs",
+)
+
 
 class DeviceSettings(FirmwareStore):
     """Device settings and the per-device password."""
@@ -194,6 +199,7 @@ class DeviceSettings(FirmwareStore):
             ("ap", "an access point switch"),
             ("ble", "a global Bluetooth switch"),
             ("debug_ws", "websocket debug log"),
+            ("cloud", "a cloud switch"),
         ):
             if key in clean and dev.get(key) == UNSUPPORTED:
                 raise ValueError(f"This device/firmware has no {label}")
@@ -218,7 +224,7 @@ class DeviceSettings(FirmwareStore):
             log.info("%s: settings changed by %s (%s)", dev.get("name"), user, ", ".join(sorted(clean)))
             self.events.add("setting", device=dev.get("name"), changes=diff, user=user)
         self.save()
-        settings = {k: dev.get(k) for k in ("shelly_name", "ntp", "eco", "ap", "ble", "debug_ws", "outputs")}
+        settings = {k: dev.get(k) for k in SETTINGS_ANSWER}
         return settings, restart, verified, not_applied
 
     @staticmethod
@@ -232,6 +238,7 @@ class DeviceSettings(FirmwareStore):
             ("ap", "ap", "Access point"),
             ("ble", "ble", "Bluetooth"),
             ("debug_ws", "debug_ws", "Websocket debug log"),
+            ("cloud", "cloud", "Cloud"),
         ):
             if key not in clean:
                 continue
@@ -262,6 +269,7 @@ class DeviceSettings(FirmwareStore):
             ("ap", "Access point"),
             ("ble", "Bluetooth"),
             ("debug_ws", "Websocket debug log"),
+            ("cloud", "Cloud"),
         ):
             if key in clean:
                 diff.append({"setting": label, "old": onoff.get(dev.get(key)), "new": onoff[clean[key]]})
@@ -273,6 +281,18 @@ class DeviceSettings(FirmwareStore):
                 {"setting": f"Power-on action {clip(label, 64)}", "old": old.get("aop"), "new": value}
             )
         return diff
+
+    async def wifi_signal(self, device_id: str) -> dict[str, int | None]:
+        """Wi-Fi signal of the device in dBm, read now for the installation dialog
+        (same restrictions as reading the settings; not stored, not logged):
+        {"rssi": dBm or None} – None for a device that is not on Wi-Fi (cable); a value
+        that cannot be read raises ShellyError (the dialog shows "unknown")."""
+        dev = self._settings_device(device_id)
+        try:
+            rssi = await shelly.wifi_signal(self.session, dev["gen"], dev["origin"], self._auth(device_id, dev))
+        except (TimeoutError, aiohttp.ClientError, KeyError, ValueError, OSError) as err:
+            raise ShellyError(f"Device not reachable: {error_text(err, 200) or type(err).__name__}") from None
+        return {"rssi": rssi}
 
     async def restart_device(self, device_id: str) -> None:
         """Restart the Shelly (same restrictions as changing settings). Not logged."""

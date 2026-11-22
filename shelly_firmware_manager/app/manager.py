@@ -68,9 +68,15 @@ class Manager(Installs):
             "host_name",
             "address_issue",
             "removed_reachable",
+            "cloud",
+            "cloud_connected",
+            "ble_proxy",
+            "hold",
+            "offer_date",
         )
         devices: list[dict[str, Any]] = []
         stored = self._downgrade_candidates()
+        kept = self._stored_versions()
         for key, dev in self.devices.items():
             origin = dev.get("origin")  # checked by resolve_device_origin: private IP
             devices.append(
@@ -79,6 +85,8 @@ class Manager(Installs):
                     **{f: dev.get(f) for f in fields},
                     # Number of stored older versions (row menu: Downgrade enabled or not)
                     "downgrades": self._downgrade_count(dev, stored),
+                    # Gen2+: is the installed version stored (way back after the next update)?
+                    "way_back": self.way_back(dev, kept),
                     "installing": key in self.installing,
                     "activity": self.activity.get(key),
                     "ignored": bool(dev.get("ignored")),
@@ -95,6 +103,9 @@ class Manager(Installs):
         return {
             "devices": devices,
             "others": self.others,
+            # Shellys Home Assistant knows but the app does not list (with the reason)
+            "listing": self.listing,
+            "offer_after_days": self.offer_after_days,
             "last_scan": self.last_scan,
             "busy": self.busy,
             "schedule": {

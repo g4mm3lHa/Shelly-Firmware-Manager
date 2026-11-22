@@ -1,5 +1,62 @@
 # Changelog
 
+## 3.9.0
+
+Released 2026-11-22. Installed versions are kept as a way back, new versions can be held
+back for some days and installations are checked first; the store import is hardened.
+
+Added
+- Keep installed versions (Settings, on by default): a check also stores the version a
+  Gen2+ device runs while Shelly offers it – its way back after the next update.
+- Offer updates only after (days) (Settings, 0–60, default 0): new versions (not your
+  uploads) held back by build date; "On hold" filter, row menu "Offer update now".
+- Devices tab: "N of M Shellys listed" with the reason why Shellys of the Shelly
+  integration are missing (disabled, discovered but not set up, ignored in HA).
+- Installation dialog: "Before installing" checks the way back (Gen2+) and the Wi-Fi
+  signal read from the device; build date of the offered version.
+- After a failed installation: "Restart the device first" checks the device, restarts
+  it, waits until it was down and answers again (at most 2 minutes), then installs.
+- Cloud icon in the action column (yellow while on) with on/off switch and filter
+  "Cloud on" (Gen2+ `Cloud.SetConfig`, Gen1 `/settings/cloud`).
+- Bluetooth popup: hint when Home Assistant uses the Shelly as Bluetooth proxy and turns
+  Bluetooth on again.
+- Firmware tab: labels and filters "Installed" and "Imported"; delete dialog warns when
+  devices lose their way back.
+
+Changed
+- Store import: warning in step 1 and in the welcome dialog, every file stored as
+  "Imported", acknowledgment required; export and log count imported files.
+- Consistent look: one set of font sizes, radii, line and warning colours; clearly
+  visible field borders; buttons, selects and fields share one height (44 px on phones).
+- Devices tab: "Columns" is a round icon on the right with a popover; a dot shows
+  columns that differ from the default.
+- IP addresses in the normal font with even digits.
+- Dialog "Install n updates?" on phones as two-line entries.
+- Delete and downgrade dialogs carry their icon; step 1 is a blue "Continue", only the
+  final step is red; error dialogs keep the title of their dialog.
+- Settings tab: the card "Device Passwords" comes first; "Check now" is hidden there.
+- Texts: "Device details", "Latest", "Intermediate", "Gen 2", "Test & store", buttons
+  without "…"; password dialog without the row "Device protection".
+
+Fixed
+- The export password could be cut off on narrow phones.
+- Installation dialog: long Gen1 version texts ran out of the dialog; they wrap now.
+
+Security
+- Store import: every imported file is stored as "imported" and never replaces Shelly's
+  file; it counts as downloaded once Shelly offers exactly this file (SHA-256).
+- Gen2+: a stored file is used instead of a download only if Shelly's download address
+  names its SHA-256; your own upload of exactly that version stays possible.
+- A provided update keeps its file only while this rule allows it: a file an older
+  version provided under the old rules is replaced by Shelly's file at the next check.
+- Gen1: imported files are no longer provided "store first", only for a manual
+  installation at your own risk while Shelly's list cannot be reached.
+- An import no longer turns an uploaded file into a downloaded one.
+- Device texts in Home Assistant notifications are shown as plain text (no links or
+  formatting); odd requests get a client error instead of a server error.
+- From 3.8.0 or older: stored Gen1 files are marked as imported once (origin unknown);
+  updates provided from them, also failed ones, are withdrawn until the next check.
+
 ## 3.8.0
 
 Released 2026-11-22. The device list is split into sections with a filter popover, and

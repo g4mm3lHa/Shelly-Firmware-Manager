@@ -50,6 +50,9 @@ def _export_import(c, page, f, out):
         d = dialog(f)
         check(f"{c}: counts (already stored)", "1 already stored" in d["body"].replace("\n", " "), d["body"][:300])
         check(f"{c}: finish button", d["buttons"][-1][0] == "Finish import", str(d["buttons"]))
+        check(f"{c}: import disabled before the acknowledgment", d["buttons"][-1][1] is True, str(d["buttons"]))
+        check(f"{c}: imported files marked", "stored as “Imported”" in d["body"], d["body"][:300])
+        f.locator("#dlg-body label.check input").check()
         page.screenshot(path=out / f"store-import-{c}.png")
         f.locator("#dlg-btns button", has_text="Finish import").click()
         check(f"{c}: import done", wait_until(lambda: "0 new files stored" in dialog(f)["body"]), dialog(f)["body"][:200])
@@ -88,7 +91,9 @@ def _bulk_passwords(c, page, f, out):
     check(f"{c}: count of fitting devices", f"All devices that fit ({fits} of 25)" in d["body"], d["body"][:200])
     check(f"{c}: protected without stored password greyed out", "store the current password first" in d["body"])
     check(f"{c}: step per device", "→ enable protection" in d["body"])
-    check(f"{c}: red button with the count", d["buttons"][-1][0] == f"Set on {fits} devices …", str(d["buttons"]))
+    # Step 1 is "Continue" in blue; the red button with the count follows in the confirmation
+    check(f"{c}: step 1 Continue in blue", d["buttons"][-1][0] == "Continue"
+          and f.locator("#dlg-btns button").last.get_attribute("class") == "primary", str(d["buttons"]))
     f.locator("#dlg-body label.check", has_text="Store in this app").locator("input").uncheck()
     check(f"{c}: not stored: red box", f.locator("#dlg-body .warnbox.danger").count() == 1)
     page.screenshot(path=out / f"bulk-passwords-{c}.png", full_page=True)
@@ -111,6 +116,8 @@ def _bulk_passwords(c, page, f, out):
     f.locator("#dlg-btns button").last.click()
     check(f"{c}: second confirmation", wait_until(lambda: "I have stored the password securely" in dialog(f)["body"]))
     check(f"{c}: confirm disabled before the acknowledgment", dialog(f)["buttons"][-1][1] is True)
+    check(f"{c}: red button with the count", dialog(f)["buttons"][-1][0] == f"Set on {fits} devices"
+          and f.locator("#dlg-btns button").last.get_attribute("class") == "danger", str(dialog(f)["buttons"]))
     f.click("#dlg-x")
 
 
@@ -125,8 +132,8 @@ def store_transfer(browser, out):
         f.click("#tab-settings")
         f.wait_for_selector("#store-export")
         heads = f.locator("#settings-form h2").all_text_contents()
-        check(f"{c}: cards in the Settings tab", heads == ["Checks", "Download Server", "Firmware & Storage", "Logs", "Advanced",
-                                                          "Device Passwords"], str(heads))
+        check(f"{c}: cards in the Settings tab", heads == ["Device Passwords", "Checks", "Download Server", "Firmware & Storage", "Logs",
+                                                          "Advanced"], str(heads))
         order = f.evaluate("""() => [...document.querySelectorAll('#settings-form .form > *')]
           .map(e => e.classList.contains('set-store') ? 'store' : (e.querySelector('input,select,textarea,.pins') || {}).id || '')
           .filter(x => ['opt-allow_downgrade', 'store', 'opt-import_max_mb'].includes(x))""")
@@ -144,14 +151,14 @@ def store_transfer(browser, out):
         c = f"first-{width}-{scheme}{'-embedded' if embedded else ''}"
         ctx, page, f, errors = open_page(browser, FIRST, width, scheme, embedded)
         check(f"{c}: welcome dialog", wait_until(lambda f=f: dialog(f)["title"] == "Welcome – import a firmware store?"))
-        check(f"{c}: buttons", dialog(f)["buttons"] == [["Skip", False], ["Import store …", False]], str(dialog(f)["buttons"]))
+        check(f"{c}: buttons", dialog(f)["buttons"] == [["Skip", False], ["Import store", False]], str(dialog(f)["buttons"]))
         page.screenshot(path=out / f"first-start-dialog-{c}.png")
         f.click("#dlg-x")
         notice = f.locator("#notice")
         check(f"{c}: notice bar", notice.is_visible() and "First start" in notice.text_content())
-        check(f"{c}: Check now disabled", f.locator("#scan").is_disabled() and "first-start" in (f.get_attribute("#scan", "title") or ""))
+        check(f"{c}: Check now disabled", f.locator("#scan").is_disabled() and "first-start" in (f.get_attribute("#scan", "data-tip") or ""))
         page.screenshot(path=out / f"first-start-notice-{c}.png")
-        f.locator("#notice button", has_text="Import store …").click()
+        f.locator("#notice button", has_text="Import store").click()
         check(f"{c}: import dialog from the notice", wait_until(lambda f=f: dialog(f)["title"] == "Import firmware store"))
         f.click("#dlg-x")
         page.reload()

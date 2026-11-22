@@ -1,9 +1,9 @@
 // Entry module: rendering, tabs and polling. Importing it loads all other modules.
-import {$, api, attachTip, closeModal, el, fmt, getState, hideTip, loadLocal, message, modal, saveLocal, ui} from "./core.js";
+import {$, api, attachTip, closeModal, el, fmt, getState, hideTip, loadLocal, message, modal, saveLocal, setTip, ui} from "./core.js";
 import {buildChooser, closeRowMenu, loadPrefs, renderDevices, syncChooser} from "./devices.js";
 import {renderFirmware} from "./firmware.js";
 import {mobileQuery, renderLogs} from "./logs.js";
-import {importDialog, renderSettings} from "./app-settings.js";
+import {IMPORT_OWN, importDialog, renderSettings} from "./app-settings.js";
 import "./install.js";
 import "./device-settings.js";
 
@@ -20,7 +20,7 @@ export function render(force) {
   // Blocked during a check or installations, and on a fresh installation until the
   // first-start question (import a firmware store?) is answered
   $("scan").disabled = !!s.busy || !!s.first_start_open;
-  $("scan").title = s.first_start_open ? FIRST_START_BLOCK : "";
+  setTip($("scan"), s.first_start_open ? FIRST_START_BLOCK : "");
   if (s.first_start_open) askFirstStart();
   else if (loadLocal("firstStartAsked")) saveLocal("firstStartAsked", null);   // answered: a reinstallation asks again
   const key = JSON.stringify([ui.view, mobileQuery.matches, s, ui.view === "firmware" ? ui.firmware : ui.view === "logs" ? ui.logs : null]);
@@ -52,8 +52,8 @@ function renderNotice(info) {
   if (!info.issue) { n.replaceChildren(); return; }
   const buttons = el("div", null, "notice-btns");
   if (info.issue === "first_start") {
-    const imp = el("button", "Import store …", "primary"), skip = el("button", "Skip");
-    imp.onclick = importDialog; skip.onclick = skipFirstStart;
+    const imp = el("button", "Import store", "primary"), skip = el("button", "Skip");
+    imp.onclick = importDialog; skip.onclick = () => skipFirstStart();
     buttons.append(imp, skip);
     n.replaceChildren(el("span", `First start: ${FIRST_START}`), buttons);
     return;
@@ -76,15 +76,18 @@ let firstStartAsked = false;
 function askFirstStart() {
   if (firstStartAsked || loadLocal("firstStartAsked")) return;
   firstStartAsked = true; saveLocal("firstStartAsked", true);
-  modal("Welcome – import a firmware store?", [
+  modal(WELCOME_TITLE, [
     el("p", "Moving from another Home Assistant instance? Import its exported firmware store first: the stored versions (also older ones Shelly no longer offers) and uploads are then available at once."),
-    el("p", FIRST_START, "hint"), el("div", "You can also import later: Settings → Firmware & Storage.", "hint")],
-  [{text: "Skip", action: skipFirstStart}, {text: "Import store …", kind: "primary", action: importDialog}], "importIcon");
+    el("p", FIRST_START, "hint"), el("div", "You can also import later: Settings → Firmware & Storage.", "hint"),
+    el("div", IMPORT_OWN, "warnbox")],
+  [{text: "Skip", action: () => skipFirstStart(WELCOME_TITLE)}, {text: "Import store", kind: "primary", action: importDialog}], "importIcon");
 }
-/** Answer the first-start question with "Skip": checks may run from now on. */
-async function skipFirstStart() {
+const WELCOME_TITLE = "Welcome – import a firmware store?";
+/** Answer the first-start question with "Skip": checks may run from now on. An error
+ *  keeps the title of the welcome dialog when it was skipped there (title). */
+async function skipFirstStart(title) {
   try { await api("api/first-start/skip", {}); closeModal(); }
-  catch (e) { message("First start", e.message, "error"); }
+  catch (e) { message(title || "First start", e.message, "error", title ? "importIcon" : undefined); }
 }
 /** Confirm that the former example URL really is the address of Home Assistant. */
 function confirmDownloadBase(url) {
@@ -92,7 +95,7 @@ function confirmDownloadBase(url) {
     el("p", "The Shellys download the firmware from this address. If it is wrong, every update fails. The confirmation ends when the address is changed.", "hint")],
   [{text: "Cancel"}, {text: "Yes, this is correct", kind: "primary", action: async () => {
     try { await api("api/settings/download-base/confirm", {url}); closeModal(); }
-    catch (e) { message("Download base URL", e.message, "error"); }
+    catch (e) { message("Confirm download base URL", e.message, "error"); }   // keeps the title of this dialog
   }}]);
 }
 const PHASES = {queued: "starting", registry: "reading the device list", devices: "checking devices",
@@ -115,6 +118,9 @@ const VIEWS = ["devices", "firmware", "logs", "settings"];
 function showView(v) {
   ui.view = v; closeRowMenu();
   for (const k of VIEWS) { $("view-" + k).hidden = k !== v; $("tab-" + k).classList.toggle("active", k === v); $("tab-" + k).setAttribute("aria-selected", k === v); }
+  // "Check now" belongs to the device data, not to the settings: hidden there, its place
+  // is kept so the header does not move when the tab changes
+  $("scan").classList.toggle("off-view", v === "settings");
   if (v === "settings") { ui.options = null; renderSettings(); api("api/settings").then(o => { ui.options = o; renderSettings(); }).catch(e => message("Settings", e.message, "error")); }
   load(true);
 }

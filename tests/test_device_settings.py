@@ -479,3 +479,87 @@ async def test_bulk_validation(mgr, several):
             await mgr.set_passwords(*args, **kwargs)
     results = await mgr.set_passwords("set", [A, A], "pw", keep=False, **good)
     assert len(results) == 1 and results[0]["result"] == "ok" and not mgr.credentials.has_device_password(A)
+
+
+async def test_gen2_cloud_and_bluetooth_proxy(device_api):
+    """Cloud switch (Shelly.GetConfig) and its connection (Cloud.GetStatus, only while
+    on); Home Assistant's Bluetooth proxy script (Script.List, only while Bluetooth is
+    on: running script with exactly that name)."""
+    calls, answers = device_api
+    answers["Shelly.GetConfig"] = {"cloud": {"enable": True}, "ble": {"enable": True}}
+    answers["Cloud.GetStatus"] = {"connected": False}
+    answers["Script.List"] = {"scripts": [{"id": 1, "name": "aioshelly_ble_integration", "enable": True, "running": True}]}
+    result = await shelly.read_settings(None, 2, "http://192.168.1.10", "Plus1")
+    assert (result["cloud"], result["cloud_connected"], result["ble_proxy"]) == (True, False, True)
+    answers["Script.List"] = {"scripts": [{"id": 1, "name": "aioshelly_ble_integration", "running": False}]}
+    assert (await shelly.read_settings(None, 2, "http://192.168.1.10", "Plus1"))["ble_proxy"] is False
+    calls.clear()
+    answers["Shelly.GetConfig"] = {"cloud": {"enable": False}, "ble": {"enable": False}}
+    result = await shelly.read_settings(None, 2, "http://192.168.1.10", "Plus1")
+    assert (result["cloud"], result["cloud_connected"], result["ble_proxy"]) == (False, None, False)
+    assert [c[0] for c in calls] == ["Shelly.GetConfig"]  # no further request while both are off
+    answers["Shelly.GetConfig"] = {}
+    assert (await shelly.read_settings(None, 2, "http://192.168.1.10", "Plus1"))["cloud"] == shelly.UNSUPPORTED
+
+
+async def test_gen1_cloud_from_the_settings(device_api):
+    """Gen1: cloud and its connection come with /settings; the switch is
+    /settings/cloud?enabled=1|0."""
+    calls, answers = device_api
+    answers["/settings"] = {"cloud": {"enabled": True, "connected": True}}
+    result = await shelly.read_settings(None, 1, "http://192.168.1.10", "SHSW-1")
+    assert (result["cloud"], result["cloud_connected"], result["ble_proxy"]) == (True, True, False)
+    await shelly.write_settings(None, 1, "http://192.168.1.10", {"cloud": False})
+    assert ("/settings/cloud", {"enabled": "0"}) in calls
+
+
+async def test_gen2_cloud_switch_changes_only_enable(device_api):
+    """Cloud.SetConfig with config.enable only; a restart request of the device is passed on."""
+    calls, answers = device_api
+    answers["Cloud.SetConfig"] = {"restart_required": True}
+    assert await shelly.write_settings(None, 2, "http://192.168.1.10", {"cloud": True}) is True
+    assert calls == [("Cloud.SetConfig", {"config": {"enable": True}})]
+    with pytest.raises(ValueError):
+        shelly.validate_settings({"cloud": "on"}, [])
+
+
+async def test_cloud_change_is_logged_and_read_back(mgr, net, monkeypatch):
+    """The cloud switch goes through change_settings: refused if the device has none,
+    logged with old and new value."""
+    await mgr.scan()
+    writes = []
+
+    async def write(_session, _gen, _origin, changes, _auth=None):
+        writes.append(changes)
+        return False
+
+    monkeypatch.setattr(shelly, "write_settings", write)
+    mgr.devices[A]["cloud"] = shelly.UNSUPPORTED
+    with pytest.raises(ValueError):
+        await mgr.change_settings(A, {"cloud": False})
+    mgr.devices[A]["cloud"] = True
+    await mgr.change_settings(A, {"cloud": False}, user="u")
+    assert writes == [{"cloud": False}]
+    entry = mgr.events.list()[0]
+    assert entry["kind"] == "setting" and {"setting": "Cloud", "old": "on", "new": "off"} in entry["changes"]
+
+
+async def test_wifi_signal_only_for_a_device_on_wifi(device_api):
+    """Wi-Fi signal: Gen2+ Wifi.GetStatus with status "got ip", Gen1 /status wifi_sta;
+    a device on the cable (no Wi-Fi connection) has none; connected without a usable
+    value is an error (the dialog shows "unknown")."""
+    _calls, answers = device_api
+    answers["Wifi.GetStatus"] = {"status": "got ip", "rssi": -83}
+    assert await shelly.wifi_signal(None, 2, "http://192.168.1.10") == -83
+    answers["Wifi.GetStatus"] = {"status": "disconnected", "rssi": 0}
+    assert await shelly.wifi_signal(None, 2, "http://192.168.1.10") is None
+    answers["Wifi.GetStatus"] = shelly.UnsupportedError("no Wi-Fi")
+    assert await shelly.wifi_signal(None, 2, "http://192.168.1.10") is None
+    answers["/status"] = {"wifi_sta": {"connected": True, "rssi": -58}}
+    assert await shelly.wifi_signal(None, 1, "http://192.168.1.10") == -58
+    answers["/status"] = {"wifi_sta": {"connected": True, "rssi": "strong"}}
+    with pytest.raises(ShellyError):
+        await shelly.wifi_signal(None, 1, "http://192.168.1.10")
+    answers["Wifi.GetStatus"] = {"status": "got ip"}
+    with pytest.raises(ShellyError):
+        await shelly.wifi_signal(None, 2, "http://192.168.1.10")
