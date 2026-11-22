@@ -1025,6 +1025,42 @@ def test_other_shellys_are_listed_read_only():
     assert [found[i]["kind"] for i in ("dw", "z", "m", "q")] == ["bluetooth", "zha", "zigbee2mqtt", "matter"]
 
 
+def test_other_shellys_leave_out_a_listed_shelly_seen_over_bluetooth():
+    """A Bluetooth entry whose MAC is the Wi-Fi MAC + 2 of a listed Shelly (registry
+    entry or MAC reported by a device) is that Shelly itself; other BLU devices stay."""
+    registry = [
+        {"id": "p", "name": "Plus 1PM", "identifiers": [["shelly", "p"]], "connections": [["mac", "a0:dd:6c:29:c3:e0"]]},
+        {"id": "dup", "name": "shellyplus1pm-4", "connections": [["bluetooth", "A0:DD:6C:29:C3:E2"]],
+         "manufacturer": "Shelly", "model": "SNSW-102P16EU"},
+        {"id": "dup2", "name": "shellyplus2pm", "connections": [["bluetooth", "08:3A:F2:00:00:01"]],
+         "manufacturer": "Shelly"},
+        {"id": "near", "name": "Door", "connections": [["bluetooth", "A0:DD:6C:29:C3:E1"]], "manufacturer": "Shelly"},
+        {"id": "wrap", "name": "Edge", "connections": [["bluetooth", "00:00:00:00:00:01"]], "manufacturer": "Shelly"},
+    ]
+    found = manager_checks.other_shellys(registry, ["083AF1FFFFFF", None, "FFFFFFFFFFFF", "bad"])
+    assert [o["id"] for o in found] == ["near"]
+    assert {o["id"] for o in manager_checks.other_shellys(registry)} == {"dup2", "near", "wrap"}
+
+
+async def test_host_name_from_the_device_id_only_when_it_resolves(mgr, net):
+    """Host name column: <device id>.local from the ID the device reports, shown only
+    when it resolves; a host name of the registry entry wins; requests keep the
+    address of the registry entry."""
+    own = f"shelly-{A}.local"
+    await mgr.scan()
+    assert mgr.devices[A]["host_name"] is None  # does not resolve
+    net.resolvable.add(own)
+    await mgr.scan()
+    assert mgr.devices[A]["host_name"] == own and mgr.devices[A]["origin"] == "http://192.168.1.10"
+    net.resolvable.add("kitchen.local")
+    net.devices[A] = ("Kitchen", "kitchen.local", "1.4.0", "1.5.0")
+    await mgr.check_device(A, user="u")
+    assert mgr.devices[A]["host_name"] == "kitchen.local"
+    net.resolvable.clear()
+    await mgr.check_device(A, user="u")
+    assert mgr.devices[A]["host_name"] is None
+
+
 async def test_other_shellys_are_kept_with_the_state(mgr, net):
     """The list of other Shellys comes with every check and is part of the state."""
     net.extra_registry.append({"id": "z", "name": "Hall motion", "identifiers": [["zha", "1"]], "manufacturer": "Shelly"})

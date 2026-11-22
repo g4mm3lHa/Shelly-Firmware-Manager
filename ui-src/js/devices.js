@@ -212,9 +212,9 @@ const ignoredPill = d => d.ignored ? el("span", "Ignored", "pill p-ignored") : n
 // Tooltip of the "Removed" marker: still reachable at the last address or not (unknown
 // until the device was tried there)
 const REMOVED_TIPS = {
-  true: "Removed from Home Assistant / the Shelly integration, but still reachable at its last address. All actions stay available; “Check all” skips it.",
-  false: "Removed from Home Assistant / the Shelly integration and no longer reachable. “Check all” skips it.",
-  null: "Removed from Home Assistant / the Shelly integration. “Check all” skips it."};
+  true: "Removed from Home Assistant / the Shelly integration, but still reachable at its last address. All actions stay available; “Check now” only tests whether it still answers.",
+  false: "Removed from Home Assistant / the Shelly integration and no longer reachable. “Check now” only tests whether it answers again.",
+  null: "Removed from Home Assistant / the Shelly integration. “Check now” only tests whether it still answers."};
 /** Removed devices: yellow marker next to the status (like "Ignored"), tooltip also on touch. */
 function removedPill(d) {
   if (!d.removed) return null;

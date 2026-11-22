@@ -105,22 +105,57 @@ def _registry_mac(entry: dict[str, Any]) -> str | None:
     return None
 
 
-def other_shellys(registry: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _bluetooth_mac(entry: dict[str, Any]) -> int | None:
+    """Bluetooth MAC address of a registry entry (connection "bluetooth") as a
+    number, else None."""
+    for item in entry.get("connections") or []:
+        if isinstance(item, list | tuple) and len(item) == 2 and item[0] == "bluetooth" and isinstance(item[1], str):
+            text = item[1].replace(":", "").replace("-", "")
+            if len(text) == 12:
+                try:
+                    return int(text, 16)
+                except ValueError:
+                    return None
+    return None
+
+
+def _shelly_bluetooth_macs(registry: list[dict[str, Any]], macs: Iterable[object]) -> set[int]:
+    """Bluetooth MAC addresses of the listed Shellys: a Gen2+ Shelly announces itself
+    over Bluetooth with its Wi-Fi MAC address + 2. macs: MAC addresses the devices
+    reported (upper case, no separators); the MACs of the Shelly registry entries
+    are added."""
+    found = set()
+    for mac in [*macs, *(_registry_mac(e) for e in registry if isinstance(e, dict) and _is_shelly(e))]:
+        text = str(mac or "")
+        if len(text) == 12:
+            try:
+                found.add((int(text, 16) + 2) % (1 << 48))
+            except ValueError:
+                continue
+    return found
+
+
+def other_shellys(registry: list[dict[str, Any]], macs: Iterable[object] = ()) -> list[dict[str, Any]]:
     """Shellys the app cannot update, as a read-only list ordered by name: BLU devices
     behind a Shelly gateway (Shelly integration, own firmware and Bluetooth
     connection) and devices of the Bluetooth/BTHome, ZHA, MQTT (Zigbee2MQTT) and
     Matter integrations whose manufacturer text names Shelly (a heuristic: a device
     with another text is missed). A device that is also in the Shelly integration (one
     registry entry with both identifiers, e.g. Gen4 with Zigbee or Matter firmware) is a
-    normal device. Disabled entries are left out.
+    normal device. Disabled entries are left out, and so is an entry whose Bluetooth
+    MAC address is the Wi-Fi MAC address + 2 of a listed Shelly (the Bluetooth
+    integration's second entry of that Shelly; macs: see _shelly_bluetooth_macs).
     Entry: {"id", "name", "kind" (OTHER_*), "model", "firmware", "gateway" (name of the
     Shelly gateway or None)}."""
     names = {e.get("id"): e.get("name_by_user") or e.get("name") for e in registry if isinstance(e, dict)}
     shelly_ids = {e.get("id") for e in registry if isinstance(e, dict) and _is_shelly(e)}
+    duplicates = _shelly_bluetooth_macs(registry, macs)
     found = []
     for entry in registry:
         if not isinstance(entry, dict) or entry.get("disabled_by") or not entry.get("id"):
             continue
+        if _bluetooth_mac(entry) in duplicates:
+            continue  # the listed Shelly itself, seen over Bluetooth
         ids, connections = _domains(entry, "identifiers"), _domains(entry, "connections")
         gateway = None
         if "shelly" in ids:
@@ -327,7 +362,7 @@ class Checks(DeviceSettings):
         try:
             registry = await self._registry()
             entry = self._shelly_entries(registry).get(device_id)
-            self.others = other_shellys(registry)
+            self.others = other_shellys(registry, (d.get("mac") for d in self.devices.values()))
             checked = False
             if entry is None:
                 self._mark_removed(dev)
@@ -373,7 +408,7 @@ class Checks(DeviceSettings):
         offers: OfferTasks = {}  # shared manufacturer requests: one per firmware ID
         registry = await self._registry()
         entries = self._shelly_entries(registry)
-        self.others = other_shellys(registry)
+        self.others = other_shellys(registry, (d.get("mac") for d in self.devices.values()))
         batteries = await self._battery_devices()
         self._readopt_removed(entries)
         for dev in self.devices.values():  # A full check ends the "just updated" display
@@ -539,21 +574,31 @@ class Checks(DeviceSettings):
         registered: bool = True,
     ) -> bool:
         """Check one device at the address of its registry entry (configuration_url),
-        keep its result on the device. True on success.
+        keep its result on the device and look up its host name. True on success.
+
+        registered=False: a removed device checked at its last address (no host
+        name of a registry entry, see _update_host_name)."""
+        dev = self.devices.setdefault(device_id, {})
+        dev["name"] = name
+        dev["last_check"] = int(time.time())
+        self.activity[device_id] = ACTIVITY_CHECKING
+        try:
+            ok = await self._attempt_check(device_id, dev, configuration_url, offers)
+            await self._update_host_name(dev, configuration_url if registered else None)
+            return ok
+        finally:
+            self.activity.pop(device_id, None)
+
+    async def _attempt_check(
+        self, device_id: str, dev: Device, configuration_url: str | None, offers: OfferTasks
+    ) -> bool:
+        """One check attempt of _check_entry. True on success.
 
         last_check = last attempt, last_success = last successful check; a failed
         attempt keeps the last known firmware so it is never shown as freshly checked.
         A known battery device (marker battery) that did not answer is STATUS_ASLEEP
         instead of STATUS_ERROR. A registry entry without a usable address sets
-        address_issue ({"reason", "message"}, see shelly.AddressError); host_name is
-        the host name of the registry entry (None for an IP address). registered=False:
-        a removed device checked at its last address (host name kept)."""
-        dev = self.devices.setdefault(device_id, {})
-        dev["name"] = name
-        dev["last_check"] = int(time.time())
-        if registered:
-            dev["host_name"] = shelly.host_name_of(configuration_url)
-        self.activity[device_id] = ACTIVITY_CHECKING
+        address_issue ({"reason", "message"}, see shelly.AddressError)."""
         try:
             await self._scan_device(device_id, dev, configuration_url, offers)
         except (TimeoutError, ShellyError, aiohttp.ClientError, KeyError, ValueError, OSError) as err:
@@ -575,8 +620,18 @@ class Checks(DeviceSettings):
         else:
             dev["last_success"] = dev["last_check"]
             return True
-        finally:
-            self.activity.pop(device_id, None)
+
+    @staticmethod
+    async def _update_host_name(dev: Device, configuration_url: str | None) -> None:
+        """Host name column: the host name of the registry entry (configuration_url)
+        wins, else <device id>.local from the ID the device reported (Gen2+ shelly_id,
+        Gen1 gen1_hostname; the last known one if this attempt failed). Looked up at
+        every check and kept only when it resolves (else None). Display only: requests
+        always go to the address of the registry entry."""
+        host = shelly.host_name_of(configuration_url) or shelly.local_host_name(
+            dev.get("shelly_id") or dev.get("gen1_hostname")
+        )
+        dev["host_name"] = host if host and await shelly.host_resolves(host) else None
 
     # ------------------------------------- One device: Gen2+ next step of the server, Gen1 firmware store first
 

@@ -163,8 +163,12 @@ the Home Assistant theme (colours, light/dark) and works on phones.
   update**. The section is display only, has no actions and is shown only with the
   filter **All** or **Other Shellys**; the search applies to it. The app recognises
   these devices by the manufacturer text in Home Assistant, so a device may be missing.
+  A listed Shelly that Home Assistant also knows over Bluetooth is not repeated here.
 - **Host name** (Columns chooser, off by default; on a phone a row in the details) shows
-  the host name of the device. It is checked on every single check and on **Check all**.
+  the host name set in the Shelly integration, else the name the device announces in
+  your network, `<device id>.local` (e.g. `shellyplus1pm-a0dd6c29c3e0.local`). The name
+  is looked up on every check and shown only when it resolves, otherwise "–". It is for
+  display only: the app always reaches the device at its address in Home Assistant.
 - A device you just updated stays on top as "Updated" (or "Unconfirmed" if the target
   version was not confirmed, or "Error" if the installation failed – then with
   **Install** for another attempt) until you check it again or the next full check runs.
@@ -584,6 +588,10 @@ The app connects only to:
   your devices or Home Assistant is sent.
 - **Home Assistant** via the Supervisor – device registry, notifications, the app's
   own settings and its slug (for the link to the app page).
+
+For the **Host name** column the app looks up each device's host name (for example
+`shellyplus1pm-a0dd6c29c3e0.local`) through the name resolution of Home Assistant on
+every check. This is a lookup only; the app does not connect to the address it gets.
 
 The user interface loads nothing from the internet. No telemetry.
 

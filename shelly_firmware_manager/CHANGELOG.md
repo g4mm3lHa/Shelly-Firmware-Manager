@@ -5,6 +5,18 @@
 Release candidate. The device list is split into sections with a filter popover, and
 devices removed from Home Assistant stay listed; lost firmware files are read back.
 
+Changes in rc2
+
+Changed
+- Devices tab: column "Host name" shows the host name of the Shelly integration, else
+  `<device id>.local`; looked up at every check, shown only when it resolves.
+- Devices tab: the Removed pill tooltip says that "Check now" only tests whether the
+  device still answers (or answers again).
+
+Fixed
+- Other Shellys: a listed Shelly that Home Assistant also knows over Bluetooth (BLE MAC
+  = Wi-Fi MAC + 2) is no longer listed a second time.
+
 Changes in rc1
 
 Added
