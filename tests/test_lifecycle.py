@@ -161,3 +161,33 @@ async def test_servers_are_stopped_in_parallel(app_env, monkeypatch):
     await _send_sigterm()
     assert await asyncio.wait_for(task, 5) is None
     assert max(overlap) == 2  # both servers stopped at the same time
+
+
+async def test_run_timetable_wakes_on_change_and_cancels_jobs_on_stop(mgr, monkeypatch):
+    """The timetable loop starts due jobs, is woken early by timetable_changed (a new
+    schedule or plan) and cancels running jobs when it is cancelled (app stop)."""
+    calls = []
+    started = asyncio.Event()
+
+    async def job():
+        started.set()
+        await asyncio.sleep(3600)
+
+    def start_due(now):
+        calls.append(now)
+        if len(calls) == 2:
+            mgr._spawn(job())
+
+    monkeypatch.setattr(mgr, "start_due", start_due)
+    monkeypatch.setattr(mgr, "due_in", lambda _now: float("inf"))  # nothing due: sleeps MAX_IDLE_WAIT_S
+    loop = asyncio.create_task(main.run_timetable(mgr))
+    await asyncio.sleep(0.01)
+    assert len(calls) == 1
+    mgr.timetable_changed.set()
+    await asyncio.wait_for(started.wait(), 1)
+    assert len(calls) == 2
+    running = next(iter(mgr._timetable_tasks))
+    loop.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await loop
+    assert running.cancelled()

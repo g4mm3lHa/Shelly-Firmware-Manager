@@ -117,3 +117,31 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   icon stays as it is. Touch is detected by the last `pointerdown` type; a second tap
   hides only a tooltip shown by a tap.
 - Device names: "Home Assistant device name: …" / "Shelly device name: …".
+
+## Tabs, start of an installation, language (3.10.0, mockups `3.10.0`, approved 2026-11-22)
+- **Tabs (F8, F9, F11):** Devices, Firmware, Schedules, Logs, Settings; "Schedules" with the
+  calendar-clock icon. Phones: only the active tab shows its name, the others only their
+  icon (variant B). The device action icon for the Shelly's own schedules is
+  named "Device schedules".
+- **Installation dialog, section "Start" (F1, F2, F6):** radios "Now" / "Install
+  at" with date and time (once, at most 7 days ahead, time zone of Home Assistant); with
+  "Install at" the red button reads "Approve & schedule", the title stays "Install
+  update?", the hint under the fields names the conditions (F3) and where to cancel. A
+  beta needs its tick also when scheduling. The section stands above the changelog
+  (live test rc1, approved 2026-11-22).
+- **Logs tab, unread entries (live test rc1, approved 2026-11-22):** a small yellow round "!" after the
+  tab name (phones: after the icon) while the log holds entries newer than the newest one
+  this browser has shown in the Logs tab; opening the tab clears it.
+- **Language (F20–F25):** card "Display" at the end of the Settings tab with "Language":
+  "Same as Home Assistant" (default, fallback English), English, Deutsch; applies at once,
+  per browser, not part of "Save settings". German uses "du" (without address where
+  possible). Logs tab: controls, filter and weekday translated, the entries stay English
+  including their type and outcome labels. Dates and times keep the form
+  "2026-11-23 03:00" in every language. Texts from the server or the Shelly stay English.
+  No in-app note on machine translation (README only). German terms:
+  Geräte, Zeitpläne, Einstellungen, Jetzt prüfen, Updates verfügbar, Beta-Updates, Achtung,
+  Aktuell, Bereit, Verfügbar, Geplant, Fehler, Installieren, Prüfen & installieren,
+  Freigeben & einplanen, Rückweg, Firmware-Ablage, Prüfungen, Gerätepasswörter, Erweitert,
+  Anzeige; unchanged: Firmware, Logs, Changelog, Downgrade, Beta, Cloud, Gen 2. The Status
+  column of the Devices table is wider in German, so "Installieren" stays beside its
+  pill (final build 3.10.0).

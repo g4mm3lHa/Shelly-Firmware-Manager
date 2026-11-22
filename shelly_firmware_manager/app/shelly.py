@@ -186,6 +186,15 @@ def parse_version(text: object) -> tuple[int, int, int, int, int]:
     return int(major), int(minor), int(patch), rank, int(pre_num or 0)
 
 
+def is_prerelease(text: object) -> bool:
+    """True for a pre-release version (alpha, beta or release candidate, e.g.
+    '1.5.0-beta2'); False for a final version and for an unknown format."""
+    try:
+        return parse_version(text)[3] < 3
+    except ShellyError:
+        return False
+
+
 # --------------------------------------------------------------------------- Devices
 
 
@@ -1202,7 +1211,11 @@ async def fetch_cloud_text(
 
 
 async def fetch_offer(
-    session: aiohttp.ClientSession, fw_type: str, pins: CertificatePins | None = None, version: str | None = None
+    session: aiohttp.ClientSession,
+    fw_type: str,
+    pins: CertificatePins | None = None,
+    version: str | None = None,
+    beta: bool = False,
 ) -> dict[str, str] | None:
     """Stable firmware offer {'version', 'url', 'steps', 'build'} of a Gen2+ firmware ID,
     or None. 'build' is the build ID the server names (starts with the build date, see
@@ -1213,7 +1226,11 @@ async def fetch_offer(
     version ("ver"), nothing else – and the server then answers with the next
     allowed step (e.g. a required intermediate version) instead of the newest
     version. Without version the answer is the newest version. 'steps' is the number
-    of update steps the server reports ("1" if it reports none)."""
+    of update steps the server reports ("1" if it reports none).
+
+    beta: also take the optional beta offer of the same answer (no further request);
+    it is added as 'beta_version', 'beta_url' and 'beta_build' when the server names
+    one with a URL. Without a stable offer the answer is None, also with a beta."""
     headers = None
     if version is not None:
         headers = {SHELLY_INFO_HEADER: json.dumps({"app": fw_type, "ver": version}, separators=(",", ":"))}
@@ -1222,12 +1239,20 @@ async def fetch_offer(
     if not isinstance(stable, dict) or not stable.get("url"):
         return None
     steps = max(1, _int_field(stable, "nsteps", 1))
-    return {
+    offer = {
         "version": clip(stable.get("version"), 64),
         "url": str(stable["url"]),
         "steps": str(steps),
         "build": plain(stable.get("build_id"), 128),
     }
+    pre = meta.get("beta") if beta and isinstance(meta, dict) else None
+    if isinstance(pre, dict) and pre.get("url") and pre.get("version"):
+        offer.update(
+            beta_version=clip(pre.get("version"), 64),
+            beta_url=str(pre["url"]),
+            beta_build=plain(pre.get("build_id"), 128),
+        )
+    return offer
 
 
 async def fetch_gen1_offers(session: aiohttp.ClientSession, pins: CertificatePins | None = None) -> dict[str, Any]:

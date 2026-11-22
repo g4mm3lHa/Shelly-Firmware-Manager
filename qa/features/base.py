@@ -46,10 +46,13 @@ def check(name, ok, detail=""):
     results.append((f"{SUITE[0]}: {name}", bool(ok), detail))
 
 
-def open_page(browser, base, width, scheme, embedded, ignore=()):
+def open_page(browser, base, width, scheme, embedded, ignore=(), init=None):
     """New page on the demo; returns (context, page, frame, errors). HTTP errors of
-    URLs containing one of ignore (expected refusals) are not counted."""
+    URLs containing one of ignore (expected refusals) are not counted; init: script run
+    in every frame before the page (e.g. a stored language choice)."""
     ctx = browser.new_context(viewport={"width": width, "height": 900}, color_scheme=scheme, has_touch=width <= 700)
+    if init:
+        ctx.add_init_script(init)
     page = ctx.new_page()
     errors = []
     page.on("pageerror", lambda e, errs=errors: errs.append(str(e)))

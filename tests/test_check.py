@@ -598,7 +598,7 @@ async def test_installed_version_is_sent_and_intermediate_versions_are_marked(mg
     sent = []
     fake = shelly.fetch_offer
 
-    async def recording(session, fw_type, pins=None, version=None):
+    async def recording(session, fw_type, pins=None, version=None, beta=False):
         sent.append((fw_type, version))
         return await fake(session, fw_type, pins, version)
 
@@ -635,7 +635,7 @@ async def test_file_provided_as_intermediate_version_keeps_a_store_marker(mgr, n
 async def test_several_steps_without_newer_version_are_an_intermediate_version(mgr, net, monkeypatch):
     fake = shelly.fetch_offer
 
-    async def steps(session, fw_type, pins=None, version=None):
+    async def steps(session, fw_type, pins=None, version=None, beta=False):
         offer = await fake(session, fw_type, pins, version)
         return {**offer, "steps": "2"} if version == "1.4.0" else offer
 
@@ -727,7 +727,7 @@ async def test_reference_request_detects_a_server_that_ignores_the_version(mgr, 
 async def test_reference_request_failure_is_no_finding(mgr, net, monkeypatch):
     fake = shelly.fetch_offer
 
-    async def failing_reference(session, fw_type, pins=None, version=None):
+    async def failing_reference(session, fw_type, pins=None, version=None, beta=False):
         if version == "1.0.7":
             raise ShellyError("502, 'Bad Gateway'")
         return await fake(session, fw_type, pins, version)

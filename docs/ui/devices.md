@@ -172,3 +172,19 @@ Wordings: `mockups/3.9.0/TEXTE.md`.
 - Phone log tile: user top right; one arrow only (none beside the user name when
   opened, the name keeps its place); no expansion when the details only repeat the
   summary (2026-11-19).
+
+## Beta and scheduled installations (3.10.0, mockups `3.10.0`, approved 2026-11-22)
+- **Beta:** section "Beta Updates" after "Updates Available" with its own
+  select-all and "Review & install"; violet "Beta" tag beside the firmware ID; filter "Beta
+  updates"; dialog "Install beta update?" with "(beta)" after the target version, the
+  yellow beta box and the tick (button disabled until ticked).
+- **Scheduled installation (F5):** blue pill "Scheduled" in place of "Ready",
+  clock line "Install at <date time>" under the version, no checkbox and no "Install";
+  row menu group 1 adds "Install now" and "Cancel scheduled installation"; filter
+  "Scheduled"; row "Scheduled" in the device details.
+- **Downgrade while scheduled (review 3.10.0, F5 a, approved 2026-11-22):** row menu
+  "Downgrade" disabled with the menu hint "Cancel the scheduled installation first" (same
+  rule as "Install").
+- **Running downgrade (review 3.10.0, F1 a, approved 2026-11-22):** the device stays in the
+  section it had before (usually "Up-To-Date"); Firmware column "installed → target" with
+  the tag "Downgrade" beside the firmware ID; status pill "Downgrading n %".

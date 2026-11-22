@@ -3,8 +3,10 @@ manual upload (stage + confirm).
 
 All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test servers."""
 
+import datetime
 import hashlib
 import json
+import time
 
 import data_paths
 import manager
@@ -208,6 +210,42 @@ async def test_downgrade_installs_the_selected_version(mgr, net, monkeypatch, qu
     assert name in mgr.firmware  # nothing deleted afterwards
     await mgr.check_device(A)  # the newer version is provided again from the store
     assert mgr.devices[A]["status"] == manager_core.STATUS_READY and net.downloads == 1
+
+
+async def test_running_downgrade_keeps_the_section_and_names_its_target(mgr, net, monkeypatch, quick_install):
+    """While a downgrade runs the device is no offered update: it stays in the section it
+    had before (up to date) and the state names the target version; afterwards both
+    markers are gone."""
+    await mgr.scan()  # B: 1.5.0, up to date
+    _name, sha = store(mgr, "Plus1", "1.4.0")
+    seen = []
+
+    async def trigger(_session, _gen, origin, _url, _auth=None):
+        view = next(d for d in mgr.public_state()["devices"] if d["id"] == B)
+        seen.append((view["section"], view["status"], view["downgrade"], view["target"], view["offer_version"]))
+        device = net.by_origin(origin)
+        net.devices[device] = (*net.devices[device][:2], "1.4.0", "1.5.0")
+
+    monkeypatch.setattr(shelly, "trigger_update", trigger)
+    assert await mgr.install(B, sha, "alice", downgrade=True) is True
+    assert seen == [(manager_core.SECTION_UP_TO_DATE, manager_core.STATUS_INSTALLING, True, "1.4.0", "1.5.0")]
+    view = next(d for d in mgr.public_state()["devices"] if d["id"] == B)
+    assert view["target"] is None and "downgrade_from" not in mgr.devices[B]
+    # a device with a provided update stays in "Updates available" while it downgrades
+    dev = {"status": manager_core.STATUS_INSTALLING, "downgrade": True, "downgrade_from": manager_core.SECTION_UPDATES}
+    assert manager_core.section_of(dev) == manager_core.SECTION_UPDATES
+
+
+async def test_downgrade_refused_while_an_installation_is_scheduled(mgr, net, quick_install):
+    """A scheduled installation blocks the downgrade of its device like "Install"."""
+    await mgr.scan()  # A: 1.4.0 with 1.5.0 provided
+    _name, sha = store(mgr, "Plus1", "1.3.0")
+    at = datetime.datetime.fromtimestamp(time.time() + 7200, mgr.tz).strftime("%Y-%m-%dT%H:%M")
+    mgr.plan_install(A, mgr.devices[A]["sha256"], at, "alice")
+    assert mgr.downgrade_blocker(A) == manager_store.DOWNGRADE_PLANNED
+    assert await mgr.install(A, sha, "u", downgrade=True) is False and mgr.devices[A]["version"] == "1.4.0"
+    mgr.cancel_plan(A, "alice")
+    assert mgr.downgrade_blocker(A) is None
 
 
 async def test_downgrade_refused_for_unknown_or_newer_file(mgr, net):

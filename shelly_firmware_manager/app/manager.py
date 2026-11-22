@@ -1,4 +1,4 @@
-"""Manager, layer 6 of 6: the complete object and its view for the UI.
+"""Manager, layer 7 of 7: the complete object and its view for the UI.
 
 See manager_core for the layers. Everything outside the manager modules uses this
 class only.
@@ -12,12 +12,12 @@ import schedule
 import shelly
 
 from manager_core import BATTERY_FROM_DEVICE, DOWNLOAD_BASE_MESSAGES, section_of
-from manager_installs import Installs
+from manager_schedules import Schedules
 
 log = logging.getLogger("sfm.manager")
 
 
-class Manager(Installs):
+class Manager(Schedules):
     """Holds the state of all Shellys and controls checks, storage and installation."""
 
     def public_state(self) -> dict[str, Any]:
@@ -73,6 +73,7 @@ class Manager(Installs):
             "ble_proxy",
             "hold",
             "offer_date",
+            "beta",
         )
         devices: list[dict[str, Any]] = []
         stored = self._downgrade_candidates()
@@ -95,9 +96,12 @@ class Manager(Installs):
                     # Where the battery marker comes from: "device" or "home_assistant"
                     "battery_source": dev.get("battery_source") or BATTERY_FROM_DEVICE if dev.get("battery") else None,
                     "section": section_of(dev),
+                    # Running downgrade: its target version (the offer of the last check stays offer_version)
+                    "target": dev.get("pending_version") if dev.get("downgrade") else None,
                     "password_set": self.credentials.has_device_password(key),  # flag only
                     "ip": shelly.origin_ip(origin) if origin else None,
                     "web_url": f"{origin}/" if origin else None,
+                    "planned": self.planned_view(dev),  # scheduled installation ("Install at")
                 }
             )
         return {
@@ -108,6 +112,9 @@ class Manager(Installs):
             "offer_after_days": self.offer_after_days,
             "last_scan": self.last_scan,
             "busy": self.busy,
+            "schedule_running": self.schedule_running,  # name of the schedule whose run is going on
+            # mark of the newest log entry (EventLog.latest): the Logs tab reloads and marks unread entries
+            "log_latest": self.events.latest(),
             "schedule": {
                 "days": self.check_days,
                 "time": self.check_time,
@@ -119,6 +126,8 @@ class Manager(Installs):
             "storage_error": self.storage_error or self.state_warning,
             "gen1_enabled": self.gen1_enabled,
             "allow_downgrade": self.allow_downgrade,
+            "beta_firmware": self.beta_firmware,
+            "schedules": self.schedules_view(),  # Schedules tab (see manager_schedules)
             "host_names": self.resolve_host_names,  # option "Resolve host names" (Host name column)
             "first_start_open": self.first_start_open,  # import question of a fresh installation
             "import_max_mb": self.import_max // 1048576,

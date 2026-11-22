@@ -10,6 +10,9 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
   "Firmware store" with export/import, Max. import size), Logs, Advanced (Max.
   parallel installations, Resolve host names, Pinned certificates; 3.8.0, mockup
   `3.8.0-hostname` B). Option labels with "Max." in front. Units in texts always "MB".
+- **Columns (live test 3.10.0-rc1, approved 2026-11-22):** the cards fill independent column stacks
+  (no shared row heights): three columns from 1600 px, two from 1168 px, else one; card n
+  goes to column n mod columns, so the order reads left to right as before.
 - **Changelog hint (3.5.0, 2026-11-19):** last line of the Settings tab, below
   the Save area: hint "What changed in each version: open the app page in Home
   Assistant and choose “Changelog” next to the version." – the link opens the info

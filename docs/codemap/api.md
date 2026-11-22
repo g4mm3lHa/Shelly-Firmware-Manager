@@ -10,7 +10,8 @@ Part of `docs/CODEMAP.md`; read when you change routes in `web_ui.py`.
 | `GET /api/state` | `public_state` (ETag / 304) |
 | `POST /api/scan` | `reserve_check` + `scan` (background) |
 | `POST /api/devices/{id}/check` | `reserve_check("device")` + `check_device` |
-| `POST /api/devices/{id}/install` | `approval_matches` / `downgrade_*` + `install` (`confirm`, `sha256`, `restart`: restart the device first; downgrade: `downgrade` + `acknowledged`) |
+| `POST /api/devices/{id}/install` | `approval_matches` / `downgrade_*` + `install` (`confirm`, `sha256`, `restart`: restart the device first; downgrade: `downgrade` + `acknowledged`; a beta needs `beta_acknowledged`; `at` "YYYY-MM-DDTHH:MM" → `plan_install` instead, answer `{scheduled, at}`; without `at` a scheduled installation is dropped – `cancel_plan("installed_now")`; 409 while a schedule runs; an update also 409 for an ignored device or while its info is reloaded) |
+| `POST /api/devices/{id}/planned/cancel` | `cancel_plan` (`confirm`) |
 | `POST /api/devices/{id}/offer-now` | `held_version`, `reserve_check`, then `release_hold` + check of the device (409 if nothing is held or the check cannot start; the hold stays then) |
 | `GET /api/devices/{id}/signal` | `wifi_signal` (`{rssi}`, read now; None: cable; not readable → 409, shown as "unknown") |
 | `GET /api/devices/{id}/downgrades` | `downgrade_versions`, `downgrade_blocker` |
@@ -31,6 +32,8 @@ Part of `docs/CODEMAP.md`; read when you change routes in `web_ui.py`.
 | `POST /api/firmware/import` | `stage_import_part` (octet-stream, ≤ `import_max_mb` in all, parts like the upload) |
 | `POST /api/firmware/import/check` · `/confirm` · `/cancel` | `check_import` (`token`, `password`) · `confirm_import` (`acknowledged` required) · `cancel_import` |
 | `POST /api/first-start/skip` | `skip_first_start` |
+| `POST /api/schedules` · `/api/schedules/{sid}` | `create_schedule` · `update_schedule` (all user fields, `timetable.validate`; answer: the schedule as in the state) |
+| `POST /api/schedules/{sid}/delete` · `/run` | `delete_schedule` · `reserve_schedule_run` + `run_schedule_now` in the background (both `confirm`; unknown ID 404, run not possible 409) |
 | `POST /api/firmware/upload/confirm` · `/cancel` | `confirm_upload` · `cancel_upload` |
 | `GET /api/firmware/{name}/download` | file response |
 | `POST /api/firmware/{name}/delete` | `delete_firmware` (`confirm` + `acknowledged`; also an unknown file of the folder) |

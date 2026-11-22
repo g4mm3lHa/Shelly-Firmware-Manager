@@ -35,10 +35,13 @@ How this differs from the update entities of the Shelly integration is answered 
 - Shellys only talk to Home Assistant – they need no internet access.
 - Every installation is approved by you, bound to the exact file (SHA-256) and verified
   afterwards; required intermediate versions are offered step by step.
+- Install now or at a chosen time (up to 7 days ahead); optional beta firmware (Gen2+).
 - Optional hold-back of brand-new versions for a number of days.
 - The version a device runs is kept, so you can go back to it (downgrade, Gen2 and newer).
 - Device settings, cloud switch and passwords for one or many devices; the firmware
   store moves to another Home Assistant instance as one sealed ZIP file.
+- Schedules restart Shellys or switch their cloud or Bluetooth at fixed times.
+- English and German interface (German machine translated – corrections welcome).
 
 ## Requirements
 

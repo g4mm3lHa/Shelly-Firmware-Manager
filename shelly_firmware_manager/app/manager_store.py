@@ -1,4 +1,4 @@
-"""Manager, layer 2 of 6: the firmware store, downgrade candidates, manual uploads and
+"""Manager, layer 2 of 7: the firmware store, downgrade candidates, manual uploads and
 the export/import of the whole store.
 
 Stored firmware is never deleted automatically: the user deletes files in the
@@ -60,8 +60,13 @@ TRANSFER_ID_RE = re.compile(r"^[0-9a-f]{32}$")  # ID of a transfer in parts
 MAX_MANIFEST = 64 * 1024  # upper limit for a manifest.json read from an uploaded ZIP
 
 STABLE_VERSION_RE = re.compile(r"^\d{1,4}\.\d{1,4}\.\d{1,4}$")  # stable Gen2+ versions only
+# Gen2+ beta versions as Shelly names them ("1.5.0-beta2", also release candidates):
+# accepted for an upload only while the option beta_firmware is on
+BETA_VERSION_RE = re.compile(r"^\d{1,4}\.\d{1,4}\.\d{1,4}-(beta|rc)\d{1,3}$")
 
 DOWNGRADE_OFF = "Downgrades are off – enable “Allow downgrades” in Settings"  # option allow_downgrade is off
+# A scheduled installation ("Install at") blocks a downgrade of its device, like "Install"
+DOWNGRADE_PLANNED = "Cancel the scheduled installation first"
 
 EXPORT_PREFIX = PART_PREFIX + "export-"  # temporary export file (removed at start)
 
@@ -681,6 +686,8 @@ class FirmwareStore(ManagerCore):
             return "Downgrades are not offered for Gen1 devices"
         if not self.allow_downgrade:
             return DOWNGRADE_OFF
+        if dev.get("planned"):
+            return DOWNGRADE_PLANNED
         if self.checking:
             return "Check in progress – please try again afterwards"
         if self.download_base_issue:
@@ -932,15 +939,21 @@ class FirmwareStore(ManagerCore):
     ) -> dict[str, Any]:
         """Step 2: register the staged file with the confirmed type and version.
 
-        type: firmware ID of a known Gen2+ device; version: stable X.Y.Z; an optional
-        expected SHA-256 must match the file (otherwise refused, the upload stays
-        staged for a correction). A file or a type/version that is already stored is
-        refused. Returns the new store entry."""
+        type: firmware ID of a known Gen2+ device; version: stable X.Y.Z, or a beta version
+        X.Y.Z-betaN while the option beta_firmware is on (it is provided only when the
+        Shelly update server offers exactly that version); an optional expected SHA-256
+        must match the file (otherwise refused, the upload stays staged for a correction).
+        A file or a type/version that is already stored is refused. Returns the new store entry."""
         staged = self._staged(token)
         types = self.upload_types()
         if not isinstance(fw_type, str) or fw_type not in types:
             raise ValueError("Choose the firmware ID of a known Gen2+ device")
-        if not isinstance(version, str) or not STABLE_VERSION_RE.fullmatch(version.strip()):
+        if not isinstance(version, str) or not (
+            STABLE_VERSION_RE.fullmatch(version.strip())
+            or (self.beta_firmware and BETA_VERSION_RE.fullmatch(version.strip()))
+        ):
+            if self.beta_firmware:
+                raise ValueError("Version must be a release number such as 1.4.4 or a beta version such as 1.5.0-beta2")
             raise ValueError("Version must be a stable release number such as 1.4.4")
         version = version.strip()
         checked = False

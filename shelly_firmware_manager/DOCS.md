@@ -15,8 +15,11 @@ Assistant). Version history: `CHANGELOG.md` (Changelog tab).
   - [Offer delay](#offer-delay)
   - [Keep installed versions](#keep-installed-versions)
   - [Installing updates](#installing-updates)
+  - [Scheduled installation](#scheduled-installation)
+  - [Beta firmware](#beta-firmware)
   - [Downgrade (Gen2+)](#downgrade-gen2)
   - [Firmware](#firmware)
+  - [Schedules](#schedules)
   - [Logs](#logs)
   - [Settings](#settings)
 - [Device passwords](#device-passwords)
@@ -77,7 +80,8 @@ Only original Shelly firmware is supported; see [Known limitations](#known-limit
 ## Configuration
 
 All options can be changed in the app's **Settings** tab (or the Configuration tab of
-the app page – same names, help texts and order). Saving restarts the app.
+the app page – same names, help texts and order, in English or German like Home
+Assistant). Saving restarts the app.
 
 | Option | Default | Allowed | Meaning |
 |---|---|---|---|
@@ -88,6 +92,7 @@ the app page – same names, help texts and order). Saving restarts the app.
 | Serve downloads only to known Shellys | on | on / off | Firmware is only served to the device it is meant for. Switch off if downloads are rejected from a 172.30.x.x address |
 | Enable Gen1 updates | on | on / off | Gen1 support: all Gen1 devices of the Shelly integration are checked (see [Gen1 firmware](#gen1-firmware)) |
 | Allow downgrades | off | on / off | Installing an older stored firmware on Gen2+ devices (see [Downgrade](#downgrade-gen2)). Stays off until you switch it on, also after an update of the app |
+| Offer beta firmware | off | on / off | Gen2+: also offers the beta versions of the Shelly update server; each needs an extra confirmation (see [Beta firmware](#beta-firmware)) |
 | Keep installed versions | on | on / off | Gen2+: also stores the firmware a device already runs while Shelly still offers it, so a downgrade stays possible after a bad update (see [Keep installed versions](#keep-installed-versions)) |
 | Max. import size (MB) | 100 | 1–2048 | Largest file accepted by **Import store** |
 | Max. log size (entries) | 1000 | 100–3000 | Size limit of the activity log |
@@ -126,8 +131,10 @@ correct the address.
 
 ## Using the app
 
-The app has four tabs: **Devices**, **Firmware**, **Logs** and **Settings**. It follows
-the Home Assistant theme (colours, light/dark) and works on phones.
+The app has five tabs: **Devices**, **Firmware**, **Schedules**, **Logs** and
+**Settings**. It follows the Home Assistant theme (colours, light/dark) and works on
+phones; there only the active tab shows its name. The user interface is in English or
+German (see [Settings](#settings)).
 
 ### Devices
 
@@ -141,6 +148,7 @@ in the first section that fits, **Removed** and **Ignored** first:
 | Section | What it holds |
 |---|---|
 | **Updates Available** | Devices with an offered, provided or running update. A device you just updated stays here as "Updated" (or "Unconfirmed", or "Error" with **Install** for another attempt) until you check it again or the next full check runs |
+| **Beta Updates** | Devices with a beta version on offer (only while **Offer beta firmware** is on, see [Beta firmware](#beta-firmware)) |
 | **Attention** | Devices whose last check ended in an error, whose installation was not confirmed, that could not be reached, or that have no usable address (see below) |
 | **Not Checked** | Devices that were never checked, and Gen1 devices that are skipped while **Enable Gen1 updates** is off |
 | **Up-To-Date** | Devices without a newer stable firmware (also while a new version is on hold, see [Offer delay](#offer-delay)) |
@@ -151,7 +159,7 @@ in the first section that fits, **Removed** and **Ignored** first:
 
 The **Filter** icon next to **Sort** opens a popover with one filter per section plus
 **All**, **Unprotected** (devices without password protection – set it per device from
-that list), **Cloud on** and **On hold** (only while **Offer updates only after (days)**
+that list), **Scheduled** (approved installations waiting for their time), **Cloud on** and **On hold** (only while **Offer updates only after (days)**
 is above 0), each with its count. A dot on the icon shows that a filter other than
 **All** is active. The Firmware and Logs tabs have the same icon with their own filters.
 
@@ -160,6 +168,7 @@ is above 0), each with its count. A dot on the icon shows that a filter other th
 | Up-To-Date | No newer stable firmware is offered (Gen2+: by the Shelly server; Gen1: neither stored nor by the Shelly server) |
 | Available | An update exists, the firmware is provided at the next check |
 | Ready | Firmware provided (from the firmware store or downloaded), waiting for your approval – "Install" next to the status opens the installation dialog |
+| Scheduled | Installation approved for a later time; the time is shown under the version (see [Scheduled installation](#scheduled-installation)) |
 | Updated | The installation was confirmed; shown until the next check of the device |
 | Queued / Installing | Installation waiting for a free slot / running (with progress for Gen2+) |
 | Unconfirmed | The installation ran, but the target version was not confirmed (see the details); stays in **Updates Available** until the next check of the device |
@@ -174,7 +183,8 @@ Assistant again and the mark disappears with the next check. A full check does n
 removed devices for updates: it only tests whether they still answer at their last
 address and logs a warning if they do, an error if not. While one is still reachable,
 its actions and a single check work as usual. **Remove from list** in the row menu
-deletes the device and its stored password from the app after a confirmation.
+deletes the device and its stored password from the app after a confirmation; it also
+leaves every schedule (a schedule without devices is switched off).
 
 **No usable address:** if the address of a device cannot be used – the host name does
 not resolve, the IP address is outside the private networks, or the device has no
@@ -206,7 +216,8 @@ is a row in the details.
 **Action icons** show and change power-on action, eco mode, password protection,
 access point, Bluetooth, cloud, actions and schedules and the websocket debug log, and
 restart the device. The popup of an icon starts with the current state; "?" means the
-value is unknown. Every change is read back from the device; a value the device
+value is unknown (also the power-on action while the outputs of a device have never been
+read). Every change is read back from the device; a value the device
 accepted but did not apply is reported as a warning and logged as failed. The lock is
 green if the device is protected and its password is stored in the app, yellow if the
 password is not stored here.
@@ -226,7 +237,8 @@ password is not stored here.
   configuration details and streaming uses device resources. Below firmware 1.0.0 the
   stream is not protected by the device password. Gen1 devices have no such log.
 
-**Row menu** ⋮ per device: Check for updates, Install update, Offer update now (only
+**Row menu** ⋮ per device: Check for updates, Install update (for a scheduled
+installation: **Install now** and **Cancel scheduled installation**), Offer update now (only
 while an update is on hold), Downgrade, Device details (status, firmware with build date
 and way back, model, generation, firmware ID, NTP server and history), Reload device
 info, Open web UI, the device settings, Ignore / Resume device and Restart. On touch
@@ -351,6 +363,49 @@ followed by a check of that device at once (see [How a check works](#how-a-check
 The next stored version – or the offer of the Shelly server – is provided when you check
 the device again (row menu ⋮ → Check for updates) or at the next full check.
 
+### Scheduled installation
+
+In the installation dialog, the section **Start** offers **Now** or **Install at** with a
+date and time – once, at most 7 days ahead, in the time zone of Home Assistant. **Approve
+& schedule** stores your approval for exactly this file (SHA-256). The device shows
+"Scheduled" with the time, and the tab **Schedules** lists it.
+
+At that time the app installs without asking again, but only if the device still runs the
+version shown in the dialog and the file is still provided. If a full check, a schedule
+or work on the device itself is running then, the installation waits up to 30 minutes and
+stays "Scheduled". Otherwise nothing is installed and the scheduled installation lapses:
+
+- a check found another version or file, or beta firmware was switched off;
+- the device was ignored or removed from Home Assistant;
+- a check could not reach the Shelly update server, so the same file is now offered
+  without its confirmation (unless you scheduled it with the risk tick for such a file);
+- the running work took longer than 30 minutes;
+- installations are disabled (download base URL);
+- the app was not running at that time. It never installs later, also not right after a
+  restart, so an installation does not start at an unexpected time.
+
+The log names the reason. Home Assistant shows one notification for every scheduled
+installation: installed, failed, lapsed or missed. Cancel it in the row menu or the tab
+**Schedules**; **Install now** in the row menu opens the dialog again and replaces the
+scheduled time. While an installation is scheduled, **Downgrade** is blocked for the
+device; cancel the scheduled installation first.
+
+### Beta firmware
+
+With **Offer beta firmware** on, a check also takes the beta version the Shelly update
+server names for a Gen2+ device. A device with a beta on offer is listed under **Beta
+Updates**; the version has a violet "Beta" tag. The installation dialog warns that a beta
+is a pre-release and needs the tick "I understand that beta firmware is a pre-release and
+may contain bugs." – also for a scheduled installation. The offer delay does not apply to
+betas. Shelly offers betas only now and then and not for every model; the app log names
+for every checked device whether a beta was offered.
+
+The way back to a stable version is a downgrade, so it needs that version in the firmware
+store (see [Keep installed versions](#keep-installed-versions)). When you switch the
+option off, offered betas are withdrawn at the next start of the app (saving the
+settings restarts it); a device that already runs a beta is not changed. Gen1 devices get
+no beta versions.
+
 ### Downgrade (Gen2+)
 
 Downgrades are off until **Allow downgrades** is switched on in the Settings tab; while
@@ -360,8 +415,10 @@ Row menu ⋮ → **Downgrade** lists all stored versions that are older than the
 one (the entry is greyed out while no older version is stored). Choose a version, check the installation dialog and confirm a second time.
 In the Firmware tab, the downgrade icon of an older version lists the devices of this
 type with a newer version installed; choose one and confirm a second time. The
-downgrade runs like a normal installation and is logged as such. It is available for
-up-to-date and ignored devices too, but never for Gen1.
+downgrade runs like a normal installation and is logged as such; meanwhile the device
+stays in its group and shows the target version with the tag "Downgrade". It is
+available for up-to-date and ignored devices too, but never for Gen1, and not while an
+installation is scheduled for the device.
 
 Shelly only offers the current version for download, so older versions are available
 only if the app downloaded them earlier or you uploaded them (see [Firmware](#firmware)).
@@ -411,18 +468,52 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
   downgrade. The app cannot verify where an uploaded file comes
   from, and the version is the one you confirmed – only use files you trust.
 
+### Schedules
+
+A schedule does one action on several Shellys at a fixed time: **Restart**, **Cloud on**,
+**Cloud off**, **Bluetooth on** or **Bluetooth off**. **Add schedule** asks for a name, the
+action, the time (time zone of Home Assistant) and the repeat: **Daily**, **On weekdays**
+or **Every** n days. Devices are **All Shellys** (new ones are included automatically) or
+a list you tick. A restart runs device by device with a pause (default 3 seconds, 0 = all
+at once), so the network and Home Assistant are not hit at once.
+
+A run leaves out ignored and removed devices, battery devices (they sleep) and devices
+without the switch (Gen1 has no Bluetooth switch); the dialog and the log name them. While
+a check, an installation or another schedule runs, a due run waits up to 30 minutes. A run
+that waited longer, or whose time passed while the app was not running, is skipped and
+logged as "missed"; it is not made up for after a restart. A run cut off by a stop of the
+app is logged as interrupted. **Run now** (play icon) starts a schedule at once after a
+confirmation. A device removed with **Remove from list** leaves every schedule; a schedule
+left without devices is switched off and shows "No device" until you choose devices again.
+
+The card lists each schedule with its next run and the last result ("2 of 3 restarted · 1
+left out" counts all chosen devices); the checkbox switches
+a schedule off and on. The card **Scheduled Installations** lists the approved installations
+waiting for their time (see [Scheduled installation](#scheduled-installation)). Every run is
+written to the log; Home Assistant shows a notification only when a device was not
+reachable or refused the change. While a schedule runs, **Check now** and installations
+are refused; an automatic check that is due then waits up to 30 minutes for the end of
+the run, otherwise it is skipped and logged.
+
+If Home Assistant uses a Shelly as Bluetooth proxy, it turns Bluetooth on again after
+**Bluetooth off**; the dialog warns about it.
+
 ### Logs
 
 The activity log records checks, downloads, uploads, installations and downgrades,
 deleted firmware, setting and password changes on devices, store exports and imports,
 firmware files read back from the disk, devices removed from the list, held-back updates
-offered now and changes of the app settings – each with time, user and result (success, warning, error). A download names
+offered now, scheduled installations, schedule runs (with the devices left out) and
+changes of schedules and app settings – each with time, user and result (success, warning, error). A download names
 the user of the check that fetched it; scheduled checks and their downloads name
 "Schedule". A full check also counts the ignored devices ("2 ignored") and names them
 in its details in the normal text colour – they are not contacted and never make the
 entry a warning or error. Removed devices are counted too ("1 removed"); each one is a
 warning if it still answers at its last address and an error if not. Filters and a device search help to find entries. Passwords never appear in the log. Consecutive
 entries of the same device are marked by a bar at the side.
+
+The tab updates itself when a new entry is written. A yellow "!" on the tab marks entries
+written since you last opened it in this browser.
 
 The bin icon deletes a single entry, **Delete all logs** the whole log (each after a
 confirmation). After clearing, one entry remains that names who cleared the log.
@@ -437,7 +528,10 @@ installations are disabled because of it, a notice above the tabs explains why. 
 **Firmware & Storage** holds the export and import of the firmware store (see [Moving the
 firmware store](#moving-the-firmware-store)), the card **Device Passwords** sets
 passwords on several devices at once (see [Device passwords](#device-passwords)). The
-last line links to the app page in Home Assistant, where **Changelog** next to the
+card **Display** chooses the language of this page: **Same as Home Assistant** (default;
+English where no translation exists), English or Deutsch. It applies at once, only in this
+browser, and needs no save. Logs, messages of the app and this documentation stay English.
+The last line links to the app page in Home Assistant, where **Changelog** next to the
 version lists what changed in each version.
 
 ## Device passwords
@@ -557,6 +651,14 @@ Gen2+ firmware is downloaded over HTTPS only.
 | Device address … is not in a private network | Only devices in a private network are contacted (see [Download base URL](#download-base-url)). Give the Shelly an address there |
 | The app stopped and did not start again | Turn on **Watchdog** and **Start on boot** on the app page. With the Watchdog on, Home Assistant restarts the app after it stopped unexpectedly |
 | The app is shown as running but does not respond | The container health check (a TCP connection to port 8098 every 30 seconds) is meant to make Home Assistant restart the app after three failures if the Watchdog is on. Otherwise restart the app by hand and report the lines of the app log if it happens again |
+| Beta version withdrawn – beta firmware is switched off in the settings (Logs tab) | **Offer beta firmware** was switched off; the offered beta is no longer offered. Check the device to get the stable offer |
+| Shelly firmware: scheduled installation – … was not started (notification) | The reason follows in the text: the version or file changed, the device is ignored or was removed from Home Assistant, the update server could not confirm the file, a check or schedule ran longer than 30 minutes, or installations are disabled. Approve the installation again |
+| Shelly firmware: scheduled installation – … was missed (notification) | The app was not running at the scheduled time; it does not install later. Approve the installation again |
+| Cancel the scheduled installation first (Downgrade) | An installation is scheduled for the device. Cancel it in the row menu or the Schedules tab, then downgrade |
+| Damaged schedule … dropped from the state file (app log) | A schedule in the state file could not be read (e.g. edited by hand) and was left out; the app starts with the others. Add the schedule again |
+| Not possible now – … (Run now) | A check, an installation or another schedule runs. Try again when it has finished |
+| Schedule “…” is running – please try again afterwards | **Check now** and installations wait for the end of a schedule run. Try again when the run has finished (Logs tab) |
+| Schedule run: … not reachable / refused (notification) | Some devices did not answer or refused the change. The log entry of the run names them; check those devices |
 | Storage error: The state file was unreadable – the backup of the previous save was loaded | The app's state file was damaged (e.g. by a power failure) and the copy of the save before was used. Check the devices again; the message disappears with the next restart |
 | Storage error: The state file was unreadable and no backup could be loaded | The device list starts empty and is filled by the next check. The firmware files stay on disk; at the start the app reads back those whose content names firmware ID and version, the others are listed as **Unknown Files** in the Firmware tab (see [Firmware](#firmware)) |
 
@@ -634,8 +736,12 @@ in the firmware store and **Allow downgrades** is switched on (see
 
 ## Known limitations
 
-- Only original Shelly firmware is supported, and only stable versions.
-- Home Assistant OS or Supervised is required; the user interface is in English only.
+- Only original Shelly firmware is supported; beta versions only for Gen2+ and only while
+  **Offer beta firmware** is on.
+- Home Assistant OS or Supervised is required. The user interface is in English and German
+  (machine translated); logs, messages and this documentation are English only.
+- Scheduled installations: at most 7 days ahead, once; schedules have one action each.
+  Runs the app misses (not running) are skipped, not caught up.
 - Only Shellys on Wi-Fi/LAN that are set up in the Home Assistant Shelly integration are
   supported (see [Requirements](#requirements) for the devices that are not); they are
   shown under **Other Shellys** without update function.

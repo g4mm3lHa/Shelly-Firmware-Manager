@@ -2,8 +2,9 @@
 
 Recorded: checks, firmware downloads and uploads, installations and downgrades that
 were actually started, deleted firmware, setting changes on Shellys, per-device password
-changes (set / removed / test failed) and app option changes. Not recorded: approvals
-that never started, restarts, anything secret (passwords and hashes never reach this
+changes (set / removed / test failed), app option changes, schedules (created, changed,
+deleted, every run or missed run) and scheduled installations. Not recorded: approvals
+that never started, restarts outside a schedule run, anything secret (passwords and hashes never reach this
 module; for secret options only the key is logged).
 Retention: entries older than retention_days and beyond max_entries are dropped.
 
@@ -37,10 +38,11 @@ log = logging.getLogger("sfm.events")
 
 # "log": the log itself was cleared (see EventLog.clear); "store": firmware files read
 # back from the disk at the start (FirmwareStore.adopt_files); "device": a removed
-# device was removed from the list (DeviceSettings.forget_device)
+# device was removed from the list (DeviceSettings.forget_device) or its beta version
+# withdrawn; "schedule": schedules of the Schedules tab (see manager_schedules)
 KINDS = (
     "check", "download", "upload", "install", "delete", "setting", "password", "options", "log", "export", "import",
-    "setup", "store", "device",
+    "setup", "store", "device", "schedule",
 )
 ENTRY_ID_RE = re.compile(r"^[0-9a-f]{12}$")  # "id" of an entry, also checked for IDs from the URL
 SEVERITIES = ("success", "warning", "error")  # ordered from lowest to highest
@@ -132,6 +134,21 @@ class EventLog:
         except OSError as err:
             log.warning("Log could not be written: %s", err)
         return entry
+
+    def latest(self) -> int:
+        """Mark of the newest entry for the UI (unread "!" of the Logs tab, reload of
+        the tab): its time in seconds × 1000 plus the number of newest entries written in
+        that same second, so it grows with every new entry, also within one second.
+        0 for an empty log."""
+        if not self.entries:
+            return 0
+        ts = int(self.entries[-1].get("ts", 0))
+        same = 0
+        for entry in reversed(self.entries):
+            if int(entry.get("ts", 0)) != ts:
+                break
+            same += 1
+        return ts * 1000 + min(same, 999)
 
     def list(self) -> list[dict[str, Any]]:
         """All entries, newest first (the UI groups them by day)."""
