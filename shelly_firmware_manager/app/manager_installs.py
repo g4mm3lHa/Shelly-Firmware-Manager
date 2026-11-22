@@ -423,7 +423,8 @@ class Installs(Checks):
             message="Updated",
         )
         title = "Shelly downgraded" if dev.get("downgrade") else "Shelly updated"
-        await self.notify(f"{title}: {dev['name']}", markdown_text(info["version"]), f"sfm_{device_id}")
+        if device_id not in self.notify_muted:
+            await self.notify(f"{title}: {dev['name']}", markdown_text(info["version"]), f"sfm_{device_id}")
         return True
 
     async def _await_by_polling(self, device_id: str, dev: Device, ota: dict[str, Any]) -> tuple[bool, str | None]:

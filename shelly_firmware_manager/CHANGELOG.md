@@ -5,6 +5,22 @@
 Release candidate. Updates can be installed at a chosen time, beta firmware can be
 offered, schedules restart Shellys or switch cloud and Bluetooth; the UI speaks German.
 
+Changes in rc2
+
+Changed
+- Missed jobs: a schedule run or scheduled installation whose time passed while the app
+  was not running is skipped, also right after a restart; no catch-up.
+- Scheduled installation: waits up to 30 minutes while a check or schedule runs; one
+  notification with the result; a missed one is notified too.
+- Installation dialog: section "Start" stands above the changelog.
+- Schedules: default pause between restarts 3 s; "2 of 3 restarted" counts left-out
+  devices; no running line under the title; dialog stays open on an error.
+- Logs tab refreshes when a new entry is written; a yellow "!" marks unread entries.
+- Devices, Schedules and Logs tabs refresh right after the time of a job.
+- Settings tab: cards in independent columns, three from 1600 px; no gaps between cards.
+- Configuration tab of the app page in German when Home Assistant uses German.
+- App log names for every checked Gen2+ device whether a beta was offered.
+
 Changes in rc1
 
 Added

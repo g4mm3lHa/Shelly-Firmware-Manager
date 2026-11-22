@@ -8,7 +8,7 @@ import {cancelPlan} from "./install.js";
 const ACTIONS = {restart: t("Restart"), cloud_on: t("Cloud on"), cloud_off: t("Cloud off"), ble_on: t("Bluetooth on"), ble_off: t("Bluetooth off")};
 const ACTION_ICONS = {restart: "restart", cloud_on: "cloud", cloud_off: "cloud", ble_on: "ble", ble_off: "ble"};
 const DAYS = [t("Mon"), t("Tue"), t("Wed"), t("Thu"), t("Fri"), t("Sat"), t("Sun")];
-const PAUSE_DEFAULT = 10, PAUSE_MAX = 600, EVERY_MAX = 365, NAME_MAX = 64;
+const PAUSE_DEFAULT = 3, PAUSE_MAX = 600, EVERY_MAX = 365, NAME_MAX = 64;
 const SEVERITY = {success: [t("Success"), "sev-success"], warning: [t("Warning"), "sev-warning"], missed: [t("Missed"), "sev-warning"]};
 const isBle = action => action === "ble_on" || action === "ble_off";
 const isCloud = action => action === "cloud_on" || action === "cloud_off";
@@ -29,7 +29,8 @@ function lastText(last) {
   const c = last.counts;
   if (!c) return last.text || "";
   const restart = last.action === "restart";
-  const parts = [c.total ? t(restart ? "{done} of {total} restarted" : "{done} of {total} switched", {done: c.done, total: c.total}) : t("No device to run on")];
+  // "n of m": m = all chosen devices, left-out ones included ("run": devices acted on)
+  const parts = [(c.run ?? c.total) ? t(restart ? "{done} of {total} restarted" : "{done} of {total} switched", {done: c.done, total: c.total}) : t("No device to run on")];
   if (c.unreachable) parts.push(t("{n} not reachable", {n: c.unreachable}));
   if (c.refused) parts.push(t("{n} refused", {n: c.refused}));
   if (c.left) parts.push(t("{n} left out", {n: c.left}));
@@ -44,7 +45,10 @@ const fields = s => ({name: s.name, on: s.on, action: s.action, pause: s.pause ?
 function scheduleRow(s) {
   const on = el("input"); on.type = "checkbox"; on.checked = s.on;
   on.setAttribute("aria-label", t("Schedule “{name}” is on", {name: s.name}));
-  on.onchange = () => saveSchedule(s.id, {...fields(s), on: on.checked}, () => { on.checked = s.on; });
+  on.onchange = async () => {
+    try { await saveSchedule(s.id, {...fields(s), on: on.checked}); closeModal(); }
+    catch (e) { on.checked = s.on; message(t("Edit schedule"), e.message, "error", "schedules"); }
+  };
   const act = box("span", "sch-act", icon(ACTION_ICONS[s.action] || "schedules"), el("span", ACTIONS[s.action] || s.action));
   const last = s.running ? [el("span", t("Running …"), "sub")]
     : s.last ? [el("span", s.last.at_text, "nowrap"), el("span", (SEVERITY[s.last.severity] || SEVERITY.warning)[0], "tag " + (SEVERITY[s.last.severity] || SEVERITY.warning)[1]),
@@ -96,17 +100,8 @@ export function renderSchedules() {
   $("sch-cards").replaceChildren(...cards);
 }
 
-/** Save a schedule (new: no id); onError restores the control that started it. */
-async function saveSchedule(id, body, onError) {
-  try {
-    await api(id ? `api/schedules/${encodeURIComponent(id)}` : "api/schedules", body);
-    closeModal(); return true;
-  } catch (e) {
-    if (onError) onError();
-    message(id ? t("Edit schedule") : t("Add schedule"), e.message, "error", "schedules");
-    return false;
-  }
-}
+/** Save a schedule (new: no id). */
+const saveSchedule = (id, body) => api(id ? `api/schedules/${encodeURIComponent(id)}` : "api/schedules", body);
 const radio = (name, text, checked, ...extra) => {
   const r = el("input"); r.type = "radio"; r.name = name; r.checked = checked;
   return box("label", "check", r, " ", el("span", text), ...extra);
@@ -124,7 +119,7 @@ export function openSchedule(s) {
     const lab = el("label", label); control.id = "sch-" + Math.random().toString(36).slice(2); lab.htmlFor = control.id;
     return box("div", "sch-field", lab, box("div", null, control, hint ? el("div", hint, "desc") : null));
   };
-  const pauseField = field(t("Pause between devices (seconds)"), pause, t("Restarts the devices one after the other; 0 = all at once. Default 10"));
+  const pauseField = field(t("Pause between devices (seconds)"), pause, t("Restarts the devices one after the other; 0 = all at once. Default 3"));
   // Repeat
   const daily = radio("sch-rep", t("Daily"), s.repeat.kind === "daily");
   const weekdays = radio("sch-rep", t("On weekdays"), s.repeat.kind === "weekdays");
@@ -177,6 +172,8 @@ export function openSchedule(s) {
     proxyBox, leftHint,
     box("label", "check", on, " " + t("Schedule is on")),
   ];
+  // An error (e.g. no name) is shown in the dialog, which stays open with all entries
+  const error = el("p", null, "bad"); error.hidden = true; error.setAttribute("role", "alert"); content.push(error);
   const title = edit ? t("Edit schedule") : t("Add schedule");
   modal(title, content, [{text: t("Cancel")}, {text: t("Save"), kind: "primary", action: async () => {
     const kind = [daily, weekdays, every].findIndex(r => r.querySelector("input").checked);
@@ -187,7 +184,11 @@ export function openSchedule(s) {
     const body = {name: name.value.trim(), on: on.checked, action: action.value, time: time.value, repeat,
       pause: action.value === "restart" || Number.isInteger(seconds) ? seconds : PAUSE_DEFAULT,
       devices: all.querySelector("input").checked ? "all" : picks.filter(([, c]) => c.checked).map(([d]) => d.id)};
-    await saveSchedule(edit ? s.id : null, body);
+    try { await saveSchedule(edit ? s.id : null, body); closeModal(); }
+    catch (e) {
+      for (const b of $("dlg-btns").children) b.disabled = false;
+      error.textContent = e.message; error.hidden = false; error.scrollIntoView({block: "nearest"});
+    }
   }}], "schedules");
   name.focus();
 }

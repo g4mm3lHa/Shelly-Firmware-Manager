@@ -1,5 +1,5 @@
 // Entry module: rendering, tabs and polling. Importing it loads all other modules.
-import {$, api, attachTip, closeModal, el, fmt, getState, hideTip, loadLocal, message, modal, saveLocal, setTip, t, ui} from "./core.js";
+import {$, api, attachTip, box, closeModal, el, fmt, getState, hideTip, loadLocal, message, modal, saveLocal, setTip, t, ui} from "./core.js";
 import {lang} from "./i18n.js";
 import {buildChooser, closeRowMenu, loadPrefs, renderDevices, syncChooser} from "./devices.js";
 import {renderFirmware} from "./firmware.js";
@@ -19,10 +19,11 @@ export function render(force) {
   $("busy").classList.toggle("error", !!s.storage_error);
   renderProgress(s.progress);
   renderNotice(s.first_start_open ? {issue: "first_start"} : s.download_base || {});
-  // Blocked during a check or installations, and on a fresh installation until the
-  // first-start question (import a firmware store?) is answered
-  $("scan").disabled = !!s.busy || !!s.first_start_open;
-  setTip($("scan"), s.first_start_open ? FIRST_START_BLOCK : "");
+  markUnreadLogs(s);
+  // Blocked during a check, installations or a schedule run, and on a fresh installation
+  // until the first-start question (import a firmware store?) is answered
+  $("scan").disabled = !!s.busy || !!s.schedule_running || !!s.first_start_open;
+  setTip($("scan"), s.first_start_open ? FIRST_START_BLOCK : s.schedule_running ? t("Schedule “{name}” is running", {name: s.schedule_running}) : "");
   if (s.first_start_open) askFirstStart();
   else if (loadLocal("firstStartAsked")) saveLocal("firstStartAsked", null);   // answered: a reinstallation asks again
   const key = JSON.stringify([ui.view, mobileQuery.matches, s, ui.view === "firmware" ? ui.firmware : ui.view === "logs" ? ui.logs : null]);
@@ -32,6 +33,22 @@ export function render(force) {
   else if (ui.view === "firmware") renderFirmware();
   else if (ui.view === "logs") renderLogs();
   else if (ui.view === "schedules") renderSchedules();
+}
+/** Logs tab: a yellow "!" while the log holds entries newer than the newest one this
+ *  browser has shown in the Logs tab (per browser; on the first visit nothing counts
+ *  as unread). Opening the Logs tab marks everything as read. */
+function markUnreadLogs(s) {
+  const latest = s.log_latest || 0, stored = loadLocal("logsSeen");
+  let seen = typeof stored === "number" ? stored : latest;
+  if (ui.view === "logs") seen = latest;
+  if (seen !== stored) saveLocal("logsSeen", seen);
+  const tab = $("tab-logs");
+  let mark = tab.querySelector(".tab-unread");
+  if (!mark) {
+    mark = box("span", "tab-unread", el("span", "!"), el("span", t("Unread log entries"), "sr-only"));
+    mark.firstChild.setAttribute("aria-hidden", "true"); tab.append(mark);
+  }
+  mark.hidden = !(latest > seen);
 }
 /** Header: last check and check cycle as two neutral pills; the cycle uses the
  *  Home Assistant time zone (not the browser's). */
@@ -138,17 +155,32 @@ const AUTH_RETRY_MS = [1000, 3000, 8000, 15000];
 let authRetry = 0;
 export let queued = false;   // read by devices.js
 const POLL_IDLE_MS = 30000, POLL_BUSY_MS = 3000;
-/** Something runs: a check, an installation or another device activity. */
-const isActive = s => !!(s && (s.busy || s.progress || s.devices.some(d => d.installing || d.activity)));
+// A schedule run or scheduled installation starts at its time: the page refreshes this
+// long after it, so the Devices, Schedules and Logs tabs show it at once
+const DUE_DELAY_MS = 2000;
+let duePolled = 0;   // time of the last job the page refreshed for (epoch s)
+/** Something runs: a check, an installation, a schedule run or another device activity. */
+const isActive = s => !!(s && (s.busy || s.progress || s.schedule_running || s.devices.some(d => d.installing || d.activity)));
+/** Time of the next schedule run or scheduled installation the page has not refreshed
+ *  for yet (epoch s; Infinity: none). */
+function nextDue(s) {
+  const times = [...(s?.schedules || []).filter(x => x.on && x.next).map(x => x.next),
+    ...(s?.devices || []).filter(d => d.planned).map(d => d.planned.at)];
+  return Math.min(Infinity, ...times.filter(x => x > duePolled));
+}
 /** Work ended since the last state (it writes its log entry at the end) or a check
  *  finished in between (last check time changed): the Logs tab fetches the log at once. */
 const workEnded = (before, now) => !!before && now !== before &&
   ((isActive(before) && !isActive(now)) || now.last_scan !== before.last_scan);
-/** Next refresh: fast while something runs, slow when idle, none while the page is hidden. */
+/** Next refresh: fast while something runs, slow when idle, shortly after the time of the
+ *  next job, none while the page is hidden. */
 function schedule() {
   clearTimeout(timer);
   if (document.hidden) return;
-  timer = setTimeout(load, isActive(ui.state) ? POLL_BUSY_MS : POLL_IDLE_MS);
+  const wait = isActive(ui.state) ? POLL_BUSY_MS : POLL_IDLE_MS, due = nextDue(ui.state);
+  const untilDue = due * 1000 + DUE_DELAY_MS - Date.now();
+  if (untilDue < wait) timer = setTimeout(() => { duePolled = due; load(); }, Math.max(0, untilDue));
+  else timer = setTimeout(load, wait);
 }
 // Hidden tab / HA panel in background: no requests; visible again: refresh at once
 document.addEventListener("visibilitychange", () => { if (!document.hidden) { authRetry = 0; load(); } else clearTimeout(timer); });
@@ -160,7 +192,8 @@ export async function load(force) {
   try {
     const s = await getState();
     if (ui.view === "firmware") { const f = await api("api/firmware"); ui.firmware = f.firmware; ui.firmwareTotal = f.total_size || 0; ui.firmwareFree = f.free_space ?? null; }
-    if (ui.view === "logs" && (force || workEnded(ui.state, s) || Date.now() - ui.logsLoaded > 30000)) { ui.logs = (await api("api/logs")).entries; ui.logsLoaded = Date.now(); }
+    // Logs tab: reloaded when a new entry was written (newest entry time) or work ended
+    if (ui.view === "logs" && (force || workEnded(ui.state, s) || s.log_latest !== ui.state?.log_latest || Date.now() - ui.logsLoaded > 30000)) { ui.logs = (await api("api/logs")).entries; ui.logsLoaded = Date.now(); }
     ui.state = s;
     authRetry = 0;
     render(force);

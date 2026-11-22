@@ -215,11 +215,11 @@ async def test_app_page_link(net):
         await client.close()
 
 
-def _translations():
-    """{key: (name, description)} of translations/en.yaml in file order (small parser:
-    two-space keys, name/description, folded ">-" texts)."""
+def _translations(lang="en"):
+    """{key: (name, description)} of translations/<lang>.yaml in file order (small
+    parser: two-space keys, name/description, folded ">-" texts)."""
     out, key, field = {}, None, None
-    for line in (APP_DIR / "translations" / "en.yaml").read_text().splitlines():
+    for line in (APP_DIR / "translations" / f"{lang}.yaml").read_text().splitlines():
         if line.startswith("network:"):
             break
         if re.match(r"^  \w+:$", line):
@@ -247,3 +247,14 @@ def test_app_configuration_matches_settings_tab():
         tname, tdesc = texts[key]
         assert tname == name, key
         assert tdesc == desc, key
+
+
+def test_german_configuration_matches_german_settings_tab():
+    """translations/de.yaml (shown by HA in German) = the German texts of the Settings tab
+    (ui-src/js/i18n-de.js), same options in the same order as en.yaml."""
+    german = dict(re.findall(r'^  "((?:[^"\\]|\\.)*)": "((?:[^"\\]|\\.)*)",?$',
+                             (ROOT / "ui-src" / "js" / "i18n-de.js").read_text(), re.M))
+    english, texts = _translations(), _translations("de")
+    assert list(texts) == list(english)
+    for key, (name, desc) in english.items():
+        assert texts[key] == (german[name], german[desc]), key

@@ -283,6 +283,9 @@ class ManagerCore:
         # schedule whose run is going on (memory only, see manager_schedules)
         self.schedules: list[dict[str, Any]] = []
         self.schedule_running: str | None = None
+        # Devices whose installation result is notified by the caller (a scheduled
+        # installation sends one notification of its own), memory only
+        self.notify_muted: set[str] = set()
         self.reloading: set[str] = set()  # device IDs whose Reload Device Info is running
         # (firmware ID, version) -> running provide task (single flight)
         self._provisions: dict[tuple[str, str], asyncio.Future[tuple[str, str, int]]] = {}
@@ -646,8 +649,9 @@ class ManagerCore:
         new, changed = app_options.merge(self.options, changes)
         if not changed:
             return []
-        if self.busy:
-            raise ShellyError(f"Not possible – {self.busy}")
+        busy = self.busy or (f"Schedule “{self.schedule_running}” is running" if self.schedule_running else None)
+        if busy:
+            raise ShellyError(f"Not possible – {busy}")
         diff = app_options.change_list(self.options, new, changed)
         try:
             await self._supervisor_post("/addons/self/options", {"options": new})
@@ -758,7 +762,9 @@ class ManagerCore:
     @property
     def busy(self) -> str | None:
         """Text for the UI while a check or installations are running (the full
-        check button is blocked while this is set)."""
+        check button is blocked while this is set). A schedule run is not named here:
+        the Schedules tab shows it under "Last run", the UI blocks the button by
+        schedule_running."""
         if self.checking:
             return "Check in progress"
         parts = []
@@ -769,8 +775,6 @@ class ManagerCore:
             parts.append(f"Installations running: {len(self.installing)}")
         if self.reloading:
             parts.append("Reloading device info")
-        if self.schedule_running is not None:
-            parts.append(f"Schedule “{self.schedule_running}” running")
         return " · ".join(parts) or None
 
     def _progress(self) -> dict[str, Any]:
