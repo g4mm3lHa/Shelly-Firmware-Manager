@@ -18,12 +18,12 @@ export const OPTION_FIELDS = [
   ["download_base_url", "Download base URL for the Shellys", "text", "LAN IP address of Home Assistant + host port 8098, e.g. http://192.168.1.20:8098 (no host name; IP addresses only in private networks). Required for installations", "Download Server"],
   ["restrict_downloads_to_devices", "Serve downloads only to known Shellys", "bool", "Switch off if downloads are rejected from 172.30.x.x", "Download Server"],
   ["gen1_updates_enabled", "Enable Gen1 updates", "bool", "Gen1 firmware is only available via plain HTTP without a checksum", STORAGE],
-  ["gen1_allowed_types", "Allowed Gen1 types", "list", "Comma-separated, e.g. SHSW-1, SHSW-PM", STORAGE],
   ["allow_downgrade", "Allow downgrades", "bool", "Installing an older stored firmware on Gen2+ devices (device menu and Firmware tab); off by default", STORAGE],
   ["import_max_mb", "Max. import size (MB)", "number", "Largest file accepted by “Import store” (Settings → Firmware & Storage); 1–2048, default 100", STORAGE],
   ["log_entry_limit", "Max. log size (entries)", "number", "100–3000", "Logs"],
   ["log_retention_days", "Log retention (days)", "number", "1–365", "Logs"],
   ["max_parallel_installs", "Max. parallel installations", "number", "1–20; further approvals wait", "Advanced"],
+  ["resolve_host_names", "Resolve host names", "bool", "Looks up each device's host name (<device id>.local) at every check and shows the column “Host name”; off by default", "Advanced"],
   ["pinned_certificates", "Pinned certificates", "pins", "Host below shelly.cloud + SHA-256 fingerprint; several entries per host allowed", "Advanced"],
 ];
 // The firmware store block (export / import) stands in the card "Firmware & Storage"
@@ -91,7 +91,6 @@ export function renderSettings() {
       if (type === "bool") { input = el("input"); input.type = "checkbox"; input.checked = !!o[key]; }
       else if (type === "number") { input = el("input"); input.type = "number"; input.value = o[key]; }
       else if (type === "time") { input = el("input"); input.type = "time"; input.step = 60; input.value = o[key] || ""; }
-      else if (type === "list") { input = el("input"); input.type = "text"; input.value = (o[key] || []).join(", "); }
       else if (type === "pins") input = pinsEditor(o[key] || []);
       else { input = el("input"); input.type = "text"; input.value = o[key] ?? ""; }
       if (key === "download_base_url" && !input.value) input.value = suggestedBaseUrl();   // only a suggestion: counts as unsaved
@@ -168,11 +167,10 @@ function optionChanges() {
     let value;
     if (type === "bool") value = input.checked;
     else if (type === "number") value = Number(input.value);
-    else if (type === "list") value = input.value.split(",").map(s => s.trim()).filter(Boolean).sort();
     else if (type === "pins") value = input.values();
     else value = input.value.trim();
     // A missing optional switch (allow_downgrade) counts as off
-    const old = type === "list" ? [...(o[key] || [])].sort() : type === "pins" ? o[key] || [] : type === "text" ? o[key] ?? "" :
+    const old = type === "pins" ? o[key] || [] : type === "text" ? o[key] ?? "" :
       type === "bool" ? !!o[key] : o[key];
     if (JSON.stringify(value) !== JSON.stringify(old)) changes[key] = value;
   }

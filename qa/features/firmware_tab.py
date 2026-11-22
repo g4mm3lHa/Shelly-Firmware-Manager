@@ -1,6 +1,8 @@
 """Firmware store suite, Firmware tab area: downgrade, rows, sorting, delete and upload (demo "features" on 8805)."""
 
-from features.base import OVERFLOW_JS, check, dialog, firmware_zip, menu_items, refresh_state, tip_text, wait_until
+from features.base import (
+    OVERFLOW_JS, check, dialog, filter_entries, firmware_zip, menu_items, pick_filter, refresh_state, tip_text, wait_until,
+)
 
 
 def _downgrade(c):
@@ -189,12 +191,12 @@ def _firmware_tab(c):
 
 def _checked(f, view):
     """Checked fields of the sort popover of a tab: [field, direction]."""
-    return f.evaluate(f"""() => [...document.querySelectorAll('#view-{view} .sort-item[aria-checked=true]')]
+    return f.evaluate(f"""() => [...document.querySelectorAll('#view-{view} .sort-item:not(.filter-item)[aria-checked=true]')]
       .map(b => b.dataset.value)""")
 
 
 def _unused_chip(c):
-    """Firmware chip "Unused": files of a firmware ID no device has; while a device's
+    """Firmware filter "Unused": files of a firmware ID no device has; while a device's
     firmware ID is unknown (never reached) nothing counts as unused (tooltip says why)."""
     case, f, page = c.case, c.f, c.page
     unknown = {"on": False}
@@ -209,8 +211,16 @@ def _unused_chip(c):
         route.fulfill(json=state)
 
     def unused():
-        chip = f.locator("#fw-chips .chip", has_text="Unused")
-        return int(chip.locator(".count").inner_text()), chip.get_attribute("title") or ""
+        count = next(int(n) for label, n, _ in filter_entries(f, "firmware") if label == "Unused")
+        tool = f.locator('#view-firmware .tool-btn[aria-label^="Filter"]')
+        tool.click()
+        entry = f.locator("#view-firmware .filter-item", has=f.locator('span:text-is("Unused")'))
+        entry.hover()   # tooltip of the entry (mouse hover)
+        wait_until(lambda: tip_text(f), 1.0)
+        tip = tip_text(f) or ""
+        page.mouse.move(1, 1)
+        page.keyboard.press("Escape")
+        return count, tip
 
     page.route("**/api/state", other_types)
     refresh_state(page, f)
@@ -230,13 +240,17 @@ def _sorting_and_downgrade(c):
     older version in the Firmware tab (dialog -> device -> second confirmation)."""
     case, f, page, out, width = c.case, c.f, c.page, c.out, c.width
     f.locator("#tab-devices").click()
-    chips = f.evaluate("() => [...document.querySelectorAll('#dev-chips .chip')].map(c => c.firstChild.textContent)")
-    check(f"{case}: Devices filter chips", chips == ["All", "Updates", "Errors", "Up-To-Date", "Unprotected", "Ignored"], str(chips))
-    f.locator("#dev-chips .chip", has_text="Unprotected").click()
+    labels = [e[0] for e in filter_entries(f, "devices")]
+    check(f"{case}: Devices filter entries", labels == ["All", "Updates", "Attention", "Not checked", "Up-To-Date", "Unprotected",
+          "Asleep", "Ignored", "Removed", "Other Shellys"], str(labels))
+    pick_filter(f, "devices", "Unprotected")
     shown = f.evaluate("() => [...document.querySelectorAll('#dev-cards tbody tr')].length")
-    expected = f.locator("#dev-chips .chip", has_text="Unprotected").locator(".count").inner_text()
-    check(f"{case}: Unprotected filter shows its count", str(shown) == expected, f"{shown} / {expected}")
-    f.locator("#dev-chips .chip", has_text="All").click()
+    expected = next(n for label, n, _ in filter_entries(f, "devices") if label == "Unprotected")
+    dot = f.locator('#view-devices .tool-btn[aria-label^="Filter"]').evaluate("b => b.classList.contains('has-value')")
+    check(f"{case}: Unprotected filter shows its count, dot on the icon", str(shown) == expected and dot, f"{shown} / {expected} / {dot}")
+    pick_filter(f, "devices", "All")
+    check(f"{case}: no dot with All", not f.locator('#view-devices .tool-btn[aria-label^="Filter"]').evaluate(
+        "b => b.classList.contains('has-value')"))
     if width < 700:   # header: pills stacked left, "Check now" right on the same line, not wrapped;
         # centred with the title block (embedded: the pills only, the title is hidden)
         head = f.evaluate("""() => { const r = e => e.getBoundingClientRect(), m = r(document.querySelector('.titlebar>div')),
@@ -247,7 +261,7 @@ def _sorting_and_downgrade(c):
               and head["stacked"] and head["lines"] <= 48, str(head))
     tools = f.locator("#view-devices .tool-btn")
     size = tools.first.evaluate("b => Math.round(b.getBoundingClientRect().width)")
-    check(f"{case}: search and sort icons in the Devices toolbar", tools.count() == 2 and size == (44 if width < 700 else 36),
+    check(f"{case}: search, sort and filter icons in the Devices toolbar", tools.count() == 3 and size == (44 if width < 700 else 36),
           f"{tools.count()} / {size}")
     sort = tools.nth(1)
     sort.click()
@@ -291,13 +305,13 @@ def _sorting_and_downgrade(c):
     f.locator("#tab-firmware").click()
     f.wait_for_selector(".fw-row")
     check(f"{case}: sort tool in the Firmware toolbar", _checked(f, "firmware") == ["type", "asc"], str(_checked(f, "firmware")))
-    chips = f.evaluate("() => [...document.querySelectorAll('#fw-chips .chip')].map(c => c.firstChild.textContent)")
-    check(f"{case}: Firmware filter chips", chips == ["All", "Provided", "Uploaded", "Intermediate", "Gen1", "Unused"], str(chips))
+    labels = [e[0] for e in filter_entries(f, "firmware")]
+    check(f"{case}: Firmware filter entries", labels == ["All", "Provided", "Uploaded", "Intermediate", "Gen1", "Unused"], str(labels))
     _unused_chip(c)
-    f.locator("#fw-chips .chip", has_text="Uploaded").click()
+    pick_filter(f, "firmware", "Uploaded")
     tags = f.evaluate("() => [...document.querySelectorAll('.fw-row')].map(r => !!r.querySelector('.fw-ver .tag.warn'))")
     check(f"{case}: Uploaded filter shows only uploads", tags and all(tags), str(tags))
-    f.locator("#fw-chips .chip", has_text="All").click()
+    pick_filter(f, "firmware", "All")
     summary = f.locator("#fw-summary").text_content()
     check(f"{case}: free disk space in the summary", " free" in summary, summary)
     if width > 700:

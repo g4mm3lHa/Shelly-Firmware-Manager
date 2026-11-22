@@ -7,6 +7,32 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
 - Gen1 AP read-only. Bluetooth only global on/off where supported, else disabled icon
   with explanation. Ignored: own group, yellow "Ignored" label, no install until
   resumed.
+- **Sections (3.8.0, mockups `3.8.0/01`, `02`):** one card per section in this order,
+  only sections with devices: Updates Available, Attention (error, unconfirmed
+  installation, no usable address), Not Checked (never checked, Gen1 skipped while Gen1
+  updates are off; status pill "Not checked" for both), Up-To-Date, Asleep, Ignored,
+  Removed, then the read-only card "Other Shellys". The server names the section
+  (`section`); the UI keeps its rule that a device stays in the updates card while it
+  is checked. Card titles in Title Case ("Not Checked"); the header checkbox and
+  "Review & install" only in the updates card.
+- **Removed (3.8.0, mockup `3.8.0/04`):** yellow "Removed" pill next to the status (like
+  "Ignored", which a removed device loses); tooltip also on touch: still reachable →
+  "Removed from Home Assistant / the Shelly integration, but still reachable at its last
+  address. All actions stay available; “Check now” only tests whether it still answers.",
+  not reachable → "… and no longer reachable. “Check now” only tests whether it answers
+  again.". Row menu group 4: "Remove from list"
+  instead of "Ignore device", confirmation "Remove from list?" (Cancel / red Remove).
+- **No usable address (3.8.0):** IP column (and the phone tile instead of the IP):
+  warning triangle + "No usable address" (warning colour), tooltip with the server's
+  text (also on touch); wide screens: the reason below the Shelly name with a small
+  triangle – "No address in Home Assistant", "Host name does not resolve", "Address not
+  allowed (public IP)".
+- **Other Shellys (3.8.0):** card head "Other Shellys · n" + "Display only – no update
+  function here"; columns Name, Kind, Model, Firmware, Where to update (left-aligned,
+  no actions). Kinds: BLU TRV (BLU behind a gateway), BLU (Bluetooth), Zigbee (ZHA),
+  Zigbee2MQTT, MQTT, Matter; "Where to update" per kind (BLU TRV names its gateway).
+  Phones: name + kind, model + firmware (bold, right), where to update. Shown under the
+  filter "All" (search applies) and "Other Shellys" only.
 - "Install update" only for Ready (or a failed installation or a store fallback), not
   ignored, no check running. Red "Install" button next to the status (table and phone
   tiles; on phones the size of the status pill, 32 px).
@@ -24,14 +50,27 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
   hidden ones. Desktop column heads keep sorting and share the state with the sort tool.
   Sort order, hidden columns and column order are kept per browser (localStorage);
   start: device name ascending.
-- **Filter chips (3.5.0):** All, Updates, Errors, Up-To-Date, Unprotected, Ignored.
-  "Unprotected" = `auth_enabled` false on the device (unknown does not count); filter
-  only, no action. Spelling "Up-To-Date" like the status label.
+- **Filter (3.8.0, mockup `3.8.0/03`):** popover of the filter icon (see common.md
+  "Toolbar"): All, Updates, Attention, Not checked, Up-To-Date, Unprotected, Asleep,
+  Ignored, Removed, Other Shellys – the order of the sections (Unprotected after
+  Up-To-Date, Asleep directly above Ignored); counts respect the search. A filter shows
+  only its section(s); Unprotected keeps the rows in their sections. Tooltips: Attention,
+  Not checked, Asleep, Removed ("Devices removed from Home Assistant / the Shelly
+  integration"), Other Shellys. "Unprotected" = `auth_enabled` false on the device
+  (unknown does not count); filter only, no action. Spelling "Up-To-Date" like the
+  status label.
+- **Host name column (3.8.0, mockup `3.8.0/05`):** optional column "Host name" (between
+  "Last update" and "NTP" in the Columns menu); phones: row "Host name" in the details.
+  Shows the host name of the HA entry, else `<device id>.local`, only when it resolves
+  ("–" otherwise). Exists only while the option "Resolve host names" is on (off: no
+  column, no Columns/Sort entry, no phone row); switching the option on shows the column
+  once per browser, the Columns menu can hide it again.
 - **Battery devices (2026-11-19, 3.5.0):** battery icon (16 px,
-  secondary text colour, tooltip "Battery device: reachable only while it is awake")
+  secondary text colour, tooltip "Battery device: reachable only while it is awake" and
+  on a second line "Detected from the device" / "Detected from Home Assistant", 3.8.0)
   right after the HA name in the table and the phone tile head (before the "Gen n"
   label). A battery device that did not answer the last check shows the grey status
-  pill "Asleep" (not listed under "Errors") and its IP dimmed (opacity 0.5). No queue,
+  pill "Asleep" (section "Asleep", not "Attention") and its IP dimmed (opacity 0.5). No queue,
   no "Check queued" pill. Tooltip of the "Asleep" pill (2026-11-19): only the wake-up
   hint and "Last contact: <date>" (last successful check, date as elsewhere).
 - Gen1 firmware column: version only.

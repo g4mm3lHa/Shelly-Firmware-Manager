@@ -14,6 +14,10 @@ intermediate version the device is checked again at once (see manager_installs).
 Gen1: the firmware store comes first – the next higher stored version is provided; the
 manufacturer's list is only asked for devices without such a file, once per check.
 A check never installs anything.
+A device that is no longer in the device registry stays listed with the marker removed
+(see _mark_removed): the full check only tests whether it still answers at its last
+address and reports that in the log; a single-device check checks it there. Shellys of
+other integrations are listed read-only (other_shellys).
 """
 
 import asyncio
@@ -28,12 +32,14 @@ import data_paths
 import schedule
 import shelly
 from events import worst
-from shelly import ShellyError, clip, error_text
+from shelly import AddressError, AuthError, ShellyError, clip, error_text
 
 from manager_core import (
     ACTIVITY_CHECKING,
     ACTIVITY_DOWNLOADING,
     ACTIVITY_WAITING,
+    BATTERY_FROM_DEVICE,
+    BATTERY_FROM_HA,
     Device,
     SOURCE_UPLOAD,
     STATUS_ASLEEP,
@@ -42,7 +48,6 @@ from manager_core import (
     STATUS_ERROR,
     STATUS_READY,
     STATUS_SKIPPED,
-    STATUS_UNREGISTERED,
     holds_file,
     severity_of,
     unexpected_text,
@@ -54,6 +59,138 @@ log = logging.getLogger("sfm.manager")
 # Status message of a battery device that was not reachable (STATUS_ASLEEP); {error}
 # is the error of the attempt
 ASLEEP_MESSAGE = "Battery device asleep – wake it up (e.g. press its button) and check it again. Last attempt: {error}"
+
+
+# Log findings of a device that was removed from Home Assistant (full and single checks)
+REMOVED_REACHABLE = "Removed from Home Assistant / the Shelly integration, but still reachable at its last address"
+
+REMOVED_UNREACHABLE = "Removed from Home Assistant / the Shelly integration and no longer reachable"
+
+# Kinds of other Shellys (read-only list, see other_shellys)
+OTHER_BLU_GATEWAY = "blu_gateway"  # BLU device (e.g. BLU TRV) behind a Shelly gateway, Shelly integration
+
+OTHER_BLUETOOTH = "bluetooth"  # BLU device of the BTHome / Bluetooth integration
+
+OTHER_ZHA = "zha"  # Zigbee device of ZHA
+
+OTHER_ZIGBEE2MQTT = "zigbee2mqtt"  # Zigbee device of Zigbee2MQTT (MQTT integration)
+
+OTHER_MQTT = "mqtt"  # other device of the MQTT integration
+
+OTHER_MATTER = "matter"  # Matter device
+
+OTHER_MAX = 500  # entries of the list kept at most
+
+# Manufacturer texts that mark a Shelly in another integration (lower case, heuristic)
+SHELLY_MAKERS = ("shelly", "allterco")
+
+
+def _is_shelly(entry: dict[str, Any]) -> bool:
+    """True for a registry entry of the Shelly integration."""
+    return any(isinstance(i, list | tuple) and i and i[0] == "shelly" for i in entry.get("identifiers") or [])
+
+
+def _domains(entry: dict[str, Any], key: str) -> set[str]:
+    """First parts of the identifiers or connections of a registry entry."""
+    return {str(i[0]) for i in entry.get(key) or [] if isinstance(i, list | tuple) and i}
+
+
+def _registry_mac(entry: dict[str, Any]) -> str | None:
+    """MAC address of a registry entry (connection "mac") in the form the device
+    reports it (upper case, no separators), else None."""
+    for item in entry.get("connections") or []:
+        if isinstance(item, list | tuple) and len(item) == 2 and item[0] == "mac" and isinstance(item[1], str):
+            mac = item[1].replace(":", "").replace("-", "").upper()
+            return mac or None
+    return None
+
+
+def _bluetooth_mac(entry: dict[str, Any]) -> int | None:
+    """Bluetooth MAC address of a registry entry (connection "bluetooth") as a
+    number, else None."""
+    for item in entry.get("connections") or []:
+        if isinstance(item, list | tuple) and len(item) == 2 and item[0] == "bluetooth" and isinstance(item[1], str):
+            text = item[1].replace(":", "").replace("-", "")
+            if len(text) == 12:
+                try:
+                    return int(text, 16)
+                except ValueError:
+                    return None
+    return None
+
+
+def _shelly_bluetooth_macs(registry: list[dict[str, Any]], macs: Iterable[object]) -> set[int]:
+    """Bluetooth MAC addresses of the listed Shellys: a Gen2+ Shelly announces itself
+    over Bluetooth with its Wi-Fi MAC address + 2. macs: MAC addresses the devices
+    reported (upper case, no separators); the MACs of the Shelly registry entries
+    are added."""
+    found = set()
+    for mac in [*macs, *(_registry_mac(e) for e in registry if isinstance(e, dict) and _is_shelly(e))]:
+        text = str(mac or "")
+        if len(text) == 12:
+            try:
+                found.add((int(text, 16) + 2) % (1 << 48))
+            except ValueError:
+                continue
+    return found
+
+
+def other_shellys(registry: list[dict[str, Any]], macs: Iterable[object] = ()) -> list[dict[str, Any]]:
+    """Shellys the app cannot update, as a read-only list ordered by name: BLU devices
+    behind a Shelly gateway (Shelly integration, own firmware and Bluetooth
+    connection) and devices of the Bluetooth/BTHome, ZHA, MQTT (Zigbee2MQTT) and
+    Matter integrations whose manufacturer text names Shelly (a heuristic: a device
+    with another text is missed). A device that is also in the Shelly integration (one
+    registry entry with both identifiers, e.g. Gen4 with Zigbee or Matter firmware) is a
+    normal device. Disabled entries are left out, and so is an entry whose Bluetooth
+    MAC address is the Wi-Fi MAC address + 2 of a listed Shelly (the Bluetooth
+    integration's second entry of that Shelly; macs: see _shelly_bluetooth_macs).
+    Entry: {"id", "name", "kind" (OTHER_*), "model", "firmware", "gateway" (name of the
+    Shelly gateway or None)}."""
+    names = {e.get("id"): e.get("name_by_user") or e.get("name") for e in registry if isinstance(e, dict)}
+    shelly_ids = {e.get("id") for e in registry if isinstance(e, dict) and _is_shelly(e)}
+    duplicates = _shelly_bluetooth_macs(registry, macs)
+    found = []
+    for entry in registry:
+        if not isinstance(entry, dict) or entry.get("disabled_by") or not entry.get("id"):
+            continue
+        if _bluetooth_mac(entry) in duplicates:
+            continue  # the listed Shelly itself, seen over Bluetooth
+        ids, connections = _domains(entry, "identifiers"), _domains(entry, "connections")
+        gateway = None
+        if "shelly" in ids:
+            if entry.get("via_device_id") not in shelly_ids or "bluetooth" not in connections:
+                continue  # a Shelly of its own, or a channel of one (no firmware of its own)
+            kind = OTHER_BLU_GATEWAY
+            gateway = names.get(entry.get("via_device_id"))
+        elif not any(m in str(entry.get("manufacturer") or "").lower() for m in SHELLY_MAKERS):
+            continue
+        elif ids & {"bthome", "bluetooth"} or "bluetooth" in connections:
+            kind = OTHER_BLUETOOTH
+        elif "zha" in ids:
+            kind = OTHER_ZHA
+        elif "mqtt" in ids:
+            z2m = any(
+                isinstance(i, list | tuple) and len(i) > 1 and str(i[1]).startswith("zigbee2mqtt")
+                for i in entry.get("identifiers") or []
+            )
+            kind = OTHER_ZIGBEE2MQTT if z2m else OTHER_MQTT
+        elif "matter" in ids:
+            kind = OTHER_MATTER
+        else:
+            continue
+        found.append(
+            {
+                "id": clip(entry["id"], 64),
+                "name": clip(entry.get("name_by_user") or entry.get("name") or entry.get("model") or "?", 100),
+                "kind": kind,
+                "model": clip(entry.get("model") or entry.get("model_id") or "", 100) or None,
+                "firmware": clip(entry.get("sw_version") or "", 64) or None,
+                "gateway": clip(gateway, 100) if gateway else None,
+            }
+        )
+    found.sort(key=lambda o: (str(o["name"]).lower(), str(o["id"])))
+    return found[:OTHER_MAX]
 
 
 def _unreachable(err: BaseException) -> bool:
@@ -147,11 +284,12 @@ class Checks(DeviceSettings):
             failure: str | None = None
             checked: list[str] = []
             ignored: list[str] = []
+            removed: list[str] = []
             header_ignored: bool | None = None
             self._scan_user = SCHEDULE_USER if automatic else user or "unknown"
             self._progress()["phase"] = "registry"
             try:
-                checked, ignored = await self._scan_all()
+                checked, ignored, removed = await self._scan_all()
                 header_ignored = await self._finish_header_check()
                 self._progress()["phase"] = "changelog"
                 await self._store_changelogs(self.devices.values())
@@ -174,6 +312,7 @@ class Checks(DeviceSettings):
                 failure,
                 header_ignored=header_ignored,
                 ignored=ignored,
+                removed=removed,
             )
         if automatic:
             await self._notify_new_updates()
@@ -204,7 +343,9 @@ class Checks(DeviceSettings):
         check (last_scan) and the schedule stay unchanged. Raises ShellyError during
         the full check or while this device is checked, installed or reloaded;
         other devices may be checked or installed at the same time. trigger: log
-        value ("device", or "step" for the check after an intermediate version)."""
+        value ("device", or "step" for the check after an intermediate version).
+        A device that is no longer in the registry is marked removed and checked at
+        its last address if it still answers there (finding in the log either way)."""
         if device_id not in self.devices:
             raise KeyError(device_id)
         if not self._reserved("device", device_id):
@@ -217,13 +358,26 @@ class Checks(DeviceSettings):
         started = time.monotonic()
         failure = None
         header_ignored: bool | None = None
+        removed: list[str] = []
         try:
-            entry = self._shelly_entries(await self._registry()).get(device_id)
+            registry = await self._registry()
+            entry = self._shelly_entries(registry).get(device_id)
+            self.others = other_shellys(registry, (d.get("mac") for d in self.devices.values()))
+            checked = False
             if entry is None:
-                dev.update(status=STATUS_UNREGISTERED, message="")
-                failure = "Device is no longer in the Home Assistant device registry"
+                self._mark_removed(dev)
+                removed.append(device_id)
+                if await self._probe_removed(device_id, dev):
+                    origin = str(dev["origin"])
+                    await self._check_entry(device_id, str(dev.get("name") or device_id), origin + "/", {}, False)
+                    checked = True
             else:
-                await self._check_entry(device_id, entry, {})
+                dev.pop("removed", None)
+                dev.pop("removed_reachable", None)
+                self._apply_ha_battery(dev, device_id in await self._battery_devices())
+                await self._check_entry(device_id, self._entry_name(entry), entry.get("configuration_url"), {})
+                checked = True
+            if checked:
                 header_ignored = await self._finish_header_check()
                 if dev.get("status") == STATUS_READY:
                     await self._store_changelogs([dev])
@@ -242,72 +396,161 @@ class Checks(DeviceSettings):
             failure,
             trigger=trigger,
             header_ignored=header_ignored,
+            removed=removed,
         )
         return {"status": dev.get("status"), "error": failure}
 
-    async def _scan_all(self) -> tuple[list[str], list[str]]:
+    async def _scan_all(self) -> tuple[list[str], list[str], list[str]]:
         """Check all Shelly main devices from the HA device registry.
-        Returns the IDs of the checked devices and the names of the ignored
-        (registered, not contacted) devices."""
+        Returns the IDs of the checked devices, the names of the ignored
+        (registered, not contacted) devices and the IDs of the removed devices
+        (no longer in the registry: only tested whether they still answer)."""
         offers: OfferTasks = {}  # shared manufacturer requests: one per firmware ID
-        entries = self._shelly_entries(await self._registry())
+        registry = await self._registry()
+        entries = self._shelly_entries(registry)
+        self.others = other_shellys(registry, (d.get("mac") for d in self.devices.values()))
+        batteries = await self._battery_devices()
+        self._readopt_removed(entries)
         for dev in self.devices.values():  # A full check ends the "just updated" display
             dev.pop("updated", None)  # and the retry of a failed installation
             dev.pop("install_failed", None)
         # Ignored devices count as registered (seen) but are not contacted
         seen = set(entries)
         ignored: list[str] = []
-        for device_id in seen & set(self.devices):
-            if self.devices[device_id].get("ignored"):
+        for device_id in seen:
+            dev = self.devices.setdefault(device_id, {})
+            dev.pop("removed", None)  # back in Home Assistant: the stored data stays
+            dev.pop("removed_reachable", None)
+            self._apply_ha_battery(dev, device_id in batteries)
+            if dev.get("ignored"):
                 entry = entries.pop(device_id)
-                name = clip(entry.get("name_by_user") or entry.get("name") or device_id, 100)
-                self.devices[device_id]["name"] = name
-                ignored.append(name)
+                dev["name"] = self._entry_name(entry)
+                ignored.append(dev["name"])
+        removed = sorted(i for i in self.devices if i not in seen)
+        for device_id in removed:
+            self._mark_removed(self.devices[device_id])
         # Every device of this check is "waiting" until it is reached
         progress = self._progress()
-        progress.update(total=len(entries), phase="devices")
-        self.activity.update(dict.fromkeys(entries, ACTIVITY_WAITING))
-        await self._check_entries(entries, offers)
-        for device_id, dev in self.devices.items():
-            if device_id not in seen:
-                dev.update(status=STATUS_UNREGISTERED, message="")
-        return sorted(entries), sorted(ignored, key=str.lower)
+        progress.update(total=len(entries) + len(removed), phase="devices")
+        self.activity.update(dict.fromkeys([*entries, *removed], ACTIVITY_WAITING))
+        await self._check_entries(entries, offers, removed)
+        return sorted(entries), sorted(ignored, key=str.lower), removed
 
-    async def _check_entries(self, entries: dict[str, dict[str, Any]], offers: OfferTasks) -> None:
-        """Check the given registry entries, up to CHECK_PARALLEL at the same time,
-        and count the results in the progress of the running check."""
+    async def _check_entries(
+        self, entries: dict[str, dict[str, Any]], offers: OfferTasks, removed: list[str] | None = None
+    ) -> None:
+        """Check the given registry entries and test whether the removed devices
+        still answer, up to CHECK_PARALLEL at the same time, and count the results
+        in the progress of the running check."""
         progress = self._progress()
         slots = asyncio.Semaphore(CHECK_PARALLEL)
 
         async def check(device_id: str, entry: dict[str, Any]) -> None:
             """Check one device within the parallel limit and count the result."""
             async with slots:
-                ok = await self._check_entry(device_id, entry, offers)
+                ok = await self._check_entry(device_id, self._entry_name(entry), entry.get("configuration_url"), offers)
             if not ok:
                 progress["errors"] += 1
+            progress["done"] += 1
+
+        async def probe(device_id: str) -> None:
+            """Test one removed device within the parallel limit and count the result."""
+            async with slots:
+                if not await self._probe_removed(device_id, self.devices[device_id]):
+                    progress["errors"] += 1
             progress["done"] += 1
 
         # TaskGroup: a cancelled check (app stop) cancels every device query
         async with asyncio.TaskGroup() as group:
             for device_id, entry in entries.items():
                 group.create_task(check(device_id, entry))
+            for device_id in removed or []:
+                group.create_task(probe(device_id))
+
+    @staticmethod
+    def _entry_name(entry: dict[str, Any]) -> str:
+        """Name of a device as shown in Home Assistant (user-given name first)."""
+        return clip(entry.get("name_by_user") or entry.get("name") or entry.get("id") or "?", 100)
+
+    @staticmethod
+    def _mark_removed(dev: Device) -> None:
+        """A device that is no longer in the device registry (removed from Home
+        Assistant or the Shelly integration, or disabled there) stays listed with
+        the marker removed (time it was noticed); an Ignored mark is dropped – the
+        removed device is shown in its own section and skipped by the full check."""
+        if not dev.get("removed"):
+            dev["removed"] = int(time.time())
+        dev.pop("ignored", None)
+
+    def _readopt_removed(self, entries: dict[str, dict[str, Any]]) -> None:
+        """A Shelly that was removed from Home Assistant and added again gets a new
+        device ID: its stored entry (and stored password) moves to that ID when the
+        MAC address of the new registry entry matches exactly one listed device that
+        is no longer in the registry (marked removed already or not yet)."""
+        for device_id, entry in entries.items():
+            mac = _registry_mac(entry)
+            if device_id in self.devices or mac is None:
+                continue
+            matches = [i for i, d in self.devices.items() if i not in entries and d.get("mac") == mac]
+            if len(matches) != 1:
+                continue
+            old = matches[0]
+            if old in self.installing or old in self.device_checks or old in self.reloading:
+                continue
+            self.devices[device_id] = self.devices.pop(old)
+            try:
+                self.credentials.rename(old, device_id)
+            except ShellyError as err:
+                log.warning("Stored password of %s not moved: %s", entry.get("name"), err)
+            log.info("%s is back in Home Assistant with a new device ID – stored data kept", self._entry_name(entry))
+
+    @staticmethod
+    def _apply_ha_battery(dev: Device, has_sensor: bool) -> None:
+        """Battery device hint of Home Assistant (a Shelly battery sensor, see
+        _battery_devices) for a device that never reported its battery state itself;
+        what the device reports always wins (battery_source)."""
+        if "battery" in dev and dev.get("battery_source") != BATTERY_FROM_HA:
+            dev["battery_source"] = BATTERY_FROM_DEVICE  # also a value of older versions (read from the device)
+            return
+        if has_sensor:
+            dev.update(battery=True, battery_source=BATTERY_FROM_HA)
+        else:
+            dev.pop("battery", None)
+            dev.pop("battery_source", None)
+
+    async def _probe_removed(self, device_id: str, dev: Device) -> bool:
+        """Does a removed device still answer at its last address? Stored as
+        removed_reachable (a refused password counts as an answer); nothing else of
+        the device changes. False without a known address."""
+        reachable = False
+        origin = dev.get("origin")
+        if isinstance(origin, str) and origin:
+            self.activity[device_id] = ACTIVITY_CHECKING
+            try:
+                await shelly.device_info(self.session, origin, self._auth_for(device_id))
+                reachable = True
+            except AuthError:
+                reachable = True
+            except (TimeoutError, ShellyError, aiohttp.ClientError, KeyError, ValueError, OSError) as err:
+                log.info("%s (removed) not reachable: %s", dev.get("name"), err)
+            except Exception:
+                log.exception("%s (removed): unexpected error while testing it", dev.get("name"))
+        self.activity.pop(device_id, None)
+        dev["removed_reachable"] = reachable
+        return reachable
 
     def _shelly_entries(self, registry: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         """Shelly main devices from the registry, ordered by name: {device ID: entry}.
 
         Sub-devices (channels of e.g. Pro 3EM or Strip, BLU devices behind a gateway) carry
         a via_device_id that points to another Shelly; only the main device has firmware of
-        its own – stale sub-device entries are removed. A via_device_id that points to
+        its own – stale sub-device entries are removed (BLU devices with firmware of their
+        own are listed read-only, see other_shellys). A via_device_id that points to
         anything else (router, bridge of another integration) does not make a sub-device."""
-
-        def is_shelly(entry: dict[str, Any]) -> bool:
-            """True for a registry entry of the Shelly integration."""
-            return any(i and i[0] == "shelly" for i in entry.get("identifiers", []))
-
-        shelly_ids = {entry["id"] for entry in registry if is_shelly(entry)}
+        shelly_ids = {entry["id"] for entry in registry if _is_shelly(entry)}
         entries: dict[str, dict[str, Any]] = {}
         for entry in registry:
-            if not is_shelly(entry) or entry.get("disabled_by"):
+            if not _is_shelly(entry) or entry.get("disabled_by"):
                 continue
             if entry.get("via_device_id") in shelly_ids:
                 self.devices.pop(entry["id"], None)
@@ -322,22 +565,47 @@ class Checks(DeviceSettings):
         order = sorted(entries, key=label)
         return {i: entries[i] for i in order}
 
-    async def _check_entry(self, device_id: str, entry: dict[str, Any], offers: OfferTasks) -> bool:
-        """Check one registry entry, keep its result on the device. True on success.
+    async def _check_entry(
+        self,
+        device_id: str,
+        name: str,
+        configuration_url: str | None,
+        offers: OfferTasks,
+        registered: bool = True,
+    ) -> bool:
+        """Check one device at the address of its registry entry (configuration_url),
+        keep its result on the device and look up its host name. True on success.
+
+        registered=False: a removed device checked at its last address (no host
+        name of a registry entry, see _update_host_name)."""
+        dev = self.devices.setdefault(device_id, {})
+        dev["name"] = name
+        dev["last_check"] = int(time.time())
+        self.activity[device_id] = ACTIVITY_CHECKING
+        try:
+            ok = await self._attempt_check(device_id, dev, configuration_url, offers)
+            await self._update_host_name(dev, configuration_url if registered else None)
+            return ok
+        finally:
+            self.activity.pop(device_id, None)
+
+    async def _attempt_check(
+        self, device_id: str, dev: Device, configuration_url: str | None, offers: OfferTasks
+    ) -> bool:
+        """One check attempt of _check_entry. True on success.
 
         last_check = last attempt, last_success = last successful check; a failed
         attempt keeps the last known firmware so it is never shown as freshly checked.
         A known battery device (marker battery) that did not answer is STATUS_ASLEEP
-        instead of STATUS_ERROR."""
-        dev = self.devices.setdefault(device_id, {})
-        dev["name"] = clip(entry.get("name_by_user") or entry.get("name") or device_id, 100)
-        dev["last_check"] = int(time.time())
-        self.activity[device_id] = ACTIVITY_CHECKING
+        instead of STATUS_ERROR. A registry entry without a usable address sets
+        address_issue ({"reason", "message"}, see shelly.AddressError)."""
         try:
-            await self._scan_device(device_id, dev, entry.get("configuration_url"), offers)
+            await self._scan_device(device_id, dev, configuration_url, offers)
         except (TimeoutError, ShellyError, aiohttp.ClientError, KeyError, ValueError, OSError) as err:
             log.warning("%s: %s", dev["name"], err)
             text = error_text(err, 500) or type(err).__name__
+            if isinstance(err, AddressError):
+                dev["address_issue"] = {"reason": err.reason, "message": text}
             if dev.get("battery") is True and _unreachable(err):
                 dev.update(status=STATUS_ASLEEP, message=ASLEEP_MESSAGE.format(error=text), error_level="warning")
             else:
@@ -352,8 +620,21 @@ class Checks(DeviceSettings):
         else:
             dev["last_success"] = dev["last_check"]
             return True
-        finally:
-            self.activity.pop(device_id, None)
+
+    async def _update_host_name(self, dev: Device, configuration_url: str | None) -> None:
+        """Host name column: the host name of the registry entry (configuration_url)
+        wins, else <device id>.local from the ID the device reported (Gen2+ shelly_id,
+        Gen1 gen1_hostname; the last known one if this attempt failed). Looked up at
+        every check and kept only when it resolves (else None). Display only: requests
+        always go to the address of the registry entry. Option resolve_host_names off:
+        no lookup, no host name."""
+        if not self.resolve_host_names:
+            dev.pop("host_name", None)
+            return
+        host = shelly.host_name_of(configuration_url) or shelly.local_host_name(
+            dev.get("shelly_id") or dev.get("gen1_hostname")
+        )
+        dev["host_name"] = host if host and await shelly.host_resolves(host) else None
 
     # ------------------------------------- One device: Gen2+ next step of the server, Gen1 firmware store first
 
@@ -362,6 +643,7 @@ class Checks(DeviceSettings):
     ) -> None:
         """Check one device and provide the new firmware if there is one."""
         origin = await shelly.resolve_device_origin(configuration_url)
+        dev.pop("address_issue", None)
         dev.update(origin=origin)
         info = await shelly.device_info(
             self.session,
@@ -382,8 +664,6 @@ class Checks(DeviceSettings):
                 sha256=None,
             )
             return
-        if info["gen"] == 1 and info["type"] not in self.gen1_allowed:
-            raise ShellyError(f"Gen1 type {info['type']} is not in the list of allowed types")
 
         dev.pop("store_fallback", None)  # set again below if it still applies
         dev.pop("step_target", None)
@@ -598,7 +878,9 @@ class Checks(DeviceSettings):
         "downloading" during the download. device_id, dev: the device whose check started
         it (log text and the user of the download entry).
         Returns (file name, sha256, size)."""
-        stored = await self._stored_firmware(info["type"], offer["version"], uploads=info["gen"] >= 2)
+        stored = await self._stored_firmware(
+            info["type"], offer["version"], uploads=info["gen"] >= 2, offered_sha=shelly.url_sha256(offer["url"])
+        )
         if stored:
             name, meta = stored
             log.info("%s: using stored firmware %s %s", dev["name"], info["type"], offer["version"])
@@ -646,6 +928,7 @@ class Checks(DeviceSettings):
         trigger: str | None = None,
         header_ignored: bool | None = None,
         ignored: list[str] | None = None,
+        removed: list[str] | None = None,
     ) -> None:
         """One log entry per check; findings = devices with an update, a warning or
         an error. trigger overrides the derived value ("device" for single-device
@@ -657,9 +940,25 @@ class Checks(DeviceSettings):
         and errors (key kept for historic entries). The entry gets the highest
         severity of its findings, an overall failure is an error. ignored: names of
         the ignored devices of a full check (not contacted) – listed in the entry and
-        counted in the result, never a finding (no influence on the severity)."""
+        counted in the result, never a finding (no influence on the severity).
+        removed: IDs of removed devices – a warning finding if the device still
+        answers at its last address, an error finding if not (counted in the result).
+        A removed device that a single check reached is also listed like a checked one."""
         findings: list[dict[str, Any]] = []
+        for device_id in removed or []:
+            dev = self.devices.get(device_id, {})
+            reachable = dev.get("removed_reachable") is True
+            findings.append(
+                {
+                    "device": dev.get("name"),
+                    "error": REMOVED_REACHABLE if reachable else REMOVED_UNREACHABLE,
+                    "severity": "warning" if reachable else "error",
+                    "removed": True,
+                }
+            )
         for device_id in checked:
+            if device_id in (removed or []) and self.devices.get(device_id, {}).get("removed_reachable") is not True:
+                continue  # not reached: the removed finding says everything
             dev = self.devices.get(device_id, {})
             if dev.get("status") in (STATUS_ERROR, STATUS_ASLEEP):
                 level = dev.get("error_level") or "error"
@@ -697,6 +996,8 @@ class Checks(DeviceSettings):
         result = f"{updates} update(s), {counts['warning']} warning(s), {counts['error']} error(s)"
         if ignored:
             result += f", {len(ignored)} ignored"
+        if removed:
+            result += f", {len(removed)} removed"
         self.events.add(
             "check",
             severity=worst("error" if failure else "success", *(f["severity"] for f in findings)),

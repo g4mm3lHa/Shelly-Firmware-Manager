@@ -63,7 +63,7 @@ TARGETS_JS = """() => [...document.querySelectorAll('#view-devices button, #view
   .filter(b => b.offsetParent !== null && !b.matches('td.c-details summary')).map(b => { const r = b.getBoundingClientRect();
   return {t: (b.getAttribute('aria-label') || b.textContent || b.id).trim().slice(0, 30), w: Math.round(r.width), h: Math.round(r.height)}; })
   .filter(x => x.h < 44 || x.w < 44)"""
-PILL_TEXTS = {"Up-To-Date", "Available", "Ready", "Queued", "Installing", "Unconfirmed", "Error", "Unregistered", "Skipped",
+PILL_TEXTS = {"Up-To-Date", "Available", "Ready", "Queued", "Installing", "Unconfirmed", "Error", "Not checked",
               "Updated", "Asleep"}
 TABS_JS = """() => [...document.querySelectorAll('.tab')].map(t => { const r = t.getBoundingClientRect();
   return {id: t.id, left: Math.round(r.left), right: Math.round(r.right), w: Math.round(r.width)}; })"""
@@ -101,8 +101,9 @@ def run_case(pw, width, scheme, embedded, base=IDLE, tag="idle"):
         # status pills and the Install button next to them (same size): >= 32 px
         small = [x for x in small if x["h"] < 32 or (x["t"] not in PILL_TEXTS and not x["t"].startswith("Install update on"))]
         check(page, f"{case}: touch targets >= 44 px (status pills, Install >= 32)", not small, json.dumps(small[:8]))
-        h1 = f.evaluate("() => getComputedStyle(document.querySelector('h1')).display")
-        check(page, f"{case}: h1 {'hidden' if embedded else 'shown'}", (h1 == "none") == embedded, h1)
+        # Inside HA the app title is hidden (a pre-release keeps only its "(beta)" mark)
+        h1 = f.evaluate("() => getComputedStyle(document.querySelector('h1 .app-title')).display")
+        check(page, f"{case}: app title {'hidden' if embedded else 'shown'}", (h1 == "none") == embedded, h1)
         cols = f.evaluate("() => getComputedStyle(document.getElementById('cols')).display")
         check(page, f"{case}: no column chooser", cols == "none", cols)
         hidden_cells = f.evaluate("""() => ['aop','eco','restart'].map(k => [...document.querySelectorAll('td.c-'+k)].every(td => getComputedStyle(td).display === 'none'))""")

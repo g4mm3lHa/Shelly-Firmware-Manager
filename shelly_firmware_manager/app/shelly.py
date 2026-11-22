@@ -100,6 +100,24 @@ class UnsupportedError(ShellyError):
     """The device does not provide the requested method/endpoint (not an outage)."""
 
 
+# Why the device registry gives no usable device address (AddressError.reason)
+ADDRESS_MISSING = "missing"  # no configuration_url, or not plain http://host[:port]
+
+ADDRESS_UNRESOLVED = "unresolved"  # host name does not resolve
+
+ADDRESS_NOT_PRIVATE = "not_private"  # (resolved) IP address outside LAN_NETWORKS
+
+
+class AddressError(ShellyError):
+    """The device registry gives no usable local address for a device; reason is one
+    of ADDRESS_MISSING, ADDRESS_UNRESOLVED, ADDRESS_NOT_PRIVATE."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        """Error with the machine-readable reason and the text for the user."""
+        super().__init__(message)
+        self.reason = reason
+
+
 class OtaError(ShellyError):
     """The device reported a failed update (Gen2+ event ota_error)."""
 
@@ -160,19 +178,76 @@ def is_lan_address(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     return any(ip in network for network in LAN_NETWORKS)
 
 
+def host_name_of(configuration_url: str | None) -> str | None:
+    """Host name of the integration's configuration_url (e.g. shellyplus1-abc.local);
+    None for an IP address or a URL without host (shown in the Host name column)."""
+    try:
+        host = urlsplit(configuration_url or "").hostname
+    except ValueError:
+        return None
+    if not host:
+        return None
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return clip(host, 253)
+    return None
+
+
+# Device ID as a host name label (Gen2+ id, e.g. shellyplus1pm-a0dd6c29c3e0; Gen1
+# /settings device.hostname, e.g. shelly1-b929cc)
+HOST_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+
+HOST_RESOLVE_TIMEOUT_S = 5  # longest wait for one host name lookup (mDNS may be slow)
+
+
+def local_host_name(device_id: object) -> str | None:
+    """Host name <device id>.local the device announces itself under (mDNS), from
+    the ID the device reports; None if the ID is missing or no valid host label."""
+    label = str(device_id or "").strip().lower()
+    return f"{label}.local" if HOST_LABEL_RE.fullmatch(label) else None
+
+
+async def host_resolves(host: str) -> bool:
+    """True if the host name resolves to at least one address within
+    HOST_RESOLVE_TIMEOUT_S. Only a lookup: no request is sent to the address."""
+    loop = asyncio.get_running_loop()
+    try:
+        infos = await asyncio.wait_for(
+            loop.getaddrinfo(host, 80, type=socket.SOCK_STREAM), HOST_RESOLVE_TIMEOUT_S
+        )
+    except (OSError, UnicodeError, TimeoutError):  # socket.gaierror is an OSError
+        return False
+    return bool(infos)
+
+
 async def resolve_device_origin(configuration_url: str | None) -> str:
-    """Returns 'http://<private-ip>:<port>' from the integration's configuration_url."""
-    parts = urlsplit(configuration_url or "")
+    """Returns 'http://<private-ip>:<port>' from the integration's configuration_url.
+
+    Raises AddressError (with its reason) if the registry gives no usable address: no
+    or no plain http URL, a host name that does not resolve, or an address outside
+    the private networks (LAN_NETWORKS)."""
+    try:
+        parts = urlsplit(configuration_url or "")
+        port = parts.port or 80
+    except ValueError:  # invalid port or brackets
+        raise AddressError(ADDRESS_MISSING, "No usable local device address in the device registry") from None
     if parts.scheme != "http" or not parts.hostname or parts.username or parts.password:
-        raise ShellyError("No usable local device address in the device registry")
-    port = parts.port or 80
+        raise AddressError(ADDRESS_MISSING, "No usable local device address in the device registry")
 
     loop = asyncio.get_running_loop()
-    infos = await loop.getaddrinfo(parts.hostname, port, type=socket.SOCK_STREAM)
+    try:
+        infos = await loop.getaddrinfo(parts.hostname, port, type=socket.SOCK_STREAM)
+    except (socket.gaierror, UnicodeError) as err:
+        raise AddressError(
+            ADDRESS_UNRESOLVED, f"Host name {clip(parts.hostname, 100)} could not be resolved ({error_text(err, 100)})"
+        ) from None
     addresses = sorted({str(info[4][0]).split("%")[0] for info in infos})
+    if not addresses:
+        raise AddressError(ADDRESS_UNRESOLVED, f"Host name {clip(parts.hostname, 100)} could not be resolved")
     for address in addresses:
         if not is_lan_address(ipaddress.ip_address(address)):
-            raise ShellyError(f"Device address {address} is not in a private network")
+            raise AddressError(ADDRESS_NOT_PRIVATE, f"Device address {address} is not in a private network")
 
     ip = addresses[0]
     host = f"[{ip}]" if ":" in ip else ip
@@ -732,6 +807,8 @@ async def read_settings(
         extra["ble"] = UNSUPPORTED  # Gen1 devices have no Bluetooth switch
         extra["debug_ws"] = UNSUPPORTED  # Gen1 devices have no websocket debug log
         extra["battery"] = _positive((settings.get("sleep_mode") or {}).get("period"))
+        # Gen1 device ID (also its mDNS host name), e.g. shelly1-B929CC
+        extra["gen1_hostname"] = clip((settings.get("device") or {}).get("hostname"), 64) or None
         if extended:
             channels = [
                 c for c in (settings.get("relays") or []) + (settings.get("lights") or []) if isinstance(c, dict)

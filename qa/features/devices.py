@@ -1,7 +1,9 @@
 """Firmware store suite, devices area: device list, action popups and icons, name tips, battery, layout
 (demo "features" on 8805)."""
 
-from features.base import OVERFLOW_JS, check, dialog, refresh_state, tip_text, wait_until
+from features.base import (
+    OVERFLOW_JS, check, dialog, filter_entries, menu_items, pick_filter, refresh_state, tip_text, wait_until,
+)
 
 
 def _device_list(c):
@@ -195,7 +197,8 @@ def _name_tips(c):
     page.wait_for_timeout(300)
     page.unroute("**/settings/refresh")
     ha.tap()
-    f.locator("#dev-chips .chip").first.tap()
+    f.locator("#view-devices .tool-btn").first.tap()
+    page.keyboard.press("Escape")
     check(f"{case}: tap elsewhere hides the tooltip", tip_text(f) is None)
     page.keyboard.press("Escape")
 
@@ -203,7 +206,8 @@ def _name_tips(c):
 def _battery(c):
     """Battery devices: battery icon right after the name on the same line (table and
     tile) with a tooltip; a sleeping one shows the grey "Asleep" pill and a dimmed IP
-    and is not listed under "Errors"; an awake one keeps its normal IP."""
+    and is listed under "Asleep", not "Attention"; an awake one keeps its normal IP; the
+    tooltip of the icon names where the battery device was recognised."""
     case, f, page, width = c.case, c.f, c.page, c.width
     def row(name):
         return f.locator("#dev-cards tr", has_text=name).first
@@ -222,10 +226,11 @@ def _battery(c):
     awake = row("Carport").evaluate("r => [!!r.querySelector('.battery'), r.querySelector('td.c-ip .mono').classList.contains('dim')]")
     check(f"{case}: awake battery device – icon, IP not dimmed", awake == [True, False], str(awake))
     check(f"{case}: no battery icon on other devices", row("Hall").locator(".battery").count() == 0)
-    errors = f.locator("#dev-chips .chip", has_text="Errors")
-    errors.click()
-    check(f"{case}: Asleep is not listed under Errors", f.locator("#dev-cards tr", has_text="Doorbell").count() == 0)
-    f.locator("#dev-chips .chip", has_text="All").click()
+    pick_filter(f, "devices", "Attention")
+    check(f"{case}: Asleep is not listed under Attention", f.locator("#dev-cards tr", has_text="Doorbell").count() == 0)
+    pick_filter(f, "devices", "Asleep")
+    check(f"{case}: Asleep filter lists it", f.locator("#dev-cards tr", has_text="Doorbell").count() == 1)
+    pick_filter(f, "devices", "All")
     icon = row("Doorbell").locator(".battery")
     icon.scroll_into_view_if_needed()
     if width > 700:
@@ -233,7 +238,8 @@ def _battery(c):
     else:
         page.wait_for_timeout(300)
         icon.tap()
-    check(f"{case}: battery tooltip", tip_text(f) == "Battery device: reachable only while it is awake", str(tip_text(f)))
+    check(f"{case}: battery tooltip", tip_text(f) == "Battery device: reachable only while it is awake\nDetected from Home Assistant",
+          str(tip_text(f)))
     page.screenshot(path=c.out / f"{case}-battery.png")
     if width > 700:
         page.mouse.move(5, 5)
@@ -244,7 +250,109 @@ def _battery(c):
               and lines[0].startswith("Battery device asleep – wake it up") and lines[1].startswith("Last contact: 20"), str(lines))
         page.mouse.move(5, 5)
     else:
-        f.locator("#dev-chips .chip").first.tap()
+        f.locator("#view-devices .tool-btn").first.tap()
+        page.keyboard.press("Escape")
+
+
+SECTION_TITLES = ["Updates Available", "Attention", "Not Checked", "Up-To-Date", "Asleep", "Ignored", "Removed", "Other Shellys"]
+FILTER_LABELS = ["All", "Updates", "Attention", "Not checked", "Up-To-Date", "Unprotected", "Asleep", "Ignored", "Removed",
+                 "Other Shellys"]
+
+
+def _host_names(c):
+    """Option "Resolve host names": off (demo) – no Host name column, no Columns or Sort
+    entry; on – the column is shown once in this browser and can be hidden again."""
+    case, f, page = c.case, c.f, c.page
+    label = f.locator('#cols-devices label:has(input[data-col="host_name"])')
+    sort = f.locator('.sort-menu .sort-item[data-value="host_name"]')
+    check(f"{case}: option off – no Host name column, Columns or Sort entry",
+          f.locator("#dev-cards th.c-host_name").count() == 0 and label.is_hidden() and sort.is_hidden())
+
+    def on(route):
+        headers = {k: v for k, v in route.request.headers.items() if k.lower() != "if-none-match"}  # no 304
+        state = route.fetch(headers=headers).json()
+        state["host_names"] = True
+        route.fulfill(json=state)
+
+    page.route("**/api/state", on)
+    refresh_state(page, f)
+    th = f.locator("#dev-cards th.c-host_name").first
+    check(f"{case}: option on – Host name column shown and ticked in Columns", th.is_visible()
+          and f.locator('#cols-devices input[data-col="host_name"]').is_checked() and "shelly-" in f.locator(
+              "#dev-cards td.c-host_name").all_inner_texts().__str__())
+    page.unroute("**/api/state")
+    refresh_state(page, f)
+
+
+def _sections(c):
+    """Sections of the device list in their order with the read-only "Other Shellys",
+    filter popover (one section, "Other Shellys" only), Removed marker with its tooltip
+    and the row menu "Remove from list" (confirmation; removed only in the last case),
+    "No usable address", the "Host name" column (see _host_names), the beta mark of a pre-release
+    and the header checkbox above the row checkboxes."""
+    case, f, page, out, width = c.case, c.f, c.page, c.out, c.width
+    titles = [t.split(" · ")[0] for t in f.locator("#dev-cards .card-head h2").all_inner_texts()]
+    check(f"{case}: sections in order, Other Shellys last", titles == SECTION_TITLES, str(titles))
+    labels = [e[0] for e in filter_entries(f, "devices")]
+    check(f"{case}: filter entries in the order of the sections", labels == FILTER_LABELS, str(labels))
+    pick_filter(f, "devices", "Attention")
+    heads = f.locator("#dev-cards .card-head h2").all_inner_texts()
+    check(f"{case}: filter Attention shows only that section", len(heads) == 1 and heads[0].startswith("Attention"), str(heads))
+    pick_filter(f, "devices", "Other Shellys")
+    others = f.locator("#dev-cards .card")
+    check(f"{case}: filter Other Shellys shows only that card", others.count() == 1
+          and others.locator(".oth-row:not(.oth-head)").count() == 5, str(others.count()))
+    page.screenshot(path=out / f"{case}-other-shellys.png")
+    pick_filter(f, "devices", "All")
+    where = f.locator(".oth-row", has_text="Bedroom thermostat").inner_text()
+    check(f"{case}: other Shelly – kind and where to update", "BLU TRV" in where and "Living room hub" in where, where)
+    # Removed: yellow marker, no Ignored marker, tooltip reachable / not reachable
+    def removed_tip(name):
+        pill = f.locator("#dev-cards tr", has_text=name).first.locator(".p-removed")
+        pill.scroll_into_view_if_needed()
+        if width > 700:
+            page.mouse.move(1, 1)
+            pill.hover()
+        else:
+            page.wait_for_timeout(300)
+            pill.tap()
+        text = wait_until(lambda: tip_text(f)) or ""
+        if width < 700:
+            pill.tap()   # a second tap hides it
+        return text
+    reach, gone = removed_tip("Sauna"), removed_tip("Dryer")
+    check(f"{case}: Removed tooltip – still reachable", reach.startswith("Removed from Home Assistant / the Shelly integration, but still reachable"), reach)
+    check(f"{case}: Removed tooltip – no longer reachable", gone.startswith("Removed from Home Assistant / the Shelly integration and no longer reachable"), gone)
+    page.mouse.move(1, 1)
+    # No usable address: message instead of the IP, the reason below the name on wide screens
+    guest = f.locator("#dev-cards tr", has_text="Guest room").first
+    reason = guest.locator(".addr-reason")
+    check(f"{case}: No usable address", guest.locator("td.c-ip").inner_text().strip() == "No usable address"
+          and reason.is_visible() == (width > 700), guest.locator("td.c-ip").inner_text())
+    # Pre-release (demo "features"): red "(beta)" – next to the title, inside HA on phones above the pills
+    beta = f.evaluate("""() => { const b = document.querySelector('h1 .beta'), m = document.getElementById('meta');
+      return b && {text: b.textContent, shown: b.getBoundingClientRect().height > 0,
+        above: b.getBoundingClientRect().bottom <= m.getBoundingClientRect().top + 1}; }""")
+    check(f"{case}: beta mark of a pre-release", bool(beta) and beta["text"] == "(beta)" and beta["shown"] and beta["above"], str(beta))
+    if width > 700:
+        _host_names(c)
+        x = f.evaluate("""() => [document.querySelector('#dev-cards .card-head input'),
+          document.querySelector('#dev-cards td.c-select input:not(.ghost)')].map(e => e.getBoundingClientRect().left)""")
+        check(f"{case}: header checkbox above the row checkboxes", abs(x[0] - x[1]) < 0.5, str(x))
+    # Row menu of a removed device: "Remove from list" instead of "Ignore device", with confirmation
+    items = dict(menu_items(f, "Sauna"))
+    check(f"{case}: removed device – Remove from list instead of Ignore", items.get("Remove from list") is False
+          and "Ignore device" not in items, str(items))
+    f.locator("#rowmenu button", has_text="Remove from list").click()
+    d = dialog(f)
+    check(f"{case}: Remove from list asks first", d["title"] == "Remove from list?" and [b[0] for b in d["buttons"]] == ["Cancel", "Remove"],
+          str(d))
+    if c.last:
+        f.locator("#dlg-btns button", has_text="Remove").click()
+        gone_row = wait_until(lambda: f.locator("#dev-cards tr", has_text="Sauna").count() == 0)
+        check(f"{case}: removed device removed from the list", gone_row)
+    else:
+        f.locator("#dlg-btns button", has_text="Cancel").click()
 
 
 def _keep_listed(c):

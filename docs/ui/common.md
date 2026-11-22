@@ -16,7 +16,7 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
 - **Row menu (⋮), five groups with separators:** 1 Check for updates, Install update,
   Downgrade (hint below it) | 2 Device Details, Reload device info ("Not available" hint
   below it), Open web UI | 3 NTP server, Power-on action, Eco mode, Device password |
-  4 Ignore / Resume device | 5 Restart (red).
+  4 Ignore / Resume device (removed devices: Remove from list) | 5 Restart (red).
 - **Message dialogs (2026-11-19, variant B):** large round icon (40 px circle, 24 px
   icon) left of the text, text in the normal colour: success green check, error red X,
   warning yellow "!" (e.g. not applied / not read back). Neutral notes ("Nothing
@@ -33,19 +33,29 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   text, at most the width minus 16 px on each side.
 
 ## Toolbar and card heads (3.5.0, variant B)
-- Same toolbar in all tabs: search and sort only as small round icons (36 px desktop,
-  44 px phones); a click opens a popover under the icon (search field; sort: list of
-  fields + Ascending/Descending, checked entries marked); click outside or Escape
-  closes; Enter in the search field closes it; dot on the search icon while a search
-  text is set. Logs: search icon only.
-- Desktop order: icons, chips, tab extras right. Phones: icons and chips share row 1
-  (chips scroll), tab extras in row 2, popover full width under row 1; "Upload
-  firmware" as round icon at the right end of row 2; the Devices row 2 (column
-  chooser) is not shown.
+- Same toolbar in all tabs: search, sort and filter only as small round icons (36 px
+  desktop, 44 px phones); a click opens a popover under the icon (search field; sort:
+  list of fields + Ascending/Descending; filter (3.8.0, replaces the chips): title
+  "Filter", one entry per filter with its count right, the chosen one in the primary
+  colour with ✓ after the count, optional tooltip); a choice keeps the popover open;
+  click outside, a second click on the icon or Escape closes; Enter in the search field
+  closes it; dot on the search icon while a search text is set and on the filter icon
+  while a filter other than "All" is chosen. Logs: search and filter icons. Start:
+  "All", popover closed.
+- Desktop order: icons, tab extras right. Phones: icons in row 1, tab extras in row 2,
+  popover full width under row 1; "Upload firmware" as round icon at the right end of
+  row 2; the Devices row 2 (column chooser) is not shown.
+- **Header checkbox (3.8.0, desktop):** the checkbox of the updates card head stands
+  exactly above the row checkboxes (same left edge); the title keeps its place.
 - Card heads (device groups, firmware IDs, settings cards) in Title Case and the same
   weight (600).
 - App title (H1, 2026-11-21): "Firmware Manager for Shelly"; the sidebar entry
   (`panel_title`) stays "Shelly Firmware".
+- **Beta mark (3.8.0):** a pre-release (version with a suffix, e.g. `-rc1`) shows a small
+  red superscript "(beta)" right of the app title (desktop and phones); inside HA on
+  phones (title hidden) it stands on its own line above the header pills, left. A
+  final version never shows it (set by the server, `web_ui.is_beta`, test in
+  `test_web.py`).
 - Phones, title bar (H1): inside HA the app title is hidden; the pills "Last checked …"
   and "Every n days · HH:MM" stacked on the left (ellipsis if too long), "Check now"
   right, vertically centred, never wraps.

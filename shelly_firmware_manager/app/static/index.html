@@ -5,7 +5,7 @@
 <title>Shelly Firmware</title><link rel="stylesheet" href="static/style.css?v=__ASSET_VERSION__"></head>
 <body>
 <header class="titlebar">
-<div><h1>Firmware Manager for Shelly</h1><div class="meta" id="meta"></div><div class="meta busy" id="busy"></div></div>
+<div><h1><span class="app-title">Firmware Manager for Shelly</span>__BETA__</h1><div class="meta" id="meta"></div><div class="meta busy" id="busy"></div></div>
 <button id="scan" class="primary">Check now</button>
 </header>
 <!-- Progress of a running check (full or single device), filled by app.js -->
@@ -21,11 +21,11 @@
 </nav>
 
 <section id="view-devices">
-<!-- Toolbar: row 1 search/sort icons and filter chips, then the extras of the tab -->
+<!-- Toolbar: row 1 search/sort/filter icons, then the extras of the tab -->
 <div class="toolbar">
 <div class="tb-main"><input id="dev-search" type="search" placeholder="Search name, IP or model" aria-label="Search devices">
 <div id="dev-sort"></div>
-<div class="chips" id="dev-chips"></div></div>
+<div id="dev-filter"></div></div>
 <div class="tb-extra"><details class="dropdown" id="cols"><summary>Columns ▾</summary><div class="menu-panel" id="cols-devices"></div></details></div>
 </div>
 <div id="dev-cards"></div>
@@ -35,7 +35,7 @@
 <div class="toolbar">
 <div class="tb-main"><input id="fw-search" type="search" placeholder="Search firmware ID, version or device" aria-label="Search firmware">
 <div id="fw-sort"></div>
-<div class="chips" id="fw-chips"></div></div>
+<div id="fw-filter"></div></div>
 <div class="tb-extra"><span class="meta" id="fw-summary"></span>
 <button class="icon" id="fw-info" aria-label="Storage" data-tip="Firmware is never deleted automatically – delete files here when they are no longer needed. Older versions allow a downgrade of Gen2+ devices (device menu “Downgrade” or the downgrade icon of a version) once “Allow downgrades” is switched on in Settings. Gen2+: the Shelly update server decides which version is next; a stored file of that version (download or upload, after a SHA-256 check) is used instead of a download. Gen1: the store comes first."></button>
 <button id="fw-upload" aria-label="Upload firmware"><span>Upload firmware</span></button></div>
@@ -46,7 +46,7 @@
 <section id="view-logs" hidden>
 <div class="toolbar">
 <div class="tb-main"><input id="log-search" type="search" placeholder="Search device" aria-label="Search device">
-<div class="chips" id="log-chips"></div></div>
+<div id="log-filter"></div></div>
 <div class="tb-extra"><label class="check"><input type="checkbox" id="log-quiet"> Hide checks without findings</label>
 <button id="log-clear">Delete all logs</button></div>
 </div>

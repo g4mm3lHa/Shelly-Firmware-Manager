@@ -1,5 +1,47 @@
 # Changelog
 
+## 3.8.0
+
+Released 2026-11-22. The device list is split into sections with a filter popover, and
+devices removed from Home Assistant stay listed; lost firmware files are read back.
+
+Added
+- Devices removed from Home Assistant stay listed under "Removed"; a full check only
+  tests whether they still answer (log warning, or error if not); data moves by MAC.
+- Devices tab: row menu "Remove from list" for removed devices (with confirmation).
+- Devices tab: read-only list "Other Shellys" (BLU behind a gateway, Bluetooth, ZHA,
+  Zigbee2MQTT, MQTT, Matter) with where to update; detected by the manufacturer text.
+- Battery devices are also recognised by their battery sensor in Home Assistant until
+  the device reports itself; the battery tooltip names the source.
+- Firmware files on disk that the store does not list are read back at the start when
+  their content proves ID and version (SHA-256); a log warning names them.
+- Devices tab: "No usable address" for a device whose address cannot be used, with the
+  reason (desktop).
+- Option "Resolve host names" (Settings → Advanced, off by default): only while it is
+  on, checks look up host names and the Devices tab offers the column "Host name"
+  (host name of the Shelly integration, else `<device id>.local`; shown if it resolves).
+- Firmware tab: card "Unknown Files" lists files the store does not know; delete there.
+- Pre-release versions show a red "(beta)" next to the app title.
+
+Changed
+- Devices tab: list in sections (Updates Available, Attention, Not Checked, Up-To-Date,
+  Asleep, Ignored, Removed, Other Shellys); a removed device loses its Ignored mark.
+- Devices, Firmware and Logs tabs: the filters are a popover of a filter icon next to
+  Sort, with counts; a dot marks an active filter.
+- Devices tab: the Removed pill tooltip says that "Check now" only tests whether the
+  device still answers (or answers again).
+- Gen1: the list of allowed types is removed; every Gen1 type is checked while Gen1
+  updates are enabled (a stored list is ignored).
+- Unknown files in the firmware folder are no longer deleted automatically.
+
+Fixed
+- "Error: 401: Unauthorized" after the app was in the background: refreshes repeat
+  silently while Home Assistant renews the session; only a lasting refusal is shown.
+- Devices tab (desktop): the header checkbox of "Updates Available" is aligned with the
+  row checkboxes.
+- Other Shellys: a listed Shelly that Home Assistant also knows over Bluetooth (BLE MAC
+  = Wi-Fi MAC + 2) is no longer listed a second time.
+
 ## 3.7.1
 
 Released 2026-11-21. Shellys that are connected through a router or another integration

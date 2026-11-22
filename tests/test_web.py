@@ -115,6 +115,21 @@ async def test_shutdown_cancels_running_check(mgr, net):
     assert mgr.activity == {} and mgr.progress is None and not mgr.checking
 
 
+async def test_beta_mark_only_in_pre_releases(mgr):
+    """The red "(beta)" next to the title: shown for an RC, never for a final version
+    (an empty version, e.g. tests and demos, counts as final)."""
+
+    async def page(version):
+        async with TestClient(TestServer(web_ui.build_ui_app(mgr, ingress_ip="127.0.0.1", app_version=version))) as c:
+            return await (await c.get("/")).text()
+
+    assert web_ui.BETA_MARK in await page("3.8.0-rc1")
+    for final in ("3.8.0", "10.0.0", ""):
+        html = await page(final)
+        assert "(beta)" not in html and "__BETA__" not in html
+    assert not web_ui.is_beta("3.8.0") and web_ui.is_beta("3.8.0-rc2")
+
+
 async def test_state_etag_304(client, mgr):
     """Unchanged state: 304 without body; changed state: new ETag and full body."""
     await mgr.scan()
@@ -158,6 +173,40 @@ async def test_ignore_and_reload_endpoints(client, mgr, net):
     offers = net.offer_calls
     r = await client.post(f"/api/devices/{B}/reload", json={}, headers=hdr(client))
     assert r.status == 200 and (await r.json())["warning"] is None and net.offer_calls == offers
+
+
+async def test_remove_from_list_endpoint(client, mgr, net):
+    """/forget: only removed devices, only with confirmation (CSRF and JSON rules);
+    the state names the section and the reachability of the removed device."""
+    await mgr.scan()
+    url = f"/api/devices/{C}/forget"
+    assert (await client.post(url, json={"confirm": True})).status == 403
+    assert (await client.post(url, json={"confirm": True}, headers=hdr(client))).status == 400  # not removed
+    net.removed.add(C)
+    await mgr.scan()
+    state = await (await client.get("/api/state")).json()
+    row = next(d for d in state["devices"] if d["id"] == C)
+    assert row["section"] == "removed" and row["removed"] and row["removed_reachable"] is True
+    assert next(d for d in state["devices"] if d["id"] == A)["section"] == "updates" and state["others"] == []
+    assert (await client.post(url, json={}, headers=hdr(client))).status == 400
+    r = await client.post(url, json={"confirm": True}, headers=hdr(client))
+    assert r.status == 200 and C not in mgr.devices
+    assert (await client.post(url, json={"confirm": True}, headers=hdr(client))).status == 404
+
+
+async def test_unknown_file_can_be_deleted_but_not_downloaded(client, mgr, net):
+    """An unknown file of the firmware folder is listed and deletable over HTTP; other
+    firmware routes do not serve it."""
+    name = "e" * 64 + ".zip"
+    (data_paths.FW_DIR / name).write_bytes(b"x" * 100)
+    mgr.cleanup_firmware()
+    listed = (await (await client.get("/api/firmware")).json())["firmware"]
+    assert {"name": name, "unknown": True, "size": 100, "deletable": True, "locked": None} in listed
+    assert (await client.get(f"/api/firmware/{name}/download")).status == 404
+    url = f"/api/firmware/{name}/delete"
+    r = await client.post(url, json={"confirm": True, "acknowledged": True}, headers=hdr(client))
+    assert r.status == 200 and not (data_paths.FW_DIR / name).exists()
+    assert (await client.post(url, json={"confirm": True, "acknowledged": True}, headers=hdr(client))).status == 404
 
 
 async def test_password_endpoint_validation(client, mgr, net):

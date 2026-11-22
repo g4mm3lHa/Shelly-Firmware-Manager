@@ -29,7 +29,7 @@ for name, value in {"STATE_FILE": data / "state.json", "FW_DIR": data / "fw", "C
     setattr(data_paths, name, value)
 
 opts = {"check_interval_days": 7, "check_time": "02:45", "download_base_url": "http://192.168.1.2:8098", "restrict_downloads_to_devices": True,
-        "gen1_updates_enabled": True, "gen1_allowed_types": ["SHSW-1"], "max_parallel_installs": 2,
+        "gen1_updates_enabled": True, "max_parallel_installs": 2,
         "log_retention_days": 30, "log_entry_limit": 1000, "allow_downgrade": True, "import_max_mb": 100}
 if scenario == "legacy":
     import app_options
@@ -127,6 +127,33 @@ m.devices[f"{24:032x}"].update(battery=True, status="asleep", error_level="warni
                                 message="Battery device asleep – wake it up (e.g. press its button) and check it again. "
                                 "Last attempt: Cannot connect to host 192.168.1.34:80")
 m.devices[f"{21:032x}"]["battery"] = True
+# The Doorbell was recognised as battery device by Home Assistant (battery sensor)
+m.devices[f"{24:032x}"]["battery_source"] = "home_assistant"
+# Host names of the registry entries (column "Host name"); the others were set up by IP
+for i in range(0, 25, 3):
+    m.devices[f"{i:032x}"]["host_name"] = f"shelly-{i}.local"
+# Removed from Home Assistant: one still reachable at its last address, one not
+m.devices[f"{22:032x}"].update(removed=now - 7200, removed_reachable=True)
+m.devices[f"{13:032x}"].update(removed=now - 7200, removed_reachable=False, status="error", error_level="error",
+                                message="Removed from Home Assistant / the Shelly integration and no longer reachable")
+# No usable address in the device registry (IP outside the private networks)
+m.devices[f"{19:032x}"].update(status="error", error_level="error", message="Device address 203.0.113.7 is not in a private network",
+                                address_issue={"reason": "not_private", "message": "Device address 203.0.113.7 is not in a private network"})
+# Shellys of other integrations (read-only card "Other Shellys")
+m.others = [
+    {"id": "o1", "name": "Bedroom thermostat", "kind": "blu_gateway", "model": "SBTR-001AEU", "firmware": "1.2.3", "gateway": "Living room hub"},
+    {"id": "o2", "name": "Desk plug", "kind": "matter", "model": "Shelly Plug Matter", "firmware": "1.1.0", "gateway": None},
+    {"id": "o3", "name": "Door/window contact", "kind": "bluetooth", "model": "SBDW-002C", "firmware": "1.0.20", "gateway": None},
+    {"id": "o4", "name": "Garage sensor", "kind": "zigbee2mqtt", "model": "Shelly Door Zigbee", "firmware": "2.0.0", "gateway": None},
+    {"id": "o5", "name": "Hall motion sensor", "kind": "zha", "model": "Shelly Motion Zigbee", "firmware": "2.0.1", "gateway": None},
+]
+# A file in the firmware folder the store does not list (Firmware tab: unknown files)
+(data / "fw" / ("e" * 64 + ".zip")).write_bytes(b"y" * 120000)
+m.unknown_files = {"e" * 64 + ".zip": 120000}
+# Log entries: files read back from the disk, a removed device removed from the list
+m.events.add("store", severity="warning", action="adopted", unknown=1, user="demo",
+             adopted=[{"type": "Plus1", "version": "1.5.0", "sha256": sha}])
+m.events.add("device", action="forgotten", device="Old plug", user="demo")
 # An intermediate version on the way to the newest one (its file keeps the store marker)
 m.firmware[f"{sha}.zip"]["intermediate"] = True
 m.devices[f"{7:032x}"].update(step_target="1.7.0", message="Provided, not installed – intermediate version on the way to 1.7.0; "
@@ -167,5 +194,6 @@ async def wrap(_request):
 
 root = web.Application()
 root.router.add_get("/wrap", wrap)
-root.add_subapp("/ui/", web_ui.build_ui_app(m, ingress_ip="127.0.0.1"))
+# The features demo runs as a pre-release (red "(beta)" mark), the others as a final version
+root.add_subapp("/ui/", web_ui.build_ui_app(m, ingress_ip="127.0.0.1", app_version="9.9.9-rc1" if scenario == "features" else ""))
 web.run_app(root, host="127.0.0.1", port=port, print=None)

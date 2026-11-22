@@ -16,8 +16,8 @@ import shelly
 from shelly import UNSUPPORTED, AuthError, DeviceAuth, ShellyError, clip, error_text
 
 from manager_core import (
-    ACTIVITY_CHECKING, ACTIVITY_DOWNLOADING, ACTIVITY_RELOADING, Device, STATUS_AVAILABLE, STATUS_CURRENT,
-    STATUS_INSTALLING, STATUS_READY, STATUS_UNCLEAR, severity_of, unexpected_text,
+    ACTIVITY_CHECKING, ACTIVITY_DOWNLOADING, ACTIVITY_RELOADING, BATTERY_FROM_DEVICE, Device, STATUS_AVAILABLE,
+    STATUS_CURRENT, STATUS_INSTALLING, STATUS_READY, STATUS_UNCLEAR, severity_of, unexpected_text,
 )
 from manager_store import FirmwareStore
 
@@ -46,13 +46,16 @@ class DeviceSettings(FirmwareStore):
 
         A failure must not stop the firmware check: the old values stay, but
         settings_error marks them as unknown (shown as such, logged as warning or
-        error) – a failed read-back is never reported as confirmed."""
+        error) – a failed read-back is never reported as confirmed. A battery state
+        reported by the device replaces one derived from Home Assistant
+        (battery_source)."""
         try:
-            dev.update(
-                await shelly.read_settings(
-                    self.session, dev["gen"], dev["origin"], dev["type"], self._auth(device_id, dev), extended
-                )
+            answer = await shelly.read_settings(
+                self.session, dev["gen"], dev["origin"], dev["type"], self._auth(device_id, dev), extended
             )
+            dev.update(answer)
+            if "battery" in answer:
+                dev["battery_source"] = BATTERY_FROM_DEVICE
         except (TimeoutError, ShellyError, aiohttp.ClientError, KeyError, ValueError) as err:
             log.warning("%s: reading settings failed: %s", dev.get("name"), err)
             message = error_text(err, 300) or type(err).__name__
@@ -142,10 +145,35 @@ class DeviceSettings(FirmwareStore):
         if not isinstance(ignored, bool):
             raise ValueError("ignored: true or false expected")
         dev = self.devices[device_id]
+        if ignored and dev.get("removed"):
+            raise ValueError("A removed device cannot be ignored")
         if ignored:
             dev["ignored"] = True
         else:
             dev.pop("ignored", None)
+        self.save()
+
+    def forget_device(self, device_id: str, confirm: object = False, user: str = "unknown") -> None:
+        """Remove from list: forget a device that was removed from Home Assistant
+        (marker removed) – its stored data and stored password. Only with confirm,
+        and not while the device is checked, installed or reloaded. A device that
+        shows up in the registry again is found anew by the next full check. Logged."""
+        if device_id not in self.devices:
+            raise KeyError(device_id)
+        dev = self.devices[device_id]
+        if not dev.get("removed"):
+            raise ValueError("Only devices removed from Home Assistant can be removed from the list")
+        if confirm is not True:
+            raise ValueError("Removal not confirmed")
+        busy = device_id in self.installing or dev.get("status") == STATUS_INSTALLING
+        if busy or device_id in self.device_checks or device_id in self.reloading or self.checking:
+            raise ShellyError("Device is being checked or installed – please try again afterwards")
+        name = str(dev.get("name") or device_id)
+        self.credentials.remove(device_id)  # a write error raises ShellyError: the device stays listed
+        self.devices.pop(device_id)
+        log.info("Removed device %s removed from the list by %s", name, user)
+        self.events.add("device", action="forgotten", device=name, user=user)
+        self.cleanup_firmware()
         self.save()
 
     async def change_settings(

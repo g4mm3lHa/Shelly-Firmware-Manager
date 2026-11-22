@@ -5,7 +5,7 @@ description: >-
   Downloads Shelly firmware via Home Assistant, provides it through its own
   local download server and installs it after manual approval.
 # Not next to "name": the beta branch changes the name, every release the version
-version: "3.7.1"
+version: "3.8.0"
 arch:
   - aarch64
   - amd64
@@ -48,17 +48,12 @@ options:
   # e.g. http://<HA-IP>:8098 – installations are refused until it is set
   restrict_downloads_to_devices: true
   gen1_updates_enabled: true
-  gen1_allowed_types:
-    - SHSW-1
-    - SHSW-PM
-    - SHSW-25
-    - SHPLG-S
-    - SHEM
   # allow_downgrade has no default: downgrades stay off until enabled
   import_max_mb: 100
   log_entry_limit: 1000
   log_retention_days: 90
   max_parallel_installs: 5
+  resolve_host_names: false
   # Default pins for the Shelly servers with the in-house Allterco CA (see DOCS.md, Certificate pinning)
   pinned_certificates:
     - host: updates.shelly.cloud
@@ -71,13 +66,12 @@ schema:
   download_base_url: "url?"
   restrict_downloads_to_devices: bool
   gen1_updates_enabled: bool
-  gen1_allowed_types:
-    - "match(^[A-Za-z0-9-]{1,32}$)"
   allow_downgrade: "bool?"
   import_max_mb: "int(1,2048)"
   log_entry_limit: "int(100,3000)"
   log_retention_days: "int(1,365)"
   max_parallel_installs: "int(1,20)"
+  resolve_host_names: bool
   # Certificate pinning for Shelly servers with an in-house CA (O=Allterco)
   pinned_certificates:
     - host: "match(^([a-z0-9-]+\\.)*shelly\\.cloud$)"

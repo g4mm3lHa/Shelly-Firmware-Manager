@@ -68,11 +68,52 @@ STATUS_ERROR = "error"
 # not reachable: it sleeps between wake-ups, so this is no error
 STATUS_ASLEEP = "asleep"
 
+# Not in the device registry at its last check (state of versions before the "removed"
+# marker); shown as "Not checked" until the device is checked again
 STATUS_UNREGISTERED = "unregistered"
 
 STATUS_SKIPPED = "skipped"  # Gen1 device while Gen1 updates are disabled
 
 PENDING = (STATUS_READY, STATUS_INSTALLING)  # device holds a firmware file
+
+# Device list sections for the UI (see section_of), in the order they are shown; the
+# read-only list of other Shellys (Manager.others) follows them
+SECTION_UPDATES = "updates"
+SECTION_ATTENTION = "attention"
+SECTION_NOT_CHECKED = "not_checked"
+SECTION_UP_TO_DATE = "up_to_date"
+SECTION_ASLEEP = "asleep"
+SECTION_IGNORED = "ignored"
+SECTION_REMOVED = "removed"
+
+# Where the marker battery (sleeping battery device) comes from (device field battery_source)
+BATTERY_FROM_DEVICE = "device"  # reported by the device itself while awake (always wins)
+
+BATTERY_FROM_HA = "home_assistant"  # Shelly battery sensor in Home Assistant, device never reported it
+
+
+def section_of(dev: Device) -> str:
+    """Section of the device list a device belongs to (SECTION_*): removed and ignored
+    devices first by their marker, then provided updates (also a recent or failed
+    installation that stays there until the next check), devices that need attention
+    (error, unconfirmed installation, no usable address), never checked devices
+    (also Gen1 devices skipped while Gen1 updates are disabled), up to date devices
+    and sleeping battery devices."""
+    status = dev.get("status")
+    if dev.get("removed"):
+        return SECTION_REMOVED
+    if dev.get("ignored"):
+        return SECTION_IGNORED
+    recent = dev.get("updated") and status in (STATUS_CURRENT, STATUS_UNCLEAR)
+    if status in (STATUS_AVAILABLE, *PENDING) or recent or holds_file(dev):
+        return SECTION_UPDATES
+    if status in (STATUS_ERROR, STATUS_UNCLEAR) or dev.get("address_issue"):
+        return SECTION_ATTENTION
+    if status == STATUS_ASLEEP:
+        return SECTION_ASLEEP
+    if status == STATUS_CURRENT:
+        return SECTION_UP_TO_DATE
+    return SECTION_NOT_CHECKED  # skipped, unregistered (older versions) or no result
 
 
 def holds_file(dev: Device) -> bool:
@@ -171,9 +212,10 @@ class ManagerCore:
         self.download_base = (options.get("download_base_url") or "").rstrip("/") or None
         self.download_base_confirmed: str | None = None  # confirmed legacy example value (persisted)
         self.restrict_downloads = bool(options["restrict_downloads_to_devices"])
-        self.gen1_allowed = frozenset(options.get("gen1_allowed_types", []))
         self.gen1_enabled = bool(options["gen1_updates_enabled"])
         self.allow_downgrade = options.get("allow_downgrade") is True  # optional, missing = off
+        # Host name column: look up host names at every check (off: no lookup, no column)
+        self.resolve_host_names = options["resolve_host_names"] is True
         self.import_max = int(options["import_max_mb"]) * 1024 * 1024  # bytes; largest store import
         self.session = session
         self.token = token
@@ -193,9 +235,15 @@ class ManagerCore:
         # Set at start if the state file was missing or unreadable although the app
         # was installed before (see _load); shown in the UI until the next restart
         self.state_warning: str | None = None
-        # No readable state at all (see _load): files of the firmware store that the
-        # registry does not know are kept by cleanup_firmware; persisted
-        self.keep_unknown_files = False
+        # Files in the firmware folder the store does not list (name -> size): never
+        # deleted automatically, listed in the Firmware tab for a manual deletion
+        # (see FirmwareStore.adopt_files and cleanup_firmware); the names are
+        # persisted so that a file is reported in the log only once
+        self.unknown_files: dict[str, int] = {}
+        # Shellys of other integrations (Bluetooth, Zigbee, Matter, MQTT) and BLU devices
+        # behind a Shelly gateway: read-only list for the UI, taken from the registry at
+        # every check (see Checks._other_shellys); persisted
+        self.others: list[dict[str, Any]] = []
         self._state_file_valid = False  # state.json holds a state this run read or wrote
         self.schedule: dict[str, Any] = {}  # automatic check schedule (see schedule.py), persisted
         self.reloading: set[str] = set()  # device IDs whose Reload Device Info is running
@@ -260,8 +308,8 @@ class ManagerCore:
         last one, see save) is loaded instead; so is the backup if only the state
         file is missing (the app was stopped between the two renames of save).
         Without any readable state the app starts with an empty device list and an
-        empty store registry and sets keep_unknown_files: the firmware files, which
-        that registry does not know, are then never removed by cleanup_firmware."""
+        empty store registry; the firmware files are read again from the disk at the
+        start (see FirmwareStore.adopt_files) – no file is ever removed for that."""
         state_file = data_paths.STATE_FILE
         backup = state_file.with_suffix(".bak")
         try:
@@ -290,10 +338,9 @@ class ManagerCore:
             self._apply_state(self._read_state(backup))
         except (ValueError, OSError) as err:
             log.error("No readable backup of the state (%s): starting without devices, firmware files are kept", err)
-            self.keep_unknown_files = True
             self.state_warning = (
                 "The state file was unreadable and no backup could be loaded. The devices are found again by "
-                "the next check; the files of the firmware store are kept, but no longer listed."
+                "the next check; the files of the firmware store were read again from the disk (see the log)."
             )
             return
         self.state_warning = (
@@ -316,6 +363,10 @@ class ManagerCore:
     def _apply_state(self, data: dict[str, Any]) -> None:
         """Take over a state read by _read_state."""
         self.devices = data.get("devices") or {}
+        if not self.resolve_host_names:  # switched off: no host name is kept or shown
+            for dev in self.devices.values():
+                if isinstance(dev, dict):
+                    dev.pop("host_name", None)
         self.last_scan = data.get("last_scan")
         self.firmware = data.get("firmware") or {}
         self.schedule = data["schedule"] if isinstance(data.get("schedule"), dict) else {}
@@ -323,7 +374,11 @@ class ManagerCore:
         self.download_base_confirmed = confirmed if isinstance(confirmed, str) else None
         self.first_start_open = data.get("first_start_open") is True
         self.first_start_notified = data.get("first_start_notified") is True
-        self.keep_unknown_files = data.get("keep_unknown_files") is True
+        unknown = data.get("unknown_files")
+        if isinstance(unknown, list):
+            self.unknown_files = {str(n): 0 for n in unknown if isinstance(n, str)}
+        others = data.get("others")
+        self.others = [o for o in others if isinstance(o, dict)] if isinstance(others, list) else []
 
     @staticmethod
     def _remove_partial_downloads() -> None:
@@ -352,7 +407,8 @@ class ManagerCore:
             "download_base_confirmed": self.download_base_confirmed,
             "first_start_open": self.first_start_open,
             "first_start_notified": self.first_start_notified,
-            "keep_unknown_files": self.keep_unknown_files,
+            "unknown_files": sorted(self.unknown_files),
+            "others": self.others,
         }
         try:
             with temp.open("w") as handle:
@@ -390,6 +446,38 @@ class ManagerCore:
     async def _registry(self) -> list[dict[str, Any]]:
         """Device registry via the Core WebSocket API (through the Supervisor proxy).
         The registry of all integrations arrives as one message (REGISTRY_MAX)."""
+        return await self._ha_list("config/device_registry/list")
+
+    async def _battery_devices(self) -> set[str]:
+        """HA device IDs with a battery sensor of the Shelly integration (entity
+        registry: platform shelly, unique ID "<mac>-<component>-battery" – Gen1
+        device_0, Gen2+ devicepower:0; Home Assistant removes it for externally
+        powered devices). Home Assistant does not hand out the sleep period of its
+        config entry over the API, so this sensor is the only hint of a battery
+        device that never answered the app. Empty if the request fails (no
+        conclusion, logged)."""
+        try:
+            entities = await self._ha_list("config/entity_registry/list")
+        except (TimeoutError, ShellyError, aiohttp.ClientError, OSError) as err:
+            log.warning("Entity registry of Home Assistant not available: %s", err or type(err).__name__)
+            return set()
+        found = set()
+        for entity in entities:
+            if not isinstance(entity, dict) or entity.get("platform") != "shelly":
+                continue
+            unique_id, device_id = entity.get("unique_id"), entity.get("device_id")
+            if (
+                isinstance(unique_id, str)
+                and unique_id.endswith("-battery")
+                and str(entity.get("entity_id") or "").startswith("sensor.")
+                and isinstance(device_id, str)
+            ):
+                found.add(device_id)
+        return found
+
+    async def _ha_list(self, request: str) -> list[Any]:
+        """Answer of one list request of the Core WebSocket API (device or entity
+        registry); anything but a successful list answer is a ShellyError."""
         ws_url = SUPERVISOR.replace("http", "ws", 1) + "/core/websocket"
 
         async def receive(ws: aiohttp.ClientWebSocketResponse) -> dict[str, Any]:
@@ -414,7 +502,7 @@ class ManagerCore:
             await ws.send_json({"type": "auth", "access_token": self.token})
             if (await receive(ws)).get("type") != "auth_ok":
                 raise ShellyError("Authentication with Home Assistant failed")
-            await ws.send_json({"id": 1, "type": "config/device_registry/list"})
+            await ws.send_json({"id": 1, "type": request})
             while True:
                 msg = await receive(ws)
                 if msg.get("id") == 1:

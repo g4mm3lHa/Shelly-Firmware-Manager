@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from features.base import FEATURES, FULL, IDLE, MISSING, OVERFLOW_JS, check, menu_items, open_page
 from features.devices import (_action_popups, _battery, _device_list, _keep_listed, _layout, _name_tips,
-                              _next_steps)
+                              _next_steps, _sections)
 from features.firmware_tab import _downgrade, _firmware_delete_and_upload, _firmware_tab, _sorting_and_downgrade
 from features.logs import _logs
 
@@ -42,6 +42,7 @@ def firmware_store(browser, out):
         _action_popups(c)
         _name_tips(c)
         _battery(c)
+        _sections(c)
         _next_steps(c)
         _downgrade(c)
         rows = _firmware_tab(c)

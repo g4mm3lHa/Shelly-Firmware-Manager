@@ -20,6 +20,7 @@ Part of `docs/CODEMAP.md`; read when you change routes in `web_ui.py`.
 | `POST /api/devices/passwords` | `set_passwords` (`mode` store/set, `devices`, `password`, `confirm`, `acknowledged`, `keep`; result per device, never the password) |
 | `POST /api/devices/{id}/ignore` | `set_ignored` |
 | `POST /api/devices/{id}/reload` | `reload_device` |
+| `POST /api/devices/{id}/forget` | `forget_device` (Remove from list; `confirm`; removed devices only) |
 | `GET /api/firmware` | `firmware_list` (per file `devices`: `id`, `name` of the devices it is provided for; `changelog` flag), `store_size`, `free_space` |
 | `GET /api/firmware/{name}/changelog` | `firmware_changelog` (stored changelog of this file, no request) |
 | `POST /api/firmware/upload` | `stage_upload_part` (octet-stream, ≤ 64 MiB in all, streamed; parts ≤ 8 MiB with `X-Upload-Total`, `X-Upload-Offset`, `X-Upload-Transfer` – `part_headers`) |
@@ -30,7 +31,7 @@ Part of `docs/CODEMAP.md`; read when you change routes in `web_ui.py`.
 | `POST /api/first-start/skip` | `skip_first_start` |
 | `POST /api/firmware/upload/confirm` · `/cancel` | `confirm_upload` · `cancel_upload` |
 | `GET /api/firmware/{name}/download` | file response |
-| `POST /api/firmware/{name}/delete` | `delete_firmware` (`confirm` + `acknowledged`) |
+| `POST /api/firmware/{name}/delete` | `delete_firmware` (`confirm` + `acknowledged`; also an unknown file of the folder) |
 | `GET /api/logs` | `events.list` |
 | `POST /api/logs/{id}/delete` · `/api/logs/clear` | `events.remove` · `events.clear` (`confirm`) |
 | `GET` · `POST /api/settings` | `options_view` · `save_options` + restart |

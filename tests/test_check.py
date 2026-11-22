@@ -97,7 +97,7 @@ async def test_battery_device_not_reachable_is_asleep(mgr, net):
     error, is an error as before."""
     net.battery.add(B)
     await mgr.scan()
-    assert mgr.devices[B]["battery"] is True and "battery" not in mgr.devices[A]
+    assert mgr.devices[B]["battery"] is True and mgr.devices[A]["battery"] is False
     assert next(d for d in mgr.public_state()["devices"] if d["id"] == B)["battery"] is True
     net.asleep.update({A, B})
     await mgr.scan()
@@ -122,13 +122,26 @@ def test_asleep_device_keeps_store_fallback_file():
     assert not manager_core.holds_file({**dev, "store_fallback": False})
 
 
-async def test_single_check_unregistered(mgr, net):
-    """Device removed from the registry: unregistered, failure logged, no crash."""
+async def test_single_check_of_a_removed_device(mgr, net):
+    """Device removed from the registry: marked removed and checked at its last
+    address while it answers there (warning finding); not reachable: error finding,
+    the last result stays."""
     await mgr.scan()
-    del net.devices[C]
+    net.removed.add(C)
+    net.devices[C] = ("Garage", "192.168.1.12", "1.5.0", "1.5.0")  # updated meanwhile
     result = await mgr.check_device(C)
-    assert mgr.devices[C]["status"] == manager_core.STATUS_UNREGISTERED
-    assert "registry" in result["error"]
+    dev = mgr.devices[C]
+    assert dev["removed"] and dev["removed_reachable"] is True and result["error"] is None
+    assert dev["status"] == manager_core.STATUS_CURRENT and dev["version"] == "1.5.0"
+    entry = mgr.events.entries[-1]
+    assert entry["severity"] == "warning" and entry["findings"][0]["removed"] is True
+    assert "still reachable" in entry["findings"][0]["error"] and "1 removed" in entry["result"]
+    net.unreachable.add(C)
+    await mgr.check_device(C)
+    assert dev["removed_reachable"] is False and dev["status"] == manager_core.STATUS_CURRENT
+    entry = mgr.events.entries[-1]
+    assert entry["severity"] == "error" and len(entry["findings"]) == 1
+    assert "no longer reachable" in entry["findings"][0]["error"]
 
 
 async def test_unknown_device_raises_keyerror(mgr):
@@ -695,28 +708,29 @@ def gen1_net(net, monkeypatch, types):
 
 async def test_gen1_list_is_requested_once_for_all_types(net, monkeypatch):
     """The manufacturer serves one list for all Gen1 types – one request per
-    check, whatever the number of types; a type that is not allowed is refused."""
+    check, whatever the number of types; every Gen1 type is checked (there is no
+    list of allowed types; a stored value of older versions is ignored)."""
     calls = gen1_net(net, monkeypatch, {A: "SHSW-1", B: "SHPLG-S", C: "SHSW-25"})
-    m = make_manager(net, gen1_allowed_types=["SHSW-1", "SHPLG-S"])
+    m = make_manager(net, gen1_allowed_types=["SHSW-1"])
     m._registry = lambda: asyncio.sleep(0, net.registry())
     await m.scan()
     assert len(calls) == 1
     assert m.devices[A]["status"] == manager_core.STATUS_READY and m.devices[A]["offer_source"] == "manufacturer"
     assert m.devices[B]["status"] == manager_core.STATUS_CURRENT and m.devices[B]["message"] == "No stable offer"
-    assert m.devices[C]["status"] == manager_core.STATUS_ERROR and "not in the list of allowed types" in m.devices[C]["message"]
+    assert m.devices[C]["status"] == manager_core.STATUS_READY
 
 
-async def test_gen1_store_first_respects_the_allowed_types(net, monkeypatch):
-    """Gen1 devices use the store as well – but never for a type that is not allowed."""
+async def test_gen1_store_first_for_every_type(net, monkeypatch):
+    """Gen1 devices of every type use the store first."""
     calls = gen1_net(net, monkeypatch, {A: "SHSW-1", B: "SHSW-1", C: "SHSW-25"})
-    m = make_manager(net)  # allowed: SHSW-1 only
+    m = make_manager(net)
     m._registry = lambda: asyncio.sleep(0, net.registry())
     store(m, "SHSW-1", "20230913-112003/v1.14.0-gcb84623", gen=1)
     store(m, "SHSW-25", "20230913-112003/v1.14.0-gcb84623", gen=1)
     await m.scan()
     assert calls == [] and net.downloads == 0
     assert m.devices[A]["offer_source"] == "store" and m.devices[B]["status"] == manager_core.STATUS_READY
-    assert m.devices[C]["status"] == manager_core.STATUS_ERROR and m.devices[C].get("file") is None
+    assert m.devices[C]["offer_source"] == "store" and m.devices[C]["status"] == manager_core.STATUS_READY
 
 
 # ---------------------------------------------------------------- Manufacturer server access
@@ -912,3 +926,236 @@ async def test_shelly_via_shelly_gateway_is_hidden_and_cleaned(mgr):
     entries = mgr._shelly_entries([_entry("gw"), _entry("blu", via="gw")])
     assert list(entries) == ["gw"]
     assert "blu" not in mgr.devices
+
+
+# ---------------------------------------------------------------- Removed devices, other Shellys, battery hint of HA
+
+
+async def test_full_check_keeps_removed_devices_and_only_tests_them(mgr, net):
+    """A device that left the registry stays listed as removed: the full check only
+    tests whether it answers (warning finding), drops its Ignored mark and keeps its
+    last result; not reachable: error finding. Back in the registry: the marker ends,
+    the stored data stays and the device is checked again."""
+    await mgr.scan()
+    mgr.set_ignored(C, True)
+    net.removed.add(C)
+    settings_before = len(net.settings_calls)
+    await mgr.scan()
+    dev = mgr.devices[C]
+    assert dev["removed"] and dev["removed_reachable"] is True and "ignored" not in dev
+    assert dev["status"] == manager_core.STATUS_READY and manager_core.section_of(dev) == manager_core.SECTION_REMOVED
+    assert len(net.settings_calls) == settings_before + 2  # A and B only: C was only reached
+    check = [e for e in mgr.events.entries if e["kind"] == "check"][-1]
+    assert check["devices"] == 2 and check["result"].endswith(", 1 removed")
+    [finding] = [f for f in check["findings"] if f.get("removed")]
+    assert finding["severity"] == "warning" and finding["device"] == "Garage"
+    assert mgr.activity == {} and mgr.progress is None
+    with pytest.raises(ValueError):
+        mgr.set_ignored(C, True)  # a removed device cannot be ignored
+    net.unreachable.add(C)
+    await mgr.scan()
+    check = [e for e in mgr.events.entries if e["kind"] == "check"][-1]
+    assert dev["removed_reachable"] is False and check["severity"] == "error"
+    net.unreachable.discard(C)
+    net.removed.discard(C)
+    await mgr.scan()
+    assert "removed" not in dev and "removed_reachable" not in dev and dev["last_success"]
+    assert manager_core.section_of(dev) == manager_core.SECTION_UPDATES
+
+
+async def test_removed_device_added_again_keeps_its_data(mgr, net):
+    """Added to Home Assistant again, the Shelly gets a new device ID: the stored entry
+    and the stored password move to it when the MAC address matches."""
+    await mgr.scan()
+    mgr.credentials.entries[C] = {"gen": 2, "realm": "shelly-c", "ha1": "0" * 64}
+    mgr.devices[C]["last_update"] = 123
+    net.removed.add(C)
+    new = "0" * 31 + "d"  # removed and added again between two checks
+    net.extra_registry.append({"id": new, "name": "Garage", "identifiers": [["shelly", new]],
+                               "configuration_url": "http://192.168.1.12/",
+                               "connections": [["mac", "aa:bb:cc:00:00:0c"]]})
+    await mgr.scan()
+    assert C not in mgr.devices and new in mgr.devices
+    dev = mgr.devices[new]
+    assert dev["last_update"] == 123 and "removed" not in dev and dev["status"] == manager_core.STATUS_READY
+    assert C not in mgr.credentials.entries and mgr.credentials.entries[new]["realm"] == "shelly-c"
+
+
+async def test_remove_from_list_only_for_removed_devices(mgr, net):
+    """Remove from list: only a removed device, only with confirmation; its data and
+    stored password are gone, the log names it."""
+    await mgr.scan()
+    with pytest.raises(ValueError):
+        mgr.forget_device(C, confirm=True)  # still in Home Assistant
+    net.removed.add(C)
+    await mgr.scan()
+    mgr.credentials.entries[C] = {"gen": 2, "realm": "shelly-c", "ha1": "0" * 64}
+    with pytest.raises(ValueError):
+        mgr.forget_device(C)
+    mgr.forget_device(C, confirm=True, user="u")
+    assert C not in mgr.devices and C not in mgr.credentials.entries
+    entry = mgr.events.entries[-1]
+    assert entry["kind"] == "device" and entry["action"] == "forgotten" and entry["device"] == "Garage"
+
+
+def test_other_shellys_are_listed_read_only():
+    """BLU devices behind a Shelly gateway and Shellys of other integrations (by the
+    manufacturer text); channels, Shellys of the Shelly integration, disabled entries and
+    other manufacturers are left out."""
+    gw = "g" * 32
+    registry = [
+        {"id": gw, "name": "Hub", "identifiers": [["shelly", "aabbcc"]], "manufacturer": "Shelly"},
+        {"id": "trv", "name": "shellyblutrv-1", "name_by_user": "Bedroom thermostat", "identifiers": [["shelly", "aa:01"]],
+         "connections": [["bluetooth", "aa:01"]], "via_device_id": gw, "model": "Shelly BLU TRV", "sw_version": "1.2.3"},
+        {"id": "ch", "name": "Hub switch 1", "identifiers": [["shelly", "aabbcc-switch:1"]], "via_device_id": gw},
+        {"id": "dw", "name": "Door", "connections": [["bluetooth", "aa:02"]], "identifiers": [["bthome", "aa:02"]],
+         "manufacturer": "Shelly", "model": "SBDW-002C", "sw_version": "1.0.20"},
+        {"id": "z", "name": "Hall motion", "identifiers": [["zha", "00:12"]], "manufacturer": "Shelly",
+         "model": "Shelly Motion Zigbee"},
+        {"id": "m", "name": "Garage sensor", "identifiers": [["mqtt", "zigbee2mqtt_0x1"]], "manufacturer": "Shelly"},
+        {"id": "q", "name": "Desk plug", "identifiers": [["matter", "x"]], "manufacturer": "Shelly Group"},
+        {"id": "q2", "name": "Gen4 plug", "identifiers": [["matter", "y"], ["shelly", "y"]], "manufacturer": "Shelly"},
+        {"id": "off", "name": "Old", "identifiers": [["zha", "1"]], "manufacturer": "Shelly", "disabled_by": "user"},
+        {"id": "hue", "name": "Lamp", "identifiers": [["zha", "2"]], "manufacturer": "Signify"},
+    ]
+    found = {o["id"]: o for o in manager_checks.other_shellys(registry)}
+    assert set(found) == {"trv", "dw", "z", "m", "q"}
+    assert found["trv"] == {"id": "trv", "name": "Bedroom thermostat", "kind": "blu_gateway", "model": "Shelly BLU TRV",
+                            "firmware": "1.2.3", "gateway": "Hub"}
+    assert [found[i]["kind"] for i in ("dw", "z", "m", "q")] == ["bluetooth", "zha", "zigbee2mqtt", "matter"]
+
+
+def test_other_shellys_leave_out_a_listed_shelly_seen_over_bluetooth():
+    """A Bluetooth entry whose MAC is the Wi-Fi MAC + 2 of a listed Shelly (registry
+    entry or MAC reported by a device) is that Shelly itself; other BLU devices stay."""
+    registry = [
+        {"id": "p", "name": "Plus 1PM", "identifiers": [["shelly", "p"]], "connections": [["mac", "a0:dd:6c:29:c3:e0"]]},
+        {"id": "dup", "name": "shellyplus1pm-4", "connections": [["bluetooth", "A0:DD:6C:29:C3:E2"]],
+         "manufacturer": "Shelly", "model": "SNSW-102P16EU"},
+        {"id": "dup2", "name": "shellyplus2pm", "connections": [["bluetooth", "08:3A:F2:00:00:01"]],
+         "manufacturer": "Shelly"},
+        {"id": "near", "name": "Door", "connections": [["bluetooth", "A0:DD:6C:29:C3:E1"]], "manufacturer": "Shelly"},
+        {"id": "wrap", "name": "Edge", "connections": [["bluetooth", "00:00:00:00:00:01"]], "manufacturer": "Shelly"},
+    ]
+    found = manager_checks.other_shellys(registry, ["083AF1FFFFFF", None, "FFFFFFFFFFFF", "bad"])
+    assert [o["id"] for o in found] == ["near"]
+    assert {o["id"] for o in manager_checks.other_shellys(registry)} == {"dup2", "near", "wrap"}
+
+
+async def test_host_name_from_the_device_id_only_when_it_resolves(mgr, net):
+    """Host name column (option resolve_host_names on): <device id>.local from the ID the
+    device reports, shown only when it resolves; a host name of the registry entry wins;
+    requests keep the address of the registry entry."""
+    assert make_manager(net, resolve_host_names=True).public_state()["host_names"] is True
+    mgr.resolve_host_names = True
+    own = f"shelly-{A}.local"
+    await mgr.scan()
+    assert mgr.devices[A]["host_name"] is None  # does not resolve
+    net.resolvable.add(own)
+    await mgr.scan()
+    assert mgr.devices[A]["host_name"] == own and mgr.devices[A]["origin"] == "http://192.168.1.10"
+    net.resolvable.add("kitchen.local")
+    net.devices[A] = ("Kitchen", "kitchen.local", "1.4.0", "1.5.0")
+    await mgr.check_device(A, user="u")
+    assert mgr.devices[A]["host_name"] == "kitchen.local"
+    net.resolvable.clear()
+    await mgr.check_device(A, user="u")
+    assert mgr.devices[A]["host_name"] is None
+
+
+async def test_host_names_off_by_default(mgr, net, monkeypatch):
+    """Option resolve_host_names off (default): no lookup at all, no host name kept;
+    a stored host name is dropped at the start."""
+    looked_up = []
+
+    async def lookup(host):
+        looked_up.append(host)
+        return True
+
+    monkeypatch.setattr(shelly, "host_resolves", lookup)
+    assert mgr.public_state()["host_names"] is False
+    await mgr.scan()
+    assert looked_up == [] and all("host_name" not in d for d in mgr.devices.values())
+    mgr.devices[A]["host_name"] = "old.local"
+    mgr.save()
+    assert "host_name" not in make_manager(net).devices[A]
+    assert make_manager(net, resolve_host_names=True).devices[A]["host_name"] == "old.local"
+
+
+async def test_other_shellys_are_kept_with_the_state(mgr, net):
+    """The list of other Shellys comes with every check and is part of the state."""
+    net.extra_registry.append({"id": "z", "name": "Hall motion", "identifiers": [["zha", "1"]], "manufacturer": "Shelly"})
+    await mgr.scan()
+    assert [o["id"] for o in mgr.public_state()["others"]] == ["z"]
+    mgr.save()
+    assert [o["id"] for o in make_manager(net).others] == ["z"]
+
+
+async def test_battery_device_hint_of_home_assistant(mgr, net):
+    """A Shelly battery sensor in HA marks a device that never answered as battery
+    device (asleep, not an error); what the device reports later always wins."""
+    net.ha_battery.add(C)
+    net.asleep.add(C)
+    await mgr.scan()
+    dev = mgr.devices[C]
+    assert dev["status"] == manager_core.STATUS_ASLEEP and dev["battery_source"] == "home_assistant"
+    assert [d for d in mgr.public_state()["devices"] if d["id"] == C][0]["battery_source"] == "home_assistant"
+    net.asleep.discard(C)
+    await mgr.scan()  # awake: the device reports no sleep period
+    assert dev["battery"] is False and dev["battery_source"] == "device"
+    net.asleep.add(C)
+    await mgr.scan()
+    assert dev["battery"] is False and dev["status"] == manager_core.STATUS_ERROR
+    net.ha_battery.clear()
+    net.battery.add(A)
+    await mgr.scan()
+    assert mgr.devices[A]["battery"] is True and mgr.devices[A]["battery_source"] == "device"
+
+
+async def test_hint_of_home_assistant_ends_with_its_sensor(mgr, net):
+    """Without the sensor in HA the battery marker of HA ends again."""
+    net.ha_battery.add(C)
+    net.unreachable.add(C)
+    await mgr.scan()
+    assert mgr.devices[C]["battery"] is True
+    net.ha_battery.clear()
+    await mgr.scan()
+    assert "battery" not in mgr.devices[C] and "battery_source" not in mgr.devices[C]
+
+
+async def test_registry_entry_without_usable_address(mgr, net, monkeypatch):
+    """No usable address in the registry: address_issue with the reason, section
+    Attention; a later usable address clears it. The host name of the entry is kept."""
+    resolve = shelly.resolve_device_origin
+
+    async def failing(url):
+        if "192.168.1.12" in str(url):
+            raise shelly.AddressError(shelly.ADDRESS_UNRESOLVED, "Host name garage.local could not be resolved")
+        return await resolve(url)
+
+    monkeypatch.setattr(shelly, "resolve_device_origin", failing)
+    net.extra_registry.clear()
+    await mgr.scan()
+    dev = mgr.devices[C]
+    assert dev["address_issue"] == {"reason": "unresolved", "message": "Host name garage.local could not be resolved"}
+    assert dev["status"] == manager_core.STATUS_ERROR and manager_core.section_of(dev) == manager_core.SECTION_ATTENTION
+    assert dev.get("host_name") is None  # the registry entry names an IP address
+    monkeypatch.setattr(shelly, "resolve_device_origin", resolve)
+    await mgr.scan()
+    assert "address_issue" not in dev
+
+
+def test_sections_of_the_device_list():
+    """Section of a device: removed and ignored first, then updates, attention,
+    not checked, asleep and up to date."""
+    sec = manager_core.section_of
+    assert sec({"status": "ready", "removed": 1, "ignored": True}) == "removed"
+    assert sec({"status": "ready", "ignored": True}) == "ignored"
+    assert sec({"status": "available"}) == "updates"
+    assert sec({"status": "up-to-date", "updated": True}) == "updates"
+    assert sec({"status": "error", "file": "x.zip", "install_failed": True}) == "updates"
+    assert sec({"status": "error"}) == sec({"status": "unconfirmed"}) == "attention"
+    assert sec({"status": "up-to-date", "address_issue": {"reason": "missing"}}) == "attention"
+    assert sec({"status": "skipped"}) == sec({"status": "unregistered"}) == sec({}) == "not_checked"
+    assert sec({"status": "asleep"}) == "asleep"
+    assert sec({"status": "up-to-date"}) == "up_to_date"
