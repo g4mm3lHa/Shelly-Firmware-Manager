@@ -4,6 +4,7 @@ manual upload (stage + confirm).
 All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test servers."""
 
 import hashlib
+import json
 
 import data_paths
 import manager
@@ -462,3 +463,28 @@ async def test_unknown_file_is_deleted_only_on_request(mgr, net):
     assert not (data_paths.FW_DIR / name).exists() and name not in mgr.unknown_files
     entry = mgr.events.entries[-1]
     assert entry["kind"] == "delete" and entry["unknown"] is True and entry["sha256"] == sha
+
+
+async def test_gen1_entries_of_an_older_state_are_marked_imported_once(net):
+    """A state of 3.8.0 or older (no marker): every Gen1 store entry becomes an imported
+    file once – those versions stored imports as downloads; a device it was provided
+    for loses the provision. Gen2+ entries stay; later Gen1 downloads stay downloads."""
+    m = manager.Manager(dict(OPTIONS), session=None, token="t")
+    gen1, gen1_sha = store(m, "SHSW-1", "20230913-112003/v1.14.0-gcb84623", gen=1)
+    gen2, _ = store(m, "Plus1", "1.5.0")
+    m.devices[A] = {"name": "Hall", "status": manager_core.STATUS_READY, "file": gen1, "sha256": gen1_sha}
+    m.save()
+    state = json.loads(data_paths.STATE_FILE.read_text())
+    state.pop("gen1_imports_marked")  # as written by 3.8.0
+    data_paths.STATE_FILE.write_text(json.dumps(state))
+    old = manager.Manager(dict(OPTIONS), session=None, token="t")
+    await old.adopt_files()
+    assert old.firmware[gen1]["source"] == manager_core.SOURCE_IMPORT and old.firmware[gen1]["https"] is None
+    assert old.firmware[gen2]["source"] == manager_core.SOURCE_DOWNLOAD
+    assert old.devices[A]["status"] == manager_core.STATUS_AVAILABLE and old.devices[A]["file"] is None
+    assert json.loads(data_paths.STATE_FILE.read_text())["gen1_imports_marked"] is True
+    later, _ = store(old, "SHSW-25", "20230913-112003/v1.14.0-gcb84623", gen=1)
+    old.save()
+    again = manager.Manager(dict(OPTIONS), session=None, token="t")
+    await again.adopt_files()
+    assert again.firmware[later]["source"] == manager_core.SOURCE_DOWNLOAD  # marked only once

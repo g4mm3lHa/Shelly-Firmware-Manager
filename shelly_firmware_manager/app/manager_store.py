@@ -38,7 +38,7 @@ from shelly import ShellyError, clip
 
 from manager_core import (
     DOWNLOAD_BASE_MESSAGES, Device, FirmwareMeta, ManagerCore, PART_PREFIX, SOURCE_DOWNLOAD,
-    SOURCE_IMPORT, SOURCE_UPLOAD, STATUS_AVAILABLE, STATUS_INSTALLING, holds_file,
+    SOURCE_IMPORT, SOURCE_UPLOAD, STATUS_AVAILABLE, STATUS_INSTALLING, STATUS_READY, holds_file,
 )
 
 log = logging.getLogger("sfm.manager")
@@ -66,6 +66,9 @@ DOWNGRADE_OFF = "Downgrades are off – enable “Allow downgrades” in Setting
 EXPORT_PREFIX = PART_PREFIX + "export-"  # temporary export file (removed at start)
 
 IMPORT_PREFIX = PART_PREFIX + "import-"  # staged store import (removed at start)
+
+# Status message of a device whose provided Gen1 file was marked as imported (mark_gen1_imported)
+GEN1_MARKED_MESSAGE = "Stored Gen1 firmware is now treated as imported – check the device again"
 
 EXPORT_TTL_S = 600  # a prepared export must be downloaded within 10 min
 
@@ -133,6 +136,9 @@ class FirmwareStore(ManagerCore):
             meta["https"] = True
         if self._source(meta) == SOURCE_IMPORT:
             meta.update(source=SOURCE_DOWNLOAD, https=True)
+            # The changelog came with the import (unverified text): the one of the
+            # Shelly documentation is requested instead
+            meta.pop("changelog", None)
             log.info("Imported firmware %s %s confirmed by the update server (%s)", meta.get("type"),
                      meta.get("version"), name)
 
@@ -169,6 +175,32 @@ class FirmwareStore(ManagerCore):
                     unknown[path.name] = path.stat().st_size
         return unknown
 
+    def mark_gen1_imported(self) -> None:
+        """Once for a state written by 3.8.0 or older: every Gen1 store entry becomes an
+        imported file. Those versions stored imported files as downloads, and Gen1
+        offers name no SHA-256, so no later check could tell them apart; a file Shelly
+        still offers is downloaded again by the next check and is a download again.
+        Devices it was provided for lose the provision until their next check."""
+        if not self.gen1_marking_due:
+            return
+        marked = [
+            name for name, meta in self.firmware.items()
+            if (meta.get("gen") or 1) < 2 and self._source(meta) != SOURCE_IMPORT
+        ]
+        for name in marked:
+            self.firmware[name].update(source=SOURCE_IMPORT, https=None)
+            self.firmware[name].pop("sha_checked", None)
+            for dev in self.devices.values():
+                if dev.get("file") == name and dev.get("status") == STATUS_READY:
+                    dev.update(
+                        status=STATUS_AVAILABLE, message=GEN1_MARKED_MESSAGE, file=None, sha256=None, size=None,
+                        source_url=None,
+                    )
+        if marked:
+            log.warning("%d stored Gen1 firmware file(s) marked as imported (origin cannot be verified)", len(marked))
+        self.gen1_marking_due = False
+        self.save()
+
     async def adopt_files(self) -> None:
         """Read firmware files back from the disk that the store does not list (after
         a lost or older state, e.g. the backup was loaded); runs once at the start.
@@ -182,6 +214,7 @@ class FirmwareStore(ManagerCore):
         other files stay on disk as unknown files (listed, deleted only manually).
         One warning in the activity log names the files read from the disk – they
         could have been changed – and the new unknown files."""
+        self.mark_gen1_imported()
         reported = set(self.unknown_files)  # unknown at the last run (persisted names)
         unknown = self._unknown_on_disk()
         adopted: list[dict[str, Any]] = []
@@ -991,10 +1024,17 @@ class FirmwareStore(ManagerCore):
             self._import = {"token": secrets.token_hex(16), "path": path, "size": size, "created": time.monotonic()}
         return {"token": self._import["token"], "size": size}
 
+    @staticmethod
+    def _same_firmware(entry: dict[str, Any], stored: FirmwareMeta) -> bool:
+        """The import entry names the same firmware ID and version as the stored file
+        of the same SHA-256 – only then may it add data to it (changelog, marker)."""
+        return bool(stored.get("type") == entry["type"] and stored.get("version") == entry["version"])
+
     def _classify(self, entries: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
         """Compare checked entries with the store: new, already stored (same SHA-256;
-        data that is missing here is added, the source never changes) and conflicts
-        (same firmware ID and version, different file: the stored file is kept)."""
+        data that is missing here is added if ID and version match too, the source
+        never changes) and conflicts (same firmware ID and version, different file:
+        the stored file is kept)."""
         result: dict[str, list[dict[str, Any]]] = {"new": [], "same": [], "conflict": []}
         for entry in entries:
             stored = self._by_sha(entry["sha256"])
@@ -1011,6 +1051,8 @@ class FirmwareStore(ManagerCore):
     def _merge_note(self, entry: dict[str, Any]) -> str:
         """What an import adds to an already stored file (summary text)."""
         stored = self._by_sha(entry["sha256"]) or {}
+        if not self._same_firmware(entry, stored):
+            return ""  # another ID or version than the stored file: nothing is taken over
         notes = []
         if "changelog" in entry and "changelog" not in stored:
             notes.append("changelog added")

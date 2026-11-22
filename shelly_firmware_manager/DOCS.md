@@ -441,8 +441,10 @@ stored; then the result shows how many files are new, already stored or in confl
 - An imported Gen2+ file counts as downloaded from Shelly once the Shelly update server
   offers exactly this file (same SHA-256); until then it is never provided instead of
   Shelly's file. Only import exports you made yourself or got from someone you trust.
-- Already stored (same SHA-256): not stored twice; missing data is added, the source
-  of the stored file stays.
+- Already stored (same SHA-256): not stored twice; if firmware ID and version match,
+  missing data is added. The source of the stored file stays.
+- A changelog that came with an import is replaced by the one from the Shelly
+  documentation once Shelly confirms the file.
 - Conflict (same firmware ID and version, different file): the stored file is kept.
 
 The largest accepted file is set by **Max. import size (MB)**. Large files are sent in
@@ -635,8 +637,13 @@ server interfaces are not officially guaranteed.
 
 ## Upgrading from older versions
 
-Updates from the previous version need no action. Older versions:
+What changes when you update from an older version:
 
+- **From 3.8.0 or older:** these versions stored imported files as downloads, and a
+  Gen1 file cannot be checked against Shelly. At the first start all stored Gen1 files
+  are therefore marked as imported; a Gen1 update provided from them is withdrawn
+  until the next check, which downloads Shelly's current file again. Delete stored
+  files you imported from an export you do not fully trust.
 - **From 3.7.1 or older:** the list **Allowed Gen1 types** is gone; all Gen1 devices of
   the Shelly integration are checked. Turn off **Enable Gen1 updates** to skip them
   (they then show as **Not checked**). A saved value is ignored. Devices that disappear

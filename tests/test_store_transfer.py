@@ -206,6 +206,35 @@ async def test_import_never_turns_an_upload_into_a_download(mgr, net):
     assert mgr.firmware_list()[0]["source"] == "upload" and mgr.firmware_list()[0]["https"] is None
 
 
+async def test_import_adds_data_only_to_the_same_firmware_id_and_version(mgr, net):
+    """Same SHA-256 but another ID or version in the export: counted as already stored,
+    nothing is taken over (no foreign changelog or marker for a genuine file)."""
+    name, _ = store(mgr, "Plus1", "1.3.0")
+    mgr.firmware[name].update(changelog={"date": "2025-01-01", "entries": [{"text": "Foreign", "models": []}]},
+                              intermediate=True)
+    data, password = await export_bytes(mgr)
+    mgr.firmware[name] = {**mgr.firmware[name], "version": "1.3.1"}  # receiving store: other version
+    mgr.firmware[name].pop("changelog")
+    mgr.firmware[name].pop("intermediate")
+    token = await stage(mgr, data)
+    summary = await mgr.check_import(token, password)
+    assert len(summary["same"]) == 1 and summary["same"][0]["note"] == ""
+    assert (await mgr.confirm_import(token))["updated"] == 0
+    assert "changelog" not in mgr.firmware[name] and "intermediate" not in mgr.firmware[name]
+
+
+async def test_confirmed_import_drops_its_changelog(mgr, net):
+    """An imported file confirmed by the offer URL loses the changelog of the import:
+    the one of the Shelly documentation is requested instead."""
+    from conftest import vendor_content
+
+    name, _ = store(mgr, "Plus1", "1.5.0", source=manager_core.SOURCE_IMPORT, content=vendor_content("1.5.0"))
+    mgr.firmware[name]["changelog"] = {"date": "2025-01-01", "entries": [{"text": "Foreign", "models": []}]}
+    mgr.devices[A] = {"name": "Kitchen"}
+    await mgr.check_device(A)
+    assert mgr.firmware[name]["source"] == manager_core.SOURCE_DOWNLOAD and "changelog" not in mgr.firmware[name]
+
+
 def test_seal_that_is_no_hex_text_is_a_wrong_password(tmp_path):
     """A seal with other characters (e.g. non-ASCII) is refused like a wrong one."""
     archive = tmp_path / "x.zip"

@@ -260,6 +260,10 @@ class ManagerCore:
         # every check (see Checks._other_shellys); persisted
         self.others: list[dict[str, Any]] = []
         self._state_file_valid = False  # state.json holds a state this run read or wrote
+        # Gen1 store entries of a state written by 3.8.0 or older are marked as imported
+        # once at the start (FirmwareStore.mark_gen1_imported): imports of these versions
+        # were stored as downloads and cannot be told apart
+        self.gen1_marking_due = False
         self.schedule: dict[str, Any] = {}  # automatic check schedule (see schedule.py), persisted
         self.reloading: set[str] = set()  # device IDs whose Reload Device Info is running
         # (firmware ID, version) -> running provide task (single flight)
@@ -389,6 +393,7 @@ class ManagerCore:
         self.download_base_confirmed = confirmed if isinstance(confirmed, str) else None
         self.first_start_open = data.get("first_start_open") is True
         self.first_start_notified = data.get("first_start_notified") is True
+        self.gen1_marking_due = data.get("gen1_imports_marked") is not True
         unknown = data.get("unknown_files")
         if isinstance(unknown, list):
             self.unknown_files = {str(n): 0 for n in unknown if isinstance(n, str)}
@@ -422,6 +427,7 @@ class ManagerCore:
             "download_base_confirmed": self.download_base_confirmed,
             "first_start_open": self.first_start_open,
             "first_start_notified": self.first_start_notified,
+            "gen1_imports_marked": not self.gen1_marking_due,
             "unknown_files": sorted(self.unknown_files),
             "others": self.others,
         }
