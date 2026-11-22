@@ -2,28 +2,8 @@
 
 ## 3.8.0
 
-Release candidate. The device list is split into sections with a filter popover, and
+Released 2026-11-22. The device list is split into sections with a filter popover, and
 devices removed from Home Assistant stay listed; lost firmware files are read back.
-
-Changes in rc3
-
-Added
-- Option "Resolve host names" (Settings → Advanced, off by default): only while it is
-  on, checks look up host names and the Devices tab offers the column "Host name".
-
-Changes in rc2
-
-Changed
-- Devices tab: column "Host name" shows the host name of the Shelly integration, else
-  `<device id>.local`; looked up at every check, shown only when it resolves.
-- Devices tab: the Removed pill tooltip says that "Check now" only tests whether the
-  device still answers (or answers again).
-
-Fixed
-- Other Shellys: a listed Shelly that Home Assistant also knows over Bluetooth (BLE MAC
-  = Wi-Fi MAC + 2) is no longer listed a second time.
-
-Changes in rc1
 
 Added
 - Devices removed from Home Assistant stay listed under "Removed"; a full check only
@@ -36,7 +16,10 @@ Added
 - Firmware files on disk that the store does not list are read back at the start when
   their content proves ID and version (SHA-256); a log warning names them.
 - Devices tab: "No usable address" for a device whose address cannot be used, with the
-  reason (desktop); optional column "Host name" (off by default).
+  reason (desktop).
+- Option "Resolve host names" (Settings → Advanced, off by default): only while it is
+  on, checks look up host names and the Devices tab offers the column "Host name"
+  (host name of the Shelly integration, else `<device id>.local`; shown if it resolves).
 - Firmware tab: card "Unknown Files" lists files the store does not know; delete there.
 - Pre-release versions show a red "(beta)" next to the app title.
 
@@ -45,6 +28,8 @@ Changed
   Asleep, Ignored, Removed, Other Shellys); a removed device loses its Ignored mark.
 - Devices, Firmware and Logs tabs: the filters are a popover of a filter icon next to
   Sort, with counts; a dot marks an active filter.
+- Devices tab: the Removed pill tooltip says that "Check now" only tests whether the
+  device still answers (or answers again).
 - Gen1: the list of allowed types is removed; every Gen1 type is checked while Gen1
   updates are enabled (a stored list is ignored).
 - Unknown files in the firmware folder are no longer deleted automatically.
@@ -54,6 +39,8 @@ Fixed
   silently while Home Assistant renews the session; only a lasting refusal is shown.
 - Devices tab (desktop): the header checkbox of "Updates Available" is aligned with the
   row checkboxes.
+- Other Shellys: a listed Shelly that Home Assistant also knows over Bluetooth (BLE MAC
+  = Wi-Fi MAC + 2) is no longer listed a second time.
 
 ## 3.7.1
 
