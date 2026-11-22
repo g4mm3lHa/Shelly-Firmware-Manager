@@ -26,7 +26,7 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   empty rows hidden) and History. The phone list ("Details" in the tile) shows the same
   values.
 - **Row menu (⋮), five groups with separators:** 1 Check for updates, Install update,
-  Downgrade (hint below it) | 2 Device details, Reload device info ("Not available" hint
+  Offer update now (only while an update is on hold), Downgrade (hint below it) | 2 Device details, Reload device info ("Not available" hint
   below it), Open web UI | 3 NTP server, Power-on action, Eco mode, Device password |
   4 Ignore / Resume device (removed devices: Remove from list) | 5 Restart (red). Phones:
   every entry incl. "Open web UI" 44 px high.
