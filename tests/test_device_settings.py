@@ -101,6 +101,15 @@ async def test_battery_device_detected_from_the_device(device_api):
     assert (await shelly.read_settings(None, 1, "http://1.2.3.4", "SHSW-1", None))["battery"] is False
 
 
+async def test_gen1_device_id_from_the_settings(device_api):
+    """Gen1 reports its device ID (also its mDNS host name) in /settings device.hostname."""
+    _calls, answers = device_api
+    answers["/settings"] = {"device": {"type": "SHSW-1", "hostname": "shelly1-B929CC"}}
+    assert (await shelly.read_settings(None, 1, "http://1.2.3.4", "SHSW-1", None))["gen1_hostname"] == "shelly1-B929CC"
+    answers["/settings"] = {}
+    assert (await shelly.read_settings(None, 1, "http://1.2.3.4", "SHSW-1", None))["gen1_hostname"] is None
+
+
 async def test_ap_and_ble_writes(device_api):
     """Gen2 AP sends only ap.enable; Gen1 AP and BLE are refused."""
     calls, _answers = device_api

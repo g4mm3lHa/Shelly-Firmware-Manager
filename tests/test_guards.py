@@ -372,6 +372,14 @@ async def test_device_address_problems_have_a_reason(monkeypatch):
     assert err.value.reason == shelly.ADDRESS_UNRESOLVED and "garage.local" in str(err.value)
 
 
+def test_local_host_name_of_the_device_id():
+    """<device id>.local only for an ID that is a valid host label (lower case)."""
+    assert shelly.local_host_name("shellyplus1pm-A0DD6C29C3E0") == "shellyplus1pm-a0dd6c29c3e0.local"
+    assert shelly.local_host_name("shelly1-B929CC") == "shelly1-b929cc.local"
+    for bad in (None, "", "-x", "a.b", "a b", "x" * 64, "evil/..", "é"):
+        assert shelly.local_host_name(bad) is None
+
+
 def test_host_name_of_the_registry_entry():
     """Host name column: the host name of configuration_url, never an IP address."""
     assert shelly.host_name_of("http://shellyplus1-abc.local/") == "shellyplus1-abc.local"

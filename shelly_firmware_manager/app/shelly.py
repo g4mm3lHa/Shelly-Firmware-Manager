@@ -194,6 +194,33 @@ def host_name_of(configuration_url: str | None) -> str | None:
     return None
 
 
+# Device ID as a host name label (Gen2+ id, e.g. shellyplus1pm-a0dd6c29c3e0; Gen1
+# /settings device.hostname, e.g. shelly1-b929cc)
+HOST_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+
+HOST_RESOLVE_TIMEOUT_S = 5  # longest wait for one host name lookup (mDNS may be slow)
+
+
+def local_host_name(device_id: object) -> str | None:
+    """Host name <device id>.local the device announces itself under (mDNS), from
+    the ID the device reports; None if the ID is missing or no valid host label."""
+    label = str(device_id or "").strip().lower()
+    return f"{label}.local" if HOST_LABEL_RE.fullmatch(label) else None
+
+
+async def host_resolves(host: str) -> bool:
+    """True if the host name resolves to at least one address within
+    HOST_RESOLVE_TIMEOUT_S. Only a lookup: no request is sent to the address."""
+    loop = asyncio.get_running_loop()
+    try:
+        infos = await asyncio.wait_for(
+            loop.getaddrinfo(host, 80, type=socket.SOCK_STREAM), HOST_RESOLVE_TIMEOUT_S
+        )
+    except (OSError, UnicodeError, TimeoutError):  # socket.gaierror is an OSError
+        return False
+    return bool(infos)
+
+
 async def resolve_device_origin(configuration_url: str | None) -> str:
     """Returns 'http://<private-ip>:<port>' from the integration's configuration_url.
 
@@ -780,6 +807,8 @@ async def read_settings(
         extra["ble"] = UNSUPPORTED  # Gen1 devices have no Bluetooth switch
         extra["debug_ws"] = UNSUPPORTED  # Gen1 devices have no websocket debug log
         extra["battery"] = _positive((settings.get("sleep_mode") or {}).get("period"))
+        # Gen1 device ID (also its mDNS host name), e.g. shelly1-B929CC
+        extra["gen1_hostname"] = clip((settings.get("device") or {}).get("hostname"), 64) or None
         if extended:
             channels = [
                 c for c in (settings.get("relays") or []) + (settings.get("lights") or []) if isinstance(c, dict)

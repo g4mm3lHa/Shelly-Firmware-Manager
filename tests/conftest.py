@@ -67,6 +67,7 @@ class FakeNet:
         self.removed = set()  # devices removed from the HA registry (still answering unless unreachable)
         self.ha_battery = set()  # devices with a Shelly battery sensor in Home Assistant
         self.extra_registry = []  # further registry entries (other integrations, sub-devices)
+        self.resolvable = set()  # host names that resolve (Host name column)
 
     def registry(self):
         """Registry entries as delivered by HA."""
@@ -165,6 +166,9 @@ def net(monkeypatch, tmp_path):
     async def refresh(*_args, **_kwargs):
         return None
 
+    async def host_resolves(host):
+        return host in fake.resolvable
+
     class NoWebSocket:
         """Gen2+ installations try the device WebSocket first; in tests there is
         none unless a test installs its own fake (the HTTP fallback is used)."""
@@ -181,6 +185,7 @@ def net(monkeypatch, tmp_path):
     monkeypatch.setattr(shelly, "fetch_offer", fetch_offer)
     monkeypatch.setattr(shelly, "download_firmware", download_firmware)
     monkeypatch.setattr(shelly, "OtaChannel", NoWebSocket)
+    monkeypatch.setattr(shelly, "host_resolves", host_resolves)
     fake.refresh = refresh
     fake.data = data
     return fake

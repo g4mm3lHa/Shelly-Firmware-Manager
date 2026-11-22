@@ -18,8 +18,9 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
 - **Removed (3.8.0, mockup `3.8.0/04`):** yellow "Removed" pill next to the status (like
   "Ignored", which a removed device loses); tooltip also on touch: still reachable →
   "Removed from Home Assistant / the Shelly integration, but still reachable at its last
-  address. All actions stay available; “Check all” skips it.", not reachable → "…
-  and no longer reachable. “Check all” skips it.". Row menu group 4: "Remove from list"
+  address. All actions stay available; “Check now” only tests whether it still answers.",
+  not reachable → "… and no longer reachable. “Check now” only tests whether it answers
+  again.". Row menu group 4: "Remove from list"
   instead of "Ignore device", confirmation "Remove from list?" (Cancel / red Remove).
 - **No usable address (3.8.0):** IP column (and the phone tile instead of the IP):
   warning triangle + "No usable address" (warning colour), tooltip with the server's
@@ -60,7 +61,8 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
   status label.
 - **Host name column (3.8.0, mockup `3.8.0/05`):** optional column "Host name" (between
   "Last update" and "NTP" in the Columns menu), hidden by default – also for browsers
-  with stored column settings; phones: row "Host name" in the details.
+  with stored column settings; phones: row "Host name" in the details. Shows the host
+  name of the HA entry, else `<device id>.local`, only when it resolves ("–" otherwise).
 - **Battery devices (2026-11-19, 3.5.0):** battery icon (16 px,
   secondary text colour, tooltip "Battery device: reachable only while it is awake" and
   on a second line "Detected from the device" / "Detected from Home Assistant", 3.8.0)
