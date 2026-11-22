@@ -7,8 +7,9 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
 - Settings tab design approved.
 - **Settings cards (3.5.0):** Checks, Download Server (download base URL, serve only to
   known Shellys), Firmware & Storage (Gen1 updates, Allow downgrades, block
-  "Firmware store" with export/import, Max. import size), Logs, Advanced, Device
-  Passwords. Option labels with "Max." in front. Units in texts always "MB".
+  "Firmware store" with export/import, Max. import size), Logs, Advanced (Max.
+  parallel installations, Resolve host names, Pinned certificates; 3.8.0, mockup
+  `3.8.0-hostname` B), Device Passwords. Option labels with "Max." in front. Units in texts always "MB".
 - **Changelog hint (3.5.0, 2026-11-19):** last line of the Settings tab, below
   the Save area: hint "What changed in each version: open the app page in Home
   Assistant and choose “Changelog” next to the version." – the link opens the info

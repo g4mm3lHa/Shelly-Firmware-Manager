@@ -52,6 +52,15 @@ def test_removed_options_never_propagate():
     assert "shelly_password" not in new
 
 
+def test_resolve_host_names_is_off_by_default():
+    """resolve_host_names: default off, only true/false accepted."""
+    assert app_options.public_view(OPTIONS)["resolve_host_names"] is False
+    with pytest.raises(ValueError):
+        app_options.merge(OPTIONS, {"resolve_host_names": "yes"})
+    new, changed = app_options.merge(OPTIONS, {"resolve_host_names": True})
+    assert new["resolve_host_names"] is True and changed == ["resolve_host_names"]
+
+
 def test_allow_downgrade_is_an_optional_switch():
     """allow_downgrade: no default (missing = off), only true/false accepted."""
     without = {k: v for k, v in OPTIONS.items() if k != "allow_downgrade"}

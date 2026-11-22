@@ -150,7 +150,7 @@ m.others = [
 # A file in the firmware folder the store does not list (Firmware tab: unknown files)
 (data / "fw" / ("e" * 64 + ".zip")).write_bytes(b"y" * 120000)
 m.unknown_files = {"e" * 64 + ".zip": 120000}
-# Log entries of 3.8.0: files read back from the disk, a removed device removed from the list
+# Log entries: files read back from the disk, a removed device removed from the list
 m.events.add("store", severity="warning", action="adopted", unknown=1, user="demo",
              adopted=[{"type": "Plus1", "version": "1.5.0", "sha256": sha}])
 m.events.add("device", action="forgotten", device="Old plug", user="demo")

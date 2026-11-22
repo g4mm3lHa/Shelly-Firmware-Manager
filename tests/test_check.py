@@ -1043,9 +1043,11 @@ def test_other_shellys_leave_out_a_listed_shelly_seen_over_bluetooth():
 
 
 async def test_host_name_from_the_device_id_only_when_it_resolves(mgr, net):
-    """Host name column: <device id>.local from the ID the device reports, shown only
-    when it resolves; a host name of the registry entry wins; requests keep the
-    address of the registry entry."""
+    """Host name column (option resolve_host_names on): <device id>.local from the ID the
+    device reports, shown only when it resolves; a host name of the registry entry wins;
+    requests keep the address of the registry entry."""
+    assert make_manager(net, resolve_host_names=True).public_state()["host_names"] is True
+    mgr.resolve_host_names = True
     own = f"shelly-{A}.local"
     await mgr.scan()
     assert mgr.devices[A]["host_name"] is None  # does not resolve
@@ -1059,6 +1061,25 @@ async def test_host_name_from_the_device_id_only_when_it_resolves(mgr, net):
     net.resolvable.clear()
     await mgr.check_device(A, user="u")
     assert mgr.devices[A]["host_name"] is None
+
+
+async def test_host_names_off_by_default(mgr, net, monkeypatch):
+    """Option resolve_host_names off (default): no lookup at all, no host name kept;
+    a stored host name is dropped at the start."""
+    looked_up = []
+
+    async def lookup(host):
+        looked_up.append(host)
+        return True
+
+    monkeypatch.setattr(shelly, "host_resolves", lookup)
+    assert mgr.public_state()["host_names"] is False
+    await mgr.scan()
+    assert looked_up == [] and all("host_name" not in d for d in mgr.devices.values())
+    mgr.devices[A]["host_name"] = "old.local"
+    mgr.save()
+    assert "host_name" not in make_manager(net).devices[A]
+    assert make_manager(net, resolve_host_names=True).devices[A]["host_name"] == "old.local"
 
 
 async def test_other_shellys_are_kept_with_the_state(mgr, net):
@@ -1118,7 +1139,7 @@ async def test_registry_entry_without_usable_address(mgr, net, monkeypatch):
     dev = mgr.devices[C]
     assert dev["address_issue"] == {"reason": "unresolved", "message": "Host name garage.local could not be resolved"}
     assert dev["status"] == manager_core.STATUS_ERROR and manager_core.section_of(dev) == manager_core.SECTION_ATTENTION
-    assert dev["host_name"] is None  # the registry entry names an IP address
+    assert dev.get("host_name") is None  # the registry entry names an IP address
     monkeypatch.setattr(shelly, "resolve_device_origin", resolve)
     await mgr.scan()
     assert "address_issue" not in dev

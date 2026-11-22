@@ -34,6 +34,10 @@ configuration:
   max_parallel_installs:
     name: Max. parallel installations
     description: 1–20; further approvals wait
+  resolve_host_names:
+    name: Resolve host names
+    description: >-
+      Looks up each device's host name (<device id>.local) at every check and shows the column “Host name”; off by default
   pinned_certificates:
     name: Pinned certificates
     description: >-

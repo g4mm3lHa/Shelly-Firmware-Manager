@@ -22,11 +22,12 @@ INT_RANGES = {
     "log_entry_limit": (100, 3000),
     "import_max_mb": (1, 2048),
 }
-BOOLS = ("restrict_downloads_to_devices", "gen1_updates_enabled", "allow_downgrade")
+BOOLS = ("restrict_downloads_to_devices", "gen1_updates_enabled", "allow_downgrade", "resolve_host_names")
 DEFAULTS = {
     "check_interval_days": 7,
     "check_time": "02:45",
     "gen1_updates_enabled": True,
+    "resolve_host_names": False,
     "log_retention_days": 90,
     "log_entry_limit": 1000,
     "import_max_mb": 100,

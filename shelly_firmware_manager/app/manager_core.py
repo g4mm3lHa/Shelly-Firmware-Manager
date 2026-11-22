@@ -214,6 +214,8 @@ class ManagerCore:
         self.restrict_downloads = bool(options["restrict_downloads_to_devices"])
         self.gen1_enabled = bool(options["gen1_updates_enabled"])
         self.allow_downgrade = options.get("allow_downgrade") is True  # optional, missing = off
+        # Host name column: look up host names at every check (off: no lookup, no column)
+        self.resolve_host_names = options["resolve_host_names"] is True
         self.import_max = int(options["import_max_mb"]) * 1024 * 1024  # bytes; largest store import
         self.session = session
         self.token = token
@@ -361,6 +363,10 @@ class ManagerCore:
     def _apply_state(self, data: dict[str, Any]) -> None:
         """Take over a state read by _read_state."""
         self.devices = data.get("devices") or {}
+        if not self.resolve_host_names:  # switched off: no host name is kept or shown
+            for dev in self.devices.values():
+                if isinstance(dev, dict):
+                    dev.pop("host_name", None)
         self.last_scan = data.get("last_scan")
         self.firmware = data.get("firmware") or {}
         self.schedule = data["schedule"] if isinstance(data.get("schedule"), dict) else {}
