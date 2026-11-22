@@ -13,7 +13,7 @@ body:
     attributes:
       label: Version of the app
       description: Shown on the app page in Home Assistant.
-      placeholder: "3.6.1"
+      placeholder: "X.Y.Z"
     validations:
       required: true
   - type: input

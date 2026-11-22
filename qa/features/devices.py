@@ -449,7 +449,7 @@ def _next_steps(c):
           f.locator("#dlg-btns button", has_text="Approve installation").is_enabled())
     c.page.screenshot(path=c.out / f"{case}-install-store-fallback.png")
     f.locator("#dlg-btns button", has_text="Cancel").click()
-    step = card.locator("tr", has_text="Heat pump 3EM")
+    step = card.locator("tr", has_text="Heat pump")
     step.locator("button.install").click()
     d = dialog(f)
     check(f"{case}: intermediate version named in the installation dialog",

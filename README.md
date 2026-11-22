@@ -17,25 +17,28 @@ Home Assistant app that keeps your Shelly devices (Gen1 to Gen4) up to date – 
 and under your control. It finds all Shellys of the Shelly integration, checks for new
 stable firmware, downloads it and serves it to the devices from its own download server
 in your network. Nothing is installed without your approval.
+How this differs from the update entities of the Shelly integration is answered in the
+[FAQ](shelly_firmware_manager/DOCS.md#faq).
 
-![Devices tab with available updates](docs/images/devices-desktop.png)
+![Devices tab with sections for updates, attention and up-to-date devices](docs/images/devices-desktop.png)
 
 <p align="center">
+  <img src="docs/images/install-dialog.png" alt="Installation dialog with checks, SHA-256 and changelog" width="420">
   <img src="docs/images/devices-phone.png" alt="Devices tab on a phone" width="250">
 </p>
 
 ## Features
 
+- All Shellys of the Shelly integration in one list, sorted by what needs your attention,
+  with search and filters.
+- Automatic check on a schedule; Home Assistant notifies you about new updates.
 - Shellys only talk to Home Assistant – they need no internet access.
-- Every installation is approved manually and verified afterwards.
-- Gen2+: the Shelly update server names the next step (also required intermediate
-  versions); a stored file of that version is used instead of a download. Gen1: stored
-  firmware comes first.
-- Older firmware versions stay stored and allow a downgrade (Gen2+, once switched on).
-- Device settings such as name, NTP server, power-on action, eco mode, password
-  protection and the websocket debug log can be edited directly.
-- The firmware store moves to another Home Assistant instance as one sealed ZIP file;
-  device passwords can be stored or set on several devices in one step.
+- Every installation is approved by you, bound to the exact file (SHA-256) and verified
+  afterwards; required intermediate versions are offered step by step.
+- Optional hold-back of brand-new versions for a number of days.
+- The version a device runs is kept, so you can go back to it (downgrade, Gen2 and newer).
+- Device settings, cloud switch and passwords for one or many devices; the firmware
+  store moves to another Home Assistant instance as one sealed ZIP file.
 
 ## Requirements
 
@@ -91,10 +94,11 @@ and [Security](shelly_firmware_manager/DOCS.md#security).
    [FAQ](shelly_firmware_manager/DOCS.md#faq).
 2. Questions and discussion: the
    [Home Assistant community thread](https://community.home-assistant.io/t/firmware-manager-for-shelly-devices/1035784).
-3. Found a bug or miss a feature? Open an
-   [issue](https://github.com/g4mm3lHa/Shelly-Firmware-Manager/issues/new/choose). A
-   bug report needs the versions of the app and of Home Assistant, the Shelly model and
-   generation, and the entry of the activity log.
+3. Found a bug, has one Shelly a problem, or do you miss a feature? Open an
+   [issue](https://github.com/g4mm3lHa/Shelly-Firmware-Manager/issues/new/choose) with
+   the matching form. A report needs the versions of the app and of Home Assistant, the
+   Shelly model, generation and firmware, the entry of the activity log and, if there is
+   one, the lines of the app log.
 4. Security problems are not reported in public issues – see
    [`SECURITY.md`](SECURITY.md).
 
