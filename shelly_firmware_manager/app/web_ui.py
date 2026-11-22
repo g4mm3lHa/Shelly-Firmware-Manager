@@ -285,6 +285,10 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
             raise web.HTTPConflict(text="Installation for this device is already running")
         if device_id in mgr.device_checks:
             raise web.HTTPConflict(text="Device is being checked – please try again afterwards")
+        if device_id in mgr.reloading:  # checked before a scheduled installation is dropped below
+            raise web.HTTPConflict(text="Device info is being reloaded – please try again in a moment")
+        if mgr.devices[device_id].get("ignored"):
+            raise web.HTTPConflict(text="Device is ignored – resume it first")
         if not mgr.approval_matches(device_id, sha):
             raise web.HTTPConflict(text="Approval does not match the provided update (anymore)")
         # A stored version offered without the server's answer needs the risk acknowledgment

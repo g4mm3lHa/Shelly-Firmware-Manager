@@ -84,9 +84,10 @@ def install_time(text: object, now: float, tz: tzinfo) -> float:
     return at
 
 
-def validate(data: object, known_devices: set[str]) -> dict[str, Any]:
+def validate(data: object, known_devices: set[str] | None) -> dict[str, Any]:
     """The user-editable fields of a schedule, checked; ValueError with a readable
-    message otherwise. Device IDs must be listed devices (known_devices)."""
+    message otherwise. Device IDs must be listed devices (known_devices; None: only
+    their form is checked)."""
     if not isinstance(data, dict):
         raise ValueError("JSON object expected")
     raw = data.get("name")
@@ -137,19 +138,57 @@ def _repeat(value: object) -> dict[str, Any]:
     return {"kind": kind}
 
 
-def _devices(value: object, known: set[str]) -> str | list[str]:
-    """"all" or a non-empty list of listed device IDs (unknown IDs are refused)."""
+def _devices(value: object, known: set[str] | None) -> str | list[str]:
+    """"all" or a non-empty list of listed device IDs (unknown IDs are refused; known
+    None: any ID of the right form)."""
     if value == "all":
         return "all"
     if not isinstance(value, list) or not value or len(value) > MAX_DEVICES:
         raise ValueError("Devices: “All Shellys” or at least one device expected")
     ids = []
     for item in value:
-        if not isinstance(item, str) or not DEVICE_ID_RE.fullmatch(item) or item not in known:
+        if not isinstance(item, str) or not DEVICE_ID_RE.fullmatch(item) or (known is not None and item not in known):
             raise ValueError("Devices: unknown device")
         if item not in ids:
             ids.append(item)
     return ids
+
+
+def _epoch(value: object) -> bool:
+    """True for a number usable as epoch (not a bool)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def check_stored(item: object) -> dict[str, Any]:
+    """A schedule read from state.json, checked like a saved one (validate; device IDs
+    only by their form, an empty device list only on a switched-off schedule – see
+    manager_schedules._strike_devices) plus its timetable fields: id, anchor (ISO
+    date or None), next (epoch or None) and last (object or None). ValueError for a
+    damaged entry."""
+    if not isinstance(item, dict) or not ID_RE.fullmatch(str(item.get("id") or "")):
+        raise ValueError("no valid ID")
+    emptied = item.get("devices") == [] and item.get("on") is False
+    # pause is stored as None for actions other than restart
+    pause = item.get("pause") if item.get("action") == "restart" else 0
+    clean = validate({**item, "pause": pause, **({"devices": "all"} if emptied else {})}, None)
+    if emptied:
+        clean["devices"] = []
+    anchor, upcoming, last = item.get("anchor"), item.get("next"), item.get("last")
+    if anchor is not None:
+        if not isinstance(anchor, str) or not DATE_RE.fullmatch(anchor):
+            raise ValueError("anchor: date expected")
+        date.fromisoformat(anchor)  # ValueError for an impossible date
+    if upcoming is not None and not _epoch(upcoming):
+        raise ValueError("next: time expected")
+    if last is not None and not (isinstance(last, dict) and (last.get("at") is None or _epoch(last.get("at")))):
+        raise ValueError("last: object expected")
+    return {"id": item["id"], **clean, "anchor": anchor, "next": upcoming, "last": last}
+
+
+def check_plan(plan: object) -> bool:
+    """True for a usable scheduled installation read from state.json ("planned" of a
+    device: time "at" as epoch, SHA-256 as text)."""
+    return isinstance(plan, dict) and _epoch(plan.get("at")) and isinstance(plan.get("sha256"), str)
 
 
 def new_id(taken: set[str]) -> str:
@@ -225,10 +264,12 @@ def changes(old: dict[str, Any], new: dict[str, Any], names: dict[str, str]) -> 
 
 
 def devices_text(devices: object, names: dict[str, str]) -> str:
-    """"All Shellys" or the device names (at most three, then the count)."""
+    """"All Shellys", the device names (at most three, then the count) or "No device"."""
     if devices == "all":
         return "All Shellys"
     ids = devices if isinstance(devices, list) else []
+    if not ids:
+        return "No device"  # all devices of the schedule were removed from the list
     shown = [names.get(i, "?") for i in ids[:3]]
     more = len(ids) - len(shown)
     return ", ".join(shown) + (f" and {more} more" if more > 0 else "")

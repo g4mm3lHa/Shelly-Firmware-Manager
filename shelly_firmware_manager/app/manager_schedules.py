@@ -8,7 +8,10 @@ run of a schedule: timetable.py.
 Scheduled installation: the approval of the installation dialog is stored on the
 device ("planned") and carried out once at its time. It installs only the exact file
 (SHA-256) that was approved, on a device that still runs the version shown in the
-dialog; otherwise the plan lapses (log warning, Home Assistant notification). While a
+dialog, is neither ignored nor removed from Home Assistant, and – if the file is now
+offered without the confirmation of the update server (store fallback) – only if the
+plan was approved with the risk acknowledgment; otherwise the plan lapses (log warning,
+Home Assistant notification). While a
 full check, a schedule run or work on the device itself goes on, the plan waits up to
 RUN_WAIT_S (it stays "planned" meanwhile), then it lapses. The result of a scheduled
 installation is sent as one Home Assistant notification (not also the usual "Shelly
@@ -21,12 +24,18 @@ scheduled installation lapses (log warning and Home Assistant notification).
 
 Schedule run: one action on the chosen devices; runs one at a time. While a check, an
 installation, Reload Device Info or a store import runs, the run waits up to
-RUN_WAIT_S, then it counts as missed. Left out (and named in the log): removed,
+RUN_WAIT_S, then it counts as missed; an automatic check due during a run waits for its
+end the same way (then it is skipped). Left out (and named in the log): removed,
 ignored and battery devices, devices that are installing, being checked or were
 never checked, devices without the switch (Bluetooth: Gen1 too). One log entry per
 run; its counts relate to all chosen devices, left-out ones included ("2 of 3
 restarted · 1 left out"). A Home Assistant notification once per run if a device was
-not reached or refused the action. A missed run is only logged.
+not reached or refused the action. A missed run is only logged; a run cut off by the
+app stop is logged as interrupted.
+
+A device removed from the list ("Remove from list") is struck from the schedules that
+name it (logged as a change; a schedule left without devices is switched off), a device
+back in Home Assistant with a new ID is renamed in them.
 """
 
 import asyncio
@@ -39,7 +48,7 @@ import timetable
 from shelly import UNSUPPORTED, ShellyError, error_text, plain
 
 from manager_core import (
-    PENDING, Device, STATUS_INSTALLING, STATUS_SKIPPED, markdown_text,
+    PENDING, Device, STATUS_INSTALLING, STATUS_SKIPPED, markdown_text, unexpected_text,
 )
 from manager_installs import Installs
 
@@ -79,11 +88,13 @@ class Schedules(Installs):
         """At the start: a beta version provided while beta firmware is switched off now
         is withdrawn (the device shows "Not checked" until its next check; a scheduled
         installation of it lapses). Also completes the timetable fields of every
-        schedule (next run)."""
+        schedule (next run) and strikes device IDs no longer listed from the schedules."""
         if not self.beta_firmware:
             for device_id, dev in self.devices.items():
                 if dev.get("beta") and (dev.get("status") in PENDING or dev.get("file")):
                     await self._withdraw_beta(device_id, dev)
+        self._strike_devices({k for s in self.schedules if isinstance(s.get("devices"), list)
+                              for k in s["devices"] if k not in self.devices}, self._names(), SCHEDULE_USER)
         now = time.time()
         for item in self.schedules:
             if item.get("on") and not isinstance(item.get("next"), (int, float)):
@@ -187,6 +198,8 @@ class Schedules(Installs):
             "target": dev.get("pending_version"),
             "beta": bool(dev.get("beta")),
             "restart": bool(restart_first),
+            # approved with the risk acknowledgment of a store fallback (see _plan_invalid)
+            "fallback_ack": bool(dev.get("store_fallback")),
         }
         self.events.add(
             "install",
@@ -239,17 +252,31 @@ class Schedules(Installs):
             return "the device was being checked"
         return None
 
+    def _plan_invalid(self, device_id: str, dev: Device, plan: dict[str, Any]) -> str | None:
+        """Why a scheduled installation no longer fits its approval (None: it does):
+        the device runs another version, is ignored or removed from Home Assistant, the
+        file is now offered without the confirmation of the update server (store
+        fallback – kept only by a plan approved with the risk acknowledgment) or the
+        approved file is no longer provided."""
+        if dev.get("version") != plan.get("version"):
+            return f"the device runs {plain(dev.get('version'), 64) or 'another version'} now"
+        if dev.get("removed"):
+            return "the device was removed from Home Assistant"
+        if dev.get("ignored"):
+            return "the device is ignored"
+        if dev.get("store_fallback") and not plan.get("fallback_ack"):
+            return "the update server could not confirm the file"
+        if not self.approval_matches(device_id, str(plan.get("sha256"))):
+            return "the approved file is no longer provided"
+        return None
+
     def _plan_blocker(self, device_id: str, dev: Device, plan: dict[str, Any]) -> str | None:
         """Why a due scheduled installation cannot be carried out (None: it can)."""
         if self.download_base_issue:
             return "installations are disabled (download base URL)"
-        if dev.get("version") != plan.get("version"):
-            return f"the device runs {plain(dev.get('version'), 64) or 'another version'} now"
         if plan.get("beta") and not self.beta_firmware:
             return "beta firmware is switched off in the settings"
-        if not self.approval_matches(device_id, str(plan.get("sha256"))):
-            return "the approved file is no longer provided"
-        return None
+        return self._plan_invalid(device_id, dev, plan)
 
     def _take_plan(self, device_id: str, plan: dict[str, Any]) -> Device | None:
         """Take a due plan off its device; None if it is no longer there (cancelled,
@@ -348,25 +375,30 @@ class Schedules(Installs):
         )
 
     def _review_plans(self) -> None:
-        """After a check: a plan whose device now runs another version or no longer
-        holds the approved file lapses at once (logged; notified at its time would be
-        too late to act on)."""
+        """After a check: a plan that no longer fits its approval (see _plan_invalid)
+        lapses at once (logged and notified; notified at its time would be too late
+        to act on)."""
         for device_id, dev in self.devices.items():
             plan = dev.get("planned")
             if not plan:
                 continue
-            reason = None
-            if dev.get("version") != plan.get("version"):
-                reason = f"the device runs {plain(dev.get('version'), 64) or 'another version'} now"
-            elif not self.approval_matches(device_id, str(plan.get("sha256"))):
-                reason = "the approved file is no longer provided"
+            reason = self._plan_invalid(device_id, dev, plan)
             if reason:
                 dev.pop("planned")
                 self._spawn(self._plan_lapsed(device_id, dev, plan, reason))
                 self.timetable_changed.set()
 
     async def scan(self, automatic: bool = False, user: str | None = None) -> bool:
-        """Full check (see Checks.scan); scheduled installations are reviewed afterwards."""
+        """Full check (see Checks.scan); scheduled installations are reviewed afterwards.
+        An automatic check due while a schedule runs waits up to RUN_WAIT_S for the end
+        of the run; if it still runs then, the check is skipped (logged by Checks.scan)."""
+        if automatic and self.schedule_running is not None:
+            log.info("Scheduled check waits for the schedule “%s”", self.schedule_running)
+            deadline = time.monotonic() + RUN_WAIT_S
+            while self.schedule_running is not None:
+                if time.monotonic() >= deadline:
+                    break  # still running: Checks.scan skips the check and logs why
+                await asyncio.sleep(RUN_WAIT_POLL_S)
         try:
             return await super().scan(automatic=automatic, user=user)
         finally:
@@ -379,7 +411,45 @@ class Schedules(Installs):
         finally:
             self._review_plans()
 
+    def forget_device(self, device_id: str, confirm: object = False, user: str = "unknown") -> None:
+        """Remove from list (see DeviceSettings.forget_device); the device is struck
+        from the schedules that name it."""
+        names = self._names()
+        super().forget_device(device_id, confirm, user)
+        self._strike_devices({device_id}, names, user)
+
+    def _moved_device(self, old: str, new: str) -> None:
+        """A device back in Home Assistant with a new ID (see Checks._readopt_removed):
+        the schedules that name it follow the new ID."""
+        for item in self.schedules:
+            devices = item.get("devices")
+            if isinstance(devices, list) and old in devices:
+                item["devices"] = list(dict.fromkeys(new if k == old else k for k in devices))
+                log.info("Schedule %s: device ID of %s updated", item.get("name"), self._names().get(new, "?"))
+        self.timetable_changed.set()
+
     # ---------------------------------------------------------------------------- Schedules
+
+    def _strike_devices(self, gone: set[str], names: dict[str, str], user: str) -> None:
+        """Strike devices that are no longer listed from the schedules that name them
+        (logged as a change); a schedule left without a device is switched off – the
+        user chooses again."""
+        if not gone:
+            return
+        for item in self.schedules:
+            devices = item.get("devices")
+            if not isinstance(devices, list) or not gone.intersection(devices):
+                continue
+            before = dict(item)
+            item["devices"] = [k for k in devices if k not in gone]
+            if not item["devices"] and item.get("on"):
+                item["on"] = False
+                item["next"] = None
+            found = timetable.changes(before, item, names)
+            self.events.add("schedule", event="changed", name=item.get("name"), changes=found, user=user)
+            log.info("Schedule %s: %s", item.get("name"), "; ".join(found))
+        self.save()
+        self.timetable_changed.set()
 
     def _schedule(self, sid: str) -> dict[str, Any]:
         """The schedule with this ID; KeyError if there is none."""
@@ -586,14 +656,20 @@ class Schedules(Installs):
             return {"device": name, "result": "unreachable", "detail": error_text(err, 200) or type(err).__name__}
         except (ShellyError, aiohttp.ClientError, ValueError, KeyError) as err:
             return {"device": name, "result": "refused", "detail": error_text(err, 200) or type(err).__name__}
+        except Exception as err:
+            # An error no code path expects must not end the run without its log entry
+            log.exception("%s: unexpected error in a schedule run", name)
+            return {"device": name, "result": "refused", "detail": unexpected_text(err)}
 
     async def _run(self, item: dict[str, Any], trigger: str, user: str) -> None:
         """One run of a schedule (schedule_running is already set)."""
         started = time.monotonic()
         action = str(item["action"])
+        targets: list[str] = []
+        left: list[dict[str, str]] = []
+        results: list[dict[str, str]] = []
         try:
             targets, left = self._targets(item)
-            results: list[dict[str, str]] = []
             if action == "restart":
                 log.info(
                     "Schedule %s: restart of %d device(s), %s", item.get("name"), len(targets),
@@ -606,9 +682,9 @@ class Schedules(Installs):
                     results.append(await self._act(device_id, action, user))
             else:
                 results = list(await asyncio.gather(*(self._act(d, action, user) for d in targets)))
-            self._record_run(item, trigger, user, results, left, time.monotonic() - started)
+            chosen = len(targets) + len(left)
+            self._record_run(item, trigger, user, results, left, time.monotonic() - started, chosen)
             failed = [r for r in results if r["result"] != "ok"]
-            chosen = len(results) + len(left)
             if failed:
                 names = ", ".join(markdown_text(r["device"], 120) for r in failed[:20])
                 more = f" and {len(failed) - 20} more" if len(failed) > 20 else ""
@@ -618,6 +694,11 @@ class Schedules(Installs):
                     "Details in the Logs tab of the “Shelly Firmware” panel.",
                     f"sfm_schedule_{item.get('id')}",
                 )
+        except asyncio.CancelledError:
+            # App stop during the run (a pause may last minutes): logged with what was done
+            chosen = len(targets) + len(left)
+            self._record_run(item, trigger, user, results, left, time.monotonic() - started, chosen, interrupted=True)
+            raise
         finally:
             self.schedule_running = self._running_id = None
             self.save()
@@ -630,24 +711,28 @@ class Schedules(Installs):
         results: list[dict[str, str]],
         left: list[dict[str, str]],
         duration: float,
+        chosen: int,
+        interrupted: bool = False,
     ) -> None:
         """Log entry and "Last run" of a finished run; "n of m" counts all chosen
-        devices, the left-out ones included."""
+        devices, the left-out ones included. interrupted: the app stopped during the
+        run (results holds the devices done until then)."""
         action = str(item["action"])
-        chosen = len(results) + len(left)
         done = sum(1 for r in results if r["result"] == "ok")
         unreachable = sum(1 for r in results if r["result"] == "unreachable")
         refused = sum(1 for r in results if r["result"] == "refused")
         verb = "restarted" if action == "restart" else "switched"
-        parts = [f"{done} of {chosen} {verb}"] if results else ["No device to run on"]
+        parts = [f"{done} of {chosen} {verb}"] if results or chosen > len(left) else ["No device to run on"]
         if unreachable:
             parts.append(f"{unreachable} not reachable")
         if refused:
             parts.append(f"{refused} refused")
         if left:
             parts.append(f"{len(left)} left out")
+        if interrupted:
+            parts.append("interrupted – the app stopped")
         text = " · ".join(parts)
-        severity = "success" if results and done == len(results) else "warning"
+        severity = "success" if results and done == len(results) and not interrupted else "warning"
         self.events.add(
             "schedule",
             severity=severity,
@@ -661,6 +746,7 @@ class Schedules(Installs):
             result=text,
             findings=results or None,
             left_out=left or None,
+            interrupted=True if interrupted else None,
             user=user,
         )
         log.info("Schedule %s (%s): %s", item.get("name"), trigger, text)
@@ -675,6 +761,7 @@ class Schedules(Installs):
                 "unreachable": unreachable,
                 "refused": refused,
                 "left": len(left),
+                "interrupted": interrupted,
             },
         }
 

@@ -182,3 +182,9 @@ Wordings: `mockups/3.9.0/TEXTE.md`.
   clock line "Install at <date time>" under the version, no checkbox and no "Install";
   row menu group 1 adds "Install now" and "Cancel scheduled installation"; filter
   "Scheduled"; row "Scheduled" in the device details.
+- **Downgrade while scheduled (review 3.10.0, F5 a, approved 2026-11-22):** row menu
+  "Downgrade" disabled with the menu hint "Cancel the scheduled installation first" (same
+  rule as "Install").
+- **Running downgrade (review 3.10.0, F1 a, approved 2026-11-22):** the device stays in the
+  section it had before (usually "Up-To-Date"); Firmware column "installed → target" with
+  the tag "Downgrade" beside the firmware ID; status pill "Downgrading n %".

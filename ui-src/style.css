@@ -176,6 +176,8 @@ td.c-menu{text-align:right}
   /* Fixed column widths: the columns of both device cards line up */
   table{table-layout:fixed}
   .c-select{width:40px}.c-ip{width:150px}.c-gen{width:56px}.c-firmware{width:170px}.c-status{width:140px}
+  /* German labels are longer: "Bereit" + "Installieren" stay on one line */
+  html[lang=de] .c-status{width:175px}
   .c-action{width:190px}.c-last_update{width:150px}.c-host_name{width:170px}.c-ntp{width:150px}
   td.c-host_name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   th.c-menu,td.c-menu{width:52px}

@@ -2,45 +2,47 @@
 
 ## 3.10.0
 
-Release candidate. Updates can be installed at a chosen time, beta firmware can be
+Released 2026-11-22. Updates can be installed at a chosen time, beta firmware can be
 offered, schedules restart Shellys or switch cloud and Bluetooth; the UI speaks German.
 
-Changes in rc2
-
-Changed
-- Missed jobs: a schedule run or scheduled installation whose time passed while the app
-  was not running is skipped, also right after a restart; no catch-up.
-- Scheduled installation: waits up to 30 minutes while a check or schedule runs; one
-  notification with the result; a missed one is notified too.
-- Installation dialog: section "Start" stands above the changelog.
-- Schedules: default pause between restarts 3 s; "2 of 3 restarted" counts left-out
-  devices; no running line under the title; dialog stays open on an error.
-- Logs tab refreshes when a new entry is written; a yellow "!" marks unread entries.
-- Devices, Schedules and Logs tabs refresh right after the time of a job.
-- Settings tab: cards in independent columns, three from 1600 px; no gaps between cards.
-- Configuration tab of the app page in German when Home Assistant uses German.
-- App log names for every checked Gen2+ device whether a beta was offered.
-
-Changes in rc1
-
 Added
-- Install at (installation dialog, section "Start"): once, at most 7 days ahead; runs
-  only if version and file are unchanged, else it lapses (log entry, notification).
+- Install at (installation dialog, section "Start" above the changelog): once, at most 7
+  days ahead; only for unchanged version and file, else it lapses with a notification.
 - Scheduled installations: pill "Scheduled" with the time, filter "Scheduled", row menu
   "Install now" / "Cancel scheduled installation"; listed in the Schedules tab.
 - Offer beta firmware (Settings, Gen2+, off by default): section "Beta Updates", violet
   "Beta" tag, extra confirmation; offered betas are withdrawn when switched off.
 - Schedules tab: restart, cloud on/off or Bluetooth on/off on all or chosen Shellys,
-  daily, on weekdays or every n days; restarts staggered (default 10 s); "Run now".
+  daily, on weekdays or every n days; restarts staggered (default 3 s); "Run now".
 - Schedule runs leave out ignored, removed and battery devices and devices without the
   switch; every run is logged, HA notifies only on failures; missed runs are skipped.
 - Language (Settings, card "Display"): Same as Home Assistant, English or Deutsch, per
-  browser; logs, messages and documentation stay English.
+  browser; also the Configuration tab of the app page; logs and messages stay English.
+- Logs tab: a yellow "!" marks unread entries; the tab refreshes on every new entry.
 
 Changed
+- Missed jobs: a schedule run or scheduled installation whose time passed while the app
+  was not running is skipped, also right after a restart; no catch-up.
+- Jobs wait up to 30 minutes for a running check, installation or schedule run; an
+  automatic check waits the same way for a schedule run before it is skipped.
+- Scheduled installation: one notification with the result; it lapses for an ignored or
+  removed device or when the update server could not confirm the file at the last check.
+- Downgrade is blocked while an installation is scheduled for the device.
+- Remove from list strikes the device from all schedules; a schedule left without
+  devices is switched off until you choose devices again.
+- Schedule result "2 of 3 restarted" counts left-out devices; a run cut off by an app
+  stop is logged as interrupted.
+- Settings tab: cards in independent columns, three from 1600 px; no gaps between cards.
+- Devices, Schedules and Logs tabs refresh right after the time of a job.
 - Power-on action icon shows "?" while the outputs of a device were never read.
 - Tabs on phones: only the active tab shows its name, the others their icon.
-- Check notification counts new beta updates separately.
+- Check notification counts new beta updates separately; the app log names for every
+  checked Gen2+ device whether a beta was offered.
+
+Fixed
+- Running downgrade: the device stays in its section and shows "installed → target" with
+  the tag "Downgrade", no longer the last offered version under "Updates Available".
+- Install at: the date range follows the time zone of Home Assistant, not the browser's.
 
 ## 3.9.0
 

@@ -36,12 +36,13 @@ export function render(force) {
 }
 /** Logs tab: a yellow "!" while the log holds entries newer than the newest one this
  *  browser has shown in the Logs tab (per browser; on the first visit nothing counts
- *  as unread). Opening the Logs tab marks everything as read. */
+ *  as unread). Opening the Logs tab marks everything as read. log_latest is a mark that
+ *  grows with every entry, also within one second (stored as "logsMark"). */
 function markUnreadLogs(s) {
-  const latest = s.log_latest || 0, stored = loadLocal("logsSeen");
+  const latest = s.log_latest || 0, stored = loadLocal("logsMark");
   let seen = typeof stored === "number" ? stored : latest;
   if (ui.view === "logs") seen = latest;
-  if (seen !== stored) saveLocal("logsSeen", seen);
+  if (seen !== stored) saveLocal("logsMark", seen);
   const tab = $("tab-logs");
   let mark = tab.querySelector(".tab-unread");
   if (!mark) {

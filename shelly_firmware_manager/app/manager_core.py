@@ -36,6 +36,7 @@ import aiohttp
 import app_options
 import data_paths
 import schedule
+import timetable
 from changelog import Changelogs
 from credentials import Credentials
 from events import EventLog
@@ -97,9 +98,10 @@ BATTERY_FROM_HA = "home_assistant"  # Shelly battery sensor in Home Assistant, d
 
 def section_of(dev: Device) -> str:
     """Section of the device list a device belongs to (SECTION_*): removed and ignored
-    devices first by their marker, then provided updates (also a recent or failed
-    installation that stays there until the next check) – beta versions (marker beta)
-    in their own section –, devices that need attention
+    devices first by their marker; a running downgrade (marker downgrade) is no offered
+    update: the device stays in the section it had before (downgrade_from); then provided
+    updates (also a recent or failed installation that stays there until the next
+    check) – beta versions (marker beta) in their own section –, devices that need attention
     (error, unconfirmed installation, no usable address), never checked devices
     (also Gen1 devices skipped while Gen1 updates are disabled), up to date devices
     and sleeping battery devices."""
@@ -108,6 +110,8 @@ def section_of(dev: Device) -> str:
         return SECTION_REMOVED
     if dev.get("ignored"):
         return SECTION_IGNORED
+    if dev.get("downgrade") and status in PENDING:
+        return str(dev.get("downgrade_from") or SECTION_UP_TO_DATE)
     recent = dev.get("updated") and status in (STATUS_CURRENT, STATUS_UNCLEAR)
     if status in (STATUS_AVAILABLE, *PENDING) or recent or holds_file(dev):
         return SECTION_BETA if dev.get("beta") else SECTION_UPDATES
@@ -374,6 +378,10 @@ class ManagerCore:
             if dev.get("status") == STATUS_INSTALLING:
                 dev.update(status=STATUS_UNCLEAR, message="App was restarted during the installation")
             dev.pop("downgrade", None)  # marker of a running downgrade, memory semantics
+            dev.pop("downgrade_from", None)  # and the section the device had before it
+            if "planned" in dev and not timetable.check_plan(dev["planned"]):
+                log.warning("%s: damaged scheduled installation dropped", plain(dev.get("name"), 64))
+                dev.pop("planned")
 
     def _load_backup(self, backup: Path) -> None:
         """Load the backup because the state file is missing or unreadable (see _load)."""
@@ -413,8 +421,7 @@ class ManagerCore:
         self.last_scan = data.get("last_scan")
         self.firmware = data.get("firmware") or {}
         self.schedule = data["schedule"] if isinstance(data.get("schedule"), dict) else {}
-        schedules = data.get("schedules")
-        self.schedules = [x for x in schedules if isinstance(x, dict)] if isinstance(schedules, list) else []
+        self.schedules = self._stored_schedules(data.get("schedules"))
         confirmed = data.get("download_base_confirmed")
         self.download_base_confirmed = confirmed if isinstance(confirmed, str) else None
         self.first_start_open = data.get("first_start_open") is True
@@ -433,6 +440,19 @@ class ManagerCore:
                 "listed": listed if isinstance(listed, int) and not isinstance(listed, bool) and listed >= 0 else 0,
                 "missing": [m for m in listing["missing"] if isinstance(m, dict)],
             }
+
+    @staticmethod
+    def _stored_schedules(stored: object) -> list[dict[str, Any]]:
+        """Schedules of the state file; a damaged entry (e.g. edited by hand) is
+        dropped with a warning instead of stopping the app at every start."""
+        schedules: list[dict[str, Any]] = []
+        for item in stored if isinstance(stored, list) else []:
+            try:
+                schedules.append(timetable.check_stored(item))
+            except (ValueError, TypeError, KeyError) as err:
+                name = item.get("name") if isinstance(item, dict) else None
+                log.warning("Damaged schedule %s dropped from the state file: %s", plain(name, 64) or "?", err)
+        return schedules[: timetable.MAX_SCHEDULES]
 
     @staticmethod
     def _remove_partial_downloads() -> None:

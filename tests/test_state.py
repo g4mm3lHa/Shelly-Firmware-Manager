@@ -310,3 +310,18 @@ def test_credentials_write_error_is_reported(tmp_path):
     with pytest.raises(ShellyError, match="could not be saved"):
         creds.store(A, DeviceAuth(gen=1, password="second"))
     assert not path.with_suffix(".tmp").exists() and "first" in saved
+
+
+def test_log_mark_grows_within_one_second(tmp_path, monkeypatch):
+    """The mark of the newest entry (Logs tab: reload and unread "!") grows with every
+    entry, also for two entries written in the same second."""
+    log = events.EventLog(tmp_path / "events.json")
+    assert log.latest() == 0
+    monkeypatch.setattr(events.time, "time", lambda: 1000.0)
+    log.add("check")
+    first = log.latest()
+    log.add("check")
+    assert log.latest() == first + 1 == 1000 * 1000 + 2
+    monkeypatch.setattr(events.time, "time", lambda: 1001.0)
+    log.add("check")
+    assert log.latest() == 1001 * 1000 + 1

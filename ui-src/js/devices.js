@@ -30,7 +30,10 @@ const justUpdated = d => installedRecently(d) && d.status === "up-to-date";
 // An approved installation waiting for its time ("Install at") shows "Scheduled" in place of "Ready"
 const shownStatus = d => d.planned && d.status === "ready" && !d.installing ? "scheduled" :
   d.installing && d.status === "ready" ? "queued" : justUpdated(d) ? "updated" : d.status;
-const hasUpdate = d => ["available", "ready", "installing"].includes(d.status);
+// A running downgrade is no offered update: the device stays in its section (named by the
+// server), the row shows "installed → target" with the tag "Downgrade"
+const downgrading = d => !!d.downgrade && d.status === "installing";
+const hasUpdate = d => !downgrading(d) && ["available", "ready", "installing"].includes(d.status);
 // Ignored devices are not installable until they are resumed; nothing is installable
 // while the download base URL is missing or the unconfirmed former example; a scheduled
 // installation is started from the row menu ("Install now") only
@@ -46,8 +49,9 @@ export function installBlocker(d, s) {
   if (s.download_base && s.download_base.issue) return s.download_base.message || t("Download base URL is not set");
   return d.status === "ready" || failedInstall(d) ? null : t("Not provided for this device anymore");
 }
-// A downgrade needs a reached Gen2+ device, no check/installation and a valid download URL
-const downgradable = (d, s) => d.gen >= 2 && !!d.ip && !d.installing && d.status !== "installing" && !s.scanning &&
+// A downgrade needs a reached Gen2+ device, no check/installation, no scheduled
+// installation and a valid download URL
+const downgradable = (d, s) => d.gen >= 2 && !!d.ip && !d.planned && !d.installing && d.status !== "installing" && !s.scanning &&
   d.activity !== "reloading" && !(s.download_base && s.download_base.issue);
 // Settings can be read/changed once the device was reached and while it is not updating or reloading
 const editable = d => !!d.ip && !!d.gen && !d.installing && d.status !== "installing" && d.activity !== "reloading";
@@ -274,8 +278,8 @@ function statusCell(d) {
   const key = shownStatus(d);
   // Gen2+ installations report the device's own download progress, then its restart
   const restarting = key === "installing" && d.ota_phase === "restarting";
-  const label = restarting ? t("Restarting") :
-    (STATUS_LABELS[key] || key || "–") + (key === "installing" && typeof d.ota_progress === "number" ? ` ${d.ota_progress} %` : "");
+  const name = key === "installing" && downgrading(d) ? t("Downgrading") : STATUS_LABELS[key] || key || "–";
+  const label = restarting ? t("Restarting") : name + (key === "installing" && typeof d.ota_progress === "number" ? ` ${d.ota_progress} %` : "");
   const p = el("button", label, "pill p-" + (key || "").replace(/[^a-z]/g, ""));
   p.onclick = () => showStatus(d); attachTip(p, () => statusText(d));
   return p;
@@ -368,9 +372,10 @@ const COLUMNS = {
   }},
   gen: {label: "Gen", sort: d => d.gen, cell: d => [d.gen ?? "–"]},
   firmware: {label: t("Firmware"), sort: d => d.type, cell: d => {
-    const offer = d.offer_version && hasUpdate(d);
+    const offer = d.offer_version && hasUpdate(d), down = downgrading(d) && d.target;
     const line = box("div", "nowrap", el("span", shortVersion(d, d.version) || "–"));
     if (offer) line.append(el("span", "→", "arrow"), el("span", shortVersion(d, d.offer_version), "newver"));
+    else if (down) line.append(el("span", "→", "arrow"), el("span", d.target, "newver"));
     // Gen1: the full version strings stay available as tooltip (and in the status details)
     if (d.gen === 1 && (d.version || offer)) {
       const full = [t("Installed: {version}", {version: d.version || "–"}), offer ? t("Available: {version}", {version: d.offer_version}) : null].filter(Boolean).join(" · ");
@@ -382,8 +387,9 @@ const COLUMNS = {
       attachTip(note, () => holdTip(d), true);
       return [line, el("div", d.type || "–", "sub"), note];
     }
-    // Beta version on offer: violet "Beta" tag beside the firmware ID
-    const sub = box("div", "sub fw-id", el("span", d.type || "–"), d.beta && offer ? el("span", t("Beta"), "tag beta") : null);
+    // Beta version on offer: violet "Beta" tag beside the firmware ID; running downgrade: tag "Downgrade"
+    const sub = box("div", "sub fw-id", el("span", d.type || "–"), d.beta && offer ? el("span", t("Beta"), "tag beta") : null,
+      down ? el("span", t("Downgrade"), "tag") : null);
     // Scheduled installation: clock line with its time under the version
     if (d.planned) return [line, sub, box("div", "hold-note plan-note", icon("clock"), el("span", t("Install at {time}", {time: d.planned.at_text})))];
     return [line, sub];
@@ -678,6 +684,8 @@ function openRowMenu(d, anchor) {
   // Disabled (no dialog) while no older version is stored or something blocks it; while
   // the option "Allow downgrades" is off it is shown disabled with the hint below it
   if (d.gen >= 2 && !s.allow_downgrade) { add(t("Downgrade"), () => {}, false); items.push(el("div", DOWNGRADE_OFF, "menu-hint")); }
+  // A scheduled installation blocks it like "Install": disabled with the hint below it
+  else if (d.gen >= 2 && d.planned) { add(t("Downgrade"), () => {}, false); items.push(el("div", t("Cancel the scheduled installation first"), "menu-hint")); }
   else if (d.gen >= 2) add(t("Downgrade"), () => openDowngrade(d), downgradable(d, ui.state) && d.downgrades > 0);
   // Group 2: the device itself
   items.push(el("hr"));

@@ -10,7 +10,7 @@ Part of `docs/CODEMAP.md`; read when you change routes in `web_ui.py`.
 | `GET /api/state` | `public_state` (ETag / 304) |
 | `POST /api/scan` | `reserve_check` + `scan` (background) |
 | `POST /api/devices/{id}/check` | `reserve_check("device")` + `check_device` |
-| `POST /api/devices/{id}/install` | `approval_matches` / `downgrade_*` + `install` (`confirm`, `sha256`, `restart`: restart the device first; downgrade: `downgrade` + `acknowledged`; a beta needs `beta_acknowledged`; `at` "YYYY-MM-DDTHH:MM" → `plan_install` instead, answer `{scheduled, at}`; without `at` a scheduled installation is dropped – `cancel_plan("installed_now")`; 409 while a schedule runs) |
+| `POST /api/devices/{id}/install` | `approval_matches` / `downgrade_*` + `install` (`confirm`, `sha256`, `restart`: restart the device first; downgrade: `downgrade` + `acknowledged`; a beta needs `beta_acknowledged`; `at` "YYYY-MM-DDTHH:MM" → `plan_install` instead, answer `{scheduled, at}`; without `at` a scheduled installation is dropped – `cancel_plan("installed_now")`; 409 while a schedule runs; an update also 409 for an ignored device or while its info is reloaded) |
 | `POST /api/devices/{id}/planned/cancel` | `cancel_plan` (`confirm`) |
 | `POST /api/devices/{id}/offer-now` | `held_version`, `reserve_check`, then `release_hold` + check of the device (409 if nothing is held or the check cannot start; the hold stays then) |
 | `GET /api/devices/{id}/signal` | `wifi_signal` (`{rssi}`, read now; None: cable; not readable → 409, shown as "unknown") |

@@ -96,6 +96,8 @@ class Manager(Schedules):
                     # Where the battery marker comes from: "device" or "home_assistant"
                     "battery_source": dev.get("battery_source") or BATTERY_FROM_DEVICE if dev.get("battery") else None,
                     "section": section_of(dev),
+                    # Running downgrade: its target version (the offer of the last check stays offer_version)
+                    "target": dev.get("pending_version") if dev.get("downgrade") else None,
                     "password_set": self.credentials.has_device_password(key),  # flag only
                     "ip": shelly.origin_ip(origin) if origin else None,
                     "web_url": f"{origin}/" if origin else None,
@@ -111,8 +113,8 @@ class Manager(Schedules):
             "last_scan": self.last_scan,
             "busy": self.busy,
             "schedule_running": self.schedule_running,  # name of the schedule whose run is going on
-            # time of the newest log entry: the Logs tab reloads and marks unread entries
-            "log_latest": self.events.entries[-1].get("ts", 0) if self.events.entries else 0,
+            # mark of the newest log entry (EventLog.latest): the Logs tab reloads and marks unread entries
+            "log_latest": self.events.latest(),
             "schedule": {
                 "days": self.check_days,
                 "time": self.check_time,

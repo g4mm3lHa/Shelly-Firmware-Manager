@@ -183,7 +183,8 @@ Assistant again and the mark disappears with the next check. A full check does n
 removed devices for updates: it only tests whether they still answer at their last
 address and logs a warning if they do, an error if not. While one is still reachable,
 its actions and a single check work as usual. **Remove from list** in the row menu
-deletes the device and its stored password from the app after a confirmation.
+deletes the device and its stored password from the app after a confirmation; it also
+leaves every schedule (a schedule without devices is switched off).
 
 **No usable address:** if the address of a device cannot be used – the host name does
 not resolve, the IP address is outside the private networks, or the device has no
@@ -375,6 +376,9 @@ or work on the device itself is running then, the installation waits up to 30 mi
 stays "Scheduled". Otherwise nothing is installed and the scheduled installation lapses:
 
 - a check found another version or file, or beta firmware was switched off;
+- the device was ignored or removed from Home Assistant;
+- a check could not reach the Shelly update server, so the same file is now offered
+  without its confirmation (unless you scheduled it with the risk tick for such a file);
 - the running work took longer than 30 minutes;
 - installations are disabled (download base URL);
 - the app was not running at that time. It never installs later, also not right after a
@@ -383,7 +387,8 @@ stays "Scheduled". Otherwise nothing is installed and the scheduled installation
 The log names the reason. Home Assistant shows one notification for every scheduled
 installation: installed, failed, lapsed or missed. Cancel it in the row menu or the tab
 **Schedules**; **Install now** in the row menu opens the dialog again and replaces the
-scheduled time.
+scheduled time. While an installation is scheduled, **Downgrade** is blocked for the
+device; cancel the scheduled installation first.
 
 ### Beta firmware
 
@@ -410,8 +415,10 @@ Row menu ⋮ → **Downgrade** lists all stored versions that are older than the
 one (the entry is greyed out while no older version is stored). Choose a version, check the installation dialog and confirm a second time.
 In the Firmware tab, the downgrade icon of an older version lists the devices of this
 type with a newer version installed; choose one and confirm a second time. The
-downgrade runs like a normal installation and is logged as such. It is available for
-up-to-date and ignored devices too, but never for Gen1.
+downgrade runs like a normal installation and is logged as such; meanwhile the device
+stays in its group and shows the target version with the tag "Downgrade". It is
+available for up-to-date and ignored devices too, but never for Gen1, and not while an
+installation is scheduled for the device.
 
 Shelly only offers the current version for download, so older versions are available
 only if the app downloaded them earlier or you uploaded them (see [Firmware](#firmware)).
@@ -474,8 +481,10 @@ A run leaves out ignored and removed devices, battery devices (they sleep) and d
 without the switch (Gen1 has no Bluetooth switch); the dialog and the log name them. While
 a check, an installation or another schedule runs, a due run waits up to 30 minutes. A run
 that waited longer, or whose time passed while the app was not running, is skipped and
-logged as "missed"; it is not made up for after a restart. **Run now** (play icon) starts
-a schedule at once after a confirmation.
+logged as "missed"; it is not made up for after a restart. A run cut off by a stop of the
+app is logged as interrupted. **Run now** (play icon) starts a schedule at once after a
+confirmation. A device removed with **Remove from list** leaves every schedule; a schedule
+left without devices is switched off and shows "No device" until you choose devices again.
 
 The card lists each schedule with its next run and the last result ("2 of 3 restarted · 1
 left out" counts all chosen devices); the checkbox switches
@@ -483,7 +492,8 @@ a schedule off and on. The card **Scheduled Installations** lists the approved i
 waiting for their time (see [Scheduled installation](#scheduled-installation)). Every run is
 written to the log; Home Assistant shows a notification only when a device was not
 reachable or refused the change. While a schedule runs, **Check now** and installations
-are refused; a scheduled check that is due then is cancelled and logged.
+are refused; an automatic check that is due then waits up to 30 minutes for the end of
+the run, otherwise it is skipped and logged.
 
 If Home Assistant uses a Shelly as Bluetooth proxy, it turns Bluetooth on again after
 **Bluetooth off**; the dialog warns about it.
@@ -642,8 +652,10 @@ Gen2+ firmware is downloaded over HTTPS only.
 | The app stopped and did not start again | Turn on **Watchdog** and **Start on boot** on the app page. With the Watchdog on, Home Assistant restarts the app after it stopped unexpectedly |
 | The app is shown as running but does not respond | The container health check (a TCP connection to port 8098 every 30 seconds) is meant to make Home Assistant restart the app after three failures if the Watchdog is on. Otherwise restart the app by hand and report the lines of the app log if it happens again |
 | Beta version withdrawn – beta firmware is switched off in the settings (Logs tab) | **Offer beta firmware** was switched off; the offered beta is no longer offered. Check the device to get the stable offer |
-| Shelly firmware: scheduled installation – … was not started (notification) | The reason follows in the text: the version or file changed, a check or schedule ran longer than 30 minutes, or installations are disabled. Approve the installation again |
+| Shelly firmware: scheduled installation – … was not started (notification) | The reason follows in the text: the version or file changed, the device is ignored or was removed from Home Assistant, the update server could not confirm the file, a check or schedule ran longer than 30 minutes, or installations are disabled. Approve the installation again |
 | Shelly firmware: scheduled installation – … was missed (notification) | The app was not running at the scheduled time; it does not install later. Approve the installation again |
+| Cancel the scheduled installation first (Downgrade) | An installation is scheduled for the device. Cancel it in the row menu or the Schedules tab, then downgrade |
+| Damaged schedule … dropped from the state file (app log) | A schedule in the state file could not be read (e.g. edited by hand) and was left out; the app starts with the others. Add the schedule again |
 | Not possible now – … (Run now) | A check, an installation or another schedule runs. Try again when it has finished |
 | Schedule “…” is running – please try again afterwards | **Check now** and installations wait for the end of a schedule run. Try again when the run has finished (Logs tab) |
 | Schedule run: … not reachable / refused (notification) | Some devices did not answer or refused the change. The log entry of the run names them; check those devices |
