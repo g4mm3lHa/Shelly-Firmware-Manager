@@ -6,6 +6,7 @@ request), Gen1 firmware store first.
 All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test servers."""
 
 import asyncio
+import datetime
 
 import data_paths
 import manager_checks
@@ -935,13 +936,13 @@ async def test_check_error_message_uses_the_readable_text(mgr, net, monkeypatch)
 async def test_offer_request_sends_only_app_and_version(monkeypatch):
     """The installed version goes in the header Shelly-Info – only "app" and "ver";
     without version no header (newest version). nsteps is returned as steps."""
-    fake_cloud(monkeypatch, {
-        "https://updates.shelly.cloud/update/Plus1": (200, {}, b'{"stable": {"url": "u", "version": "1.3.3", "nsteps": 2}}'),
-    })
+    body = b'{"stable": {"url": "u", "version": "1.3.3", "nsteps": 2, "build_id": "20240625-123456/1.3.3-gabc"}}'
+    fake_cloud(monkeypatch, {"https://updates.shelly.cloud/update/Plus1": (200, {}, body)})
     headers = shelly._CloudRequest.headers_seen
     headers.clear()
-    assert await shelly.fetch_offer(None, "Plus1", None, "1.0.7") == {"version": "1.3.3", "url": "u", "steps": "2"}
-    assert await shelly.fetch_offer(None, "Plus1") == {"version": "1.3.3", "url": "u", "steps": "2"}
+    expected = {"version": "1.3.3", "url": "u", "steps": "2", "build": "20240625-123456/1.3.3-gabc"}
+    assert await shelly.fetch_offer(None, "Plus1", None, "1.0.7") == expected
+    assert await shelly.fetch_offer(None, "Plus1") == expected
     assert headers == [{"Shelly-Info": '{"app":"Plus1","ver":"1.0.7"}'}, None]
 
 
@@ -1260,3 +1261,143 @@ def test_sections_of_the_device_list():
     assert sec({"status": "skipped"}) == sec({"status": "unregistered"}) == sec({}) == "not_checked"
     assert sec({"status": "asleep"}) == "asleep"
     assert sec({"status": "up-to-date"}) == "up_to_date"
+
+
+# ---- Keep installed versions, offer only after N days, Shellys not listed
+
+
+async def test_keep_installed_stores_the_version_a_device_runs(mgr, net):
+    """Option keep_installed: an up-to-date Gen2+ device gets its installed version
+    stored while the server offers it (way back); nothing is provided to the device.
+    Off: nothing is downloaded for an up-to-date device."""
+    net.devices = {B: net.devices[B]}  # Hall runs 1.5.0, the offered version
+    await mgr.scan()
+    assert net.downloads == 0 and not mgr.firmware
+    mgr.keep_installed = True
+    await mgr.scan()
+    dev = mgr.devices[B]
+    assert net.downloads == 1 and dev["status"] == manager_core.STATUS_CURRENT and not dev.get("file")
+    [meta] = mgr.firmware.values()
+    assert (meta["type"], meta["version"], meta["source"]) == ("Plus1", "1.5.0", "download")
+    assert mgr.public_state()["devices"][0]["way_back"] == {"version": "1.5.0", "stored": True}
+    await mgr.scan()
+    assert net.downloads == 1  # stored file named by the offer: only verified
+
+
+async def test_keep_installed_failure_does_not_change_the_check(mgr, net, monkeypatch):
+    """A failed download of the installed version is logged only."""
+    net.devices = {B: net.devices[B]}
+    mgr.keep_installed = True
+
+    async def broken(*_args, **_kwargs):
+        raise ShellyError("Download failed")
+
+    monkeypatch.setattr(shelly, "download_firmware", broken)
+    await mgr.scan()
+    assert mgr.devices[B]["status"] == manager_core.STATUS_CURRENT and not mgr.firmware
+    assert mgr.public_state()["devices"][0]["way_back"] == {"version": "1.5.0", "stored": False}
+
+
+def test_build_date_from_build_id_or_gen1_version():
+    """The build date starts a Gen2+ build ID and a Gen1 version text."""
+    assert shelly.build_date("20241011-114455/1.4.4-g6d2a586") == "2024-10-11"
+    assert shelly.build_date("20230913-112003/v1.14.0-gcb84623") == "2023-09-13"
+    assert shelly.build_date("20231399-112003/v1.14.0") is None
+    assert shelly.build_date("1.4.4") is None and shelly.build_date(None) is None
+
+
+def built_days_ago(days):
+    """Build ID of a version built that many days ago (local date)."""
+    day = datetime.date.today() - datetime.timedelta(days=days)
+    return f"{day:%Y%m%d}-101500/1.5.0-gabc", day.isoformat()
+
+
+async def test_young_version_is_held_back_until_it_is_old_enough(mgr, net):
+    """offer_after_days: a version younger than N days (build date) is not offered:
+    the device stays up to date with the marker hold, nothing is downloaded or
+    notified. "Offer update now" lifts the hold for this version on this device."""
+    build, day = built_days_ago(2)
+    net.builds["1.5.0"] = build
+    mgr.offer_after_days = 7
+    await mgr.scan(automatic=True)
+    dev = mgr.devices[A]
+    until = (datetime.date.fromisoformat(day) + datetime.timedelta(days=7)).isoformat()
+    assert dev["status"] == manager_core.STATUS_CURRENT and dev["hold"] == {"version": "1.5.0", "built": day, "until": until}
+    assert net.downloads == 0 and not mgr.notified and not dev.get("offer_version")
+    assert mgr.release_hold(A) == "1.5.0"
+    await mgr.check_device(A)
+    assert dev["status"] == manager_core.STATUS_READY and "hold" not in dev and dev["offer_date"] == day
+    await mgr.scan()
+    assert mgr.devices[A]["status"] == manager_core.STATUS_READY and mgr.devices[C].get("hold")
+    with pytest.raises(ValueError):
+        mgr.release_hold(B)  # nothing held back
+
+
+async def test_old_enough_or_undated_version_is_offered_at_once(mgr, net):
+    """A version at least N days old, or one without a build date, is offered."""
+    mgr.offer_after_days = 7
+    net.builds["1.5.0"] = built_days_ago(7)[0]
+    await mgr.scan()
+    assert mgr.devices[A]["status"] == manager_core.STATUS_READY
+    net.builds["1.5.0"] = ""
+    await mgr.check_device(C)
+    assert mgr.devices[C]["status"] == manager_core.STATUS_READY and mgr.devices[C]["offer_date"] is None
+
+
+async def test_gen1_upload_is_never_held_back(net, monkeypatch):
+    """Gen1 store first: a stored download is held back like an offer, the user's
+    own upload is not."""
+    gen1_net(net, monkeypatch, {A: "SHSW-1"})
+    m = make_manager(net)
+    m._registry = lambda: asyncio.sleep(0, net.registry())
+    m.devices[A] = {"name": "Hall"}
+    m.offer_after_days = 30
+    young = f"{datetime.date.today():%Y%m%d}-101500/v1.14.0-gcb84623"
+    name, _ = store(m, "SHSW-1", young, gen=1)
+    await m.check_device(A)
+    assert m.devices[A]["hold"]["version"] == young and m.devices[A]["status"] == manager_core.STATUS_CURRENT
+    m.firmware[name]["source"] = manager_core.SOURCE_UPLOAD
+    await m.check_device(A)
+    assert m.devices[A]["status"] == manager_core.STATUS_READY and "hold" not in m.devices[A]
+
+
+async def test_shellys_known_to_home_assistant_but_not_listed(mgr, net):
+    """Full check: disabled Shelly main devices, discoveries not set up yet and
+    ignored discoveries are named with their reason; flows of other integrations,
+    user flows and reauthentications, sub-devices and other domains are not."""
+    net.extra_registry = [
+        {"id": "d1", "name": "Garden shed plug", "identifiers": [["shelly", "d1"]], "disabled_by": "user",
+         "model": "Plus Plug S", "model_id": "SNPL-00112EU"},
+        {"id": "d2", "name": "Channel", "identifiers": [["shelly", "d2"]], "disabled_by": "user", "via_device_id": A},
+    ]
+    net.ha_entries = [
+        {"domain": "shelly", "title": "shelly1-98F4AB", "source": "ignore"},
+        {"domain": "shelly", "title": "Kitchen", "source": "zeroconf"},
+    ]
+    net.ha_flows = [
+        {"handler": "shelly", "context": {"source": "zeroconf", "title_placeholders": {"name": "shellyplus1pm-a8032ab1c2d4"}}},
+        {"handler": "shelly", "context": {"source": "reauth", "title_placeholders": {"name": "Kitchen"}}},
+        {"handler": "hue", "context": {"source": "zeroconf", "title_placeholders": {"name": "Hue bridge"}}},
+    ]
+    await mgr.scan()
+    listing = mgr.public_state()["listing"]
+    assert listing["listed"] == 3
+    assert listing["missing"] == [
+        {"name": "Garden shed plug", "model": "SNPL-00112EU", "reason": "disabled"},
+        {"name": "shellyplus1pm-a8032ab1c2d4", "model": None, "reason": "discovered"},
+        {"name": "shelly1-98F4AB", "model": None, "reason": "ignored"},
+    ]
+    net.setup_error = ShellyError("Unauthorized")  # entries and flows not available: disabled devices only
+    await mgr.scan()
+    assert [m["reason"] for m in mgr.listing["missing"]] == ["disabled"]
+    assert make_manager(net).listing == mgr.listing  # kept with the state
+
+
+async def test_gen2_store_fallback_of_an_imported_file_names_its_origin(mgr, net):
+    """The device message of a store fallback with an imported file says it is not
+    confirmed by Shelly."""
+    store(mgr, "Plus1", "1.6.0", source=manager_core.SOURCE_IMPORT)
+    net.offer_error = ShellyError("502, 'Bad Gateway'")
+    mgr.devices[A] = {"name": "Kitchen"}
+    await mgr.check_device(A)
+    assert "1.6.0 (imported file, not confirmed by Shelly)" in mgr.devices[A]["message"]

@@ -232,6 +232,10 @@ class ManagerCore:
         # Host name column: look up host names at every check (off: no lookup, no column)
         self.resolve_host_names = options["resolve_host_names"] is True
         self.import_max = int(options["import_max_mb"]) * 1024 * 1024  # bytes; largest store import
+        # Gen2+: also store the version a device runs while Shelly still offers it (way back)
+        self.keep_installed = options["keep_installed"] is True
+        # A new version is offered only once it is this many days old (build date); 0 = at once
+        self.offer_after_days = int(options["offer_after_days"])
         self.session = session
         self.token = token
         self.pins = pins  # certificate pins for shelly.cloud
@@ -259,6 +263,10 @@ class ManagerCore:
         # behind a Shelly gateway: read-only list for the UI, taken from the registry at
         # every check (see Checks._other_shellys); persisted
         self.others: list[dict[str, Any]] = []
+        # Shellys Home Assistant knows but the app does not list, with the reason:
+        # {"listed": n, "missing": [{"name", "model", "reason"}]} (MISSING_*), taken
+        # at every full check (see Checks._missing_shellys); persisted
+        self.listing: dict[str, Any] = {"listed": 0, "missing": []}
         self._state_file_valid = False  # state.json holds a state this run read or wrote
         # Gen1 store entries of a state written by 3.8.0 or older are marked as imported
         # once at the start (FirmwareStore.mark_gen1_imported): imports of these versions
@@ -399,6 +407,12 @@ class ManagerCore:
             self.unknown_files = {str(n): 0 for n in unknown if isinstance(n, str)}
         others = data.get("others")
         self.others = [o for o in others if isinstance(o, dict)] if isinstance(others, list) else []
+        listing = data.get("listing")
+        if isinstance(listing, dict) and isinstance(listing.get("missing"), list):
+            self.listing = {
+                "listed": int(listing.get("listed") or 0),
+                "missing": [m for m in listing["missing"] if isinstance(m, dict)],
+            }
 
     @staticmethod
     def _remove_partial_downloads() -> None:
@@ -430,6 +444,7 @@ class ManagerCore:
             "gen1_imports_marked": not self.gen1_marking_due,
             "unknown_files": sorted(self.unknown_files),
             "others": self.others,
+            "listing": self.listing,
         }
         try:
             with temp.open("w") as handle:
@@ -496,9 +511,19 @@ class ManagerCore:
                 found.add(device_id)
         return found
 
-    async def _ha_list(self, request: str) -> list[Any]:
+    async def _ha_setup_state(self) -> tuple[list[Any], list[Any]]:
+        """Config entries of the Shelly integration (config_entries/get; ignored
+        discoveries have source "ignore") and the flows in progress (discoveries
+        not set up yet, config_entries/flow/progress) – for the Shellys Home
+        Assistant knows but the app does not list. Raises like _ha_list."""
+        entries = await self._ha_list("config_entries/get", domain="shelly")
+        flows = await self._ha_list("config_entries/flow/progress")
+        return entries, flows
+
+    async def _ha_list(self, request: str, **params: str) -> list[Any]:
         """Answer of one list request of the Core WebSocket API (device or entity
-        registry); anything but a successful list answer is a ShellyError."""
+        registry, config entries, flows); params are added to the request; anything
+        but a successful list answer is a ShellyError."""
         ws_url = SUPERVISOR.replace("http", "ws", 1) + "/core/websocket"
 
         async def receive(ws: aiohttp.ClientWebSocketResponse) -> dict[str, Any]:
@@ -523,7 +548,7 @@ class ManagerCore:
             await ws.send_json({"type": "auth", "access_token": self.token})
             if (await receive(ws)).get("type") != "auth_ok":
                 raise ShellyError("Authentication with Home Assistant failed")
-            await ws.send_json({"id": 1, "type": request})
+            await ws.send_json({"id": 1, "type": request, **params})
             while True:
                 msg = await receive(ws)
                 if msg.get("id") == 1:

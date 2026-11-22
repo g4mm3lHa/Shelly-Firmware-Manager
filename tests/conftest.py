@@ -31,6 +31,7 @@ OPTIONS = {
     "log_retention_days": 30,
     "log_entry_limit": 1000,
     "allow_downgrade": True,
+    "keep_installed": False,  # switched on by the tests of "Keep installed versions"
 }
 
 
@@ -76,6 +77,10 @@ class FakeNet:
         self.ha_battery = set()  # devices with a Shelly battery sensor in Home Assistant
         self.extra_registry = []  # further registry entries (other integrations, sub-devices)
         self.resolvable = set()  # host names that resolve (Host name column)
+        self.ha_entries = []  # config entries of the Shelly integration (config_entries/get)
+        self.ha_flows = []  # flows in progress (config_entries/flow/progress)
+        self.setup_error = None  # exception raised by the request of entries and flows
+        self.builds = {}  # offered version -> build ID named by the server
 
     def registry(self):
         """Registry entries as delivered by HA."""
@@ -145,7 +150,8 @@ def net(monkeypatch, tmp_path):
     def offer(version):
         # Like the real Gen2+ URLs the offer URL ends in the SHA-256 of the file
         sha = hashlib.sha256(vendor_content(version)).hexdigest()
-        return {"version": version, "url": f"https://fw.example/Plus1-{version}/{sha}", "steps": "1"}
+        return {"version": version, "url": f"https://fw.example/Plus1-{version}/{sha}", "steps": "1",
+                "build": fake.builds.get(version, "")}
 
     async def fetch_offer(_session, fw_type, _pins=None, version=None):
         if (fw_type, version) == ("Plus1", "1.0.7"):  # reference request of every check
@@ -225,8 +231,15 @@ async def mgr(net):
         await asyncio.sleep(0)
         return set(net.ha_battery)
 
+    async def setup_state():
+        await asyncio.sleep(0)
+        if net.setup_error is not None:
+            raise net.setup_error
+        return list(net.ha_entries), list(net.ha_flows)
+
     m.notified = []
     m._registry = registry
+    m._ha_setup_state = setup_state
     m._battery_devices = battery_devices
     m.notify = notify
     m.changelogs.refresh = net.refresh

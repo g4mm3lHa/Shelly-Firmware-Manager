@@ -44,11 +44,13 @@ options:
   # Automatic check every N days at HH:MM (time zone of Home Assistant)
   check_interval_days: 7
   check_time: "02:45"
+  offer_after_days: 0
   # download_base_url has no default: LAN IP of Home Assistant + port 8098,
   # e.g. http://<HA-IP>:8098 – installations are refused until it is set
   restrict_downloads_to_devices: true
   gen1_updates_enabled: true
   # allow_downgrade has no default: downgrades stay off until enabled
+  keep_installed: true
   import_max_mb: 100
   log_entry_limit: 1000
   log_retention_days: 90
@@ -63,10 +65,12 @@ options:
 schema:
   check_interval_days: "int(1,30)"
   check_time: "match(^([01]\\d|2[0-3]):[0-5]\\d$)"
+  offer_after_days: "int(0,60)"
   download_base_url: "url?"
   restrict_downloads_to_devices: bool
   gen1_updates_enabled: bool
   allow_downgrade: "bool?"
+  keep_installed: bool
   import_max_mb: "int(1,2048)"
   log_entry_limit: "int(100,3000)"
   log_retention_days: "int(1,365)"

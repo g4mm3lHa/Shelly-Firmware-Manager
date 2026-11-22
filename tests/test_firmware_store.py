@@ -488,3 +488,23 @@ async def test_gen1_entries_of_an_older_state_are_marked_imported_once(net):
     again = manager.Manager(dict(OPTIONS), session=None, token="t")
     await again.adopt_files()
     assert again.firmware[later]["source"] == manager_core.SOURCE_DOWNLOAD  # marked only once
+
+
+async def test_installed_versions_are_marked_and_counted(mgr, net):
+    """Firmware tab: a stored Gen2+ version that listed devices run is marked with their
+    names; Settings: stored installed versions and those the next check downloads."""
+    await mgr.scan()  # Kitchen and Garage run 1.4.0, Hall 1.5.0 (up to date); 1.5.0 is downloaded
+    name, _ = store(mgr, "Plus1", "1.4.0")
+    listed = {f["version"]: f for f in mgr.firmware_list()}
+    assert listed["1.4.0"]["installed"] == ["Garage", "Kitchen"] and listed["1.5.0"]["installed"] == ["Hall"]
+    usage = mgr.installed_versions()
+    assert (usage["stored"], usage["pending"]) == (2, 0)
+    assert usage["stored_size"] == listed["1.4.0"]["size"] + listed["1.5.0"]["size"]
+    (data_paths.FW_DIR / name).unlink()
+    usage = mgr.installed_versions()
+    assert (usage["stored"], usage["pending"]) == (1, 0)  # 1.4.0 is no longer offered: not counted
+    del mgr.firmware[[n for n, m in mgr.firmware.items() if m["version"] == "1.5.0"][0]]
+    usage = mgr.installed_versions()
+    assert (usage["stored"], usage["pending"], usage["pending_size"]) == (0, 1, None)
+    ways = {d["name"]: d["way_back"] for d in mgr.public_state()["devices"]}
+    assert ways["Hall"] == {"version": "1.5.0", "stored": False}

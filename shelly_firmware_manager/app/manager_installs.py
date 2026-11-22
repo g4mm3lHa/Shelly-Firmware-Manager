@@ -47,6 +47,14 @@ OTA_BOOT_WAIT_S = 30  # events: and report the target version within 30 s after 
 OTA_POLL_S = 5  # events: query interval around the restart
 OTA_TICK_S = 1  # events: check interval while the update runs
 
+# "Restart the device first" (retry after a failed installation): after the restart
+# command the device goes down, then it must answer again within RESTART_WAIT_S
+RESTART_SETTLE_S = 5
+
+RESTART_WAIT_S = 120
+
+RESTART_POLL_S = 3
+
 MAX_SERVED_IPS = 16  # download diagnosis: client addresses recorded per file
 
 
@@ -66,13 +74,16 @@ class Installs(Checks):
         retry = dev.get("status") == STATUS_ERROR and holds_file(dev)
         return (dev.get("status") == STATUS_READY or retry) and hmac.compare_digest(str(dev.get("sha256")), sha)
 
-    async def install(self, device_id: str, sha: str, approved_by: str, downgrade: bool = False) -> bool:
+    async def install(
+        self, device_id: str, sha: str, approved_by: str, downgrade: bool = False, restart_first: bool = False
+    ) -> bool:
         """Install an approved update or downgrade (see _install_approved). True only
         if the target version is confirmed. Normally no check follows: the device
         keeps its result until the next full check or a single check of the device.
         After a confirmed intermediate version the device is checked again at once
-        (see _check_step)."""
-        ok = await self._install_approved(device_id, sha, approved_by, downgrade)
+        (see _check_step). restart_first: restart the device and wait until it answers
+        again before the installation starts (see _restart_and_wait)."""
+        ok = await self._install_approved(device_id, sha, approved_by, downgrade, restart_first)
         await self._check_step(device_id, approved_by)
         return ok
 
@@ -90,7 +101,7 @@ class Installs(Checks):
             log.info("Check after the intermediate version skipped: %s", err)
 
     async def _install_approved(
-        self, device_id: str, sha: str, approved_by: str, downgrade: bool = False
+        self, device_id: str, sha: str, approved_by: str, downgrade: bool = False, restart_first: bool = False
     ) -> bool:
         """Install an approved update. True only if the target version is confirmed.
 
@@ -161,8 +172,10 @@ class Installs(Checks):
                     entry["downgrade"] = True
                 if unverified:
                     entry["unverified"] = True  # stored version installed without the server's answer
+                if restart_first:
+                    entry["restarted"] = True  # the device was restarted before the installation
                 self.events.add("install", event="started", **entry)
-                ok, diagnosis = await self._install(device_id, dev, sha)
+                ok, diagnosis = await self._install(device_id, dev, sha, restart_first)
                 if ok and downgrade:
                     self._after_downgrade(dev)
                 elif ok or dev.get("status") == STATUS_UNCLEAR:
@@ -217,13 +230,36 @@ class Installs(Checks):
         else:
             dev["message"] = f"Downgraded to {dev.get('version')}"
 
-    async def _install(self, device_id: str, dev: Device, sha: str) -> tuple[bool, str | None]:
-        """Actual installation: pre-check, update command, wait for the target version.
-        Returns (confirmed, diagnosis or None)."""
+    async def _restart_and_wait(self, device_id: str, dev: Device, auth: DeviceAuth | None) -> None:
+        """Restart the device and wait until it answers again (/shelly, polled every
+        RESTART_POLL_S after RESTART_SETTLE_S); ShellyError if it does not answer
+        within RESTART_WAIT_S – nothing is installed then."""
+        dev["message"] = "Restarting the device before the installation"
+        await shelly.restart(self.session, dev["gen"], dev["origin"], auth)
+        await asyncio.sleep(RESTART_SETTLE_S)
+        deadline = time.monotonic() + RESTART_WAIT_S
+        while True:
+            try:
+                await shelly.device_info(self.session, dev["origin"], self._auth_for(device_id))
+                return
+            except (TimeoutError, ShellyError, aiohttp.ClientError, OSError) as err:
+                if time.monotonic() >= deadline:
+                    raise ShellyError(
+                        "The device did not answer within 2 minutes after its restart – nothing was installed"
+                    ) from err
+            await asyncio.sleep(RESTART_POLL_S)
+
+    async def _install(
+        self, device_id: str, dev: Device, sha: str, restart_first: bool = False
+    ) -> tuple[bool, str | None]:
+        """Actual installation: optional restart, pre-check, update command, wait for
+        the target version. Returns (confirmed, diagnosis or None)."""
         # 1. The approval is valid only for exactly this file and this device state
         if await asyncio.to_thread(shelly.file_sha256, data_paths.FW_DIR, dev["file"]) != sha:
             raise ShellyError("Firmware file was modified")
         auth = self._auth(device_id, dev)
+        if restart_first:
+            await self._restart_and_wait(device_id, dev, auth)
         current = await shelly.device_info(self.session, dev["origin"], self._auth_for(device_id))
         if current["mac"] != dev.get("mac") or current["build"] != dev.get("pending_build"):
             raise ShellyError("Device or firmware changed since the check – please check again")

@@ -21,6 +21,7 @@ def make_manager(net, **options):
     m.first_start_open = False
     m.notify = lambda *_a: asyncio.sleep(0, True)
     m._battery_devices = lambda: asyncio.sleep(0, set(net.ha_battery))
+    m._ha_setup_state = lambda: asyncio.sleep(0, (list(net.ha_entries), list(net.ha_flows)))
     return m
 
 

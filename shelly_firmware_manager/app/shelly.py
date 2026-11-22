@@ -24,6 +24,7 @@ Security:
 
 import asyncio
 import base64
+import datetime
 import hashlib
 import hmac
 import ipaddress
@@ -48,6 +49,9 @@ MIN_FW_SIZE = 1024  # anything smaller is certainly no firmware
 FW_EXTENSIONS = (".zip", ".bin", ".gbl")
 FW_NAME_RE = re.compile(r"^[0-9a-f]{64}\.(zip|bin|gbl)$")
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
+# Build date at the start of a Gen2+ build_id ("20241011-114455/1.4.4-g6d2a586") or a Gen1
+# version text ("20230913-112003/v1.14.0-gcb84623"): YYYYMMDD-HHMMSS
+BUILD_DATE_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})-\d{6}(?:/|$)")
 _ERROR_LABEL_RE = re.compile(r"\b(?:message|url)=(?=['\"])")  # labels of aiohttp's ClientResponseError
 VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)(\d+))?")
 
@@ -727,6 +731,75 @@ def _flag(value: object) -> bool | str:
     return value if isinstance(value, bool) else UNSUPPORTED
 
 
+def build_date(text: object) -> str | None:
+    """Build date "YYYY-MM-DD" from the start of a Gen2+ build ID or a Gen1 version
+    text (see BUILD_DATE_RE); None if the text does not start with a valid date. The
+    manufacturer's servers name no release date: the build date is the only one."""
+    match = BUILD_DATE_RE.match(text) if isinstance(text, str) else None
+    if not match:
+        return None
+    try:
+        return datetime.date(*(int(part) for part in match.groups())).isoformat()
+    except ValueError:
+        return None
+
+
+# Script that the Shelly integration of Home Assistant installs on a Gen2+ Shelly to use it
+# as Bluetooth proxy (aioshelly BLE_SCRIPT_NAME); Home Assistant turns Bluetooth on again
+# while it runs
+BLE_PROXY_SCRIPT = "aioshelly_ble_integration"
+
+
+async def _ble_proxy(session: aiohttp.ClientSession, origin: str, auth: DeviceAuth | None) -> bool | None:
+    """True if Home Assistant's Bluetooth proxy script runs on the device (Script.List:
+    name BLE_PROXY_SCRIPT, running), False if not or the device has no scripts, None
+    if it could not be read."""
+    try:
+        data = await _rpc(session, origin, "Script.List", auth=auth)
+    except UnsupportedError:
+        return False
+    except (TimeoutError, ShellyError, aiohttp.ClientError):
+        return None
+    scripts = data.get("scripts")
+    if not isinstance(scripts, list):
+        return None
+    return any(
+        isinstance(e, dict) and e.get("name") == BLE_PROXY_SCRIPT and e.get("running") is True for e in scripts
+    )
+
+
+async def _cloud_connected(session: aiohttp.ClientSession, origin: str, auth: DeviceAuth | None) -> bool | None:
+    """Gen2+: whether the device is connected to the Shelly cloud now (Cloud.GetStatus),
+    None if it could not be read."""
+    try:
+        status = await _rpc(session, origin, "Cloud.GetStatus", auth=auth)
+    except (TimeoutError, ShellyError, aiohttp.ClientError):
+        return None
+    connected = status.get("connected")
+    return connected if isinstance(connected, bool) else None
+
+
+async def wifi_signal(
+    session: aiohttp.ClientSession, gen: int, origin: str, auth: DeviceAuth | None = None
+) -> int | None:
+    """Wi-Fi signal of the device in dBm, read now (Gen2+ Wifi.GetStatus, Gen1 /status
+    wifi_sta). None if the device is not connected over Wi-Fi (e.g. a Pro device on
+    the cable, or no Wi-Fi at all) or reports no value."""
+    if gen >= 2:
+        try:
+            status = await _rpc(session, origin, "Wifi.GetStatus", auth=auth)
+        except UnsupportedError:
+            return None
+        connected = status.get("status") == "got ip"
+    else:
+        status = (await _device_json(session, origin, "/status", auth)).get("wifi_sta") or {}
+        connected = isinstance(status, dict) and status.get("connected") is True
+    rssi = status.get("rssi") if isinstance(status, dict) else None
+    if not connected or isinstance(rssi, bool) or not isinstance(rssi, (int, float)) or not -120 <= rssi <= 0:
+        return None
+    return int(rssi)
+
+
 def _positive(value: object) -> bool:
     """True if a reported period is a number above 0 (a sleeping battery device)."""
     return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
@@ -772,9 +845,14 @@ async def read_settings(
     auth: DeviceAuth | None = None,
     extended: bool = False,
 ) -> dict[str, Any]:
-    """Shelly name, NTP server, eco mode, AP, Bluetooth and websocket debug switch,
-    battery flag and power-on action of all outputs – one request (Gen2+
+    """Shelly name, NTP server, eco mode, AP, Bluetooth, cloud and websocket debug
+    switch, battery flag and power-on action of all outputs – one request (Gen2+
     Shelly.GetConfig, Gen1 /settings).
+
+    cloud_connected: whether the device is connected to the Shelly cloud while the
+    cloud is on (Gen2+ one more request, Cloud.GetStatus; None if unknown or off).
+    ble_proxy: Gen2+ with Bluetooth on – whether Home Assistant's Bluetooth proxy
+    script runs (one more request, Script.List; None if unknown).
 
     battery is True for a battery device that sleeps between wake-ups (Gen2+
     wakeup_period > 0 in the sys status – read with Sys.GetStatus only when extended –
@@ -800,6 +878,11 @@ async def read_settings(
         # then runs on demand) and ble.rpc.enable is no global switch.
         extra["ble"] = _flag((config.get("ble") or {}).get("enable"))
         extra["debug_ws"] = _flag(((system.get("debug") or {}).get("websocket") or {}).get("enable"))
+        extra["cloud"] = _flag((config.get("cloud") or {}).get("enable"))
+        extra["cloud_connected"] = (
+            await _cloud_connected(session, origin, auth) if extra["cloud"] is True else None
+        )
+        extra["ble_proxy"] = await _ble_proxy(session, origin, auth) if extra["ble"] is True else False
         if _positive(system.get("wakeup_period")):
             extra["battery"] = True
         if extended:
@@ -831,6 +914,11 @@ async def read_settings(
         extra["ap"] = _flag((settings.get("wifi_ap") or {}).get("enabled"))
         extra["ble"] = UNSUPPORTED  # Gen1 devices have no Bluetooth switch
         extra["debug_ws"] = UNSUPPORTED  # Gen1 devices have no websocket debug log
+        cloud = settings.get("cloud") or {}
+        extra["cloud"] = _flag(cloud.get("enabled") if isinstance(cloud, dict) else None)
+        connected = cloud.get("connected") if isinstance(cloud, dict) and extra["cloud"] is True else None
+        extra["cloud_connected"] = connected if isinstance(connected, bool) else None
+        extra["ble_proxy"] = False
         extra["battery"] = _positive((settings.get("sleep_mode") or {}).get("period"))
         # Gen1 device ID (also its mDNS host name), e.g. shelly1-B929CC
         extra["gen1_hostname"] = clip((settings.get("device") or {}).get("hostname"), 64) or None
@@ -888,6 +976,7 @@ def validate_settings(changes: dict[str, Any], outputs: list[dict[str, Any]]) ->
         ("ap", "access point"),
         ("ble", "Bluetooth"),
         ("debug_ws", "websocket debug log"),
+        ("cloud", "cloud"),
     ):
         if key in changes:
             if not isinstance(changes[key], bool):
@@ -930,6 +1019,9 @@ async def write_settings(
         if "ble" in changes:  # legacy global switch only (callers check it is supported)
             result = await _rpc(session, origin, "BLE.SetConfig", {"config": {"enable": changes["ble"]}}, auth)
             restart |= bool(result.get("restart_required"))
+        if "cloud" in changes:  # only cloud.enable – the server address stays
+            result = await _rpc(session, origin, "Cloud.SetConfig", {"config": {"enable": changes["cloud"]}}, auth)
+            restart |= bool(result.get("restart_required"))
         for key, value in changes.get("aop", {}).items():
             kind, _, index = key.partition(":")
             output = {"id": int(index), "config": {"initial_state": value}}
@@ -953,6 +1045,8 @@ async def write_settings(
         query["eco_mode_enabled"] = "true" if changes["eco"] else "false"
     if query:
         await _device_json(session, origin, "/settings", auth, query)
+    if "cloud" in changes:
+        await _device_json(session, origin, "/settings/cloud", auth, {"enabled": "1" if changes["cloud"] else "0"})
     for key, value in changes.get("aop", {}).items():
         kind, _, index = key.partition(":")
         if kind not in GEN1_OUTPUT_KINDS or not index.isdigit():
@@ -1107,7 +1201,9 @@ async def fetch_cloud_text(
 async def fetch_offer(
     session: aiohttp.ClientSession, fw_type: str, pins: CertificatePins | None = None, version: str | None = None
 ) -> dict[str, str] | None:
-    """Stable firmware offer {'version', 'url', 'steps'} of a Gen2+ firmware ID, or None.
+    """Stable firmware offer {'version', 'url', 'steps', 'build'} of a Gen2+ firmware ID,
+    or None. 'build' is the build ID the server names (starts with the build date, see
+    build_date; "" if none).
 
     version: installed version of the device. It is sent the way a Shelly asks for
     updates itself – header Shelly-Info with only the firmware ID ("app") and the
@@ -1123,7 +1219,12 @@ async def fetch_offer(
     if not isinstance(stable, dict) or not stable.get("url"):
         return None
     steps = max(1, _int_field(stable, "nsteps", 1))
-    return {"version": clip(stable.get("version"), 64), "url": str(stable["url"]), "steps": str(steps)}
+    return {
+        "version": clip(stable.get("version"), 64),
+        "url": str(stable["url"]),
+        "steps": str(steps),
+        "build": plain(stable.get("build_id"), 128),
+    }
 
 
 async def fetch_gen1_offers(session: aiohttp.ClientSession, pins: CertificatePins | None = None) -> dict[str, Any]:

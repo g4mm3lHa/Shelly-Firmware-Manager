@@ -38,7 +38,7 @@ from shelly import ShellyError, clip
 
 from manager_core import (
     DOWNLOAD_BASE_MESSAGES, Device, FirmwareMeta, ManagerCore, PART_PREFIX, SOURCE_DOWNLOAD,
-    SOURCE_IMPORT, SOURCE_UPLOAD, STATUS_AVAILABLE, STATUS_INSTALLING, STATUS_READY, holds_file,
+    SOURCE_IMPORT, SOURCE_UPLOAD, STATUS_AVAILABLE, STATUS_CURRENT, STATUS_INSTALLING, STATUS_READY, holds_file,
 )
 
 log = logging.getLogger("sfm.manager")
@@ -399,13 +399,89 @@ class FirmwareStore(ManagerCore):
             dev.update(file=None, sha256=None, size=None, source_url=None)
         return sorted(released, key=str.lower)
 
+    @staticmethod
+    def _installed_key(dev: Device) -> tuple[str, tuple[int, ...]] | None:
+        """(firmware ID, parsed version) a listed Gen2+ device runs, else None (Gen1,
+        removed, not identified yet or a version of unknown format)."""
+        if (dev.get("gen") or 1) < 2 or dev.get("removed") or not dev.get("type"):
+            return None
+        try:
+            return str(dev["type"]), shelly.parse_version(dev.get("version"))
+        except ShellyError:
+            return None
+
+    def _stored_versions(self) -> dict[tuple[str, tuple[int, ...]], FirmwareMeta]:
+        """Stored Gen2+ files whose file exists, by (firmware ID, parsed version) – the
+        files a downgrade could use (read-back files only once an offer confirmed
+        them; imported files count, a downgrade to them is allowed with a warning)."""
+        found: dict[tuple[str, tuple[int, ...]], FirmwareMeta] = {}
+        for name, meta in self.firmware.items():
+            if (meta.get("gen") or 1) < 2 or self._adopted_unconfirmed(meta):
+                continue
+            try:
+                parsed = shelly.parse_version(meta.get("version"))
+            except ShellyError:
+                continue
+            if (data_paths.FW_DIR / name).is_file():
+                found[(str(meta.get("type")), parsed)] = meta
+        return found
+
+    def way_back(self, dev: Device, stored: dict[tuple[str, tuple[int, ...]], FirmwareMeta]) -> dict[str, Any] | None:
+        """Way back of a Gen2+ device: {"version": installed version, "stored": whether
+        a file of exactly that version is stored} (a downgrade to it stays possible after
+        the next update); None for Gen1 and devices of unknown version. stored: see
+        _stored_versions (computed once per state request)."""
+        key = self._installed_key(dev)
+        return None if key is None else {"version": dev.get("version"), "stored": key in stored}
+
+    def installed_versions(self) -> dict[str, Any]:
+        """Storage needed by the option keep_installed (Settings tab), over the versions
+        the listed Gen2+ devices run: stored (number, bytes) and those the next check
+        downloads (the device is up to date, so Shelly still offers its version), with an
+        estimated size each (average of the stored Gen2+ files of these firmware IDs,
+        else of all; None while nothing is stored); free bytes of the store volume."""
+        stored = self._stored_versions()
+        running: dict[tuple[str, tuple[int, ...]], list[Device]] = {}
+        for dev in self.devices.values():
+            key = self._installed_key(dev)
+            if key is not None:
+                running.setdefault(key, []).append(dev)
+        kept = [key for key in running if key in stored]
+
+        def offered(dev: Device) -> bool:
+            """Up to date: the server's last offer was exactly the installed version."""
+            try:
+                same = shelly.parse_version(dev.get("offer_version")) == shelly.parse_version(dev.get("version"))
+            except ShellyError:
+                return False
+            return dev.get("status") == STATUS_CURRENT and same
+
+        pending = [key for key, devs in running.items() if key not in stored and any(offered(d) for d in devs)]
+        types = {key[0] for key in pending}
+        sizes = [int(m.get("size") or 0) for k, m in stored.items() if k[0] in types] or [
+            int(m.get("size") or 0) for m in stored.values()
+        ]
+        return {
+            "stored": len(kept),
+            "stored_size": sum(int(stored[key].get("size") or 0) for key in kept),
+            "pending": len(pending),
+            "pending_size": sum(sizes) // len(sizes) if sizes else None,
+            "free": self.free_space(),
+        }
+
     def firmware_list(self) -> list[dict[str, Any]]:
         """Stored firmwares for the "Firmware" tab, followed by the unknown files
-        (marker unknown: only name, size and whether it can be deleted now)."""
+        (marker unknown: only name, size and whether it can be deleted now). installed:
+        names of the listed Gen2+ devices that run exactly this version (their way
+        back after the next update)."""
         users: dict[str, list[dict[str, str]]] = {}  # file name -> devices it is provided for
+        running: dict[tuple[str, tuple[int, ...]], list[str]] = {}  # version -> devices that run it
         for device_id, dev in self.devices.items():
             if holds_file(dev):
                 users.setdefault(dev["file"], []).append({"id": device_id, "name": dev.get("name") or "?"})
+            key = self._installed_key(dev)
+            if key is not None:
+                running.setdefault(key, []).append(str(dev.get("name") or "?"))
         result = []
         for name, meta in self.firmware.items():
             lock = self._delete_lock(name)
@@ -413,6 +489,10 @@ class FirmwareStore(ManagerCore):
             # Devices this file is provided for, ordered by name ({"id", "name"}: the
             # ID lets the Firmware tab open the installation dialog of the device)
             holders = sorted(users.get(name, []), key=lambda d: (d["name"].lower(), d["id"]))
+            installed: list[str] = []
+            if (meta.get("gen") or 1) >= 2:
+                with contextlib.suppress(ShellyError):
+                    installed = running.get((str(meta.get("type")), shelly.parse_version(meta.get("version"))), [])
             result.append(
                 {
                     "name": name,
@@ -421,6 +501,7 @@ class FirmwareStore(ManagerCore):
                     "source": source,
                     "sha_checked": bool(meta.get("sha_checked")) if source == SOURCE_UPLOAD else None,
                     "devices": holders,
+                    "installed": sorted(installed, key=str.lower),
                     "changelog": "changelog" in meta,  # flag only; text: firmware_changelog
                     "intermediate": meta.get("intermediate") is True,  # once provided as an intermediate version
                     "adopted": meta.get("adopted") is True,  # read back from the disk, see adopt_files
@@ -1086,7 +1167,7 @@ class FirmwareStore(ManagerCore):
             "conflict": [brief(e) for e in groups["conflict"]],
         }
 
-    async def confirm_import(self, token: object, user: str = "unknown") -> dict[str, int]:
+    async def confirm_import(self, token: object, user: str = "unknown", acknowledged: object = True) -> dict[str, int]:
         """Step 3: store the new files of the checked import, add missing data to
         already stored ones, keep conflicting stored files. Refused during a check
         (the store must not change then); while it runs no check can start. Answers
@@ -1095,7 +1176,8 @@ class FirmwareStore(ManagerCore):
         The seal only proves that the creator of the file knew its password, not who
         made it: every new file gets the source SOURCE_IMPORT, whatever the manifest
         says (see _stored_firmware and _store_offer), and an import never changes the
-        source of a stored file."""
+        source of a stored file. acknowledged: the user stated to have created the export
+        or to trust its source (the web UI passes the checkbox; False is refused)."""
         if self.checking or self.device_checks:
             raise ShellyError("Not possible during a check – please try again afterwards")
         if self._import_lock.locked():
@@ -1107,6 +1189,8 @@ class FirmwareStore(ManagerCore):
                 checked = staged.get("checked")
                 if not checked:
                     raise ShellyError("The file has not been checked yet")
+                if acknowledged is not True:
+                    raise ValueError("Confirmation incomplete")
                 groups = self._classify(checked["entries"])
                 # The sizes are sealed; a compressed archive can unpack to more than its size
                 if self._free_space() < sum(e["size"] for e in groups["new"]) + SPACE_MARGIN:

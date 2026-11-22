@@ -24,6 +24,7 @@ other integrations are listed read-only (other_shellys).
 """
 
 import asyncio
+import datetime
 import functools
 import logging
 import time
@@ -85,6 +86,16 @@ OTHER_MQTT = "mqtt"  # other device of the MQTT integration
 OTHER_MATTER = "matter"  # Matter device
 
 OTHER_MAX = 500  # entries of the list kept at most
+
+# Why a Shelly that Home Assistant knows is not listed (see _update_listing)
+MISSING_DISABLED = "disabled"  # device (or its config entry) disabled in Home Assistant
+
+MISSING_DISCOVERED = "discovered"  # discovered by Home Assistant, not set up yet
+
+MISSING_IGNORED = "ignored"  # discovery ignored in Home Assistant (config entry with source "ignore")
+
+# Flow sources of a discovery (a flow started by the user or a reauthentication is none)
+DISCOVERY_SOURCES = frozenset({"zeroconf", "dhcp", "bluetooth", "discovery", "integration_discovery", "ssdp"})
 
 # Manufacturer texts that mark a Shelly in another integration (lower case, heuristic)
 SHELLY_MAKERS = ("shelly", "allterco")
@@ -228,6 +239,18 @@ STORE_FALLBACK_HINT = (
     "Stored version {version} is ready and can be installed manually – at your own risk: "
     "without the answer of the Shelly update server it cannot be verified whether an "
     "intermediate version is required first."
+)
+
+# The same for an imported file (origin unverified): Gen2+ and Gen1
+IMPORT_FALLBACK_HINT = (
+    "Stored version {version} (imported file, not confirmed by Shelly) is ready and can be "
+    "installed manually – at your own risk: without the answer of the Shelly update server "
+    "it cannot be verified whether an intermediate version is required first."
+)
+
+IMPORT_FALLBACK_HINT_GEN1 = (
+    "Stored version {version} (imported file, not confirmed by Shelly) is ready and can be "
+    "installed manually – at your own risk."
 )
 
 # Where the update provided for a device comes from (device field offer_source)
@@ -434,6 +457,7 @@ class Checks(DeviceSettings):
                 entry = entries.pop(device_id)
                 dev["name"] = self._entry_name(entry)
                 ignored.append(dev["name"])
+        await self._update_listing(registry, len(seen))
         removed = sorted(i for i in self.devices if i not in seen)
         for device_id in removed:
             self._mark_removed(self.devices[device_id])
@@ -474,6 +498,45 @@ class Checks(DeviceSettings):
                 group.create_task(check(device_id, entry))
             for device_id in removed or []:
                 group.create_task(probe(device_id))
+
+    async def _update_listing(self, registry: list[dict[str, Any]], listed: int) -> None:
+        """Shellys Home Assistant knows but the app does not list, with the reason
+        (MISSING_*), for the line "N of M Shellys listed": disabled main devices of the
+        Shelly integration (device registry), discoveries ignored in Home Assistant
+        (config entries with source "ignore") and discoveries not set up yet (flows in
+        progress). listed: number of Shelly main devices of the registry the app lists.
+        A failed request of the config entries or flows leaves those reasons out
+        (logged); the check goes on."""
+        shelly_ids = {e.get("id") for e in registry if isinstance(e, dict) and _is_shelly(e)}
+        missing: list[dict[str, Any]] = []
+        for entry in registry:
+            if isinstance(entry, dict) and _is_shelly(entry) and entry.get("disabled_by"):
+                if entry.get("via_device_id") in shelly_ids:
+                    continue  # channel or BLU device of a Shelly: no firmware of its own
+                model = clip(entry.get("model_id") or entry.get("model") or "", 64) or None
+                missing.append({"name": self._entry_name(entry), "model": model, "reason": MISSING_DISABLED})
+        try:
+            config_entries, flows = await self._ha_setup_state()
+        except (TimeoutError, ShellyError, aiohttp.ClientError, OSError) as err:  # a hint only: the check goes on
+            log.warning("Config entries of Home Assistant not available: %s", err or type(err).__name__)
+            config_entries, flows = [], []
+        for item in config_entries:
+            if isinstance(item, dict) and item.get("domain", "shelly") == "shelly" and item.get("source") == "ignore":
+                name = clip(item.get("title") or item.get("unique_id") or "Shelly", 100)
+                missing.append({"name": name, "model": None, "reason": MISSING_IGNORED})
+        for flow in flows:
+            context = flow.get("context") if isinstance(flow, dict) else None
+            if not isinstance(context, dict) or flow.get("handler") != "shelly":
+                continue
+            if context.get("source") not in DISCOVERY_SOURCES:
+                continue
+            placeholders = context.get("title_placeholders")
+            found = placeholders.get("name") if isinstance(placeholders, dict) else None
+            name = clip(found or context.get("unique_id") or "Shelly", 100)
+            missing.append({"name": name, "model": None, "reason": MISSING_DISCOVERED})
+        order = (MISSING_DISABLED, MISSING_DISCOVERED, MISSING_IGNORED)
+        missing.sort(key=lambda m: (order.index(m["reason"]), str(m["name"]).lower()))
+        self.listing = {"listed": listed, "missing": missing[:OTHER_MAX]}
 
     @staticmethod
     def _entry_name(entry: dict[str, Any]) -> str:
@@ -675,13 +738,18 @@ class Checks(DeviceSettings):
 
         dev.pop("store_fallback", None)  # set again below if it still applies
         dev.pop("step_target", None)
+        dev.pop("hold", None)
+        dev.pop("offer_date", None)
         if info["gen"] == 1:
             # Gen1: the firmware store comes first. The next higher stored version is
             # provided – also instead of an update provided before – and the
             # manufacturer's list is not asked for this device.
             stored = await self._store_offer(info)
             if stored:
-                self._provide_stored(dev, info, *stored)
+                version = str(stored[1]["version"])
+                upload = self._source(stored[1]) == SOURCE_UPLOAD  # the user's own file is never held back
+                if upload or not self._hold_back(dev, version, shelly.build_date(version)):
+                    self._provide_stored(dev, info, *stored)
                 return
             try:
                 offer = await self._manufacturer_offer(info, offers)
@@ -699,7 +767,13 @@ class Checks(DeviceSettings):
                 file=None,
                 sha256=None,
             )
+            if offer and info["gen"] >= 2:
+                await self._keep_installed(device_id, dev, info, offer)
             return
+        built = shelly.build_date(offer.get("build")) or shelly.build_date(offer["version"])
+        if self._hold_back(dev, offer["version"], built):
+            return
+        dev["offer_date"] = built
 
         # Already provided and device unchanged -> download nothing again
         already = (
@@ -709,25 +783,7 @@ class Checks(DeviceSettings):
             and (data_paths.FW_DIR / str(dev.get("file"))).is_file()
         )
         if not already:
-            # One provide task per firmware ID and version, shared by the full check and
-            # all single-device checks: a parallel device of the same type waits for it
-            # instead of downloading the file a second time
-            fw_key = (info["type"], offer["version"])
-            task = self._provisions.get(fw_key)
-            if task is None:
-                provide = self._provide(fw_key, device_id, dev, info, offer)
-                task = self._provisions[fw_key] = asyncio.ensure_future(provide)
-                task.add_done_callback(functools.partial(self._provision_done, fw_key))
-            waiters = self._provision_waiters.setdefault(fw_key, set())
-            waiters.add(device_id)
-            if fw_key in self._fetching:  # joined a running download
-                self.activity[device_id] = ACTIVITY_DOWNLOADING
-            try:
-                name, sha, size = await task
-            finally:
-                waiters.discard(device_id)
-                if self.activity.get(device_id) == ACTIVITY_DOWNLOADING:
-                    self.activity[device_id] = ACTIVITY_CHECKING
+            name, sha, size = await self._shared_provide(device_id, dev, info, offer)
             dev.update(
                 file=name,
                 sha256=sha,
@@ -747,6 +803,85 @@ class Checks(DeviceSettings):
             towards = f" on the way to {dev['step_target']}" if dev["step_target"] else ""
             message += f" – intermediate version{towards}; the device is checked again after its installation"
         dev.update(status=STATUS_READY, offer_source=source, message=message)
+
+    async def _shared_provide(
+        self, device_id: str, dev: Device, info: dict[str, Any], offer: dict[str, str]
+    ) -> tuple[str, str, int]:
+        """The file of the offered version (see _provide). One provide task per firmware
+        ID and version, shared by the full check and all single-device checks: a
+        parallel device of the same type waits for it instead of downloading the file a
+        second time. Returns (file name, sha256, size)."""
+        fw_key = (info["type"], offer["version"])
+        task = self._provisions.get(fw_key)
+        if task is None:
+            provide = self._provide(fw_key, device_id, dev, info, offer)
+            task = self._provisions[fw_key] = asyncio.ensure_future(provide)
+            task.add_done_callback(functools.partial(self._provision_done, fw_key))
+        waiters = self._provision_waiters.setdefault(fw_key, set())
+        waiters.add(device_id)
+        if fw_key in self._fetching:  # joined a running download
+            self.activity[device_id] = ACTIVITY_DOWNLOADING
+        try:
+            result: tuple[str, str, int] = await task
+        finally:
+            waiters.discard(device_id)
+            if self.activity.get(device_id) == ACTIVITY_DOWNLOADING:
+                self.activity[device_id] = ACTIVITY_CHECKING
+        return result
+
+    async def _keep_installed(
+        self, device_id: str, dev: Device, info: dict[str, Any], offer: dict[str, str]
+    ) -> None:
+        """Option keep_installed (Gen2+): the server offers exactly the installed version
+        (the device is up to date) – store that file as the device's way back, so that a
+        downgrade stays possible after the next update. Nothing is provided to the
+        device; a stored file the offer names is only verified. A failure is logged and
+        does not change the result of the check."""
+        if not self.keep_installed or shelly.parse_version(offer["version"]) != shelly.parse_version(info["version"]):
+            return
+        try:
+            await self._shared_provide(device_id, dev, info, offer)
+        except (TimeoutError, ShellyError, aiohttp.ClientError, OSError, ValueError) as err:
+            log.warning("%s: installed version %s not stored: %s", dev["name"], offer["version"], err)
+
+    def _hold_back(self, dev: Device, version: str, built: str | None) -> bool:
+        """Option offer_after_days: a new version (not an upload) is offered only once
+        it is that many days old, counted from its build date (local date of Home
+        Assistant). While it is younger the device stays up to date with the marker
+        hold {"version", "built", "until"} and nothing is downloaded, provided or
+        notified. "Offer update now" (release_hold) lifts the hold for this version on
+        this device. A version without a build date is offered at once. Returns True
+        if the version is held back."""
+        released = dev.get("hold_released")
+        if released is not None and released != version:
+            dev.pop("hold_released", None)  # a newer version is held again
+        if self.offer_after_days <= 0 or not built or dev.get("hold_released") == version:
+            return False
+        until = datetime.date.fromisoformat(built) + datetime.timedelta(days=self.offer_after_days)
+        if datetime.datetime.now(self.tz).date() >= until:
+            return False
+        dev.update(
+            status=STATUS_CURRENT,
+            offer_version=None,
+            offer_source=None,
+            message="",
+            file=None,
+            sha256=None,
+            hold={"version": version, "built": built, "until": until.isoformat()},
+        )
+        return True
+
+    def release_hold(self, device_id: str) -> str:
+        """"Offer update now": lift the hold of the held version for this device (the
+        caller starts a check of the device, which then provides it). Returns the
+        version; ValueError if no version is held back."""
+        dev = self.devices[device_id]
+        hold = dev.get("hold")
+        if not isinstance(hold, dict) or not hold.get("version"):
+            raise ValueError("No update is held back for this device")
+        dev["hold_released"] = hold["version"]
+        self.save()
+        return str(hold["version"])
 
     def _offer_source(self, name: str) -> str:
         """Source of the file provided for the manufacturer's offer: downloaded by this
@@ -776,6 +911,7 @@ class Checks(DeviceSettings):
             pending_build=info["build"],
             source_url=fresh_url,
             message=OFFER_MESSAGES[source],
+            offer_date=shelly.build_date(meta.get("version")),
         )
 
     async def _step_offer(self, dev: Device, info: dict[str, Any], offers: OfferTasks) -> dict[str, str] | None:
@@ -839,7 +975,11 @@ class Checks(DeviceSettings):
             source_url=None,
             store_fallback=True,
         )
-        hint = STORE_FALLBACK_HINT.format(version=meta["version"])
+        if self._source(meta) != SOURCE_IMPORT:
+            hint = STORE_FALLBACK_HINT
+        else:
+            hint = IMPORT_FALLBACK_HINT if info["gen"] >= 2 else IMPORT_FALLBACK_HINT_GEN1
+        hint = hint.format(version=meta["version"])
         raise ShellyError(f"{error_text(err, 300) or type(err).__name__}. {hint}") from err
 
     def _start_header_check(self) -> None:
