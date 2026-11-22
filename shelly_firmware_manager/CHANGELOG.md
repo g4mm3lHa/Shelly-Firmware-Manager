@@ -5,6 +5,12 @@
 Release candidate. The device list is split into sections with a filter popover, and
 devices removed from Home Assistant stay listed; lost firmware files are read back.
 
+Changes in rc3
+
+Added
+- Option "Resolve host names" (Settings → Advanced, off by default): only while it is
+  on, checks look up host names and the Devices tab offers the column "Host name".
+
 Changes in rc2
 
 Changed

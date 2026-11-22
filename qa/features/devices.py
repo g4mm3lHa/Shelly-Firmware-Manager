@@ -259,11 +259,36 @@ FILTER_LABELS = ["All", "Updates", "Attention", "Not checked", "Up-To-Date", "Un
                  "Other Shellys"]
 
 
+def _host_names(c):
+    """Option "Resolve host names": off (demo) – no Host name column, no Columns or Sort
+    entry; on – the column is shown once in this browser and can be hidden again."""
+    case, f, page = c.case, c.f, c.page
+    label = f.locator('#cols-devices label:has(input[data-col="host_name"])')
+    sort = f.locator('.sort-menu .sort-item[data-value="host_name"]')
+    check(f"{case}: option off – no Host name column, Columns or Sort entry",
+          f.locator("#dev-cards th.c-host_name").count() == 0 and label.is_hidden() and sort.is_hidden())
+
+    def on(route):
+        headers = {k: v for k, v in route.request.headers.items() if k.lower() != "if-none-match"}  # no 304
+        state = route.fetch(headers=headers).json()
+        state["host_names"] = True
+        route.fulfill(json=state)
+
+    page.route("**/api/state", on)
+    refresh_state(page, f)
+    th = f.locator("#dev-cards th.c-host_name").first
+    check(f"{case}: option on – Host name column shown and ticked in Columns", th.is_visible()
+          and f.locator('#cols-devices input[data-col="host_name"]').is_checked() and "shelly-" in f.locator(
+              "#dev-cards td.c-host_name").all_inner_texts().__str__())
+    page.unroute("**/api/state")
+    refresh_state(page, f)
+
+
 def _sections(c):
     """Sections of the device list in their order with the read-only "Other Shellys",
     filter popover (one section, "Other Shellys" only), Removed marker with its tooltip
     and the row menu "Remove from list" (confirmation; removed only in the last case),
-    "No usable address", the hidden "Host name" column, the beta mark of a pre-release
+    "No usable address", the "Host name" column (see _host_names), the beta mark of a pre-release
     and the header checkbox above the row checkboxes."""
     case, f, page, out, width = c.case, c.f, c.page, c.out, c.width
     titles = [t.split(" · ")[0] for t in f.locator("#dev-cards .card-head h2").all_inner_texts()]
@@ -310,10 +335,7 @@ def _sections(c):
         above: b.getBoundingClientRect().bottom <= m.getBoundingClientRect().top + 1}; }""")
     check(f"{case}: beta mark of a pre-release", bool(beta) and beta["text"] == "(beta)" and beta["shown"] and beta["above"], str(beta))
     if width > 700:
-        hidden = f.evaluate("() => getComputedStyle(document.querySelector('#dev-cards th.c-host_name')).display")
-        chooser = f.locator('#cols-devices input[data-col="host_name"]')
-        check(f"{case}: Host name column hidden by default, offered in Columns", hidden == "none" and chooser.count() == 1
-              and not chooser.is_checked(), hidden)
+        _host_names(c)
         x = f.evaluate("""() => [document.querySelector('#dev-cards .card-head input'),
           document.querySelector('#dev-cards td.c-select input:not(.ghost)')].map(e => e.getBoundingClientRect().left)""")
         check(f"{case}: header checkbox above the row checkboxes", abs(x[0] - x[1]) < 0.5, str(x))

@@ -23,6 +23,7 @@ export const OPTION_FIELDS = [
   ["log_entry_limit", "Max. log size (entries)", "number", "100–3000", "Logs"],
   ["log_retention_days", "Log retention (days)", "number", "1–365", "Logs"],
   ["max_parallel_installs", "Max. parallel installations", "number", "1–20; further approvals wait", "Advanced"],
+  ["resolve_host_names", "Resolve host names", "bool", "Looks up each device's host name (<device id>.local) at every check and shows the column “Host name”; off by default", "Advanced"],
   ["pinned_certificates", "Pinned certificates", "pins", "Host below shelly.cloud + SHA-256 fingerprint; several entries per host allowed", "Advanced"],
 ];
 // The firmware store block (export / import) stands in the card "Firmware & Storage"

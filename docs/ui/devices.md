@@ -60,9 +60,11 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
   (unknown does not count); filter only, no action. Spelling "Up-To-Date" like the
   status label.
 - **Host name column (3.8.0, mockup `3.8.0/05`):** optional column "Host name" (between
-  "Last update" and "NTP" in the Columns menu), hidden by default – also for browsers
-  with stored column settings; phones: row "Host name" in the details. Shows the host
-  name of the HA entry, else `<device id>.local`, only when it resolves ("–" otherwise).
+  "Last update" and "NTP" in the Columns menu); phones: row "Host name" in the details.
+  Shows the host name of the HA entry, else `<device id>.local`, only when it resolves
+  ("–" otherwise). Exists only while the option "Resolve host names" is on (off: no
+  column, no Columns/Sort entry, no phone row); switching the option on shows the column
+  once per browser, the Columns menu can hide it again.
 - **Battery devices (2026-11-19, 3.5.0):** battery icon (16 px,
   secondary text colour, tooltip "Battery device: reachable only while it is awake" and
   on a second line "Detected from the device" / "Detected from Home Assistant", 3.8.0)

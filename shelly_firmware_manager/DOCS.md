@@ -86,6 +86,7 @@ the app page – same names, help texts and order). Saving restarts the app.
 | Max. log size (entries) | 1000 | 100–3000 | Size limit of the activity log |
 | Log retention (days) | 90 | 1–365 | Age limit of the activity log |
 | Max. parallel installations | 5 | 1–20 | How many installations (and password changes) run at the same time; further approvals wait |
+| Resolve host names | off | on / off | Looks up each device's host name at every check and shows the **Host name** column (see [Devices](#devices)). Off: no lookup, no column |
 | Pinned certificates | two Shelly hosts | host + SHA-256 | Certificate fingerprints for Shelly servers (see [Certificate pinning](#certificate-pinning)) |
 
 ### Download base URL
@@ -164,11 +165,13 @@ the Home Assistant theme (colours, light/dark) and works on phones.
   filter **All** or **Other Shellys**; the search applies to it. The app recognises
   these devices by the manufacturer text in Home Assistant, so a device may be missing.
   A listed Shelly that Home Assistant also knows over Bluetooth is not repeated here.
-- **Host name** (Columns chooser, off by default; on a phone a row in the details) shows
-  the host name set in the Shelly integration, else the name the device announces in
-  your network, `<device id>.local` (e.g. `shellyplus1pm-a0dd6c29c3e0.local`). The name
-  is looked up on every check and shown only when it resolves, otherwise "–". It is for
-  display only: the app always reaches the device at its address in Home Assistant.
+- **Host name** exists only while **Resolve host names** is on (Settings tab,
+  Advanced). Switching it on shows the column; the Columns chooser can hide it, on a
+  phone it is a row in the details. It shows the host name set in the Shelly
+  integration, else the name the device announces in your network, `<device id>.local`
+  (e.g. `shellyplus1pm-a0dd6c29c3e0.local`). The name is looked up on every check and
+  shown only when it resolves, otherwise "–". It is for display only: the app always
+  reaches the device at its address in Home Assistant.
 - A device you just updated stays on top as "Updated" (or "Unconfirmed" if the target
   version was not confirmed, or "Error" if the installation failed – then with
   **Install** for another attempt) until you check it again or the next full check runs.
@@ -589,9 +592,12 @@ The app connects only to:
 - **Home Assistant** via the Supervisor – device registry, notifications, the app's
   own settings and its slug (for the link to the app page).
 
-For the **Host name** column the app looks up each device's host name (for example
-`shellyplus1pm-a0dd6c29c3e0.local`) through the name resolution of Home Assistant on
-every check. This is a lookup only; the app does not connect to the address it gets.
+While **Resolve host names** is on, the app looks up each device's host name (for
+example `shellyplus1pm-a0dd6c29c3e0.local`) through the name resolution of Home
+Assistant on every check, for the **Host name** column. This is a lookup only; the app does not connect to the address it gets.
+Names ending in `.local` are answered by mDNS in your network (Home Assistant OS and
+supervised systems with systemd-resolved). On a system without it, the DNS of Home
+Assistant may pass the lookup on to your configured DNS servers.
 
 The user interface loads nothing from the internet. No telemetry.
 

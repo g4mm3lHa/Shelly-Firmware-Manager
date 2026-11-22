@@ -268,7 +268,7 @@ function detailsCell(d) {
   const fill = () => {
     const controls = box("div", "detail-actions", actionStrip(d, true));
     const list = valueList([["Model", [d.model, d.gen ? `Gen ${d.gen}` : null].filter(Boolean).join(" · ")], ["Firmware ID", d.type],
-      ["Host name", d.host_name], ["NTP", d.ntp],
+      ...(ui.state.host_names ? [["Host name", d.host_name]] : []), ["NTP", d.ntp],
       ["Last check", fmt(d.last_check)], ["Last success", d.last_success ? fmt(d.last_success) : "never"],
       ["Last update", d.last_update ? fmt(d.last_update) : "–"]], "tile-kv");
     det.replaceChildren(det.firstChild, box("div", "detail-body", controls, list));
@@ -378,8 +378,23 @@ function setSort(value) { prefs.devices.sort = value; savePrefs(); render(true);
 // Toolbar control: all sortable columns, also those hidden in the table
 const devSort = sortControl(DATA_COLUMNS.filter(k => COLUMNS[k].sort).map(k => [k, COLUMNS[k].label]), setSort);
 $("dev-sort").replaceWith(devSort.node);
-/** All column keys in display order. */
-const columnKeys = () => ["select", ...prefs.devices.order, ...Object.keys(COLUMNS).filter(k => COLUMNS[k].fixed && k !== "select")];
+/** All column keys in display order; without the option "Resolve host names" there is no
+ *  Host name column. */
+const columnKeys = () => ["select", ...prefs.devices.order.filter(offered),
+  ...Object.keys(COLUMNS).filter(k => COLUMNS[k].fixed && k !== "select")];
+/** False for a column the app does not offer right now (Host name while the option is off). */
+const offered = key => key !== "host_name" || !!(ui.state && ui.state.host_names);
+// The option "Resolve host names" as last seen by this end device: switching it on shows
+// the Host name column once (the user may hide it again)
+function followHostNames() {
+  const on = !!ui.state.host_names;
+  if (on && loadLocal("hostNamesSeen") !== true && prefs.devices.hidden.includes("host_name")) {
+    prefs.devices.hidden = prefs.devices.hidden.filter(k => k !== "host_name"); savePrefs(); syncChooser();
+  }
+  if (loadLocal("hostNamesSeen") !== on) saveLocal("hostNamesSeen", on);
+  for (const n of document.querySelectorAll('#cols-devices label:has(input[data-col="host_name"]), .sort-menu .sort-item[data-value="host_name"]')) n.hidden = !on;
+  if (!on && prefs.devices.sort[0] === "host_name") prefs.devices.sort = ["device", prefs.devices.sort[1]];
+}
 /** Move a data column before another one (drag & drop) or by one step (keyboard). */
 function moveColumn(key, target) {
   const order = prefs.devices.order.filter(k => k !== key);
@@ -481,6 +496,7 @@ export function renderDevices() {
   const s = ui.state, q = $("dev-search").value.trim().toLowerCase();
   const ok = new Set(s.devices.filter(d => installable(d, s)).map(d => d.id));
   for (const id of [...selected]) if (!ok.has(id)) selected.delete(id);
+  followHostNames();
   const match = d => !q || [d.name, d.shelly_name, d.ip, d.host_name, d.model, d.type].some(v => String(v || "").toLowerCase().includes(q));
   const found = s.devices.filter(match);
   const others = (s.others || []).filter(o => !q || [o.name, o.model, o.firmware, OTHER_KINDS[o.kind]].some(v => String(v || "").toLowerCase().includes(q)));
