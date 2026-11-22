@@ -2,10 +2,10 @@ name: Firmware Manager for Shelly (Beta)
 slug: shelly_firmware_manager
 url: https://github.com/g4mm3lHa/Shelly-Firmware-Manager
 description: >-
-  Downloads Shelly firmware via Home Assistant, provides it through its own
-  local download server and installs it after manual approval.
+  Keeps Shelly devices (Gen1 to Gen4) up to date locally: checks, stores and
+  installs firmware after your approval.
 # Not next to "name": the beta branch changes the name, every release the version
-version: "3.9.0-rc1"
+version: "3.9.0"
 arch:
   - aarch64
   - amd64

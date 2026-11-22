@@ -1,10 +1,11 @@
 """Local demo server with fake data for UI tests (no network access).
 
-Usage: python demo.py <app_dir> <port> <scenario: idle|busy|legacy|missing|features|first|public>
+Usage: python demo.py <app_dir> <port> <scenario: idle|busy|legacy|missing|features|first|public|docs>
 legacy: download_base_url is the former example value (not confirmed) and one device
 installs with device progress; missing: download_base_url not set; public: download_base_url is a public IP address (saved
 before it was refused); features: idle
-plus stored older versions (one of them uploaded) for downgrade and upload checks.
+plus stored older versions (one of them uploaded) for downgrade and upload checks; docs: features with
+fewer open updates and other models, for the screenshots of the documentation.
 Serves the UI app below /ui/ and a same-origin wrapper /wrap that embeds it in an
 iframe (like the HA Ingress panel)."""
 
@@ -44,7 +45,7 @@ m = manager.Manager(opts, session=None, token="t")
 m.first_start_open = scenario == "first"
 now = int(time.time())
 names = ["Kitchen light", "Living room ceiling with a really long device name", "Hall", "Garage door", "Pool pump",
-         "Office desk", "Bedroom shutter", "Heat pump 3EM", "Garden plug", "Basement", "Attic fan", "Terrace",
+         "Office desk", "Bedroom shutter", "Heat pump", "Garden plug", "Basement", "Attic fan", "Terrace",
          "Washing machine", "Dryer", "Fridge", "Boiler", "Entrance", "Bathroom", "Kids room", "Guest room",
          "Workshop", "Carport", "Sauna", "Wallbox meter", "Doorbell"]
 statuses = ["ready", "available", "up-to-date", "up-to-date", "error", "unconfirmed", "up-to-date", "ready",
@@ -82,7 +83,7 @@ for i, n in enumerate(names):
         # websocket debug log: off (grey), on (yellow), unknown; Gen1 has none
         "debug_ws": "unsupported" if gen == 1 else [False, True, False, None][i % 4],
     }
-if scenario == "features":  # older versions for the downgrade list, one uploaded
+if scenario in ("features", "docs"):  # older versions for the downgrade list, one uploaded
     for version, source in (("1.3.1", "download"), ("1.3.0", "download"), ("1.2.0", "upload")):
         older = f"Plus1 {version} ".encode() * 6000
         older_sha = hashlib.sha256(older).hexdigest()
@@ -129,6 +130,18 @@ m.devices[f"{24:032x}"].update(battery=True, status="asleep", error_level="warni
 m.devices[f"{21:032x}"]["battery"] = True
 # The Doorbell was recognised as battery device by Home Assistant (battery sensor)
 m.devices[f"{24:032x}"]["battery_source"] = "home_assistant"
+if scenario == "docs":  # screenshots of the documentation: fewer open updates, other models
+    docs_models = [("SNSW-102P16EU", "Plus2PM"), ("SNPL-00112EU", "PlusPlugS"), ("SNSW-001P16EU", "Plus1PM"),
+                   ("SNSN-0024X", "PlusI4"), ("SPEM-003CEBEU", "Pro3EM"), ("SNSW-001X8EU", "PlusUni")]
+    for i, d in enumerate(m.devices.values()):
+        if i in (5, 6, 14, 16):  # leave the sections of finished or failed installations out
+            d.update(status="up-to-date", updated=False, install_failed=False, store_fallback=False, error_level=None, message="",
+                     step_target=None, offer_version=None, file=None, sha256=None, pending_version=None, offer_source=None, source_url=None)
+        elif d["status"] in ("ready", "available") and i not in (0, 7, 10):
+            d.update(status="up-to-date", offer_version=None, file=None, sha256=None, pending_version=None, offer_source=None,
+                     source_url=None)
+        if d["gen"] > 1 and d["status"] in ("up-to-date", "unregistered", "asleep") and not d.get("hold"):
+            d["model"], d["type"] = docs_models[i % len(docs_models)]
 # Host names of the registry entries (column "Host name"); the others were set up by IP
 for i in range(0, 25, 3):
     m.devices[f"{i:032x}"]["host_name"] = f"shelly-{i}.local"
@@ -162,7 +175,7 @@ m.events.add("install", event="confirmed", ok=True, unverified=True, device="Ent
              user="demo")
 m.events.add("check", trigger="step", devices=1, duration=1.4, updates=1, warnings=0, errors=0,
              result="1 update(s), 0 warning(s), 0 error(s)", user="demo",
-             findings=[{"device": "Heat pump 3EM", "version": "1.5.0", "offer": "1.7.0", "severity": "success"}])
+             findings=[{"device": "Heat pump", "version": "1.5.0", "offer": "1.7.0", "severity": "success"}])
 m.credentials.entries[f"{1:032x}"] = {"gen": 2, "realm": "shelly-1", "ha1": "0" * 64}
 # three consecutive log entries of one device (grouped by a side bar) and a check with mixed findings
 m.events.add("setting", device="Pool pump", changes=[{"setting": "Eco mode", "old": "on", "new": "off"}], user="demo")
@@ -176,7 +189,7 @@ m.events.add("check", severity="error", trigger="manual", devices=23, duration=3
              findings=[{"device": "Sauna", "version": "1.6.2", "offer": "2.0.3", "source": "manufacturer", "severity": "success"},
                        {"device": "Doorbell", "error": "Cannot connect to host 192.168.1.34:80", "severity": "warning"},
                        {"device": "Fridge", "error": "The Shelly rejected the password", "severity": "error"}])
-if scenario == "features":  # next version: cloud, Bluetooth proxy, offer delay, Shellys not listed, imported file
+if scenario in ("features", "docs"):  # next version: cloud, Bluetooth proxy, offer delay, Shellys not listed, imported file
     for i, key in enumerate(m.devices):
         d = m.devices[key]
         d["cloud"] = [True, False, None, False][i % 4]

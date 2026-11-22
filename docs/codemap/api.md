@@ -11,7 +11,7 @@ Part of `docs/CODEMAP.md`; read when you change routes in `web_ui.py`.
 | `POST /api/scan` | `reserve_check` + `scan` (background) |
 | `POST /api/devices/{id}/check` | `reserve_check("device")` + `check_device` |
 | `POST /api/devices/{id}/install` | `approval_matches` / `downgrade_*` + `install` (`confirm`, `sha256`, `restart`: restart the device first; downgrade: `downgrade` + `acknowledged`) |
-| `POST /api/devices/{id}/offer-now` | `release_hold` + check of the device (409 if nothing is held) |
+| `POST /api/devices/{id}/offer-now` | `held_version`, `reserve_check`, then `release_hold` + check of the device (409 if nothing is held or the check cannot start; the hold stays then) |
 | `GET /api/devices/{id}/signal` | `wifi_signal` (`{rssi}`, read now; None: cable; not readable → 409, shown as "unknown") |
 | `GET /api/devices/{id}/downgrades` | `downgrade_versions`, `downgrade_blocker` |
 | `GET /api/devices/{id}/changelog` | `changelog_for` |

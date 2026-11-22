@@ -118,6 +118,9 @@ const VIEWS = ["devices", "firmware", "logs", "settings"];
 function showView(v) {
   ui.view = v; closeRowMenu();
   for (const k of VIEWS) { $("view-" + k).hidden = k !== v; $("tab-" + k).classList.toggle("active", k === v); $("tab-" + k).setAttribute("aria-selected", k === v); }
+  // "Check now" belongs to the device data, not to the settings: hidden there, its place
+  // is kept so the header does not move when the tab changes
+  $("scan").classList.toggle("off-view", v === "settings");
   if (v === "settings") { ui.options = null; renderSettings(); api("api/settings").then(o => { ui.options = o; renderSettings(); }).catch(e => message("Settings", e.message, "error")); }
   load(true);
 }

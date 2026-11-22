@@ -261,6 +261,18 @@ def _sorting_and_downgrade(c):
             stacked: p.length === 2 && p[1].top >= p[0].bottom, lines: Math.round(s.height)}; }""")
         check(f"{case}: header – pills stacked, Check now right and centred", head["right"] and head["mid"] < 2
               and head["stacked"] and head["lines"] <= 48, str(head))
+    # Settings tab: "Check now" hidden, its place kept (header height and pills unchanged)
+    head_js = """() => { const t = document.querySelector('.titlebar').getBoundingClientRect(),
+      s = document.getElementById('scan'); return {h: Math.round(t.height), w: Math.round(t.width),
+      vis: getComputedStyle(s).visibility}; }"""
+    before = f.evaluate(head_js)
+    f.locator("#tab-settings").click()
+    inside = f.evaluate(head_js)
+    check(f"{case}: Settings tab – Check now hidden, header unchanged", inside["vis"] == "hidden"
+          and inside["h"] == before["h"] and inside["w"] == before["w"] and f.evaluate(OVERFLOW_JS) <= 0,
+          f"{before} / {inside}")
+    f.locator("#tab-devices").click()
+    check(f"{case}: Devices tab – Check now visible again", f.evaluate(head_js)["vis"] == "visible")
     tools = f.locator("#view-devices .tb-main .tool-btn")
     size = tools.first.evaluate("b => Math.round(b.getBoundingClientRect().width)")
     check(f"{case}: search, sort and filter icons in the Devices toolbar", tools.count() == 3 and size == (44 if width < 700 else 36),

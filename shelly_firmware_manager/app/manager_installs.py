@@ -49,9 +49,11 @@ OTA_TICK_S = 1  # events: check interval while the update runs
 
 # "Restart the device first" (retry after a failed installation): after the restart
 # command the device goes down, then it must answer again within RESTART_WAIT_S
-RESTART_SETTLE_S = 5  # wait before the first query (the device is still going down)
+RESTART_SETTLE_S = 1  # wait before the first query
+RESTART_DOWN_S = 30  # a device that still answers is queried this long for going down
+RESTART_DOWN_POLL_S = 1  # query interval until it stops answering
 RESTART_WAIT_S = 120  # the device must answer again within 2 minutes
-RESTART_POLL_S = 3  # query interval while waiting
+RESTART_POLL_S = 3  # query interval while waiting for its answer
 
 MAX_SERVED_IPS = 16  # download diagnosis: client addresses recorded per file
 
@@ -228,24 +230,42 @@ class Installs(Checks):
         else:
             dev["message"] = f"Downgraded to {dev.get('version')}"
 
+    async def _verify_unchanged(self, device_id: str, dev: Device) -> None:
+        """Pre-check of an installation: the device at the address is the checked one
+        (MAC) and still runs the checked build; ShellyError otherwise."""
+        current = await shelly.device_info(self.session, dev["origin"], self._auth_for(device_id))
+        if current["mac"] != dev.get("mac") or current["build"] != dev.get("pending_build"):
+            raise ShellyError("Device or firmware changed since the check – please check again")
+
     async def _restart_and_wait(self, device_id: str, dev: Device, auth: DeviceAuth | None) -> None:
-        """Restart the device and wait until it answers again (/shelly, polled every
-        RESTART_POLL_S after RESTART_SETTLE_S); ShellyError if it does not answer
-        within RESTART_WAIT_S – nothing is installed then."""
+        """Restart the device and wait until it answers again. A device that still
+        answers after the restart command (slow shutdown) is queried every
+        RESTART_DOWN_POLL_S until it stops answering – an answer before that is not
+        taken as "back". If it never stops answering within RESTART_DOWN_S, the
+        restart was too short to see and the installation goes on. After it went
+        down, /shelly is polled every RESTART_POLL_S; ShellyError if it does not
+        answer within RESTART_WAIT_S after the restart command – nothing is
+        installed then."""
         dev["message"] = "Restarting the device before the installation"
         await shelly.restart(self.session, dev["gen"], dev["origin"], auth)
+        started = time.monotonic()
+        went_down = False
         await asyncio.sleep(RESTART_SETTLE_S)
-        deadline = time.monotonic() + RESTART_WAIT_S
         while True:
             try:
                 await shelly.device_info(self.session, dev["origin"], self._auth_for(device_id))
-                return
+                if went_down:
+                    return
+                if time.monotonic() - started >= RESTART_DOWN_S:
+                    log.info("%s: no pause seen after the restart command – installing", dev["name"])
+                    return
             except (TimeoutError, ShellyError, aiohttp.ClientError, OSError) as err:
-                if time.monotonic() >= deadline:
+                went_down = True
+                if time.monotonic() - started >= RESTART_WAIT_S:
                     raise ShellyError(
                         "The device did not answer within 2 minutes after its restart – nothing was installed"
                     ) from err
-            await asyncio.sleep(RESTART_POLL_S)
+            await asyncio.sleep(RESTART_POLL_S if went_down else RESTART_DOWN_POLL_S)
 
     async def _install(
         self, device_id: str, dev: Device, sha: str, restart_first: bool = False
@@ -257,10 +277,10 @@ class Installs(Checks):
             raise ShellyError("Firmware file was modified")
         auth = self._auth(device_id, dev)
         if restart_first:
+            # Only the approved device is restarted: identity and build first
+            await self._verify_unchanged(device_id, dev)
             await self._restart_and_wait(device_id, dev, auth)
-        current = await shelly.device_info(self.session, dev["origin"], self._auth_for(device_id))
-        if current["mac"] != dev.get("mac") or current["build"] != dev.get("pending_build"):
-            raise ShellyError("Device or firmware changed since the check – please check again")
+        await self._verify_unchanged(device_id, dev)
 
         # 2. Trigger the update; the Shelly downloads from the app's download server.
         # Gen2+: over the device WebSocket, so the device's own OTA events

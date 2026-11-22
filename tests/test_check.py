@@ -522,6 +522,24 @@ async def test_server_decides_and_a_stored_file_of_the_offered_version_is_used(m
     assert {f["source"] for f in entry["findings"]} == {"store"} and entry["updates"] == 2
 
 
+@pytest.mark.parametrize("source", [manager_core.SOURCE_DOWNLOAD, manager_core.SOURCE_IMPORT])
+async def test_provided_file_the_offer_does_not_name_is_replaced(mgr, net, source):
+    """A device that is ready with a file the offer URL does not name (provided under
+    older rules, e.g. an imported foreign file) does not keep it: the next check
+    provides the manufacturer's file. An upload of the version stays provided."""
+    mgr.devices[A] = {"name": "Kitchen"}
+    await mgr.check_device(A)
+    dev = mgr.devices[A]
+    foreign, fsha = store(mgr, "Plus1", "1.5.0", source=source, content=b"foreign" * 3000)
+    dev.update(file=foreign, sha256=fsha)
+    await mgr.check_device(A)
+    assert dev["status"] == manager_core.STATUS_READY and dev["file"] != foreign and not mgr.approval_matches(A, fsha)
+    upload, usha = store(mgr, "Plus1", "1.5.0", source=manager_core.SOURCE_UPLOAD, content=b"u" * 3000)
+    dev.update(file=upload, sha256=usha)
+    await mgr.check_device(A)
+    assert dev["file"] == upload and mgr.approval_matches(A, usha)
+
+
 async def test_uploaded_file_of_the_offered_version_is_used(mgr, net):
     name, sha = store(mgr, "Plus1", "1.5.0", source=manager_core.SOURCE_UPLOAD)
     mgr.devices[A] = {"name": "Kitchen"}
@@ -1284,6 +1302,26 @@ async def test_keep_installed_stores_the_version_a_device_runs(mgr, net):
     assert net.downloads == 1  # stored file named by the offer: only verified
 
 
+async def test_keep_installed_without_sha_in_the_url_keeps_a_stored_download(mgr, net, monkeypatch):
+    """An offer URL without SHA-256: a stored download of the installed version is kept,
+    not loaded again at every check."""
+    net.devices = {B: net.devices[B]}
+    mgr.keep_installed = True
+    fetch = shelly.fetch_offer
+
+    async def without_sha(*args, **kwargs):
+        offer = await fetch(*args, **kwargs)
+        if offer:
+            offer["url"] = offer["url"].rsplit("/", 1)[0] + "/Plus1.zip"
+        return offer
+
+    monkeypatch.setattr(shelly, "fetch_offer", without_sha)
+    await mgr.scan()
+    assert net.downloads == 1 and len(mgr.firmware) == 1
+    await mgr.scan()
+    assert net.downloads == 1 and len(mgr.firmware) == 1
+
+
 async def test_keep_installed_failure_does_not_change_the_check(mgr, net, monkeypatch):
     """A failed download of the installed version is logged only."""
     net.devices = {B: net.devices[B]}
@@ -1324,13 +1362,15 @@ async def test_young_version_is_held_back_until_it_is_old_enough(mgr, net):
     until = (datetime.date.fromisoformat(day) + datetime.timedelta(days=7)).isoformat()
     assert dev["status"] == manager_core.STATUS_CURRENT and dev["hold"] == {"version": "1.5.0", "built": day, "until": until}
     assert net.downloads == 0 and not mgr.notified and not dev.get("offer_version")
-    assert mgr.release_hold(A) == "1.5.0"
+    assert mgr.release_hold(A, "alice") == "1.5.0"
+    entry = mgr.events.entries[-1]
+    assert (entry["kind"], entry["action"], entry["version"], entry["user"]) == ("device", "offered_now", "1.5.0", "alice")
     await mgr.check_device(A)
     assert dev["status"] == manager_core.STATUS_READY and "hold" not in dev and dev["offer_date"] == day
     await mgr.scan()
     assert mgr.devices[A]["status"] == manager_core.STATUS_READY and mgr.devices[C].get("hold")
     with pytest.raises(ValueError):
-        mgr.release_hold(B)  # nothing held back
+        mgr.release_hold(B, "alice")  # nothing held back
 
 
 async def test_old_enough_or_undated_version_is_offered_at_once(mgr, net):
@@ -1342,6 +1382,21 @@ async def test_old_enough_or_undated_version_is_offered_at_once(mgr, net):
     net.builds["1.5.0"] = ""
     await mgr.check_device(C)
     assert mgr.devices[C]["status"] == manager_core.STATUS_READY and mgr.devices[C]["offer_date"] is None
+
+
+async def test_gen2_upload_of_the_offered_version_is_never_held_back(mgr, net):
+    """Gen2+ as Gen1: the user's own upload of exactly the offered version is provided
+    at once, a held-back offer without such an upload is not."""
+    net.builds["1.5.0"] = built_days_ago(2)[0]
+    mgr.offer_after_days = 30
+    mgr.devices[A] = {"name": "Kitchen"}
+    await mgr.check_device(A)
+    assert mgr.devices[A]["hold"]["version"] == "1.5.0"
+    name, _ = store(mgr, "Plus1", "1.5.0", source=manager_core.SOURCE_UPLOAD, content=b"u" * 3000)
+    await mgr.check_device(A)
+    dev = mgr.devices[A]
+    assert dev["status"] == manager_core.STATUS_READY and "hold" not in dev and dev["file"] == name
+    assert net.downloads == 0
 
 
 async def test_gen1_upload_is_never_held_back(net, monkeypatch):
@@ -1391,6 +1446,15 @@ async def test_shellys_known_to_home_assistant_but_not_listed(mgr, net):
     await mgr.scan()
     assert [m["reason"] for m in mgr.listing["missing"]] == ["disabled"]
     assert make_manager(net).listing == mgr.listing  # kept with the state
+
+
+@pytest.mark.parametrize("listed", ["3", [1], None, -1, True, 2.5])
+def test_unexpected_listing_count_in_the_state_counts_as_zero(net, listed):
+    """A stored count that is not a whole number never stops the start."""
+    m = make_manager(net)
+    m.listing = {"listed": listed, "missing": []}
+    m.save()
+    assert make_manager(net).listing == {"listed": 0, "missing": []}
 
 
 async def test_gen2_store_fallback_of_an_imported_file_names_its_origin(mgr, net):

@@ -613,6 +613,8 @@ async def test_restart_first_waits_until_the_device_answers(run_install, monkeyp
     before the pre-check and the update command."""
     monkeypatch.setattr(manager_installs, "RESTART_SETTLE_S", 0)
     monkeypatch.setattr(manager_installs, "RESTART_POLL_S", 0)
+    monkeypatch.setattr(manager_installs, "RESTART_DOWN_POLL_S", 0)
+    monkeypatch.setattr(manager_installs, "RESTART_DOWN_S", 0.05)  # this fake device never goes down
     order = []
 
     async def restart(*_args):
@@ -629,28 +631,63 @@ async def test_restart_first_waits_until_the_device_answers(run_install, monkeyp
     assert ok and order == ["restart"]
 
 
-async def test_restart_first_without_answer_installs_nothing(mgr, monkeypatch):
-    """No answer within the limit after the restart: error, no update command."""
+RESTART_DEV = {"name": "Kitchen", "gen": 2, "origin": "http://192.168.1.10", "mac": "AA", "file": "x.zip",
+               "version": "1.4.0", "pending_version": "1.5.0", "pending_build": "b-old"}
+
+
+def restart_fakes(monkeypatch, answers):
+    """Fake device for "Restart the device first": answers[i] is the i-th /shelly
+    answer (an exception is raised, a dict returned; the last one repeats). Returns
+    the list of calls ("restart", "info", "trigger") in order."""
     monkeypatch.setattr(manager_installs, "RESTART_SETTLE_S", 0)
     monkeypatch.setattr(manager_installs, "RESTART_POLL_S", 0)
-    monkeypatch.setattr(manager_installs, "RESTART_WAIT_S", 0.05)
-    dev = {"name": "Kitchen", "gen": 2, "origin": "http://192.168.1.10", "mac": "AA", "file": "x.zip",
-           "version": "1.4.0", "pending_version": "1.5.0", "pending_build": "b-old"}
-    triggered = []
+    monkeypatch.setattr(manager_installs, "RESTART_DOWN_POLL_S", 0)
+    calls = []
 
-    async def gone(*_args, **_kwargs):
-        raise TimeoutError()
+    async def info(*_args, **_kwargs):
+        answer = answers[min(calls.count("info"), len(answers) - 1)]
+        calls.append("info")
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
 
     async def restart(*_args):
-        return None
+        calls.append("restart")
 
     async def trigger(*_args):
-        triggered.append(1)
+        calls.append("trigger")
 
     monkeypatch.setattr(shelly, "file_sha256", lambda *_a: "s")
     monkeypatch.setattr(shelly, "restart", restart)
-    monkeypatch.setattr(shelly, "device_info", gone)
+    monkeypatch.setattr(shelly, "device_info", info)
     monkeypatch.setattr(shelly, "trigger_update", trigger)
+    return calls
+
+
+async def test_restart_first_checks_the_device_before_the_restart(mgr, monkeypatch):
+    """Another device at the address (MAC) or another build: nothing is restarted."""
+    calls = restart_fakes(monkeypatch, [{"mac": "BB", "build": "b-old"}])
+    with pytest.raises(shelly.ShellyError, match="changed since the check"):
+        await mgr._install(A, dict(RESTART_DEV), "s", restart_first=True)
+    assert calls == ["info"]
+
+
+async def test_restart_first_waits_for_a_slow_shutdown(mgr, monkeypatch):
+    """A device that still answers after the restart command is not taken as back:
+    the installation starts only after it stopped answering and answers again."""
+    me = {"mac": "AA", "build": "b-old"}
+    calls = restart_fakes(monkeypatch, [me, me, me, TimeoutError(), me])
+    monkeypatch.setattr(mgr, "_await_target_version", lambda *_a: asyncio.sleep(0, (True, None)))
+    monkeypatch.setattr(mgr, "_update_over_websocket", lambda *_a: asyncio.sleep(0, None))
+    await mgr._install(A, dict(RESTART_DEV), "s", restart_first=True)
+    # check, restart, two answers while going down, no answer, back, check again, update
+    assert calls == ["info", "restart", "info", "info", "info", "info", "info", "trigger"]
+
+
+async def test_restart_first_without_answer_installs_nothing(mgr, monkeypatch):
+    """No answer within the limit after the restart: error, no update command."""
+    monkeypatch.setattr(manager_installs, "RESTART_WAIT_S", 0.05)
+    calls = restart_fakes(monkeypatch, [{"mac": "AA", "build": "b-old"}, TimeoutError()])
     with pytest.raises(shelly.ShellyError, match="did not answer within 2 minutes"):
-        await mgr._install(A, dev, "s", restart_first=True)
-    assert not triggered
+        await mgr._install(A, dict(RESTART_DEV), "s", restart_first=True)
+    assert "restart" in calls and "trigger" not in calls

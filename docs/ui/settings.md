@@ -59,7 +59,7 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
 - **Upload progress (3.4.1):** firmware upload and store import send the file in parts
   and show "Uploading <file> … n %" in the dialog, then "Checking <file> …" (import).
 
-## Next version (mockups `3.9.0`, approved 2026-11-22)
+## Offer delay, way back, import (3.9.0, mockups `3.9.0`, approved 2026-11-22)
 - **Options (F1):** "Offer updates only after (days)" in "Checks" after "Check time";
   "Keep installed versions" in "Firmware & Storage" after "Allow downgrades", below it
   the line "n installed versions: x are stored (MB), y are downloaded at the next check

@@ -509,13 +509,18 @@ async def test_http_install_refused_with_a_stored_bad_download_base_url(net):
 
 
 async def test_http_offer_now_lifts_the_hold_and_checks_the_device(client, mgr, net):
-    """"Offer update now": 409 while nothing is held back; otherwise the hold of this
-    version is lifted and the device checked, which provides it."""
+    """"Offer update now": 409 while nothing is held back or the check cannot start
+    (the hold stays then); otherwise the hold of this version is lifted and the device
+    checked, which provides it."""
     mgr.offer_after_days = 7
     net.builds["1.5.0"] = f"{datetime.date.today():%Y%m%d}-101500/1.5.0-gabc"
     await mgr.scan()
     r = await client.post(f"/api/devices/{B}/offer-now", json={}, headers=hdr(client))
     assert r.status == 409  # Hall is up to date
+    mgr.device_checks[A] = "running"  # the check cannot start now: 409, the hold stays
+    r = await client.post(f"/api/devices/{A}/offer-now", json={}, headers=hdr(client))
+    assert r.status == 409 and "hold_released" not in mgr.devices[A]
+    del mgr.device_checks[A]
     r = await client.post(f"/api/devices/{A}/offer-now", json={}, headers=hdr(client))
     assert r.status == 200
     for _ in range(100):
@@ -526,8 +531,8 @@ async def test_http_offer_now_lifts_the_hold_and_checks_the_device(client, mgr, 
 
 
 async def test_http_wifi_signal_and_restart_flag(client, mgr, net, monkeypatch):
-    """Wi-Fi signal read now; the install request passes "restart" and refuses other
-    values than true/false."""
+    """Wi-Fi signal read now; the install request passes "restart" – only after a failed
+    installation – and refuses other values than true/false."""
     await mgr.scan()
 
     async def signal(*_args, **_kwargs):
@@ -553,6 +558,9 @@ async def test_http_wifi_signal_and_restart_flag(client, mgr, net, monkeypatch):
     body = {"sha256": mgr.devices[A]["sha256"], "confirm": True}
     r = await client.post(f"/api/devices/{A}/install", json={**body, "restart": "yes"}, headers=hdr(client))
     assert r.status == 400
+    r = await client.post(f"/api/devices/{A}/install", json={**body, "restart": True}, headers=hdr(client))
+    assert r.status == 400  # a restart first only after a failed installation
+    mgr.devices[A]["install_failed"] = True
     r = await client.post(f"/api/devices/{A}/install", json={**body, "restart": True}, headers=hdr(client))
     assert r.status == 200
     await asyncio.sleep(0.01)

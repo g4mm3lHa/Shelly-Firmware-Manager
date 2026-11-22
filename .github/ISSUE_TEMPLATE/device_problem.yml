@@ -1,0 +1,88 @@
+name: Device problem
+description: One Shelly cannot be checked, updated or changed, or shows wrong values.
+title: "[Device] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check the Troubleshooting section and the FAQ of the documentation first.
+        Do not report security problems here – use the private way described in SECURITY.md.
+        Remove passwords, tokens and public IP addresses from everything you paste.
+  - type: input
+    id: model
+    attributes:
+      label: Shelly model
+      description: From Device Details (row menu of the device).
+      placeholder: "Shelly Plus 1PM (SNSW-001P16EU)"
+    validations:
+      required: true
+  - type: dropdown
+    id: generation
+    attributes:
+      label: Generation
+      options:
+        - Gen1
+        - Gen2
+        - Gen3
+        - Gen4
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware ID and installed firmware version
+      description: From Device Details (row menu of the device).
+      placeholder: "Plus1PM, 1.4.0"
+    validations:
+      required: true
+  - type: input
+    id: offered
+    attributes:
+      label: Offered firmware version
+      description: Shown in the Devices tab when an update is available. Leave empty if there is none.
+      placeholder: "1.5.0"
+  - type: input
+    id: app_version
+    attributes:
+      label: Version of the app
+      description: Shown on the app page in Home Assistant.
+      placeholder: "X.Y.Z"
+    validations:
+      required: true
+  - type: input
+    id: ha_version
+    attributes:
+      label: Version of Home Assistant
+      placeholder: "2026.11.2"
+    validations:
+      required: true
+  - type: dropdown
+    id: connection
+    attributes:
+      label: How is the device connected?
+      options:
+        - Wi-Fi
+        - Ethernet / cable
+        - Not sure
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens with this device?
+      description: What did you do, what did you expect, what happened instead? Does it happen with other Shellys too?
+    validations:
+      required: true
+  - type: textarea
+    id: activity_log
+    attributes:
+      label: Entry of the activity log
+      description: Logs tab of the app – the entry of this device with its details, as text or screenshot.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: app_log
+    attributes:
+      label: App log
+      description: Log tab of the app page in Home Assistant – the lines around the time of the problem.
+      render: text

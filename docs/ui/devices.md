@@ -110,7 +110,7 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
 - Websocket debug popup: explanation, link `<web_url>#/diagnostics` (new tab,
   noopener), warning below firmware 1.0.0.
 
-## Next version: cloud, Bluetooth proxy, offer delay, missing Shellys, installation (mockups `3.9.0`, approved 2026-11-22)
+## Cloud, Bluetooth proxy, offer delay, missing Shellys, installation (3.9.0, mockups `3.9.0`, approved 2026-11-22)
 Wordings: `mockups/3.9.0/TEXTE.md`.
 - **Cloud (F13, F14):** tenth icon of the action column after Bluetooth (MDI cloud),
   yellow while on, grey off, "?" unknown; tooltip "Cloud: on – connected to the Shelly

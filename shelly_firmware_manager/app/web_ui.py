@@ -218,12 +218,15 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
         device_id = device_id_from(request)
         await json_body(request)  # no parameters, but the JSON/CSRF rules apply
         user = user_from(request.headers)
+        if not mgr.held_version(device_id):
+            raise web.HTTPConflict(text="No update is held back for this device")
+        # Reserve the check first: if it cannot start now (409), the hold stays as it is
         try:
-            version = mgr.release_hold(device_id)  # a check that cannot start now provides it later
-        except ValueError as err:
+            mgr.reserve_check("device", device_id)
+        except ShellyError as err:
             raise web.HTTPConflict(text=str(err)) from None
-        log.info("%s: held update %s offered now by %s", mgr.devices[device_id].get("name"), version, user)
-        start_device_check(device_id, user)
+        mgr.release_hold(device_id, user)
+        run_device_check(device_id, user)
         return web.json_response({"started": True})
 
     def start_device_check(device_id: str, user: str) -> None:
@@ -281,6 +284,8 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
         restart_first = body.get("restart", False)  # "Restart the device first"
         if not isinstance(restart_first, bool):
             raise web.HTTPBadRequest(text="restart: true or false expected")
+        if restart_first and not mgr.devices[device_id].get("install_failed"):
+            raise web.HTTPBadRequest(text="A restart first is only offered after a failed installation")
         background(mgr.install(device_id, sha, approved_by=user_from(request.headers), restart_first=restart_first))
         return web.json_response({"started": True})
 
