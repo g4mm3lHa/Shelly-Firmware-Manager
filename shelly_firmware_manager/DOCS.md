@@ -44,7 +44,7 @@ Assistant). Version history: `CHANGELOG.md` (Changelog tab).
    restarts the app if it stops unexpectedly or hangs (see [Troubleshooting](#troubleshooting)).
 5. On a fresh installation the app asks once whether to import a firmware store from
    another Home Assistant instance (see [Moving the firmware store](#moving-the-firmware-store)).
-   No check runs until you choose **Import store …** or **Skip**; a notice above the
+   No check runs until you choose **Import store** or **Skip**; a notice above the
    tabs and a Home Assistant notification remind you. Updates of the app never ask.
 6. Click **Check now** in the **Devices** tab. Devices with an update are listed on
    top: tick them, click **Review & install** and approve the installation (see
@@ -340,7 +340,7 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
   3. Optionally enter the expected SHA-256; the upload is refused if it does not match.
 
   Uploaded files are marked "Uploaded". A file that a check provided as an
-  intermediate version is marked "intermediate" (files provided before this app version
+  intermediate version is marked "Intermediate" (files provided before this app version
   are not marked). An uploaded version is used when the Shelly update server offers
   exactly this version, or for a manual installation while the server cannot be
   reached (see [How a check works](#how-a-check-works)); an older one allows a
@@ -365,7 +365,7 @@ confirmation). After clearing, one entry remains that names who cleared the log.
 
 ### Settings
 
-All options from [Configuration](#configuration) in the cards **Checks**, **Download
+First the card **Device Passwords**, then all options from [Configuration](#configuration) in the cards **Checks**, **Download
 Server**, **Firmware & Storage**, **Logs** and **Advanced**, with one Save button. The
 i-icon next to a setting shows its help (on touch devices with a tap). While you type, a
 hint warns if the download base URL is a host name or not in your local network; while
@@ -394,7 +394,7 @@ password**, or the lock icon):
 After enabling, changing or removing the protection, change the password in the Home
 Assistant Shelly integration as well.
 
-**Several devices at once:** Settings tab → **Device Passwords** → **Device passwords …**. Choose the action –
+**Several devices at once:** Settings tab → **Device Passwords** → **Device passwords**. Choose the action –
 **Store the existing device password in this app** or **Set password** (enables the
 protection of unprotected devices, changes it on protected devices whose password is
 stored) – tick the devices ("All devices that fit") and enter one password for all of
@@ -414,7 +414,7 @@ unprotected through your network.
 ## Moving the firmware store
 
 To move to another Home Assistant instance (or keep a copy), export the whole firmware
-store in the Settings tab → **Firmware & Storage** → **Export store …**:
+store in the Settings tab → **Firmware & Storage** → **Export store**:
 
 - The app generates an **export password** and shows it once (copy icon; if the browser
   does not allow copying, the password is selected for copying by hand). Save it –
@@ -429,7 +429,7 @@ store in the Settings tab → **Firmware & Storage** → **Export store …**:
 - Stored files whose SHA-256 no longer matches are left out (warning in the log).
   Device passwords are never exported.
 
-On the other instance: **Import store …**, choose the file and enter the export
+On the other instance: **Import store**, choose the file and enter the export
 password. The file is checked completely – seal, every file – before anything is
 stored; then the result shows how many files are new, already stored or in conflict
 (each group can be expanded; conflicts are expanded). **Import** stores the new files:

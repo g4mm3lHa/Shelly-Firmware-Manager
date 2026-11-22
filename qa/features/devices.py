@@ -42,6 +42,11 @@ def _device_list(c):
     page.screenshot(path=out / f"{case}-devices.png")
     install.first.click()
     check(f"{case}: Install opens the installation dialog (devices)", dialog(f)["title"] == "Install update?")
+    # Full Gen1 version texts have no spaces: the Version row wraps inside the dialog
+    wraps = f.evaluate("""() => { const v = document.querySelector('#dlg dl.kv>dd.ver'), body = document.getElementById('dlg-body');
+      v.textContent = '20230503-101129/v1.13.0-g9aed950  →  20230913-112003/v1.14.0-gcb84623';
+      return v.scrollWidth <= v.clientWidth + 1 && body.scrollWidth <= body.clientWidth + 1; }""")
+    check(f"{case}: long Gen1 version wraps in the dialog", wraps)
     f.locator("#dlg-btns button", has_text="Cancel").click()
     if width > 700:   # the icon strip is part of the table on wide screens
         counts = f.evaluate("""() => ({good: document.querySelectorAll('.act.c-good').length,
@@ -174,6 +179,8 @@ def _name_tips(c):
     row = f.locator("#dev-cards tr", has_text="Hall").first
     ha, shelly_name = row.locator("td.c-device .name"), row.locator(".shelly-name > span")
     check(f"{case}: no native title on the names", ha.get_attribute("title") is None)
+    check(f"{case}: no browser tooltip (title) anywhere – the app's own tooltip only", f.locator("[title]").count() == 0,
+          str(f.locator("[title]").evaluate_all("l => l.slice(0, 5).map(e => e.outerHTML.slice(0, 80))")))
     if width > 700:
         ha.hover()
         check(f"{case}: HA name tooltip on hover", tip_text(f) == "Home Assistant device name: Hall", str(tip_text(f)))
@@ -212,7 +219,7 @@ def _battery(c):
     def row(name):
         return f.locator("#dev-cards tr", has_text=name).first
     geo = row("Doorbell").evaluate("""r => { const n = r.querySelector('td.c-device .name').getBoundingClientRect(),
-      b = r.querySelector('td.c-device .battery'), g = b && b.getBoundingClientRect(), ip = r.querySelector('td.c-ip .mono');
+      b = r.querySelector('td.c-device .battery'), g = b && b.getBoundingClientRect(), ip = r.querySelector('td.c-ip .num');
       return {icon: !!b, after: !!g && g.left >= n.right - 1 && g.left - n.right <= 12,
         line: !!g && Math.abs((g.top + g.height / 2) - (n.top + n.height / 2)) < 3,
         dim: !!ip && ip.classList.contains('dim') && getComputedStyle(ip).opacity === '0.5',
@@ -223,7 +230,7 @@ def _battery(c):
     grey = pill.evaluate("""p => { const s = getComputedStyle(p);
       return [s.getPropertyValue('--pill').trim(), s.getPropertyValue('--secondary-text-color').trim()]; }""")
     check(f"{case}: Asleep pill grey", grey[0] == grey[1] and grey[0] != "", str(grey))
-    awake = row("Carport").evaluate("r => [!!r.querySelector('.battery'), r.querySelector('td.c-ip .mono').classList.contains('dim')]")
+    awake = row("Carport").evaluate("r => [!!r.querySelector('.battery'), r.querySelector('td.c-ip .num').classList.contains('dim')]")
     check(f"{case}: awake battery device – icon, IP not dimmed", awake == [True, False], str(awake))
     check(f"{case}: no battery icon on other devices", row("Hall").locator(".battery").count() == 0)
     pick_filter(f, "devices", "Attention")
@@ -263,10 +270,17 @@ def _host_names(c):
     """Option "Resolve host names": off (demo) – no Host name column, no Columns or Sort
     entry; on – the column is shown once in this browser and can be hidden again."""
     case, f, page = c.case, c.f, c.page
-    label = f.locator('#cols-devices label:has(input[data-col="host_name"])')
-    sort = f.locator('.sort-menu .sort-item[data-value="host_name"]')
-    check(f"{case}: option off – no Host name column, Columns or Sort entry",
-          f.locator("#dev-cards th.c-host_name").count() == 0 and label.is_hidden() and sort.is_hidden())
+    entry = f.locator('#cols-devices .sort-item[data-col="host_name"]')
+    sort = f.locator('#view-devices .sort-menu .sort-item[data-value="host_name"]')
+
+    def shown_in(tool, item):
+        """Whether the entry is visible while its popover is open (closed popovers hide everything)."""
+        f.locator(f'#view-devices .tool-btn[aria-label^="{tool}"]').click()
+        visible = item.is_visible()
+        page.keyboard.press("Escape")
+        return visible
+    check(f"{case}: option off – no Host name column, Columns or Sort entry", f.locator("#dev-cards th.c-host_name").count() == 0
+          and not shown_in("Sort", sort) and (c.width <= 700 or not shown_in("Columns", entry)))
 
     def on(route):
         headers = {k: v for k, v in route.request.headers.items() if k.lower() != "if-none-match"}  # no 304
@@ -278,10 +292,35 @@ def _host_names(c):
     refresh_state(page, f)
     th = f.locator("#dev-cards th.c-host_name").first
     check(f"{case}: option on – Host name column shown and ticked in Columns", th.is_visible()
-          and f.locator('#cols-devices input[data-col="host_name"]').is_checked() and "shelly-" in f.locator(
+          and entry.get_attribute("aria-checked") == "true" and "shelly-" in f.locator(
               "#dev-cards td.c-host_name").all_inner_texts().__str__())
     page.unroute("**/api/state")
     refresh_state(page, f)
+
+
+def _columns(c):
+    """"Columns" (desktop): round icon at the right end of the toolbar, popover like sort and
+    filter (title, check marks, "Reset columns" last), a click keeps it open, dot while the
+    columns differ from the default."""
+    case, f, page = c.case, c.f, c.page
+    btn = f.locator('#view-devices .tb-extra .tool-btn[aria-label="Columns"]')
+    geo = btn.evaluate("""b => { const r = b.getBoundingClientRect(), bar = b.closest('.toolbar').getBoundingClientRect();
+      return {w: Math.round(r.width), right: Math.round(bar.right - r.right)}; }""")
+    check(f"{case}: Columns as round icon at the right end", geo["w"] == 36 and geo["right"] <= 1, str(geo))
+    btn.click()
+    menu = f.evaluate("""() => { const m = document.getElementById('cols-devices');
+      return {title: m.querySelector('.pop-title').textContent, last: [...m.querySelectorAll('.sort-item')].pop().textContent,
+        checked: [...m.querySelectorAll('[data-col][aria-checked=true]')].map(b => b.dataset.col)}; }""")
+    check(f"{case}: Columns popover – title, check marks, Reset last", menu["title"] == "Columns" and menu["last"] == "Reset columns"
+          and "device" in menu["checked"] and "ntp" not in menu["checked"], str(menu))
+    dot = lambda: btn.evaluate("b => b.classList.contains('has-value')")
+    check(f"{case}: no dot with the default columns", not dot())
+    f.locator('#cols-devices .sort-item[data-col="gen"]').click()
+    check(f"{case}: a click hides the column, keeps the popover open and sets the dot",
+          f.locator("#dev-cards th.c-gen").first.is_hidden() and f.locator("#cols.open").count() == 1 and dot())
+    f.locator("#cols-devices .sort-item", has_text="Reset columns").click()
+    check(f"{case}: Reset columns – column back, no dot", f.locator("#dev-cards th.c-gen").first.is_visible() and not dot())
+    page.keyboard.press("Escape")
 
 
 def _sections(c):
@@ -336,6 +375,7 @@ def _sections(c):
     check(f"{case}: beta mark of a pre-release", bool(beta) and beta["text"] == "(beta)" and beta["shown"] and beta["above"], str(beta))
     if width > 700:
         _host_names(c)
+        _columns(c)
         x = f.evaluate("""() => [document.querySelector('#dev-cards .card-head input'),
           document.querySelector('#dev-cards td.c-select input:not(.ghost)')].map(e => e.getBoundingClientRect().left)""")
         check(f"{case}: header checkbox above the row checkboxes", abs(x[0] - x[1]) < 0.5, str(x))

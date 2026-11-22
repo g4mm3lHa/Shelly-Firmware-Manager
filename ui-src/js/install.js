@@ -42,7 +42,7 @@ const FALLBACK_WARNING = "The Shelly update server could not be asked. This stor
 const stepHint = d => `${d.name}: ${d.offer_version} is an intermediate version${d.step_target ? ` on the way to ${d.step_target}` : ""}. After the installation the device is checked again and the next version is provided (it is installed only after a new approval).`;
 const GEN1_WARNING = "Gen1 firmware is offered by Shelly only via plain HTTP and without a checksum – its integrity and origin cannot be verified. Install only if you accept this risk.";
 /** "Device" block of the installation and downgrade dialogs. */
-const deviceSection = d => section("Device", valueList([["Name", d.name], ["Shelly", d.shelly_name], ["IP", d.ip, "mono"],
+const deviceSection = d => section("Device", valueList([["Name", d.name], ["Shelly", d.shelly_name], ["IP", d.ip, "num"],
   ["Model", [d.model, d.gen ? `Gen ${d.gen}` : null].filter(Boolean).join(" · ")]]));
 /** Installed and target version on one line. */
 const versionStep = (from, to) => `${from || "–"}  →  ${to || "–"}`;
@@ -58,10 +58,15 @@ export function openInstall(devs) {
     if (d.step_target != null) content.push(el("p", stepHint(d), "hint"));
     content.push(section("Changelog", changelogBox(d)));
   } else {
-    const t = el("table"), h = el("tr");
+    // Phones show the rows as two-line entries (style.css, class inst-list)
+    const t = el("table", null, "inst-list"), h = el("tr");
     for (const c of ["Device", "IP", "Installed", "Target", "Source"]) h.append(el("th", c));
     t.append(box("thead", null, h));
-    for (const d of devs) { const r = el("tr"); for (const v of [d.name, d.ip, d.version, d.offer_version, OFFER_SHORT[d.offer_source]]) r.append(el("td", v ?? "–")); t.append(r); }
+    for (const d of devs) {
+      const r = el("tr");
+      for (const [v, cls] of [[d.name], [d.ip, "num"], [d.version], [d.offer_version], [OFFER_SHORT[d.offer_source]]]) r.append(el("td", v ?? "–", cls));
+      t.append(r);
+    }
     content.push(t);
     if (devs.some(d => d.gen === 1)) content.push(el("div", GEN1_WARNING, "warnbox"));
     if (devs.some(d => d.offer_source === "upload")) content.push(el("div", UPLOAD_HINT, "warnbox"));
@@ -81,7 +86,9 @@ export function openInstall(devs) {
     box("label", "check", ack, " I accept the risk of installing without the update server's verification"));
   }
   content.push(el("p", devs.length === 1 ? "The device restarts during the installation." : "The devices restart during the installation.", "hint"));
-  modal(devs.length === 1 ? "Install update?" : `Install ${devs.length} updates?`, content, [{text: "Cancel"},
+  // An error keeps the title of this dialog
+  const title = devs.length === 1 ? "Install update?" : `Install ${devs.length} updates?`;
+  modal(title, content, [{text: "Cancel"},
     {text: "Approve installation", kind: "danger", action: async () => {
       const errors = [];
       for (const d of devs) {   // each installation starts in the background – calls return at once
@@ -89,7 +96,7 @@ export function openInstall(devs) {
         try { await api(`${devUrl(d)}/install`, body); selected.delete(d.id); }
         catch (e) { errors.push(`${d.name}: ${e.message}`); }
       }
-      errors.length ? message("Installation", errors.join("\n"), "error", "chip") : closeModal();
+      errors.length ? message(title, errors.join("\n"), "error", "chip") : closeModal();
     }}], "chip");
   if (unverified.length) { const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; }; }
 }
@@ -103,12 +110,12 @@ export const fwSource = v => v.source === "upload" ? (v.sha_checked ? "Uploaded 
 /** Step 1: choose one of the stored older versions. */
 export async function openDowngrade(d) {
   const title = `Downgrade – ${d.name}`;
-  modal(title, [el("p", "Loading stored versions …", "hint")], [{text: "Cancel"}]);
+  modal(title, [el("p", "Loading stored versions …", "hint")], [{text: "Cancel"}], "history");
   let r;
-  try { r = await api(`${devUrl(d)}/downgrades`); } catch (e) { message(title, e.message, "error"); return; }
-  if (r.blocked) { message(title, r.blocked, "error"); return; }
+  try { r = await api(`${devUrl(d)}/downgrades`); } catch (e) { message(title, e.message, "error", "history"); return; }
+  if (r.blocked) { message(title, r.blocked, "error", "history"); return; }
   if (!r.versions.length) {
-    message(title, `No stored version of ${r.type || d.type} is older than the installed version ${r.installed || "–"}. Older versions stay stored once newer ones were downloaded, or can be uploaded in the Firmware tab.`);
+    message(title, `No stored version of ${r.type || d.type} is older than the installed version ${r.installed || "–"}. Older versions stay stored once newer ones were downloaded, or can be uploaded in the Firmware tab.`, "info", "history");
     return;
   }
   const list = el("div", null, "modes");
@@ -122,7 +129,7 @@ export async function openDowngrade(d) {
     el("p", "Newer versions are installed with “Install update”.", "hint")],
   [{text: "Cancel"}, {text: "Continue", kind: "primary", action: () => {
     downgradeInstall(d, r.versions[Number(list.querySelector("input:checked").value)]);
-  }}]);
+  }}], "history");
 }
 /** Step 2: the known installation dialog, with the selected older version as target. */
 function downgradeInstall(d, v) {
@@ -131,7 +138,7 @@ function downgradeInstall(d, v) {
   el("div", DOWNGRADE_WARNING, "warnbox")];
   if (v.source === "upload") content.push(el("div", UPLOAD_HINT, "warnbox"));
   content.push(el("p", "The device restarts during the installation.", "hint"));
-  modal("Downgrade?", content, [{text: "Cancel"}, {text: "Continue", kind: "primary", action: () => downgradeConfirm(d, v)}]);
+  modal("Downgrade?", content, [{text: "Cancel"}, {text: "Continue", kind: "primary", action: () => downgradeConfirm(d, v)}], "history");
 }
 /** Hint while the option "Allow downgrades" is off (row menu, Firmware tab). */
 export const DOWNGRADE_OFF = "Downgrades are off – enable “Allow downgrades” in Settings";
@@ -143,8 +150,8 @@ export function downgradeConfirm(d, v) {
     box("label", "check", ack, " I understand that the downgrade may fail or reset settings")],
   [{text: "Cancel"}, {text: "Downgrade", kind: "danger", action: async () => {
     try { await api(`${devUrl(d)}/install`, {sha256: v.sha256, confirm: true, downgrade: true, acknowledged: ack.checked}); closeModal(); }
-    catch (e) { message(title, e.message, "error"); }
-  }}]);
+    catch (e) { message(title, e.message, "error", "history"); }
+  }}], "history");
   const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; };
 }
 $("scan").onclick = () => api("api/scan", {}).then(() => load(true)).catch(e => message("Check", e.message, "error"));

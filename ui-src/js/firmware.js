@@ -1,7 +1,7 @@
 // Firmware tab: stored files, changelog, Install button per device, delete and upload.
 import {
   $, api, attachTip, box, closeModal, collator, copyText, el, filterControl, fmt, icon, iconButton, keptDetails, loadLocal, mb,
-  message, modal, saveLocal, searchTool, section, shaRow, sortControl, toast, ui, uploadFile, valueList,
+  message, modal, saveLocal, searchTool, section, setTip, shaRow, sortControl, toast, ui, uploadFile, valueList,
 } from "./core.js";
 import {installable, installBlocker} from "./devices.js";
 import {changelogNodes, DOWNGRADE_OFF, DOWNGRADE_WARNING, downgradeConfirm, fwSource, openInstall, UPLOAD_HINT} from "./install.js";
@@ -111,21 +111,21 @@ function firmwareHead() {
   return box("div", "fw-head", ...FW_COLUMNS.map(t => {
     const key = FW_SORT_HEADS[t], head = el("span", t);
     if (!key) return head;
-    head.className = "sortable"; head.tabIndex = 0; head.role = "button"; head.title = "Click to sort";
+    head.className = "sortable"; head.tabIndex = 0; head.role = "button"; setTip(head, "Click to sort");
     if (fwSort[0] === key) head.dataset.dir = fwSort[1];
     head.onclick = () => setFirmwareSort([key, fwSort[0] === key && fwSort[1] === "asc" ? "desc" : "asc"]);
     head.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); head.onclick(); } };
     return head;
   }));
 }
-/** Text of the "intermediate" label (tooltip without action, also on touch). */
+/** Text of the "Intermediate" label (tooltip without action, also on touch). */
 const INTERMEDIATE_TIP = "Intermediate version: required step before newer firmware can be installed safely";
 /** Device a firmware is provided for, with an "Install" button that opens the
  *  usual installation dialog (same conditions as "Install update" in the Devices tab). */
 function firmwareDevice(entry) {
   const s = ui.state || {devices: []}, d = s.devices.find(x => x.id === entry.id);
   const blocker = installBlocker(d, s), go = el("button", "Install", "danger small");
-  go.disabled = !!blocker; go.title = blocker || "Install this firmware on the device";
+  go.disabled = !!blocker; setTip(go, blocker || "Install this firmware on the device");
   go.setAttribute("aria-label", `Install on ${entry.name}`);
   go.onclick = () => { if (d && installable(d, ui.state)) openInstall([d]); };
   return box("li", null, el("span", entry.name), go);
@@ -148,7 +148,7 @@ function firmwareRow(f, latest, older) {
     : el("span", "–", "muted");
   devices.classList.add("fw-dev");
   const dl = el("a", null, "icon"); dl.href = `api/firmware/${encodeURIComponent(f.name)}/download`; dl.setAttribute("download", "");
-  dl.title = "Download"; dl.setAttribute("aria-label", `Download ${f.type} ${f.version}`); dl.append(icon("download"));
+  setTip(dl, "Download"); dl.setAttribute("aria-label", `Download ${f.type} ${f.version}`); dl.append(icon("download"));
   const del = iconButton("delete", f.deletable ? "Delete" : (f.locked || "Locked"), () => deleteFirmware(f), "red");
   del.disabled = !f.deletable;
   const log = iconButton("changelog", f.changelog ? "Changelog" : "No changelog stored – it is stored by a check that provides this firmware",
@@ -158,12 +158,12 @@ function firmwareRow(f, latest, older) {
   const uploaded = f.source === "upload" ? el("span", "Uploaded", "tag warn") : null;
   if (uploaded) attachTip(uploaded, () => fwSource(f), true);
   // Once provided as an intermediate version by a check (permanent store marker)
-  const step = f.intermediate ? el("span", "intermediate", "tag step") : null;
+  const step = f.intermediate ? el("span", "Intermediate", "tag step") : null;
   if (step) attachTip(step, () => INTERMEDIATE_TIP, true);
   // Phones: small labels in the tile (data-label, shown by CSS only there)
   const size = el("span", mb(f.size || 0), "nowrap fw-size"), date = el("span", fmt(f.downloaded), "nowrap sub fw-date");
   size.dataset.label = "Size"; date.dataset.label = "Stored"; sha.dataset.label = "SHA-256";
-  return box("div", "fw-row", box("div", "fw-ver", el("span", f.version, "name"), latest ? el("span", "latest", "tag primary") : null, uploaded, step),
+  return box("div", "fw-row", box("div", "fw-ver", el("span", f.version, "name"), latest ? el("span", "Latest", "tag primary") : null, uploaded, step),
     size, date, sha, devices, box("div", "actions", older ? downgradeButton(f) : null, log, dl, del));
 }
 // ---------------------------------------------------------------- Downgrade from the Firmware tab
@@ -195,7 +195,7 @@ function openFirmwareDowngrade(f) {
     f.source === "upload" ? el("div", UPLOAD_HINT, "warnbox") : null].filter(Boolean),
   [{text: "Cancel"}, {text: "Continue", kind: "primary", action: () => {
     downgradeConfirm(targets[Number(list.querySelector("input:checked").value)], f);
-  }}]);
+  }}], "history");
 }
 
 /** Delete a stored firmware: dialog, then a second confirmation with
@@ -208,12 +208,12 @@ function deleteFirmware(f) {
     // What cannot be restored: red warning box
     el("div", f.source === "upload" ? "An uploaded file can only be restored by uploading it again." :
     "Only versions that Shelly still offers can be downloaded again; older versions are gone for good.", "warnbox danger")].filter(Boolean),
-  [{text: "Cancel"}, {text: "Continue", kind: "danger", action: () => {
+  [{text: "Cancel"}, {text: "Continue", kind: "primary", action: () => {
     const ack = el("input"); ack.type = "checkbox";
     modal(title, [el("p", `Delete ${f.type} ${f.version} permanently?`), box("label", "check", ack, " I understand that this file cannot be restored by the app")],
       [{text: "Cancel"}, {text: "Delete", kind: "danger", action: async () => {
         try { await api(`api/firmware/${encodeURIComponent(f.name)}/delete`, {confirm: true, acknowledged: ack.checked}); closeModal(); }
-        catch (e) { message("Delete firmware", e.message, "error", "delete"); }
+        catch (e) { message(title, e.message, "error", "delete"); }
       }}], "delete");
     const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; };
   }}], "delete");
@@ -261,7 +261,7 @@ function uploadConfirm(r) {
     }
   }}], "upload");
 }
-$("fw-upload").append(icon("upload"));   // same icon as the upload dialog title (aria-hidden)
+$("fw-upload").prepend(icon("upload"));   // same icon as the upload dialog title, before the text (aria-hidden)
 $("fw-upload").onclick = openUpload;
 $("fw-search").oninput = () => render(true);
 searchTool($("fw-search"));

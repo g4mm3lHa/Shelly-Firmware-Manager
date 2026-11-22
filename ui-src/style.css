@@ -8,42 +8,55 @@
 @media (prefers-color-scheme:dark){:root{--primary-background-color:#111;--secondary-background-color:#202020;
   --card-background-color:#1c1c1c;--primary-text-color:#e1e1e1;--secondary-text-color:#9b9b9b;
   --divider-color:rgba(225,225,225,.12)}}
+/* Design tokens: every font size, radius, line and warning text of the app uses these.
+   Font sizes in four steps: tags and section titles, secondary and hint text, text, card
+   titles (the app title and dialog titles have their own size). Radii: small (fields,
+   menus, popovers, notices, tooltips), medium (pills, tags, tiles, cards, dialogs) and the
+   button radius of the HA theme (buttons and outlined tile buttons). Lines: fine (the
+   theme's divider colour) and strong (at least 3:1 against the card in light and dark
+   themes: fields, tiles, outlined tile buttons). Warning text: mixed half towards the
+   text colour like the status pills (at least 4.5:1 on light and dark cards). Control
+   height: text buttons, fields and selects (desktop 33 px, phones 44 px). */
+:root{--fs-tag:11px;--fs-small:12px;--fs-text:14px;--fs-title:15px;
+  --radius-s:8px;--radius-m:12px;--radius-btn:var(--ha-button-border-radius,18px);
+  --line:var(--divider-color);--line-strong:color-mix(in srgb,var(--primary-text-color) 50%,var(--card-background-color));
+  --warn-text:color-mix(in srgb,var(--warning-color) 50%,var(--primary-text-color));--control-h:33px}
 *{box-sizing:border-box}
 body{font-family:var(--ha-font-family-body,var(--mdc-typography-font-family,Roboto,system-ui,sans-serif));
-  margin:16px;color:var(--primary-text-color);background:var(--primary-background-color);font-size:14px}
+  margin:16px;color:var(--primary-text-color);background:var(--primary-background-color);font-size:var(--fs-text)}
 h1{font-size:1.4em;margin:0;font-weight:500}
 /* Pre-release builds only: red "(beta)" next to the app title */
-h1 .beta{margin-left:4px;color:var(--error-color);font-size:.5em;font-weight:500}
-h2{font-size:1.05em;margin:0;font-weight:500}
+h1 .beta{margin-left:4px;color:var(--error-color);font-size:var(--fs-tag);font-weight:500}
+h2{font-size:var(--fs-title);margin:0;font-weight:500}
 /* Card heads (device groups, firmware IDs, settings cards): all in the same, bold weight */
 .card-head h2{font-weight:600}
 a{color:var(--primary-color)}
-.meta{color:var(--secondary-text-color);font-size:.85em;line-height:1.6}
-.meta:empty{display:none}.busy{color:var(--warning-color)}
+.meta{color:var(--secondary-text-color);font-size:var(--fs-small);line-height:1.6}
+.meta:empty{display:none}.busy{color:var(--warn-text)}
 #meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
 .meta-pill{--pill:var(--secondary-text-color);color:var(--primary-text-color)}
-.progress{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px;color:var(--secondary-text-color);font-size:.85em}
+.progress{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px;color:var(--secondary-text-color);font-size:var(--fs-small)}
 .progress[hidden]{display:none}
 .progress progress{flex:1 1 160px;max-width:320px;height:6px;accent-color:var(--primary-color)}
 /* Installations disabled by the download base URL: message with buttons */
 .notice{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;margin-top:10px;padding:10px 12px;
-  border-left:3px solid var(--warning-color);border-radius:8px;
+  border-left:3px solid var(--warning-color);border-radius:var(--radius-s);
   background:color-mix(in srgb,var(--warning-color) 12%,var(--card-background-color))}
 .notice[hidden]{display:none}
 .notice>span{flex:1 1 260px}
 .notice-btns{display:flex;gap:8px;flex-wrap:wrap}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .muted{color:var(--secondary-text-color)}
-.small{font-size:.85em}
+.small{font-size:var(--fs-small)}
 .nowrap{white-space:nowrap}
 .error{color:var(--error-color);overflow-wrap:anywhere}
-.hint{color:var(--secondary-text-color);font-size:.9em}
+.hint{color:var(--secondary-text-color);font-size:var(--fs-small)}
 /* Visually hidden, read by screen readers (e.g. the help text of a setting) */
 .sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 
 /* Header and tabs */
 .titlebar{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
-.tabs{display:flex;gap:4px;margin:12px 0 16px;border-bottom:1px solid var(--divider-color);overflow-x:auto}
+.tabs{display:flex;gap:4px;margin:12px 0 16px;border-bottom:1px solid var(--line);overflow-x:auto}
 .tab{background:none;color:var(--secondary-text-color);border-radius:0;border:0;border-bottom:2px solid transparent;
   padding:8px 16px;display:flex;align-items:center;gap:6px}
 .tab svg{width:18px;height:18px;fill:currentColor}
@@ -51,11 +64,14 @@ a{color:var(--primary-color)}
 
 /* Controls */
 button,select,input{font:inherit;color:var(--primary-text-color)}
-button{cursor:pointer;padding:6px 12px;border-radius:var(--ha-button-border-radius,18px);
-  border:1px solid var(--divider-color);background:var(--card-background-color)}
+button{cursor:pointer;padding:6px 12px;border-radius:var(--radius-btn);
+  border:1px solid var(--line);background:var(--card-background-color)}
 button.primary{background:var(--primary-color);color:var(--text-primary-color);border-color:transparent}
 button.danger{background:var(--error-color);color:#fff;border-color:transparent}
 button.small{padding:1px 10px}
+/* Text buttons (not icons, pills, tabs, menu entries, action icons or "Install"): one
+   height with fields and selects */
+button:not(.icon):not(.small):not(.pill):not(.tab):not(.sort-item):not(.act){min-height:var(--control-h)}
 input.ghost{visibility:hidden}   /* keeps the indentation of a row without checkbox */
 button:disabled{opacity:.45;cursor:default}
 button.icon,a.icon{background:none;border:0;padding:4px;line-height:0;color:var(--secondary-text-color);border-radius:50%}
@@ -64,9 +80,17 @@ button.icon:hover:not(:disabled),button.icon:focus-visible{color:var(--primary-c
   background:color-mix(in srgb,var(--primary-color) 12%,transparent)}
 button.icon svg,.svg{width:18px;height:18px;fill:currentColor;vertical-align:middle}
 button.icon.red{color:var(--error-color)}
+/* Fields and selects: strong border on every width (at least 3:1 against the card) */
 input[type=search],input[type=text],input[type=password],input[type=number],input[type=time],select,textarea{
-  padding:7px 10px;border-radius:8px;border:1px solid var(--divider-color);
+  min-height:var(--control-h);padding:7px 10px;border-radius:var(--radius-s);border:1px solid var(--line-strong);
   background:var(--card-background-color);color:var(--primary-text-color);font:inherit}
+select,input[type=time]{padding-top:0;padding-bottom:0}   /* their own inner height would exceed the control height */
+input.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}   /* after font:inherit: SHA, export password (fixed width, never cut off) */
+input[type=checkbox],input[type=radio]{accent-color:var(--primary-color)}
+/* File chooser (upload, import): its button like a normal button */
+input[type=file]{max-width:100%;color:var(--secondary-text-color)}
+input[type=file]::file-selector-button{min-height:var(--control-h);margin-right:10px;padding:6px 12px;font:inherit;cursor:pointer;
+  border:1px solid var(--line);border-radius:var(--radius-btn);background:var(--card-background-color);color:var(--primary-text-color)}
 :focus-visible{outline:2px solid var(--primary-color);outline-offset:1px}
 .check{display:inline-flex;align-items:center;gap:6px;cursor:pointer;color:var(--secondary-text-color)}
 
@@ -77,54 +101,48 @@ input[type=search],input[type=text],input[type=password],input[type=number],inpu
 /* Search, sort and filter: small round icons, a click opens a popover below the icon */
 .tool{position:relative;flex:none}
 button.icon.tool-btn{position:relative;width:36px;height:36px;padding:0;display:inline-flex;align-items:center;
-  justify-content:center;border:1px solid var(--divider-color);background:var(--card-background-color)}
+  justify-content:center;border:1px solid var(--line);background:var(--card-background-color)}
 .tool.open>button.icon.tool-btn{color:var(--primary-color);border-color:var(--primary-color);
   background:color-mix(in srgb,var(--primary-color) 12%,var(--card-background-color))}
 /* Dot while a search text is set or a filter other than "All" is chosen */
 button.icon.tool-btn.has-value::after{content:"";position:absolute;top:3px;right:3px;width:8px;height:8px;border-radius:50%;
   background:var(--primary-color);border:2px solid var(--card-background-color)}
 .tool-pop{position:absolute;z-index:12;top:calc(100% + 6px);left:0;min-width:300px;padding:10px;
-  background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.25)}
+  background:var(--card-background-color);border:1px solid var(--line);border-radius:var(--radius-s);box-shadow:0 4px 16px rgba(0,0,0,.25)}
 .tool-pop[hidden]{display:none}
 .tool-pop input[type=search]{width:100%}
 .tool-pop:has(.sort-menu){padding:6px 0;min-width:220px}
 .sort-menu{display:flex;flex-direction:column}
-.sort-menu hr{border:0;border-top:1px solid var(--divider-color);margin:4px 0;width:100%}
-.pop-title{padding:4px 16px 6px;font-size:.75em;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--secondary-text-color)}
+.sort-menu hr{border:0;border-top:1px solid var(--line);margin:4px 0;width:100%}
+.pop-title{padding:4px 16px 6px;font-size:var(--fs-tag);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--secondary-text-color)}
 button.sort-item{display:flex;align-items:center;gap:8px;border:0;border-radius:0;background:none;text-align:left;
   padding:8px 16px;color:var(--primary-text-color)}
 button.sort-item:hover,button.sort-item:focus-visible{background:color-mix(in srgb,var(--primary-text-color) 8%,transparent)}
 button.sort-item svg{width:16px;height:16px;fill:currentColor;color:var(--secondary-text-color)}
 button.sort-item[aria-checked=true]{color:var(--primary-color);font-weight:500}
 button.sort-item[aria-checked=true]::after{content:"✓";margin-left:auto;padding-left:16px}
+button.sort-item[hidden]{display:none}
 /* Filter entries: label left, count right, check mark after the count of the chosen one */
 button.filter-item .count{margin-left:auto;padding-left:16px;font-variant-numeric:tabular-nums}
 button.filter-item[aria-checked=true]::after{margin-left:0;padding-left:8px}
-.dropdown{position:relative;margin-left:auto}
-.dropdown summary{cursor:pointer;list-style:none;padding:6px 12px;border:1px solid var(--divider-color);
-  border-radius:18px;background:var(--card-background-color);color:var(--secondary-text-color)}
-.dropdown summary::-webkit-details-marker{display:none}
-.menu-panel,.rowmenu{position:absolute;z-index:10;background:var(--card-background-color);
-  border:1px solid var(--divider-color);border-radius:8px;padding:6px 0;min-width:180px;
+/* "Columns" (Devices tab): round icon at the right end, its popover aligned to the right */
+.tb-extra .tool-pop{left:auto;right:0}
+.rowmenu{position:fixed;z-index:10;display:flex;flex-direction:column;background:var(--card-background-color);
+  border:1px solid var(--line);border-radius:var(--radius-s);padding:6px 0;min-width:180px;
   box-shadow:0 4px 16px rgba(0,0,0,.25)}
-.menu-panel{right:0;top:calc(100% + 4px);display:flex;flex-direction:column}
-.menu-panel label{padding:6px 14px;cursor:pointer;white-space:nowrap}
-.menu-panel hr{border:0;border-top:1px solid var(--divider-color);margin:4px 0;width:100%}
-.menu-panel .reset-cols{margin:4px 14px;align-self:flex-start}
-.rowmenu{position:fixed;display:flex;flex-direction:column}
 .rowmenu[hidden]{display:none}
 .rowmenu button,.rowmenu a{border:0;border-radius:0;background:none;text-align:left;padding:8px 16px;
   color:var(--primary-text-color);text-decoration:none;font-size:inherit}
 .rowmenu button:hover:not(:disabled),.rowmenu a:hover,.rowmenu button:focus-visible,.rowmenu a:focus-visible{
   background:color-mix(in srgb,var(--primary-text-color) 8%,transparent)}
 .rowmenu .red{color:var(--error-color)}
-.rowmenu hr{border:0;border-top:1px solid var(--divider-color);margin:4px 0}
-.menu-hint{padding:0 16px 6px;max-width:260px;color:var(--secondary-text-color);font-size:.85em}
+.rowmenu hr{border:0;border-top:1px solid var(--line);margin:4px 0}
+.menu-hint{padding:0 16px 6px;max-width:260px;color:var(--secondary-text-color);font-size:var(--fs-small)}
 
 /* Cards */
-.card{background:var(--card-background-color);border-radius:var(--ha-card-border-radius,12px);
-  box-shadow:var(--ha-card-box-shadow,none);border:1px solid var(--divider-color);margin-bottom:16px;overflow:hidden}
-.card-head{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--divider-color);flex-wrap:wrap}
+.card{background:var(--card-background-color);border-radius:var(--ha-card-border-radius,var(--radius-m));
+  box-shadow:var(--ha-card-box-shadow,none);border:1px solid var(--line);margin-bottom:16px;overflow:hidden}
+.card-head{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .card-head .spacer{flex:1}
 .card-body{padding:12px 16px}
 .empty{padding:24px 16px;color:var(--secondary-text-color)}
@@ -132,14 +150,15 @@ button.filter-item[aria-checked=true]::after{margin-left:0;padding-left:8px}
 /* Device tables (inside the cards) */
 table{border-collapse:collapse;width:100%}
 th,td{padding:8px 10px;text-align:left;vertical-align:middle;
-  border-bottom:1px solid color-mix(in srgb,var(--primary-text-color) 12%,transparent)}
+  border-bottom:1px solid var(--line)}
 tr:last-child>td{border-bottom:0}
 tbody tr:hover>td{background:color-mix(in srgb,var(--primary-text-color) 4%,transparent)}
-th{color:var(--secondary-text-color);font-weight:500;font-size:.85em;white-space:nowrap;user-select:none}
+th{color:var(--secondary-text-color);font-weight:500;font-size:var(--fs-small);white-space:nowrap;user-select:none}
 th.sortable,.fw-head>.sortable{cursor:pointer}th.sortable:hover,.fw-head>.sortable:hover{color:var(--primary-text-color)}
 .fw-head>[data-dir=asc]::after{content:" ▲";font-size:.75em}.fw-head>[data-dir=desc]::after{content:" ▼";font-size:.75em}
 th[draggable=true]{cursor:grab}th.drop{box-shadow:inset 2px 0 0 var(--primary-color)}
-tr.ignored>td{opacity:.7}
+/* Ignored rows: name, IP, firmware and icons dimmed; status and "Ignored" at full strength */
+tr.ignored>td:not(.c-device):not(.c-status):not(.c-select):not(.c-menu):not(.c-details),tr.ignored>td.c-device>*{opacity:.7}
 .shelly-name{display:flex;align-items:center;gap:2px;min-width:0}
 .shelly-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 button.icon.pen{padding:2px}button.icon.pen svg{width:14px;height:14px}
@@ -171,8 +190,9 @@ td.c-menu{text-align:right}
 .battery{display:inline-flex;flex:none;color:var(--secondary-text-color)}
 .battery .svg{width:16px;height:16px}
 .dim{opacity:.5}
+.num{font-variant-numeric:tabular-nums}   /* IP addresses: normal font, equal-width digits */
 /* Device without usable address: message in the IP column, reason below the Shelly name */
-.addr-issue,.addr-reason{display:inline-flex;align-items:center;gap:4px;color:color-mix(in srgb,var(--warning-color) 70%,var(--primary-text-color))}
+.addr-issue,.addr-reason{display:inline-flex;align-items:center;gap:4px;color:var(--warn-text)}
 .addr-issue .svg{flex:none;width:16px;height:16px;color:var(--warning-color)}
 .addr-reason{display:flex}
 .addr-reason .svg{flex:none;width:14px;height:14px;color:var(--warning-color)}
@@ -180,21 +200,21 @@ td.c-device .addr-reason{white-space:normal}
 /* Card "Other Shellys" (read only) and unknown files of the Firmware tab */
 .others .card-head .sub{font-weight:400}
 .oth-row{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1.4fr) minmax(0,1.6fr) minmax(0,.9fr) minmax(0,3fr);gap:12px;
-  align-items:center;padding:8px 16px;border-bottom:1px solid color-mix(in srgb,var(--primary-text-color) 12%,transparent)}
+  align-items:center;padding:8px 16px;border-bottom:1px solid var(--line)}
 .oth-row:last-child{border-bottom:0}
-.oth-head{color:var(--secondary-text-color);font-weight:500;font-size:.85em}
+.oth-head{color:var(--secondary-text-color);font-weight:500;font-size:var(--fs-small)}
 .oth-kind{color:var(--secondary-text-color)}
-.oth-where{color:var(--secondary-text-color);font-size:.85em}
+.oth-where{color:var(--secondary-text-color);font-size:var(--fs-small)}
 .unk-row{display:grid;grid-template-columns:minmax(0,1fr) 100px 112px;gap:12px;align-items:center;padding:8px 16px;
-  border-bottom:1px solid color-mix(in srgb,var(--primary-text-color) 12%,transparent)}
+  border-bottom:1px solid var(--line)}
 .unk-row:last-child{border-bottom:0}
 .unk-name{overflow-wrap:anywhere}
-.sub{color:var(--secondary-text-color);font-size:.85em}
+.sub{color:var(--secondary-text-color);font-size:var(--fs-small)}
 .arrow{color:var(--secondary-text-color);margin:0 4px}
 .newver{color:var(--primary-color);font-weight:600}
 
 /* Status pill and indicators */
-.pill{display:inline-flex;align-items:center;gap:4px;padding:2px 10px;border-radius:12px;font-size:.85em;
+.pill{display:inline-flex;align-items:center;gap:4px;padding:2px 10px;border-radius:var(--radius-m);font-size:var(--fs-small);
   border:0;font-weight:500;cursor:default;white-space:nowrap;
   background:color-mix(in srgb,var(--pill) 16%,transparent);
   /* Text mixed half towards the text colour: >= 4.5:1 (WCAG AA) on light and dark cards */
@@ -221,7 +241,7 @@ button.pill{cursor:pointer}
 .act.s-on{--act:var(--success-color)}
 .act.alert.s-on{--act:var(--error-color)}
 .act.s-unsupported,.act[aria-disabled]{opacity:.35;cursor:help}
-.act.s-unknown::after{content:"?";position:absolute;right:0;top:0;font-size:10px;font-weight:700;line-height:1;
+.act.s-unknown::after{content:"?";position:absolute;right:0;top:0;font-size:var(--fs-tag);font-weight:700;line-height:1;
   color:var(--warning-color)}
 .act.s-unknown svg{opacity:.55}
 .act.restart{--act:var(--primary-text-color)}
@@ -232,24 +252,24 @@ button.pill{cursor:pointer}
 /* Mobile details: labeled buttons */
 .act-strip.labeled{width:auto;max-width:none;gap:6px}
 .act-strip.labeled .act{width:auto;height:auto;min-height:44px;padding:6px 12px;line-height:1.2;
-  border:1px solid var(--divider-color);border-radius:18px;color:var(--primary-text-color)}
+  border:1px solid var(--line);border-radius:var(--radius-btn);color:var(--primary-text-color)}
 .act-strip.labeled .act svg{color:var(--act)}
 .act-strip.labeled .act.s-unknown::after{right:4px;top:4px}
-.tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:.78em;margin-right:4px;white-space:nowrap;
+.tag{display:inline-block;padding:1px 8px;border-radius:var(--radius-m);font-size:var(--fs-tag);margin-right:4px;white-space:nowrap;
   background:color-mix(in srgb,var(--secondary-text-color) 16%,transparent);color:var(--secondary-text-color)}
-.tag.warn{background:color-mix(in srgb,var(--warning-color) 20%,transparent);color:var(--warning-color)}
+.tag.warn{background:color-mix(in srgb,var(--warning-color) 20%,transparent);color:var(--warn-text)}
 .tag.sec{background:var(--error-color);color:#fff}
 /* Log severity: color plus label text */
 .tag.sev-success{background:color-mix(in srgb,var(--success-color) 18%,transparent);color:color-mix(in srgb,var(--success-color) 60%,var(--primary-text-color))}
-.tag.sev-warning{background:color-mix(in srgb,var(--warning-color) 22%,transparent);color:color-mix(in srgb,var(--warning-color) 55%,var(--primary-text-color))}
+.tag.sev-warning{background:color-mix(in srgb,var(--warning-color) 22%,transparent);color:var(--warn-text)}
 .tag.sev-error{background:var(--error-color);color:#fff}
-.warnc{color:color-mix(in srgb,var(--warning-color) 60%,var(--primary-text-color))}
+.warnc{color:var(--warn-text)}
 .tag.model{background:color-mix(in srgb,var(--info-color,var(--primary-color)) 18%,transparent);
-  color:var(--info-color,var(--primary-color))}
-.tag.primary{background:color-mix(in srgb,var(--primary-color) 18%,transparent);color:var(--primary-color)}
+  color:color-mix(in srgb,var(--info-color,var(--primary-color)) 50%,var(--primary-text-color))}
+.tag.primary{background:color-mix(in srgb,var(--primary-color) 18%,transparent);color:color-mix(in srgb,var(--primary-color) 50%,var(--primary-text-color))}
 /* Firmware once provided as an intermediate version: outlined ("Uploaded" stays filled) */
-.tag.step{background:transparent;border:1px solid var(--warning-color);color:var(--warning-color);padding:0 7px}
-.tooltip{position:fixed;z-index:20;max-width:360px;padding:8px 10px;border-radius:6px;font-size:.85em;
+.tag.step{background:transparent;border:1px solid var(--warning-color);color:var(--warn-text);padding:0 7px}
+.tooltip{position:fixed;z-index:20;max-width:360px;padding:8px 10px;border-radius:var(--radius-s);font-size:var(--fs-small);
   background:var(--primary-text-color);color:var(--card-background-color);pointer-events:none;
   overflow-wrap:anywhere;box-shadow:0 2px 8px rgba(0,0,0,.3)}
 .tooltip[hidden]{display:none}
@@ -257,16 +277,23 @@ button.pill{cursor:pointer}
 /* Firmware cards: column titles (.fw-head, wide screens) and one row per version; both
    share the grid, the icon column has a fixed width so the columns line up */
 .fw-row,.fw-head{display:grid;grid-template-columns:minmax(120px,1.2fr) 80px 130px minmax(150px,1fr) minmax(130px,1fr) 112px;
-  gap:8px 12px;align-items:center;padding:10px 16px;border-bottom:1px solid color-mix(in srgb,var(--primary-text-color) 12%,transparent)}
-.fw-head{padding-top:8px;padding-bottom:8px;color:var(--secondary-text-color);font-weight:500;font-size:.85em;white-space:nowrap}
+  gap:8px 12px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line)}
+.fw-head{padding-top:8px;padding-bottom:8px;color:var(--secondary-text-color);font-weight:500;font-size:var(--fs-small);white-space:nowrap}
 .fw-row:last-child{border-bottom:0}
 .fw-row details summary{cursor:pointer;color:var(--secondary-text-color)}
-/* "For n devices": no browser marker, one chevron after the text (down closed, up open) */
-.fw-dev summary{list-style:none;display:inline-flex;align-items:center;gap:8px}
-.fw-dev summary::-webkit-details-marker{display:none}
-.fw-dev summary::after{content:"";width:6px;height:6px;margin-top:-3px;border-right:2px solid currentColor;
+/* One disclosure sign everywhere: no browser marker, a chevron after the text (down when
+   closed, up when open) – "For n devices", log entries, changelogs and groups in dialogs,
+   phone log tiles and the "Details" button of the phone tiles */
+.fw-dev summary{display:inline-flex}
+.fw-dev summary,.log details>summary,dialog details>summary{list-style:none;align-items:center;gap:8px}
+.log details>summary,dialog details>summary{display:flex}
+:is(.fw-dev,.log details,dialog details,.log-m details)>summary::-webkit-details-marker{display:none}
+.fw-dev summary::after,.log details>summary::after,dialog details>summary::after,.log-m summary .chev::after{
+  content:"";flex:none;display:inline-block;width:6px;height:6px;margin-top:-3px;border-right:2px solid currentColor;
   border-bottom:2px solid currentColor;transform:rotate(45deg);transition:transform .15s}
-.fw-dev[open] summary::after{margin-top:3px;transform:rotate(-135deg)}
+.fw-dev[open] summary::after,.log details[open]>summary::after,dialog details[open]>summary::after,
+.log-m details[open] summary .chev::after{margin-top:3px;transform:rotate(-135deg)}
+@media (prefers-reduced-motion:reduce){summary::after,summary .chev::after{transition:none}}
 .fw-row details ul{margin:4px 0 0;padding-left:18px}
 .fw-row details li{margin:2px 0}
 .fw-row details li>span{margin-right:8px;overflow-wrap:anywhere}
@@ -280,41 +307,45 @@ button.pill{cursor:pointer}
   .fw-size,.fw-date{font-variant-numeric:tabular-nums}
   .fw-dev ul{display:inline-block;text-align:left}   /* the list as a block in the centre, lines left */
 }
-/* Upload button: text, then the icon of the upload dialog (phones: the icon only) */
+/* Upload button: the icon of the upload dialog, then the text (phones: the icon only) */
 #fw-upload{display:inline-flex;align-items:center;gap:6px}
 #fw-upload svg{width:16px;height:16px;fill:currentColor}
 
 /* Logs */
 .day{margin:16px 0 6px;color:var(--secondary-text-color);font-weight:500}
 .log{display:grid;grid-template-columns:52px 110px 1fr auto auto;gap:4px 12px;padding:8px 16px;align-items:start;
-  border-bottom:1px solid color-mix(in srgb,var(--primary-text-color) 12%,transparent)}
+  border-bottom:1px solid var(--line)}
 .log:last-child{border-bottom:0}
 /* Consecutive entries of one device – side bar only, the content is not indented */
 .log.grp,.log-m.grp{box-shadow:inset 3px 0 0 var(--primary-color)}
 .log.grp-first,.log.grp-mid{border-bottom-color:transparent}
 .log .log-del{margin:-3px 0}
+.log>.tag{justify-self:start}   /* kind label as wide as its text (neutral, also in error entries) */
 .tag[class*=sev-]{min-width:64px;text-align:center}   /* Success / Warning / Error: one size */
 .okc{color:color-mix(in srgb,var(--success-color) 60%,var(--primary-text-color))}
 /* Check entry: ignored devices in the normal text colour, also inside an error entry */
 .log li.neutral,.log-m li.neutral{color:var(--primary-text-color)}
 .log details summary{cursor:pointer}
+.log details>summary::after{color:var(--secondary-text-color)}
 .log ul{margin:4px 0 0;padding-left:18px}
-.log .user{color:var(--secondary-text-color);font-size:.85em;white-space:nowrap;line-height:20px}   /* centred with the delete icon */
+.log .user{color:var(--secondary-text-color);font-size:var(--fs-small);white-space:nowrap;line-height:20px}   /* centred with the delete icon */
 .log-body{display:grid;grid-template-columns:auto 1fr;gap:0 8px;align-items:start;min-width:0}
 .log-body>.tag{margin-top:1px}
 /* Mobile log tile (rendered instead of .log on narrow screens) */
-.log-m{padding:10px 12px;border-bottom:1px solid color-mix(in srgb,var(--primary-text-color) 12%,transparent)}
+.log-m{padding:10px 12px;border-bottom:1px solid var(--line)}
 .log-m:last-child{border-bottom:0}
 .log-head{display:flex;align-items:center;gap:6px}
 .log-m summary{cursor:pointer;list-style:none;margin-top:4px;color:var(--primary-text-color)}
 .log-sum{margin-top:4px}   /* summary without details (nothing to expand) */
-.log-m summary::-webkit-details-marker{display:none}
-.log-m summary div:last-child::after{content:" ▾";color:var(--secondary-text-color)}
-.log-m details[open] summary div:last-child::after{content:" ▴"}
+/* Chevron of a phone tile: after the last summary line, or after the first line's text when
+   the user stands right of it (one chevron only, the user name keeps its place) */
+.log-m summary .chev{color:var(--secondary-text-color)}
+.log-m summary .chev::after{margin:0 0 2px 8px}
+.log-m details[open] summary .chev::after{margin:0 0 -2px 8px}
 .log-details{margin-top:6px;overflow-wrap:anywhere}
 .log-details ul{margin:4px 0 0;padding-left:18px}
 .toast{position:fixed;z-index:30;left:50%;bottom:24px;transform:translateX(-50%);max-width:min(480px,calc(100vw - 32px));
-  padding:10px 16px;border-radius:8px;background:var(--primary-text-color);color:var(--card-background-color);
+  padding:10px 16px;border-radius:var(--radius-s);background:var(--primary-text-color);color:var(--card-background-color);
   box-shadow:0 4px 16px rgba(0,0,0,.3);overflow-wrap:anywhere}
 .toast.warn{border-left:4px solid var(--warning-color)}
 .toast[hidden]{display:none}
@@ -323,16 +354,16 @@ button.pill{cursor:pointer}
 /* Dialog */
 dialog{width:min(640px,calc(100vw - 32px));max-height:calc(100vh - 48px);padding:0;
   background:var(--card-background-color);color:var(--primary-text-color);border:0;
-  border-radius:var(--ha-dialog-border-radius,var(--ha-card-border-radius,12px));box-shadow:0 8px 32px rgba(0,0,0,.4)}
+  border-radius:var(--ha-dialog-border-radius,var(--ha-card-border-radius,var(--radius-m)));box-shadow:0 8px 32px rgba(0,0,0,.4)}
 dialog::backdrop{background:rgba(0,0,0,.5)}
 /* Head and button area separated by divider lines; content in titled sections */
-.dlg-head{display:flex;align-items:center;gap:8px;padding:16px 20px 12px;border-bottom:1px solid var(--divider-color)}
+.dlg-head{display:flex;align-items:center;gap:8px;padding:16px 20px 12px;border-bottom:1px solid var(--line)}
 .dlg-head h2{flex:1;font-size:1.15em;display:flex;align-items:center;gap:8px;min-width:0}
 /* Icon before the title (changelog, delete, upload, installation) */
 .dlg-head h2 .ti{width:20px;height:20px;flex:none;color:var(--secondary-text-color)}
 .dlg-head h2 .ti-delete,.dlg-head h2 .ti-chip{color:var(--error-color)}
 /* Status strip of the popups opened by an action icon: icon, feature name, state */
-.fstrip{display:flex;align-items:center;gap:12px;margin:12px 0 4px;padding:8px 12px;border-radius:10px;
+.fstrip{display:flex;align-items:center;gap:12px;margin:12px 0 4px;padding:8px 12px;border-radius:var(--radius-m);
   background:color-mix(in srgb,var(--primary-text-color) 5%,transparent);--act:var(--secondary-text-color)}
 .fstrip .fs-icon{display:inline-flex;align-items:center;justify-content:center;flex:none;width:32px;height:32px;
   border-radius:50%;color:var(--act);background:color-mix(in srgb,var(--act) 16%,transparent)}
@@ -343,20 +374,20 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
 .fstrip.t-warn{--act:var(--warning-color)}.fstrip.t-neutral{--act:var(--primary-text-color)}
 #dlg-body{padding:4px 20px 12px;overflow:auto;max-height:calc(100vh - 200px)}
 #dlg-body>p.hint{margin:14px 0 2px}
-.btns{display:flex;justify-content:flex-end;gap:8px;padding:12px 20px 16px;border-top:1px solid var(--divider-color)}
+.btns{display:flex;justify-content:flex-end;gap:8px;padding:12px 20px 16px;border-top:1px solid var(--line)}
 .btns:empty{display:none}
 dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;margin:4px 0}
 dt{color:var(--secondary-text-color)}dd{margin:0;overflow-wrap:anywhere}
 /* Value lists: fixed label column, thin row dividers */
 dl.kv{grid-template-columns:minmax(96px,34%) minmax(0,1fr);gap:0;margin:0}
-dl.kv>dt,dl.kv>dd{padding:4px 0;border-bottom:1px solid color-mix(in srgb,var(--primary-text-color) 8%,transparent)}
+dl.kv>dt,dl.kv>dd{padding:4px 0;border-bottom:1px solid var(--line)}
 dl.kv>dt:last-of-type,dl.kv>dd:last-of-type{border-bottom:0}
 dl.kv>dt{padding-right:12px}
-dl.kv>dd.sha{font-size:.8em;word-break:break-all;color:var(--secondary-text-color);line-height:1.5}
-dl.kv>dd.ver{font-weight:600;white-space:pre}
-dl.kv>dd.src{font-size:.9em}
+dl.kv>dd.sha{font-size:var(--fs-tag);word-break:break-all;color:var(--secondary-text-color);line-height:1.5}
+dl.kv>dd.ver{font-weight:600;white-space:pre-wrap;overflow-wrap:anywhere}   /* long Gen1 versions wrap */
+dl.kv>dd.src{font-size:var(--fs-small)}
 .dsec{margin:14px 0 4px}
-.dsec>h3{margin:0 0 4px;font-size:.75em;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--secondary-text-color)}
+.dsec>h3{margin:0 0 4px;font-size:var(--fs-tag);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--secondary-text-color)}
 /* Status dialog: message left, status pill right */
 .dstatus{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:12px}
 .dmsg{margin:0;line-height:1.45}
@@ -374,15 +405,24 @@ dl.kv>dd.src{font-size:.9em}
 .cl-version{margin:4px 0;font-weight:600}
 .cl-list{margin:0;padding-left:18px}.cl-list li{margin:6px 0;line-height:1.4}
 .cl-list li.this{font-weight:600}
-dialog table th,dialog table td{padding:6px 8px}
+/* Tables in dialogs: plain tables, left-aligned, on every width (the device table rules of
+   wide screens and the phone tiles do not apply) */
+dialog table{display:table;table-layout:auto}
+dialog thead{display:table-header-group}
+dialog tbody{display:table-row-group;padding:0;background:none;border-radius:0}
+dialog tr{display:table-row;padding:0;margin:0;border:0;border-radius:0;background:none}
+dialog tr::before{content:none}
+#dlg table th,#dlg table td{display:table-cell;padding:6px 8px;text-align:left;border-bottom:1px solid var(--line)}
+dialog tr:last-child>td{border-bottom:0}
+dialog tbody tr:hover>td{background:none}
 .field{display:flex;flex-direction:column;gap:6px;margin:8px 0;color:var(--secondary-text-color)}
 .field[hidden]{display:none}
 .field input,.field select{min-width:min(320px,100%)}
 
 /* Settings form */
 .form{display:grid;grid-template-columns:minmax(180px,280px) 1fr;gap:14px 20px;align-items:center}
-.form .desc{grid-column:2;color:var(--secondary-text-color);font-size:.85em;margin-top:-10px}
-.form .desc.warnc{color:color-mix(in srgb,var(--warning-color) 60%,var(--primary-text-color))}   /* e.g. non-local download URL */
+.form .desc{grid-column:2;color:var(--secondary-text-color);font-size:var(--fs-small);margin-top:-10px}
+.form .desc.warnc{color:var(--warn-text)}   /* e.g. non-local download URL */
 .form input[type=text],.form input[type=password]{width:min(420px,100%)}
 .form input[type=number]{width:110px}
 .pins{display:flex;flex-direction:column;gap:6px}
@@ -395,12 +435,12 @@ dialog table th,dialog table td{padding:6px 8px}
 .set-name>label{cursor:help}
 button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help svg{width:16px;height:16px}
 .form-actions{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:4px}
-.unsaved{color:var(--warning-color);font-size:.9em}.unsaved[hidden]{display:none}
+.unsaved{color:var(--warn-text);font-size:var(--fs-small)}.unsaved[hidden]{display:none}
 .set-changelog{margin:16px 0 0}
 .settings-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(560px,1fr));gap:0 16px;align-items:start}
 /* Firmware store block inside "Firmware & Storage": full width, between the options */
-.set-store{grid-column:1/-1;padding:12px 0;border-top:1px solid color-mix(in srgb,var(--primary-text-color) 12%,transparent);
-  border-bottom:1px solid color-mix(in srgb,var(--primary-text-color) 12%,transparent)}
+.set-store{grid-column:1/-1;padding:12px 0;border-top:1px solid var(--line);
+  border-bottom:1px solid var(--line)}
 .set-store-name{font-weight:500}
 .set-store>.hint{margin:6px 0 0}
 .set-store .store-btns{margin-top:10px}
@@ -411,13 +451,11 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
 
 /* Narrow screens (phones): device rows become compact cards */
 @media (max-width:700px){
-  /* Lines of tiles and outlined tile buttons: at least 3:1 against the card in light and
-     dark themes (the theme's divider colour is about 1.5:1 in dark themes) */
-  :root{--line-strong:color-mix(in srgb,var(--primary-text-color) 50%,var(--card-background-color))}
+  :root{--control-h:44px}   /* touch targets */
   body{margin:8px}
   /* Inside HA the app title is hidden; a "(beta)" mark stays, on its own line above the pills */
   .embedded h1 .app-title{display:none}
-  .embedded h1 .beta{display:block;margin:0 0 2px;font-size:12px;line-height:1.3}
+  .embedded h1 .beta{display:block;margin:0 0 2px;font-size:var(--fs-small);line-height:1.3}
   /* Header: the pills stacked on the left (cut with an ellipsis), "Check now" right,
      vertically centred – the button never wraps below the pills */
   .titlebar{align-items:center;flex-wrap:nowrap}
@@ -436,23 +474,36 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
   button.icon.tool-btn{width:44px;height:44px}
   .tb-extra{flex:1 1 100%;margin-left:0}
   #view-devices .tb-extra{display:none}   /* only the column chooser, not used on phones */
+  #cols{display:none}   /* fixed card layout: no column chooser */
   #fw-upload{margin-left:auto;width:44px;height:44px;padding:0;justify-content:center;border-radius:50%}
   #fw-upload>span{display:none}
   #fw-upload svg{width:20px;height:20px}
-  #cols{display:none}   /* fixed card layout: no column chooser */
+  /* Touch targets: buttons, fields, selects, the file chooser and the link entries of the row menu 44 px */
   button,input[type=search],select{min-height:44px}
+  .rowmenu a{display:flex;align-items:center;min-height:44px}
   button.pill{min-height:32px}   /* status details are also in the ⋮ menu */
   .pill.p-ignored,.pill.p-removed,.pill.p-activity{min-height:32px}   /* same size as the status pill */
-  button.install{min-height:32px;padding:2px 10px;border-radius:12px;font-size:.85em;font-weight:500}   /* same size as the status pill */
+  button.install{min-height:32px;padding:2px 10px;border-radius:var(--radius-m);font-size:var(--fs-small);font-weight:500}   /* same size as the status pill */
   button.icon{min-width:44px;min-height:44px}
   thead{display:none}
   table,tbody{display:block}
   /* Each device is a clearly separated tile: tiles sit on the page background like the
      firmware cards, with their own card background and a border of at least 3:1
      contrast (the theme's divider colour is too faint, about 1.5:1 in dark themes). */
-  tbody{padding:10px;background:var(--primary-background-color);border-radius:0 0 12px 12px}
+  tbody{padding:10px;background:var(--primary-background-color);border-radius:0 0 var(--radius-m) var(--radius-m)}
   dialog{width:calc(100vw - 16px);max-height:calc(100vh - 24px)}
   #dlg-body{padding-top:12px}
+  /* "Install n updates?": two-line entries instead of the five columns – name, below it
+     IP · installed → target · source (the plain table does not fit at 360 px) */
+  #dlg table.inst-list,#dlg table.inst-list tbody{display:block}
+  #dlg table.inst-list thead{display:none}
+  #dlg table.inst-list tr{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 6px;padding:8px 0;border-bottom:1px solid var(--line)}
+  #dlg table.inst-list tr:last-child{border-bottom:0}
+  #dlg table.inst-list td{display:block;padding:0;border:0;color:var(--secondary-text-color);font-size:var(--fs-small)}
+  #dlg table.inst-list td:first-child{flex:0 0 100%;color:var(--primary-text-color);font-size:var(--fs-text);font-weight:500}
+  #dlg table.inst-list td:nth-child(3)::before,#dlg table.inst-list td:nth-child(5)::before{content:"· "}
+  #dlg table.inst-list td:nth-child(4)::before{content:"→ "}
+  #dlg table.inst-list td:nth-child(4){color:var(--primary-text-color);font-weight:500}
   /* Toast as wide as its text, at most the width minus 16 px on each side */
   .toast{left:16px;right:16px;transform:none;width:fit-content;max-width:none;margin:0 auto}
   /* Tile: checkbox, HA name and ⋮ on line 1; Shelly name left, IP right on line 2;
@@ -460,15 +511,15 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
      at top and bottom. */
   tr{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;column-gap:8px;row-gap:2px;align-items:center;
     padding:12px;margin-bottom:10px;background:var(--card-background-color);
-    border:1px solid var(--line-strong);border-radius:10px}
+    border:1px solid var(--line-strong);border-radius:var(--radius-m)}
   /* Head of the tile like the head of a firmware card: HA name (600) with the "Gen n"
      label, divider line over the full tile width. The band is a grid item behind line 1. */
   tr::before{content:"";grid-column:1/-1;grid-row:1;align-self:stretch;margin:-12px -12px 0;
-    border-bottom:1px solid var(--divider-color)}
+    border-bottom:1px solid var(--line)}
   td.c-select,td.c-menu,td.c-device .name-line{margin-bottom:12px}
   td.c-device{display:contents}
   td.c-device .name-line{grid-column:2;grid-row:1;align-self:center;display:flex;align-items:center;gap:8px;min-width:0}
-  td.c-device .name{font-size:1.05em;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  td.c-device .name{font-size:var(--fs-title);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   td.c-device .name-line .tag{display:inline-block;margin:0;flex:none}
   td.c-device .shelly-name{grid-column:2;grid-row:2}
   tr:last-child{margin-bottom:0}
@@ -481,8 +532,7 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
   td.c-menu button.icon{margin:-12px 0}   /* 44 px touch target, 20 px (one text line) in the layout */
   td.c-firmware{grid-column:2;grid-row:3;padding-top:6px}
   /* IP right of the Shelly name: grey, plain text with ↗ when it links to the web UI */
-  td.c-ip{grid-column:3/5;grid-row:2;text-align:right;color:var(--secondary-text-color);font-size:.85em}
-  td.c-ip .mono{font-family:inherit}
+  td.c-ip{grid-column:3/5;grid-row:2;text-align:right;color:var(--secondary-text-color);font-size:var(--fs-small)}
   td.c-ip a{color:inherit;text-decoration:none}
   td.c-ip a::after{content:" ↗"}
   td.c-details{grid-column:1/-1;grid-row:4}
@@ -492,16 +542,16 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
   /* Other Shellys: name and kind, model and firmware, where to update */
   .oth-head{display:none}
   .oth-row{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"name kind" "model fw" "where where";gap:2px 12px;padding:10px 16px}
-  .oth-name{grid-area:name}.oth-kind{grid-area:kind;text-align:right}.oth-model{grid-area:model;font-size:.9em}
+  .oth-name{grid-area:name}.oth-kind{grid-area:kind;text-align:right}.oth-model{grid-area:model;font-size:var(--fs-small)}
   .oth-fw{grid-area:fw;text-align:right;font-weight:600}.oth-where{grid-area:where}
   .unk-row{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"name act" "size act";gap:2px 12px}
-  .unk-name{grid-area:name}.unk-size{grid-area:size;color:var(--secondary-text-color);font-size:.9em}.unk-row>.actions{grid-area:act}
+  .unk-name{grid-area:name}.unk-size{grid-area:size;color:var(--secondary-text-color);font-size:var(--fs-small)}.unk-row>.actions{grid-area:act}
   .unk-row>.actions>*{min-width:44px;min-height:44px}
   /* "Details" as outlined button like the feature buttons: full content width, 36 px,
      centred text with a chevron (down when closed, up when open) */
   td.c-details summary{cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:center;gap:8px;
-    min-height:36px;margin-top:10px;padding:4px 10px;border:1px solid var(--line-strong);border-radius:16px;
-    color:var(--primary-text-color);font-size:.9em}
+    min-height:36px;margin-top:10px;padding:4px 10px;border:1px solid var(--line-strong);border-radius:var(--radius-btn);
+    color:var(--primary-text-color);font-size:var(--fs-small)}
   td.c-details summary::-webkit-details-marker{display:none}
   td.c-details summary::after{content:"";width:6px;height:6px;margin-top:-3px;border-right:2px solid currentColor;
     border-bottom:2px solid currentColor;transform:rotate(45deg);transition:transform .15s}
@@ -510,32 +560,34 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
   .detail-body{padding-top:4px}
   .detail-actions{margin-bottom:10px}
   /* Feature buttons: natural width, every row stretched to the full content width */
-  .act-strip.labeled .act{flex:1 1 auto;min-height:36px;padding:4px 10px;gap:5px;font-size:.9em;border-radius:16px;
+  .act-strip.labeled .act{flex:1 1 auto;min-height:36px;padding:4px 10px;gap:5px;font-size:var(--fs-small);border-radius:var(--radius-btn);
     border-color:var(--line-strong)}
   .act-strip.labeled .act svg{width:16px;height:16px}
   /* Detail list: label left, value right */
-  dl.tile-kv{border-top:1px solid color-mix(in srgb,var(--primary-text-color) 12%,transparent)}
+  dl.tile-kv{border-top:1px solid var(--line)}
   dl.tile-kv>dt,dl.tile-kv>dd{padding:6px 0}
   dl.tile-kv>dd{text-align:right}
   td.c-status .status-cell{justify-content:flex-end}
   /* Logs: entries as separated tiles with a 5 px gap (like the device tiles) */
   #log-list .card:has(>.log-m){background:none;border:0;box-shadow:none;overflow:visible}
-  .log-m,.log-m:last-child{margin-bottom:5px;background:var(--card-background-color);border-radius:10px;
+  .log-m,.log-m:last-child{margin-bottom:5px;background:var(--card-background-color);border-radius:var(--radius-m);
     border:1px solid var(--line-strong)}
   /* Firmware: version with the icon buttons right-aligned in the head, size + date, checksum, devices */
   .fw-row{grid-template-columns:auto 1fr;grid-template-areas:"ver act" "size date" "sha sha" "dev dev";
     gap:6px 12px;padding:8px 16px 12px}
   .fw-head{display:none}   /* phones: small labels inside the tile instead */
-  .fw-row [data-label]::before{content:attr(data-label);margin-right:6px;color:var(--secondary-text-color);font-size:.78em;font-weight:500}
+  .fw-row [data-label]::before{content:attr(data-label);margin-right:6px;color:var(--secondary-text-color);font-size:var(--fs-tag);font-weight:500}
   .fw-ver{grid-area:ver;overflow-wrap:anywhere}
   .fw-size{grid-area:size}.fw-date{grid-area:date;justify-self:end;text-align:right}   /* right, under the icons */
   .fw-sha{grid-area:sha;display:flex;align-items:center;gap:4px;min-width:0}
   .fw-sha>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
   .fw-dev{grid-area:dev;min-width:0;overflow-wrap:anywhere;padding-top:6px;
-    border-top:1px dashed color-mix(in srgb,var(--primary-text-color) 18%,transparent)}
+    border-top:1px dashed var(--line)}
   .fw-dev summary{padding:6px 0}
   .fw-row details ul{padding-left:0;list-style:none}
-  .fw-row details li{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .fw-row details li{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:44px}
+  /* "Install" behind a device of the Firmware tab: like in the device tile (size of the status pill) */
+  .fw-dev button.danger.small{min-height:32px;padding:2px 10px;border-radius:var(--radius-m);font-size:var(--fs-small);font-weight:500}
   .fw-row>.actions{grid-area:act;justify-content:flex-end;align-items:center;gap:2px}
   a.icon{min-width:44px;min-height:44px}
   .fw-row>.actions>*{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px}
@@ -546,15 +598,11 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
   .log-head .log-del{margin:-8px -6px -8px 0}
   /* User top right, beside the first summary line */
   .log-m :is(summary,.log-sum) div.first{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
-  .log-m :is(summary,.log-sum) div.first>.user{color:var(--secondary-text-color);font-size:.85em;white-space:nowrap}
-  .log-m summary div.first:last-child::after{content:none}
-  .log-m summary div.first:last-child>span:first-child::after{content:" ▾";color:var(--secondary-text-color)}
-  .log-m details[open] summary div.first:last-child>span:first-child::after{content:" ▴"}
-  .log-m details[open] summary div.first:last-child::after{content:none}   /* one arrow only, the user stays in place */
+  .log-m :is(summary,.log-sum) div.first>.user{color:var(--secondary-text-color);font-size:var(--fs-small);white-space:nowrap}
   /* Settings: each option is one block (label, control, help) with a separator */
   .form{display:block}
   .set-field{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;padding:14px 0;
-    border-top:1px solid color-mix(in srgb,var(--primary-text-color) 12%,transparent)}
+    border-top:1px solid var(--line)}
   .set-field:first-child{border-top:0;padding-top:2px}
   .set-field:last-child{padding-bottom:0}
   .set-store{padding:14px 0;border-bottom:0}
@@ -570,7 +618,7 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
   .pins input{min-width:0;width:100%;box-sizing:border-box}
   /* Common save area: stays reachable at the bottom while scrolling */
   .form-actions{position:sticky;bottom:0;z-index:5;margin-top:12px;padding:10px 12px;
-    background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:12px;
+    background:var(--card-background-color);border:1px solid var(--line);border-radius:var(--radius-m);
     box-shadow:0 -2px 8px rgba(0,0,0,.18)}
   .form-actions .unsaved{margin-right:auto}
 }
@@ -589,18 +637,20 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
 /* Import: result as counts, every group expandable */
 .imp-groups{display:flex;flex-direction:column;gap:6px}
 .imp-sum{display:inline-flex;align-items:center;gap:6px}
-.imp-list{margin:6px 0 4px 18px;padding:0;font-size:.92em}
+.imp-list{margin:6px 0 4px 18px;padding:0;font-size:var(--fs-small)}
 .imp-list li{margin:2px 0}
 /* Passwords of several devices: device list with the step per device, result rows */
 .bulk-list{display:flex;flex-direction:column}
-.bulk-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;padding:6px 0;border-bottom:1px solid var(--divider-color)}
+.bulk-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;padding:6px 0;border-bottom:1px solid var(--line)}
 .bulk-row.off{opacity:.6}
 .bulk-all{padding:4px 0 8px;font-weight:500}
 .bulk-dev{display:inline-flex;flex-direction:column}
-.bulk-dev .sub,.bulk-row>.sub{color:var(--secondary-text-color);font-size:.88em}
-.bulk-step{margin-left:auto;font-size:.9em;color:var(--primary-color)}
+.bulk-dev .sub,.bulk-row>.sub{color:var(--secondary-text-color);font-size:var(--fs-small)}
+/* Step of a fitting device and reason of a greyed-out one: both right (wrapped: right on their own line) */
+.bulk-step,.bulk-row>.sub{margin-left:auto;text-align:right}
+.bulk-step{font-size:var(--fs-small);color:var(--primary-color)}
 .bulk-res{display:flex;flex-direction:column}
-.bulk-res-row{display:flex;align-items:center;gap:12px;padding:6px 0;border-bottom:1px solid var(--divider-color)}
+.bulk-res-row{display:flex;align-items:center;gap:12px;padding:6px 0;border-bottom:1px solid var(--line)}
 .msg-icon.sm{width:28px;height:28px}
 .msg-icon.sm svg{width:18px;height:18px}
-@media (max-width:700px){.bulk-step,.bulk-row>.sub{margin-left:26px}}
+

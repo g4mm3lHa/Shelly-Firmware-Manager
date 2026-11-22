@@ -1,7 +1,7 @@
 // Devices tab: status and action icons, the device table / phone tiles and the row menu.
 import {
   $, api, attachTip, box, closeModal, collator, devUrl, el, filterControl, fmt, hideTip, icon, iconButton, loadLocal, message,
-  modal, openDetails, saveLocal, searchTool, section, selected, sortControl, toast, ui, valueList, webUrl,
+  modal, openDetails, saveLocal, searchTool, section, selected, setTip, sortControl, toast, toolButton, ui, valueList, webUrl,
 } from "./core.js";
 import {DOWNGRADE_OFF, OFFER_SOURCES, openDowngrade, openInstall} from "./install.js";
 import {
@@ -91,7 +91,7 @@ const devFilter = filterControl(FILTERS.map(([key, label, , tip]) => [key, label
 $("dev-filter").replaceWith(devFilter.node);
 
 // Running check of a device (server-side state, in memory only)
-const ACTIVITY_LABELS = {waiting: "Waiting", checking: "Checking…", downloading: "Downloading…", reloading: "Reloading…"};
+const ACTIVITY_LABELS = {waiting: "Waiting", checking: "Checking …", downloading: "Downloading …", reloading: "Reloading …"};
 // The last successful check differs from the last attempt only after a failed attempt
 const lastSuccess = d => d.last_success && d.last_success !== d.last_check ? fmt(d.last_success) : null;
 
@@ -103,7 +103,7 @@ function statusText(d) {
   return [d.message, `Installed: ${d.version || "–"}`, d.offer_version ? `Available: ${d.offer_version}` : null,
     `Last check: ${fmt(d.last_check)}`, lastSuccess(d) && `Last successful check: ${lastSuccess(d)}`].filter(Boolean).join("\n");
 }
-/** "Device Details" popup: message left, status right on one line, then the sections
+/** "Device details" popup: message left, status right on one line, then the sections
  *  Firmware, Device (model, generation, firmware ID, NTP) and History. */
 function showStatus(d) {
   const key = shownStatus(d), bad = ["error", "unconfirmed"].includes(d.status);
@@ -255,7 +255,7 @@ function installButton(d) {
   if (!(d.status === "ready" || failedInstall(d)) || d.activity || d.installing) return null;
   const blocker = installBlocker(d, ui.state), go = el("button", "Install", "danger small install");
   go.disabled = !!blocker;
-  go.title = blocker || (d.store_fallback ? "Install the stored version (not verified by the Shelly update server)" : "Install the provided update");
+  setTip(go, blocker || (d.store_fallback ? "Install the stored version (not verified by the Shelly update server)" : "Install the provided update"));
   go.setAttribute("aria-label", `Install update on ${d.name}`);
   go.onclick = () => { if (installable(d, ui.state)) openInstall([d]); };
   return go;
@@ -328,9 +328,9 @@ const COLUMNS = {
     }
     if (!d.ip) return ["–"];
     // Dimmed while the battery device sleeps (its web UI does not answer then)
-    const cls = "mono" + (asleep(d) ? " dim" : "");
+    const cls = "num" + (asleep(d) ? " dim" : "");
     const url = webUrl(d); if (!url) return [el("span", d.ip, cls)];
-    const a = el("a", d.ip, cls); a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.title = "Open the Shelly web UI";
+    const a = el("a", d.ip, cls); a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer"; setTip(a, "Open the Shelly web UI");
     return [a];
   }},
   gen: {label: "Gen", sort: d => d.gen, cell: d => [d.gen ?? "–"]},
@@ -357,6 +357,9 @@ const COLUMNS = {
 // Data columns can be reordered; selection (left) and menu/details (right) stay at the edges
 const DATA_COLUMNS = Object.keys(COLUMNS).filter(k => !COLUMNS[k].fixed);
 const defaultPrefs = () => ({sort: ["device", "asc"], hidden: DATA_COLUMNS.filter(k => COLUMNS[k].optional), order: [...DATA_COLUMNS]});
+/** Hidden columns of "Reset columns": the optional ones; Host name is shown while the option
+ *  "Resolve host names" is on (as when the option is switched on). */
+const defaultHidden = () => defaultPrefs().hidden.filter(k => k !== "host_name" || !(ui.state && ui.state.host_names));
 // Sort order, hidden columns and column order – kept per end device (browser storage);
 // a new device starts with the defaults (device name ascending)
 const prefs = {devices: defaultPrefs()};
@@ -392,7 +395,7 @@ function followHostNames() {
     prefs.devices.hidden = prefs.devices.hidden.filter(k => k !== "host_name"); savePrefs(); syncChooser();
   }
   if (loadLocal("hostNamesSeen") !== on) saveLocal("hostNamesSeen", on);
-  for (const n of document.querySelectorAll('#cols-devices label:has(input[data-col="host_name"]), .sort-menu .sort-item[data-value="host_name"]')) n.hidden = !on;
+  for (const n of document.querySelectorAll('#cols-devices .sort-item[data-col="host_name"], .sort-menu .sort-item[data-value="host_name"]')) n.hidden = !on;
   if (!on && prefs.devices.sort[0] === "host_name") prefs.devices.sort = ["device", prefs.devices.sort[1]];
 }
 /** Move a data column before another one (drag & drop) or by one step (keyboard). */
@@ -426,7 +429,7 @@ function tableHead() {
     const [sKey, dir] = prefs.devices.sort;
     if (col.sort) { th.classList.add("sortable"); if (sKey === key) th.dataset.dir = dir; }
     if (!col.fixed) {
-      th.tabIndex = 0; th.draggable = true; th.title = col.sort ? "Click to sort · drag or Alt+Arrow to move" : "Drag or Alt+Arrow to move";
+      th.tabIndex = 0; th.draggable = true; setTip(th, col.sort ? "Click to sort · drag or Alt+Arrow to move" : "Drag or Alt+Arrow to move");
       th.ondragstart = e => { e.dataTransfer.setData("text/plain", key); e.dataTransfer.effectAllowed = "move"; };
       th.ondragover = e => { e.preventDefault(); th.classList.add("drop"); };
       th.ondragleave = () => th.classList.remove("drop");
@@ -496,7 +499,7 @@ export function renderDevices() {
   const s = ui.state, q = $("dev-search").value.trim().toLowerCase();
   const ok = new Set(s.devices.filter(d => installable(d, s)).map(d => d.id));
   for (const id of [...selected]) if (!ok.has(id)) selected.delete(id);
-  followHostNames();
+  followHostNames(); syncChooser();
   const match = d => !q || [d.name, d.shelly_name, d.ip, d.host_name, d.model, d.type].some(v => String(v || "").toLowerCase().includes(q));
   const found = s.devices.filter(match);
   const others = (s.others || []).filter(o => !q || [o.name, o.model, o.firmware, OTHER_KINDS[o.kind]].some(v => String(v || "").toLowerCase().includes(q)));
@@ -525,24 +528,38 @@ export function renderDevices() {
     s.first_start_open ? "No devices yet – they are found by the first check." : "No devices yet – run “Check now”.", "empty")));
   $("dev-cards").replaceChildren(...cards);
 }
-// Column chooser: built once, checkbox state follows prefs
+// ---- Column chooser
+// "Columns": round icon at the right end of the toolbar (wide screens only; the phone tiles
+// have a fixed layout). Its popover looks like the sort and filter tools: title, one entry
+// per data column with a check mark while shown (a click keeps the popover open), "Reset
+// columns" last. A dot on the icon while the columns differ from the default.
+let columnsTool = null;
+/** Build the column chooser once; its entries follow prefs (syncChooser). */
 export function buildChooser() {
-  for (const [key, col] of Object.entries(COLUMNS)) {
-    if (col.fixed) continue;
-    const label = el("label"), cb = el("input"); cb.type = "checkbox"; cb.dataset.col = key;
-    cb.onchange = () => {
-      const hidden = new Set(prefs.devices.hidden); cb.checked ? hidden.delete(key) : hidden.add(key);
-      prefs.devices.hidden = [...hidden]; savePrefs(); render(true);
+  const items = DATA_COLUMNS.map(key => {
+    const b = el("button", COLUMNS[key].label, "sort-item"); b.type = "button"; b.role = "menuitemcheckbox"; b.dataset.col = key;
+    b.onclick = () => {
+      const hidden = new Set(prefs.devices.hidden); hidden.has(key) ? hidden.delete(key) : hidden.add(key);
+      prefs.devices.hidden = [...hidden]; savePrefs(); syncChooser(); render(true);
     };
-    label.append(cb, " " + col.label); $("cols-devices").append(label);
-  }
-  const reset = el("button", "Reset columns", "reset-cols"); reset.type = "button";
-  reset.onclick = () => { prefs.devices = defaultPrefs(); syncChooser(); savePrefs(); render(true); };
-  $("cols-devices").append(el("hr"), reset);
+    return b;
+  });
+  const reset = el("button", "Reset columns", "sort-item reset-cols"); reset.type = "button"; reset.role = "menuitem";
+  reset.onclick = () => { prefs.devices = {...defaultPrefs(), hidden: defaultHidden()}; savePrefs(); syncChooser(); render(true); };
+  const menu = box("div", "sort-menu", el("div", "Columns", "pop-title"), ...items, el("hr"), reset);
+  menu.role = "menu"; menu.id = "cols-devices";
+  columnsTool = toolButton("columns", "Columns", menu); columnsTool.node.id = "cols";
+  $("cols").replaceWith(columnsTool.node);
 }
-/** Set the chooser checkboxes from prefs. */
-export function syncChooser() { for (const cb of $("cols-devices").querySelectorAll("input")) cb.checked = !prefs.devices.hidden.includes(cb.dataset.col); }
-document.addEventListener("click", e => { if (!$("cols").contains(e.target)) $("cols").open = false; });
+/** Check marks of the chooser from prefs; the dot while hidden columns or their order differ
+ *  from the default (columns the app does not offer right now do not count). */
+export function syncChooser() {
+  for (const b of $("cols-devices").querySelectorAll("[data-col]")) b.setAttribute("aria-checked", String(!prefs.devices.hidden.includes(b.dataset.col)));
+  const shown = keys => DATA_COLUMNS.filter(k => offered(k) && !keys.includes(k)).join();
+  const changed = shown(prefs.devices.hidden) !== shown(defaultHidden()) ||
+    prefs.devices.order.filter(offered).join() !== DATA_COLUMNS.filter(offered).join();
+  columnsTool.button.classList.toggle("has-value", changed);
+}
 $("dev-search").oninput = () => render(true);
 searchTool($("dev-search"));
 
@@ -569,7 +586,7 @@ function openRowMenu(d, anchor) {
   else if (d.gen >= 2) add("Downgrade", () => openDowngrade(d), downgradable(d, ui.state) && d.downgrades > 0);
   // Group 2: the device itself
   items.push(el("hr"));
-  add("Device Details", () => showStatus(d), true);
+  add("Device details", () => showStatus(d), true);
   add("Reload device info", () => reloadDevice(d), !blocked && !!d.ip);
   if (blocked) items.push(el("div", `Not available – ${blocked}`, "menu-hint"));   // reason, also for touch
   const url = webUrl(d);
@@ -623,8 +640,8 @@ function forgetDevice(d) {
   [{text: "Cancel"}, {text: "Remove", kind: "danger", action: async () => {
     try {
       await api(`${devUrl(d)}/forget`, {confirm: true}); selected.delete(d.id); closeModal(); toast(`${d.name}: removed from the list`);
-    } catch (e) { message(title, e.message, "error"); }
-  }}]);
+    } catch (e) { message(title, e.message, "error", "delete"); }
+  }}], "delete");
 }
 /** Close the row menu. */
 export function closeRowMenu() { rowmenu.hidden = true; }

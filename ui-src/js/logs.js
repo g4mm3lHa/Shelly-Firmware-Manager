@@ -39,6 +39,14 @@ const INSTALL_EVENTS = {started: "started", confirmed: "confirmed", unconfirmed:
 const TRIGGER_LABELS = {manual: "Manual", scheduled: "Scheduled", device: "Single-device", install: "After-installation",
   step: "After-intermediate-version"};
 const arrow = (a, b) => `${a ?? "–"} → ${b ?? "–"}`;
+/** Result of a check from its counts ("1 update · 1 warning · 1 error · 2 ignored"), the
+ *  same form on every width; entries before 3.0 have only the server's text. */
+function checkCounts(e) {
+  if (typeof e.updates !== "number") return e.result;
+  const n = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
+  return [n(e.updates, "update"), n(e.warnings || 0, "warning"), n(e.errors || 0, "error"),
+    e.ignored?.length ? `${e.ignored.length} ignored` : null].filter(Boolean).join(" · ");
+}
 
 /** Main line and optional details of one log entry. */
 function logContent(e) {
@@ -46,7 +54,7 @@ function logContent(e) {
     case "check": {
       // A scheduled check that could not start (other work running): cancelled, not repeated
       if (e.skipped) return [el("div", `Scheduled check cancelled · ${e.skipped}`)];
-      const line = el("div", `${TRIGGER_LABELS[e.trigger] || "Scheduled"} check · ${e.devices} device${e.devices === 1 ? "" : "s"} · ${e.duration} s · ${e.result}`);
+      const line = el("div", `${TRIGGER_LABELS[e.trigger] || "Scheduled"} check · ${e.devices} device${e.devices === 1 ? "" : "s"} · ${e.duration} s · ${checkCounts(e)}`);
       if (!e.findings?.length && !e.ignored?.length) return [line];
       return [keptDetails(`log-${e.ts}-check`, line.textContent, checkFindings(e))];
     }
@@ -109,11 +117,7 @@ function logSummary(e) {
     case "check": {
       if (e.skipped) return ["Scheduled check cancelled", e.skipped];
       const first = `${TRIGGER_LABELS[e.trigger] || "Scheduled"} · ${e.devices} device${e.devices === 1 ? "" : "s"} · ${e.duration} s`;
-      const counts = typeof e.updates === "number"
-        ? `${e.updates} update${e.updates === 1 ? "" : "s"} · ${e.warnings || 0} warning${e.warnings === 1 ? "" : "s"} · ${e.errors || 0} error${e.errors === 1 ? "" : "s"}`
-          + (e.ignored?.length ? ` · ${e.ignored.length} ignored` : "")
-        : e.result;   // entries before 3.0
-      return [first, counts];
+      return [first, checkCounts(e)];
     }
     case "download": return [`${e.type} ${e.version}`];
     case "delete": return [e.unknown ? "Unknown file" : `${e.type} ${e.version}`];
@@ -143,8 +147,8 @@ function deleteLogEntry(e) {
     el("p", "The entry is removed from the activity log for good.", "hint")],
   [{text: "Cancel"}, {text: "Delete", kind: "danger", action: async () => {
     try { await api(`api/logs/${encodeURIComponent(e.id)}/delete`, {confirm: true}); closeModal(); ui.logsLoaded = 0; load(true); }
-    catch (err) { message(title, err.message, "error"); }
-  }}]);
+    catch (err) { message(title, err.message, "error", "delete"); }
+  }}], "delete");
 }
 /** Delete icon of an entry (entries of versions before 3.1.1 get their ID at the start). */
 function logDelete(e) {
@@ -156,7 +160,7 @@ function logDelete(e) {
 function logRow(e, d, group) {
   const sev = severity(e);
   return box("div", "log" + (group ? ` grp grp-${group}` : ""), el("span", `${pad(d.getHours())}:${pad(d.getMinutes())}`, "mono sub"),
-    el("span", KIND_LABELS[e.kind] || e.kind, "tag" + (sev === "error" ? " sec" : "")),
+    el("span", KIND_LABELS[e.kind] || e.kind, "tag"),   // neutral like on phones: the outcome has its own label
     box("div", "log-body" + (sev === "error" ? " bad" : ""), el("span", SEVERITY_LABELS[sev], `tag sev-${sev}`), box("div", null, ...logContent(e))),
     el("span", e.user || "", "user"), logDelete(e));
 }
@@ -166,7 +170,7 @@ function logTile(e, d, group) {
   const sev = severity(e), summary = logSummary(e);
   const head = box("div", "log-head", el("span", `${pad(d.getHours())}:${pad(d.getMinutes())}`, "mono sub"),
     el("span", KIND_LABELS[e.kind] || e.kind, "tag"), el("span", SEVERITY_LABELS[sev], `tag sev-${sev}`), el("span", null, "spacer"), logDelete(e));
-  const body = box("div", "log-details", ...(e.kind === "check" ? (e.findings?.length || e.ignored?.length ? [checkFindings(e)] : [el("div", e.result, "sub")]) : logContent(e)));
+  const body = box("div", "log-details", ...(e.kind === "check" ? (e.findings?.length || e.ignored?.length ? [checkFindings(e)] : [el("div", checkCounts(e), "sub")]) : logContent(e)));
   // The user stands top right, beside the first summary line
   const lines = () => summary.map((t, i) => i === 0 && e.user ? box("div", "first", el("span", t), el("span", e.user, "user")) : el("div", t));
   const same = [...body.children].map(c => c.textContent.trim()).join("\n") === summary.join("\n");
@@ -174,8 +178,11 @@ function logTile(e, d, group) {
   const det = el("details"), key = `logm-${e.ts}-${e.kind}`;
   det.open = openDetails.has(key);
   det.ontoggle = () => { det.open ? openDetails.add(key) : openDetails.delete(key); };
-  const sum = el("summary");
-  sum.append(...lines());
+  // One chevron after the text of the last summary line (beside the user name it follows the
+  // text, so the name keeps its place)
+  const sum = el("summary"), shown = lines(), last = shown[shown.length - 1], chev = el("span", null, "chev");
+  (last.classList.contains("first") ? last.firstChild : last).append(chev);
+  sum.append(...shown);
   det.append(sum, body);
   return box("div", "log-m" + (group ? ` grp grp-${group}` : ""), head, det);
 }
@@ -213,6 +220,6 @@ $("log-clear").onclick = () => {
   modal(title, [el("p", `All ${count} log entr${count === 1 ? "y" : "ies"} are deleted for good – regardless of the filter. One entry stays that names who cleared the log.`)],
     [{text: "Cancel"}, {text: "Delete all", kind: "danger", action: async () => {
       try { await api("api/logs/clear", {confirm: true}); closeModal(); ui.logsLoaded = 0; load(true); }
-      catch (err) { message(title, err.message, "error"); }
-    }}]);
+      catch (err) { message(title, err.message, "error", "delete"); }
+    }}], "delete");
 };

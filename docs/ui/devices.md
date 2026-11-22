@@ -6,7 +6,13 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
 ## Devices table and phone tiles
 - Gen1 AP read-only. Bluetooth only global on/off where supported, else disabled icon
   with explanation. Ignored: own group, yellow "Ignored" label, no install until
-  resumed.
+  resumed; name, IP, firmware and icons dimmed (70 %), status and "Ignored" at full
+  strength (2026-11-22, L3).
+- **Columns (2026-11-22, mockup `reports/3.8.0-design/M7`):** round icon at the right end
+  of the toolbar (desktop only); popover like sort and filter: title "Columns", one entry
+  per data column with ✓ while shown (a click keeps the popover open), "Reset columns"
+  last; blue dot on the icon while the shown columns or their order differ from the
+  default. "Reset columns" shows "Host name" while the option "Resolve host names" is on.
 - **Sections (3.8.0, mockups `3.8.0/01`, `02`):** one card per section in this order,
   only sections with devices: Updates Available, Attention (error, unconfirmed
   installation, no usable address), Not Checked (never checked, Gen1 skipped while Gen1
@@ -90,7 +96,8 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
 - Action column: `.act-strip` 170 px, two rows (5 + 4), column 190 px.
 - Wide screens (2026-11-17): titles and content of all columns except "Device"
   centred (status cell and action strip too); IP and Firmware with
-  `font-variant-numeric: tabular-nums`. Phone tiles unchanged.
+  `font-variant-numeric: tabular-nums`; IP in the normal font (2026-11-22, U11). Phone
+  tiles unchanged.
 - Popups opened by an action icon and the notes of greyed-out icons start with a
   **status strip** (32 px tinted icon circle in the action-column colour, feature name,
   state pill On/Off, Protected/Not protected/Unknown, Not available, Not supported;
