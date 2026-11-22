@@ -23,10 +23,10 @@ Options:
                       (e.g. device dialogs: '**/settings/refresh=live.json'); repeatable
   --gate              layout gate: 360/430 px light/dark, 390 px embedded, 1440 px
                       light/dark with --long-data; Devices (phones: details open),
-                      Firmware, Settings and Settings with an unsaved change
+                      Firmware, Schedules, Settings and Settings with an unsaved change
   --shot NAME=STEPS   one screenshot NAME (file <case>-<NAME>.png) after the steps,
                       separated by ';':
-                        tab:<devices|firmware|logs|settings>  switch tab
+                        tab:<devices|firmware|schedules|logs|settings>  switch tab
                         click:<css>   mouse click (first match; Playwright selectors,
                                       e.g. 'td.c-details summary >> nth=1')
                         tap:<css>     touch tap (phones; falls back to click)
@@ -37,7 +37,8 @@ Options:
                         tall          viewport as tall as the page (sticky bars at
                                       their natural place)
                       Every shot starts on a freshly loaded page. Without --shot the
-                      four tabs are captured (devices, firmware, logs, settings).
+                      five tabs are captured (devices, firmware, schedules, logs,
+                      settings).
 
 Example (Firmware tab and upload dialog):
   tools/dev/run.sh python3 qa/capture.py /tmp/shots --shot firmware=tab:firmware \\
@@ -56,12 +57,13 @@ from common import launch
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_SHOTS = {tab: f"tab:{tab}" for tab in ("devices", "firmware", "logs", "settings")}
+DEFAULT_SHOTS = {tab: f"tab:{tab}" for tab in ("devices", "firmware", "schedules", "logs", "settings")}
 GATE_CASES = ((360, "dark", False), (360, "light", False), (430, "dark", False), (430, "light", False),
               (390, "dark", True), (1440, "dark", False), (1440, "light", False))
 GATE_SHOTS = {
     "devices": "full",
     "firmware": "tab:firmware;click:#fw-cards details summary;full",
+    "schedules": "tab:schedules;full",
     "settings": "tab:settings;tall;full",
     "settings-unsaved": "tab:settings;fill:#opt-check_interval_days=5",
 }
