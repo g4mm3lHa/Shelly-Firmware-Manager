@@ -1,5 +1,31 @@
 # Changelog
 
+## 3.10.0
+
+Release candidate. Updates can be installed at a chosen time, beta firmware can be
+offered, schedules restart Shellys or switch cloud and Bluetooth; the UI speaks German.
+
+Changes in rc1
+
+Added
+- Install at (installation dialog, section "Start"): once, at most 7 days ahead; runs
+  only if version and file are unchanged, else it lapses (log entry, notification).
+- Scheduled installations: pill "Scheduled" with the time, filter "Scheduled", row menu
+  "Install now" / "Cancel scheduled installation"; listed in the Schedules tab.
+- Offer beta firmware (Settings, Gen2+, off by default): section "Beta Updates", violet
+  "Beta" tag, extra confirmation; offered betas are withdrawn when switched off.
+- Schedules tab: restart, cloud on/off or Bluetooth on/off on all or chosen Shellys,
+  daily, on weekdays or every n days; restarts staggered (default 10 s); "Run now".
+- Schedule runs leave out ignored, removed and battery devices and devices without the
+  switch; every run is logged, HA notifies only on failures; missed runs are skipped.
+- Language (Settings, card "Display"): Same as Home Assistant, English or Deutsch, per
+  browser; logs, messages and documentation stay English.
+
+Changed
+- Power-on action icon shows "?" while the outputs of a device were never read.
+- Tabs on phones: only the active tab shows its name, the others their icon.
+- Check notification counts new beta updates separately.
+
 ## 3.9.0
 
 Released 2026-11-22. Installed versions are kept as a way back, new versions can be held

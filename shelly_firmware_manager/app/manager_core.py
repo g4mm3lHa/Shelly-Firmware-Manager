@@ -1,10 +1,10 @@
-"""Manager, layer 1 of 6: state, persistence, Home Assistant access, app options and the
+"""Manager, layer 1 of 7: state, persistence, Home Assistant access, app options and the
 check slot.
 
 The manager is one object built from layers, each in its own module and each extending
 the one before: ManagerCore (this file) -> FirmwareStore (manager_store) ->
 DeviceSettings (manager_devices) -> Checks (manager_checks) -> Installs
-(manager_installs) -> Manager (manager). A layer only uses what the layers below it
+(manager_installs) -> Schedules (manager_schedules) -> Manager (manager). A layer only uses what the layers below it
 provide; the complete object is manager.Manager.
 
 State lives in /data/state.json (with the previous save as backup state.bak, see
@@ -72,13 +72,16 @@ STATUS_ASLEEP = "asleep"
 # marker); shown as "Not checked" until the device is checked again
 STATUS_UNREGISTERED = "unregistered"
 
-STATUS_SKIPPED = "skipped"  # Gen1 device while Gen1 updates are disabled
+# Gen1 device while Gen1 updates are disabled; also a Gen2+ device whose beta offer was
+# withdrawn at the start because beta firmware is switched off (until its next check)
+STATUS_SKIPPED = "skipped"
 
 PENDING = (STATUS_READY, STATUS_INSTALLING)  # device holds a firmware file
 
 # Device list sections for the UI (see section_of), in the order they are shown; the
 # read-only list of other Shellys (Manager.others) follows them
 SECTION_UPDATES = "updates"
+SECTION_BETA = "beta"  # provided beta versions: own section after the stable updates
 SECTION_ATTENTION = "attention"
 SECTION_NOT_CHECKED = "not_checked"
 SECTION_UP_TO_DATE = "up_to_date"
@@ -95,7 +98,8 @@ BATTERY_FROM_HA = "home_assistant"  # Shelly battery sensor in Home Assistant, d
 def section_of(dev: Device) -> str:
     """Section of the device list a device belongs to (SECTION_*): removed and ignored
     devices first by their marker, then provided updates (also a recent or failed
-    installation that stays there until the next check), devices that need attention
+    installation that stays there until the next check) – beta versions (marker beta)
+    in their own section –, devices that need attention
     (error, unconfirmed installation, no usable address), never checked devices
     (also Gen1 devices skipped while Gen1 updates are disabled), up to date devices
     and sleeping battery devices."""
@@ -106,7 +110,7 @@ def section_of(dev: Device) -> str:
         return SECTION_IGNORED
     recent = dev.get("updated") and status in (STATUS_CURRENT, STATUS_UNCLEAR)
     if status in (STATUS_AVAILABLE, *PENDING) or recent or holds_file(dev):
-        return SECTION_UPDATES
+        return SECTION_BETA if dev.get("beta") else SECTION_UPDATES
     if status in (STATUS_ERROR, STATUS_UNCLEAR) or dev.get("address_issue"):
         return SECTION_ATTENTION
     if status == STATUS_ASLEEP:
@@ -229,6 +233,8 @@ class ManagerCore:
         self.restrict_downloads = bool(options["restrict_downloads_to_devices"])
         self.gen1_enabled = bool(options["gen1_updates_enabled"])
         self.allow_downgrade = options.get("allow_downgrade") is True  # optional, missing = off
+        # Gen2+: also offer the beta versions of the Shelly update server (optional, missing = off)
+        self.beta_firmware = options.get("beta_firmware") is True
         # Host name column: look up host names at every check (off: no lookup, no column)
         self.resolve_host_names = options["resolve_host_names"] is True
         self.import_max = int(options["import_max_mb"]) * 1024 * 1024  # bytes; largest store import
@@ -273,6 +279,10 @@ class ManagerCore:
         # were stored as downloads and cannot be told apart
         self.gen1_marking_due = False
         self.schedule: dict[str, Any] = {}  # automatic check schedule (see schedule.py), persisted
+        # Schedules of the Schedules tab (see timetable.py), persisted; the name of the
+        # schedule whose run is going on (memory only, see manager_schedules)
+        self.schedules: list[dict[str, Any]] = []
+        self.schedule_running: str | None = None
         self.reloading: set[str] = set()  # device IDs whose Reload Device Info is running
         # (firmware ID, version) -> running provide task (single flight)
         self._provisions: dict[tuple[str, str], asyncio.Future[tuple[str, str, int]]] = {}
@@ -313,6 +323,9 @@ class ManagerCore:
         # Set whenever the schedule changes (check finished): wakes the scheduler in
         # main.py instead of letting it poll every minute.
         self.schedule_changed = asyncio.Event()
+        # Set whenever a schedule or a scheduled installation changes: wakes the loop of
+        # the Schedules tab in main.py (run_timetable)
+        self.timetable_changed = asyncio.Event()
         data_paths.FW_DIR.mkdir(parents=True, exist_ok=True)
         self._remove_partial_downloads()
         self.credentials = Credentials(data_paths.CREDENTIALS_FILE)
@@ -397,6 +410,8 @@ class ManagerCore:
         self.last_scan = data.get("last_scan")
         self.firmware = data.get("firmware") or {}
         self.schedule = data["schedule"] if isinstance(data.get("schedule"), dict) else {}
+        schedules = data.get("schedules")
+        self.schedules = [x for x in schedules if isinstance(x, dict)] if isinstance(schedules, list) else []
         confirmed = data.get("download_base_confirmed")
         self.download_base_confirmed = confirmed if isinstance(confirmed, str) else None
         self.first_start_open = data.get("first_start_open") is True
@@ -440,6 +455,7 @@ class ManagerCore:
             "last_scan": self.last_scan,
             "firmware": self.firmware,
             "schedule": self.schedule,
+            "schedules": self.schedules,
             "download_base_confirmed": self.download_base_confirmed,
             "first_start_open": self.first_start_open,
             "first_start_notified": self.first_start_notified,
@@ -700,8 +716,8 @@ class ManagerCore:
 
         Two quick requests (double tap, two browsers) can therefore never start the
         same check twice, and an approval arriving in between is refused.
-        kind "all": only while nothing else runs (no single-device check, installation
-        or Reload Device Info). kind "device": not during the full check, and not for
+        kind "all": only while nothing else runs (no single-device check, installation,
+        Reload Device Info or run of a schedule). kind "device": not during the full check, and not for
         a device that is being checked, installed or reloaded – other devices may be
         checked or installed at the same time. No check starts while a store import
         writes its files. Raises ShellyError otherwise."""
@@ -709,6 +725,8 @@ class ManagerCore:
             raise ShellyError(FIRST_START_BLOCK)
         if self.checking:
             raise ShellyError("Check in progress – please try again afterwards")
+        if kind != "device" and self.schedule_running is not None:
+            raise ShellyError(f"Schedule “{self.schedule_running}” is running – please try again afterwards")
         if self._import_storing:
             raise ShellyError("Store import in progress – please try again in a moment")
         if self.reloading and (kind != "device" or device_id in self.reloading):
@@ -751,6 +769,8 @@ class ManagerCore:
             parts.append(f"Installations running: {len(self.installing)}")
         if self.reloading:
             parts.append("Reloading device info")
+        if self.schedule_running is not None:
+            parts.append(f"Schedule “{self.schedule_running}” running")
         return " · ".join(parts) or None
 
     def _progress(self) -> dict[str, Any]:

@@ -2,8 +2,9 @@
 
 Recorded: checks, firmware downloads and uploads, installations and downgrades that
 were actually started, deleted firmware, setting changes on Shellys, per-device password
-changes (set / removed / test failed) and app option changes. Not recorded: approvals
-that never started, restarts, anything secret (passwords and hashes never reach this
+changes (set / removed / test failed), app option changes, schedules (created, changed,
+deleted, every run or missed run) and scheduled installations. Not recorded: approvals
+that never started, restarts outside a schedule run, anything secret (passwords and hashes never reach this
 module; for secret options only the key is logged).
 Retention: entries older than retention_days and beyond max_entries are dropped.
 
@@ -37,10 +38,11 @@ log = logging.getLogger("sfm.events")
 
 # "log": the log itself was cleared (see EventLog.clear); "store": firmware files read
 # back from the disk at the start (FirmwareStore.adopt_files); "device": a removed
-# device was removed from the list (DeviceSettings.forget_device)
+# device was removed from the list (DeviceSettings.forget_device) or its beta version
+# withdrawn; "schedule": schedules of the Schedules tab (see manager_schedules)
 KINDS = (
     "check", "download", "upload", "install", "delete", "setting", "password", "options", "log", "export", "import",
-    "setup", "store", "device",
+    "setup", "store", "device", "schedule",
 )
 ENTRY_ID_RE = re.compile(r"^[0-9a-f]{12}$")  # "id" of an entry, also checked for IDs from the URL
 SEVERITIES = ("success", "warning", "error")  # ordered from lowest to highest

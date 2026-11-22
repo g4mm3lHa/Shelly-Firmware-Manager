@@ -1,4 +1,5 @@
-"""Entry point: load options, start both web servers, run the check schedule.
+"""Entry point: load options, start both web servers, run the check schedule and the
+timetable of the Schedules tab (schedules and scheduled installations).
 
 SIGTERM (stop by the Supervisor) and SIGINT shut the app down cleanly with exit
 code 0; see main()."""
@@ -21,7 +22,7 @@ from manager import Manager
 from tls import CertificatePins
 from web_ui import build_ui_app
 
-VERSION = "3.9.0"  # must match config.yaml
+VERSION = "3.10.0-rc1"  # must match config.yaml
 
 OPTIONS_FILE = Path("/data/options.json")
 UI_PORT = 8099  # Ingress (internal)
@@ -80,6 +81,8 @@ async def main() -> None:
         # Firmware files the store does not list (lost or older state): read back
         # from the disk before the UI lists the store (see FirmwareStore.adopt_files)
         await mgr.adopt_files()
+        # Beta versions withdrawn while beta firmware is off, next runs of the schedules
+        await mgr.start_timetable()
         runners = [
             await start_site(build_ui_app(mgr, app_version=VERSION), UI_PORT),
             await start_site(build_download_app(mgr), DOWNLOAD_PORT),
@@ -110,22 +113,24 @@ async def main() -> None:
             loop.add_signal_handler(sig, stop.set)
         await mgr.announce_first_start()   # fresh installation: one HA notification about the import question
         scheduler = asyncio.create_task(run_schedule(mgr))
+        timetable = asyncio.create_task(run_timetable(mgr))
         stopper = asyncio.create_task(stop.wait())
-        results: tuple[object, ...] = (None, None)
+        results: tuple[object, ...] = (None, None, None)
         try:
-            await asyncio.wait({scheduler, stopper}, return_when=asyncio.FIRST_COMPLETED)
+            await asyncio.wait({scheduler, timetable, stopper}, return_when=asyncio.FIRST_COMPLETED)
         finally:
             log.info("Stopping – cancelling running work and saving the state")
-            for task in (scheduler, stopper):
+            for task in (scheduler, timetable, stopper):
                 task.cancel()
-            results = await asyncio.gather(scheduler, stopper, return_exceptions=True)
+            results = await asyncio.gather(scheduler, timetable, stopper, return_exceptions=True)
             # Both servers in parallel: the stop needs at most one
             # SHUTDOWN_TIMEOUT_S, not one per server – well inside the 10 s of the Supervisor
             await asyncio.gather(*(runner.cleanup() for runner in runners))
             log.info("Stopped")
         # A scheduler that ended with an error is reported (non-zero exit code)
-        if isinstance(results[0], Exception):
-            raise results[0]
+        for result in results[:2]:
+            if isinstance(result, Exception):
+                raise result
 
 
 async def run_schedule(mgr: Manager) -> None:
@@ -148,6 +153,26 @@ async def run_schedule(mgr: Manager) -> None:
         # The attempt is recorded when it is due; a check that cannot start
         # (other work running) is cancelled and logged, not repeated
         await mgr.scan(automatic=True)
+
+
+
+async def run_timetable(mgr: Manager) -> None:
+    """Start the schedules and scheduled installations at their time until cancelled
+    (each job runs as its own task, see Schedules.start_due); running jobs are
+    cancelled with it."""
+    try:
+        while True:
+            # Sleep until the next job, at most MAX_IDLE_WAIT_S at a time;
+            # timetable_changed (schedule or plan added/changed) wakes it early
+            mgr.timetable_changed.clear()
+            now = time.time()
+            mgr.start_due(now)
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(
+                    mgr.timetable_changed.wait(), timeout=min(mgr.due_in(time.time()), MAX_IDLE_WAIT_S)
+                )
+    finally:
+        await mgr.stop_timetable()
 
 
 if __name__ == "__main__":

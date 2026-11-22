@@ -1,9 +1,9 @@
 // Devices tab: status and action icons, the device table / phone tiles and the row menu.
 import {
   $, api, attachTip, box, closeModal, collator, devUrl, el, filterControl, fmt, hideTip, icon, iconButton, loadLocal, message,
-  modal, openDetails, saveLocal, searchTool, section, selected, setTip, sortControl, toast, toolButton, ui, valueList, webUrl,
+  modal, openDetails, saveLocal, searchTool, section, selected, setTip, sortControl, t, toast, toolButton, ui, valueList, webUrl,
 } from "./core.js";
-import {DOWNGRADE_OFF, OFFER_SOURCES, daysAgo, openDowngrade, openInstall} from "./install.js";
+import {DOWNGRADE_OFF, OFFER_SOURCES, cancelPlan, daysAgo, openDowngrade, openInstall} from "./install.js";
 import {
   aopLabel, aopSummary, aopTone, editAop, editCloud, editDebug, editEco, editPassword, editSwitch, editValue, featureStrip,
   restartDevice,
@@ -13,9 +13,9 @@ import {load, queued, render} from "./main.js";
 // ---------------------------------------------------------------- Devices
 // Never checked (status of older versions "unregistered") and Gen1 devices skipped while
 // Gen1 updates are disabled are both shown as "Not checked"
-const STATUS_LABELS = {"up-to-date": "Up-To-Date", available: "Available", ready: "Ready", queued: "Queued",
-  installing: "Installing", unconfirmed: "Unconfirmed", error: "Error", unregistered: "Not checked", skipped: "Not checked",
-  updated: "Updated", asleep: "Asleep"};
+const STATUS_LABELS = {"up-to-date": t("Up-To-Date"), available: t("Available"), ready: t("Ready"), queued: t("Queued"),
+  installing: t("Installing"), unconfirmed: t("Unconfirmed"), error: t("Error"), unregistered: t("Not checked"), skipped: t("Not checked"),
+  updated: t("Updated"), asleep: t("Asleep"), scheduled: t("Scheduled")};
 // Battery device (detected from the device while it was awake) that did not answer the last check
 const asleep = d => d.status === "asleep";
 // A device with a confirmed or unconfirmed installation stays in the "Updates
@@ -27,21 +27,24 @@ const installedRecently = d => !!d.updated && ["up-to-date", "unconfirmed"].incl
 // for a manual installation while the Shelly update server could not be asked
 const failedInstall = d => d.status === "error" && !!(d.install_failed || d.store_fallback);
 const justUpdated = d => installedRecently(d) && d.status === "up-to-date";
-const shownStatus = d => d.installing && d.status === "ready" ? "queued" : justUpdated(d) ? "updated" : d.status;
+// An approved installation waiting for its time ("Install at") shows "Scheduled" in place of "Ready"
+const shownStatus = d => d.planned && d.status === "ready" && !d.installing ? "scheduled" :
+  d.installing && d.status === "ready" ? "queued" : justUpdated(d) ? "updated" : d.status;
 const hasUpdate = d => ["available", "ready", "installing"].includes(d.status);
 // Ignored devices are not installable until they are resumed; nothing is installable
-// while the download base URL is missing or the unconfirmed former example
-export const installable = (d, s) => (d.status === "ready" || failedInstall(d)) && !d.installing && !d.ignored && !s.scanning && !d.activity &&
+// while the download base URL is missing or the unconfirmed former example; a scheduled
+// installation is started from the row menu ("Install now") only
+export const installable = (d, s) => !d.planned && (d.status === "ready" || failedInstall(d)) && !d.installing && !d.ignored && !s.scanning && !d.activity &&
   !(s.download_base && s.download_base.issue);
 /** Why "Install" is not possible for a device right now (tooltip of the disabled button). */
 export function installBlocker(d, s) {
-  if (!d) return "Device is not known anymore";
-  if (d.installing || d.status === "installing") return "Installation is running";
-  if (s.scanning) return "Check in progress";
-  if (d.activity) return "Device is being checked";
-  if (d.ignored) return "Device is ignored";
-  if (s.download_base && s.download_base.issue) return s.download_base.message || "Download base URL is not set";
-  return d.status === "ready" || failedInstall(d) ? null : "Not provided for this device anymore";
+  if (!d) return t("Device is not known anymore");
+  if (d.installing || d.status === "installing") return t("Installation is running");
+  if (s.scanning) return t("Check in progress");
+  if (d.activity) return t("Device is being checked");
+  if (d.ignored) return t("Device is ignored");
+  if (s.download_base && s.download_base.issue) return s.download_base.message || t("Download base URL is not set");
+  return d.status === "ready" || failedInstall(d) ? null : t("Not provided for this device anymore");
 }
 // A downgrade needs a reached Gen2+ device, no check/installation and a valid download URL
 const downgradable = (d, s) => d.gen >= 2 && !!d.ip && !d.installing && d.status !== "installing" && !s.scanning &&
@@ -52,20 +55,21 @@ const editable = d => !!d.ip && !!d.gen && !d.installing && d.status !== "instal
 // ---- Sections and filters
 // Sections of the device list in their order; the server names the section of every
 // device (field "section"), the read-only card "Other Shellys" follows them
-const SECTIONS = [["updates", "Updates Available"], ["attention", "Attention"], ["not_checked", "Not Checked"],
-  ["up_to_date", "Up-To-Date"], ["asleep", "Asleep"], ["ignored", "Ignored"], ["removed", "Removed"]];
+const SECTIONS = [["updates", t("Updates Available")], ["beta", t("Beta Updates")], ["attention", t("Attention")], ["not_checked", t("Not Checked")],
+  ["up_to_date", t("Up-To-Date")], ["asleep", t("Asleep")], ["ignored", t("Ignored")], ["removed", t("Removed")]];
 // Devices shown in "Updates available" at the last render (kept there while checked)
 const shownUpdates = new Set();
 // A device listed in the updates card stays there while it is checked again (its markers
 // are reset by the check); the result of the check decides at the next render without activity
 const listedUpdate = d => hasUpdate(d) || shownStatus(d) === "queued" || installedRecently(d) || failedInstall(d) ||
   (!!d.activity && shownUpdates.has(d.id));
-/** Section of a device: removed and ignored by their marker, then the updates card
- *  (also while checked, see listedUpdate), else the section named by the server. */
+/** Section of a device: removed and ignored by their marker, then the updates card – or
+ *  the beta card for a beta version – (also while checked, see listedUpdate), else the
+ *  section named by the server. */
 function sectionOf(d) {
   if (d.removed) return "removed";
   if (d.ignored) return "ignored";
-  if (d.section === "updates" || listedUpdate(d)) return "updates";
+  if (["updates", "beta"].includes(d.section) || listedUpdate(d)) return d.beta ? "beta" : "updates";
   return SECTIONS.some(([key]) => key === d.section) ? d.section : "not_checked";
 }
 // Filter entries (popover of the toolbar) in the order of the sections; "Unprotected":
@@ -76,21 +80,23 @@ const inSection = key => d => sectionOf(d) === key;
 // Option "Offer updates only after (days)": a new version younger than that is held back,
 // the device stays up to date with the marker hold {version, built, until} (ISO dates)
 const held = d => !!(d.hold && d.hold.version);
-const holdTip = d => `${d.hold.version} was built on ${d.hold.built} (${daysAgo(d.hold.built)}). New versions are offered after ` +
-  `${ui.state.offer_after_days} days (Settings → Checks): from ${d.hold.until}.`;
+const holdTip = d => t("{version} was built on {built} ({age}). New versions are offered after {days} days (Settings → Checks): from {until}.",
+  {version: d.hold.version, built: d.hold.built, age: daysAgo(d.hold.built), days: ui.state.offer_after_days, until: d.hold.until});
 const FILTERS = [
-  ["all", "All", () => true],
-  ["updates", "Updates", inSection("updates")],
-  ["attention", "Attention", inSection("attention"), "Devices with an error, an unconfirmed installation or no usable address"],
-  ["not_checked", "Not checked", inSection("not_checked"), "Devices never checked, and Gen1 devices while Gen1 updates are disabled"],
-  ["up_to_date", "Up-To-Date", inSection("up_to_date")],
-  ["unprotected", "Unprotected", d => d.auth_enabled === false],
-  ["cloud", "Cloud on", d => d.cloud === true, "Devices with the Shelly cloud switched on"],
-  ["hold", "On hold", held, "Devices with a new version that is not offered yet (Settings → Checks → “Offer updates only after”)"],
-  ["asleep", "Asleep", inSection("asleep"), "Battery devices that did not answer the last check"],
-  ["ignored", "Ignored", inSection("ignored")],
-  ["removed", "Removed", inSection("removed"), "Devices removed from Home Assistant / the Shelly integration"],
-  ["others", "Other Shellys", () => false, "Shellys of other integrations (Bluetooth, Zigbee, MQTT, Matter) – display only"],
+  ["all", t("All"), () => true],
+  ["updates", t("Updates"), inSection("updates")],
+  ["beta", t("Beta updates"), inSection("beta"), t("Devices with a beta version on offer (Settings → “Offer beta firmware”)")],
+  ["planned", t("Scheduled"), d => !!d.planned, t("Devices with an approved installation waiting for its time")],
+  ["attention", t("Attention"), inSection("attention"), t("Devices with an error, an unconfirmed installation or no usable address")],
+  ["not_checked", t("Not checked"), inSection("not_checked"), t("Devices never checked, and Gen1 devices while Gen1 updates are disabled")],
+  ["up_to_date", t("Up-To-Date"), inSection("up_to_date")],
+  ["unprotected", t("Unprotected"), d => d.auth_enabled === false],
+  ["cloud", t("Cloud on"), d => d.cloud === true, t("Devices with the Shelly cloud switched on")],
+  ["hold", t("On hold"), held, t("Devices with a new version that is not offered yet (Settings → Checks → “Offer updates only after”)")],
+  ["asleep", t("Asleep"), inSection("asleep"), t("Battery devices that did not answer the last check")],
+  ["ignored", t("Ignored"), inSection("ignored")],
+  ["removed", t("Removed"), inSection("removed"), t("Devices removed from Home Assistant / the Shelly integration")],
+  ["others", t("Other Shellys"), () => false, t("Shellys of other integrations (Bluetooth, Zigbee, MQTT, Matter) – display only")],
 ];
 const filterFn = key => (FILTERS.find(f => f[0] === key) || FILTERS[0])[2];
 const devFilter = filterControl(FILTERS.map(([key, label, , tip]) => [key, label, tip ? () => tip : null]),
@@ -98,17 +104,18 @@ const devFilter = filterControl(FILTERS.map(([key, label, , tip]) => [key, label
 $("dev-filter").replaceWith(devFilter.node);
 
 // Running check of a device (server-side state, in memory only)
-const ACTIVITY_LABELS = {waiting: "Waiting", checking: "Checking …", downloading: "Downloading …", reloading: "Reloading …"};
+const ACTIVITY_LABELS = {waiting: t("Waiting"), checking: t("Checking …"), downloading: t("Downloading …"), reloading: t("Reloading …")};
 // The last successful check differs from the last attempt only after a failed attempt
 const lastSuccess = d => d.last_success && d.last_success !== d.last_check ? fmt(d.last_success) : null;
 
 // Tooltip of the "Asleep" pill: the wake-up hint and the last successful contact only
-const ASLEEP_HINT = "Battery device asleep – wake it up (e.g. press its button) and check it again.";
+const ASLEEP_HINT = t("Battery device asleep – wake it up (e.g. press its button) and check it again.");
 /** Text of the status tooltip (details, versions, last attempt and last success). */
 function statusText(d) {
-  if (asleep(d)) return `${ASLEEP_HINT}\nLast contact: ${d.last_success ? fmt(d.last_success) : "never"}`;
-  return [d.message, `Installed: ${d.version || "–"}`, d.offer_version ? `Available: ${d.offer_version}` : null,
-    `Last check: ${fmt(d.last_check)}`, lastSuccess(d) && `Last successful check: ${lastSuccess(d)}`].filter(Boolean).join("\n");
+  if (asleep(d)) return `${ASLEEP_HINT}\n` + t("Last contact: {time}", {time: fmt(d.last_success)});
+  return [d.message, t("Installed: {version}", {version: d.version || "–"}), d.offer_version ? t("Available: {version}", {version: d.offer_version}) : null,
+    d.planned ? t("Install at {time}", {time: d.planned.at_text}) : null,
+    t("Last check: {time}", {time: fmt(d.last_check)}), lastSuccess(d) && t("Last successful check: {time}", {time: lastSuccess(d)})].filter(Boolean).join("\n");
 }
 /** "Device details" popup: message left, status right on one line, then the sections
  *  Firmware, Device (model, generation, firmware ID, NTP) and History. */
@@ -118,40 +125,52 @@ function showStatus(d) {
     el("span", STATUS_LABELS[key] || d.status, "pill p-" + (key || "").replace(/[^a-z]/g, "")));
   const provided = hasUpdate(d) || failedInstall(d);
   modal(d.name, [head,
-    section("Firmware", valueList([["Installed", d.version],
-      ["Available", held(d) ? `${d.hold.version} · on hold until ${d.hold.until}` : d.offer_version],
-      ["Build date", held(d) ? d.hold.built : d.offer_version ? d.offer_date : null],
-      ["Way back", d.way_back ? `${d.way_back.version} ${d.way_back.stored ? "is stored" : "is not stored"}` : null],
-      ["Source", provided ? OFFER_SOURCES[d.offer_source] : null]])),
-    section("Device", valueList([["Model", [d.model, d.gen ? `Gen ${d.gen}` : null].filter(Boolean).join(" · ")], ["Firmware ID", d.type], ["NTP", d.ntp]])),
-    section("History", valueList([["Last check", fmt(d.last_check)], ["Last success", d.last_success ? fmt(d.last_success) : "never"],
-      ["Last update", d.last_update ? fmt(d.last_update) : "–"]]))],
+    section(t("Firmware"), valueList([[t("Installed"), d.version],
+      [t("Available"), held(d) ? t("{version} · on hold until {until}", {version: d.hold.version, until: d.hold.until}) :
+        d.offer_version && d.beta ? t("{version} (beta)", {version: d.offer_version}) : d.offer_version],
+      [t("Scheduled"), d.planned ? t("Install at {time} · approved {on} by {user}", {time: d.planned.at_text, on: d.planned.on_text, user: d.planned.by}) : null],
+      [t("Build date"), held(d) ? d.hold.built : d.offer_version ? d.offer_date : null],
+      [t("Way back"), d.way_back ? (d.way_back.stored ? t("{version} is stored", {version: d.way_back.version}) : t("{version} is not stored", {version: d.way_back.version})) : null],
+      [t("Source"), provided ? OFFER_SOURCES[d.offer_source] : null]])),
+    section(t("Device"), valueList([[t("Model"), [d.model, d.gen ? `Gen ${d.gen}` : null].filter(Boolean).join(" · ")], [t("Firmware ID"), d.type], ["NTP", d.ntp]])),
+    section(t("History"), valueList([[t("Last check"), fmt(d.last_check)], [t("Last success"), fmt(d.last_success)],
+      [t("Last update"), d.last_update ? fmt(d.last_update) : "–"]]))],
     // Ready (and installable): red button right of Close opens the existing install dialog
-    installable(d, ui.state) ? [{text: "Close"}, {text: "Install update", kind: "danger", action: () => openInstall([d])}] : undefined);
+    installable(d, ui.state) ? [{text: t("Close")}, {text: t("Install update"), kind: "danger", action: () => openInstall([d])}] : undefined);
 }
-const AOP_NOTE = "Power-on action: not available – this device has no switchable output.";
+const AOP_NOTE = t("Power-on action: not available – this device has no switchable output.");
 /** Popup of a greyed-out action icon: status strip with the reason as pill, explanation below. */
 function notePopup(iconName, label, pill, text) {
   modal(label, [featureStrip(iconName, label, "off", pill), el("p", text, "hint")]);
 }
+const AOP_UNKNOWN = t("Power-on action: unknown – the outputs of this device have not been read yet.");
 /** Power-on action (AOP) in the action column: flash icon with state – green
  *  if every output restores its last state, red if an output has another value, "?"
- *  if the settings could not be read; opens the same dialog as the row menu. Mobile
- *  (labeled): the current value is shown on the button next to the icon. Devices
- *  without switchable outputs get a disabled icon with an explanation. */
+ *  if the settings could not be read or the device was never read (outputs unknown);
+ *  opens the same dialog as the row menu. Mobile (labeled): the current value is shown
+ *  on the button next to the icon. Devices without switchable outputs get a disabled
+ *  icon with an explanation. */
 function aopButton(d, labeled) {
   const outputs = d.outputs || [];
+  if (d.outputs == null) {   // never read: unknown like the other icons, not "not available"
+    const b = el("button", null, "act s-unknown"); b.append(icon("aop"));
+    if (labeled) b.append(el("span", t("Power-on action")));
+    b.setAttribute("aria-label", AOP_UNKNOWN); attachTip(b, () => AOP_UNKNOWN);
+    b.setAttribute("aria-disabled", "true"); b.onclick = () => notePopup("aop", t("Power-on action"), t("Unknown"), AOP_UNKNOWN);
+    return b;
+  }
   const state = !outputs.length ? "restart" : d.settings_error ? "s-unknown" : aopTone(outputs) === "good" ? "c-good" : "c-alert";
   const b = el("button", null, `act ${state}`);
   b.append(icon("aop"));
   if (!outputs.length) {
-    if (labeled) b.append(el("span", "Power-on action"));
+    if (labeled) b.append(el("span", t("Power-on action")));
     b.setAttribute("aria-label", AOP_NOTE); attachTip(b, () => AOP_NOTE);
-    b.setAttribute("aria-disabled", "true"); b.onclick = () => notePopup("aop", "Power-on action", "Not available", AOP_NOTE);
+    b.setAttribute("aria-disabled", "true"); b.onclick = () => notePopup("aop", t("Power-on action"), t("Not available"), AOP_NOTE);
     return b;
   }
-  if (labeled) b.append(el("span", `Power-on: ${aopSummary(outputs)}`));
-  const text = "Power-on action – " + (d.settings_error ? `unknown – ${d.settings_error.message}` : outputs.map(o => `${o.name || o.key}: ${aopLabel(o.aop)}`).join(", "));
+  if (labeled) b.append(el("span", t("Power-on: {summary}", {summary: aopSummary(outputs)})));
+  const text = t("Power-on action – {detail}", {detail: d.settings_error ? t("unknown – {error}", {error: d.settings_error.message}) :
+    outputs.map(o => `${o.name || o.key}: ${aopLabel(o.aop)}`).join(", ")});
   b.setAttribute("aria-label", `${text} (${d.name})`); attachTip(b, () => text);
   b.disabled = !editable(d); b.onclick = () => editAop(d);
   return b;
@@ -161,19 +180,19 @@ function aopButton(d, labeled) {
 // "unsupported" (device/firmware lacks it) or null/missing (not known yet or
 // the last read failed) – unknown is shown distinctly ("?"), never as "off".
 const UNSUPPORTED = "unsupported";
-const GEN1_AP_NOTE = "Not available on Gen1: enabling the access point turns off the Wi-Fi client mode, the device would leave your network.";
-const GEN1_DEBUG_NOTE = "Gen1 devices have no websocket debug log.";
+const GEN1_AP_NOTE = t("Not available on Gen1: enabling the access point turns off the Wi-Fi client mode, the device would leave your network.");
+const GEN1_DEBUG_NOTE = t("Gen1 devices have no websocket debug log.");
 const ACTION_ITEMS = [
-  {key: "eco", icon: "eco", label: "Eco mode", on: "on", off: "off", edit: d => editEco(d)},
-  {key: "auth_enabled", icon: "lock", label: "Password protection", on: "protected", off: "not protected", edit: d => editPassword(d), always: true},
-  {key: "ap", icon: "ap", label: "Access point", on: "on", off: "off", alert: true, edit: d => editSwitch(d, "ap")},
-  {key: "ble", icon: "ble", label: "Bluetooth", on: "on", off: "off", edit: d => editSwitch(d, "ble")},
+  {key: "eco", icon: "eco", label: t("Eco mode"), on: t("on"), off: t("off"), edit: d => editEco(d)},
+  {key: "auth_enabled", icon: "lock", label: t("Password protection"), on: t("protected"), off: t("not protected"), edit: d => editPassword(d), always: true},
+  {key: "ap", icon: "ap", label: t("Access point"), on: t("on"), off: t("off"), alert: true, edit: d => editSwitch(d, "ap")},
+  {key: "ble", icon: "ble", label: t("Bluetooth"), on: t("on"), off: t("off"), edit: d => editSwitch(d, "ble")},
   // Shelly cloud: yellow while on (the device is reachable from outside the network)
-  {key: "cloud", icon: "cloud", label: "Cloud", on: "on", off: "off", warn: true, edit: d => editCloud(d)},
-  {key: "actions", icon: "actions", label: "Actions", on: "at least one active", off: "none active", alert: true, link: true},
-  {key: "schedules", icon: "schedules", label: "Schedules", on: "at least one active", off: "none active", alert: true, link: true},
+  {key: "cloud", icon: "cloud", label: t("Cloud"), on: t("on"), off: t("off"), warn: true, edit: d => editCloud(d)},
+  {key: "actions", icon: "actions", label: t("Actions"), on: t("at least one active"), off: t("none active"), alert: true, link: true},
+  {key: "schedules", icon: "schedules", label: t("Device schedules"), on: t("at least one active"), off: t("none active"), alert: true, link: true},
   // Debug output costs resources and may expose details: yellow while on
-  {key: "debug_ws", icon: "bug", label: "Websocket debug log", on: "on", off: "off", warn: true, edit: d => editDebug(d)},
+  {key: "debug_ws", icon: "bug", label: t("Websocket debug log"), on: t("on"), off: t("off"), warn: true, edit: d => editDebug(d)},
 ];
 /** State of one feature: "on" | "off" | "unknown" | "unsupported". */
 function featureState(d, key) {
@@ -186,16 +205,16 @@ function featureState(d, key) {
  *  labeled = mobile, the text is shown next to the icon. */
 function actionButton(d, item, labeled) {
   const state = featureState(d, item.key), gen1Ap = item.key === "ap" && d.gen === 1;
-  let text = `${item.label}: ${state === "on" ? item.on : state === "off" ? item.off : state === "unsupported" ? "not supported by this device" : "unknown"}`;
+  let text = `${item.label}: ${state === "on" ? item.on : state === "off" ? item.off : state === "unsupported" ? t("not supported by this device") : t("unknown")}`;
   if (state === "unknown" && d.settings_error) text += ` – ${d.settings_error.message}`;
   if (gen1Ap) text += ` – ${GEN1_AP_NOTE}`;
   if (item.key === "debug_ws" && d.gen === 1) text += ` – ${GEN1_DEBUG_NOTE}`;
   // Protected without a password stored in this app = warning (the app cannot
   // read or update the device); green only if protection is on and the password is stored
   const unstored = item.key === "auth_enabled" && state === "on" && !d.password_set;
-  if (unstored) text += " – password not stored in this app";
-  if (item.key === "cloud" && state === "on") text += d.cloud_connected ? " – connected to the Shelly cloud" : " – not connected at the moment";
-  if (item.key === "ble" && state === "on" && d.ble_proxy) text += " – used by Home Assistant as Bluetooth proxy";
+  if (unstored) text += " – " + t("password not stored in this app");
+  if (item.key === "cloud" && state === "on") text += " – " + (d.cloud_connected ? t("connected to the Shelly cloud") : t("not connected at the moment"));
+  if (item.key === "ble" && state === "on" && d.ble_proxy) text += " – " + t("used by Home Assistant as Bluetooth proxy");
   const url = item.link ? webUrl(d) : null;
   const node = item.link && url && state !== "unsupported" ? el("a") : el("button");
   node.className = `act s-${state}${item.alert ? " alert" : ""}${unstored || (item.warn && state === "on") ? " c-warn" : ""}`;
@@ -206,7 +225,7 @@ function actionButton(d, item, labeled) {
   } else if (state === "unsupported" || gen1Ap || (item.link && !url)) {
     // aria-disabled keeps hover/focus/tap for the explanation
     node.setAttribute("aria-disabled", "true");
-    const pill = state === "unsupported" ? "Not supported" : "Not available";
+    const pill = state === "unsupported" ? t("Not supported") : t("Not available");
     node.onclick = () => notePopup(item.icon, item.label, pill, text);
   } else {
     node.disabled = !(item.always ? !!d.ip && !!d.gen : editable(d)); node.onclick = () => item.edit(d);
@@ -216,33 +235,33 @@ function actionButton(d, item, labeled) {
 /** Icon strip of the action column (and labeled buttons in the mobile details). */
 function actionStrip(d, labeled) {
   const strip = box("div", labeled ? "act-strip labeled" : "act-strip", aopButton(d, labeled), ...ACTION_ITEMS.map(item => actionButton(d, item, labeled)));
-  const r = el("button", null, "act restart"); r.append(icon("restart")); if (labeled) r.append(el("span", "Restart"));
-  r.setAttribute("aria-label", `Restart ${d.name}`); attachTip(r, () => "Restart"); r.disabled = !editable(d); r.onclick = () => restartDevice(d);
+  const r = el("button", null, "act restart"); r.append(icon("restart")); if (labeled) r.append(el("span", t("Restart")));
+  r.setAttribute("aria-label", t("Restart {name}", {name: d.name})); attachTip(r, () => t("Restart")); r.disabled = !editable(d); r.onclick = () => restartDevice(d);
   strip.append(r);
   return strip;
 }
 /** Ignored devices: additional yellow marker next to the status, no function. */
-const ignoredPill = d => d.ignored ? el("span", "Ignored", "pill p-ignored") : null;
+const ignoredPill = d => d.ignored ? el("span", t("Ignored"), "pill p-ignored") : null;
 // Tooltip of the "Removed" marker: still reachable at the last address or not (unknown
 // until the device was tried there)
 const REMOVED_TIPS = {
-  true: "Removed from Home Assistant / the Shelly integration, but still reachable at its last address. All actions stay available; “Check now” only tests whether it still answers.",
-  false: "Removed from Home Assistant / the Shelly integration and no longer reachable. “Check now” only tests whether it answers again.",
-  null: "Removed from Home Assistant / the Shelly integration. “Check now” only tests whether it still answers."};
+  true: t("Removed from Home Assistant / the Shelly integration, but still reachable at its last address. All actions stay available; “Check now” only tests whether it still answers."),
+  false: t("Removed from Home Assistant / the Shelly integration and no longer reachable. “Check now” only tests whether it answers again."),
+  null: t("Removed from Home Assistant / the Shelly integration. “Check now” only tests whether it still answers.")};
 /** Removed devices: yellow marker next to the status (like "Ignored"), tooltip also on touch. */
 function removedPill(d) {
   if (!d.removed) return null;
-  const p = el("span", "Removed", "pill p-removed"); p.tabIndex = 0;
+  const p = el("span", t("Removed"), "pill p-removed"); p.tabIndex = 0;
   attachTip(p, () => REMOVED_TIPS[d.removed_reachable === true ? "true" : d.removed_reachable === false ? "false" : "null"], true);
   return p;
 }
 // Battery marker: where the battery device was recognised
-const BATTERY_SOURCES = {device: "Detected from the device", home_assistant: "Detected from Home Assistant"};
+const BATTERY_SOURCES = {device: t("Detected from the device"), home_assistant: t("Detected from Home Assistant")};
 // Device without usable address in the device registry: message in the IP column, the
 // reason below the Shelly name (wide screens), the server's text as tooltip
-const NO_ADDRESS = "No usable address";
-const ADDRESS_REASONS = {missing: "No address in Home Assistant", unresolved: "Host name does not resolve",
-  not_private: "Address not allowed (public IP)"};
+const NO_ADDRESS = t("No usable address");
+const ADDRESS_REASONS = {missing: t("No address in Home Assistant"), unresolved: t("Host name does not resolve"),
+  not_private: t("Address not allowed (public IP)")};
 const addressReason = d => ADDRESS_REASONS[d.address_issue.reason] || d.address_issue.message || NO_ADDRESS;
 /** Status cell: while a check runs the activity replaces the (then outdated) status. */
 function statusCell(d) {
@@ -255,7 +274,7 @@ function statusCell(d) {
   const key = shownStatus(d);
   // Gen2+ installations report the device's own download progress, then its restart
   const restarting = key === "installing" && d.ota_phase === "restarting";
-  const label = restarting ? "Restarting" :
+  const label = restarting ? t("Restarting") :
     (STATUS_LABELS[key] || key || "–") + (key === "installing" && typeof d.ota_progress === "number" ? ` ${d.ota_progress} %` : "");
   const p = el("button", label, "pill p-" + (key || "").replace(/[^a-z]/g, ""));
   p.onclick = () => showStatus(d); attachTip(p, () => statusText(d));
@@ -266,11 +285,11 @@ function statusCell(d) {
  *  possible (same conditions as "Install update"). Not shown while a check runs for
  *  the device or its installation is queued. */
 function installButton(d) {
-  if (!(d.status === "ready" || failedInstall(d)) || d.activity || d.installing) return null;
-  const blocker = installBlocker(d, ui.state), go = el("button", "Install", "danger small install");
+  if (!(d.status === "ready" || failedInstall(d)) || d.activity || d.installing || d.planned) return null;
+  const blocker = installBlocker(d, ui.state), go = el("button", t("Install"), "danger small install");
   go.disabled = !!blocker;
-  setTip(go, blocker || (d.store_fallback ? "Install the stored version (not verified by the Shelly update server)" : "Install the provided update"));
-  go.setAttribute("aria-label", `Install update on ${d.name}`);
+  setTip(go, blocker || (d.store_fallback ? t("Install the stored version (not verified by the Shelly update server)") : t("Install the provided update")));
+  go.setAttribute("aria-label", t("Install update on {name}", {name: d.name}));
   go.onclick = () => { if (installable(d, ui.state)) openInstall([d]); };
   return go;
 }
@@ -281,13 +300,13 @@ function detailsCell(d) {
   const key = "dev:" + d.id, det = el("details");
   const fill = () => {
     const controls = box("div", "detail-actions", actionStrip(d, true));
-    const list = valueList([["Model", [d.model, d.gen ? `Gen ${d.gen}` : null].filter(Boolean).join(" · ")], ["Firmware ID", d.type],
-      ...(ui.state.host_names ? [["Host name", d.host_name]] : []), ["NTP", d.ntp],
-      ["Last check", fmt(d.last_check)], ["Last success", d.last_success ? fmt(d.last_success) : "never"],
-      ["Last update", d.last_update ? fmt(d.last_update) : "–"]], "tile-kv");
+    const list = valueList([[t("Model"), [d.model, d.gen ? `Gen ${d.gen}` : null].filter(Boolean).join(" · ")], [t("Firmware ID"), d.type],
+      ...(ui.state.host_names ? [[t("Host name"), d.host_name]] : []), ["NTP", d.ntp],
+      [t("Last check"), fmt(d.last_check)], [t("Last success"), fmt(d.last_success)],
+      [t("Last update"), d.last_update ? fmt(d.last_update) : "–"]], "tile-kv");
     det.replaceChildren(det.firstChild, box("div", "detail-body", controls, list));
   };
-  det.append(el("summary", "Details"));
+  det.append(el("summary", t("Details")));
   det.open = openDetails.has(key);
   if (det.open) fill();
   det.ontoggle = () => {
@@ -310,23 +329,23 @@ const COLUMNS = {
       return [gap];
     }
     if (!installable(d, ui.state)) return [];
-    const cb = el("input"); cb.type = "checkbox"; cb.checked = selected.has(d.id); cb.setAttribute("aria-label", `Select ${d.name}`);
+    const cb = el("input"); cb.type = "checkbox"; cb.checked = selected.has(d.id); cb.setAttribute("aria-label", t("Select {name}", {name: d.name}));
     cb.onchange = () => { cb.checked ? selected.add(d.id) : selected.delete(d.id); render(true); };
     return [cb];
   }},
-  device: {label: "Device", sort: d => d.name, cell: d => {
+  device: {label: t("Device"), sort: d => d.name, cell: d => {
     // Shelly name + pencil: opens the existing Shelly-name dialog (no HA rename)
-    const pen = iconButton("pencil", `Edit Shelly name of ${d.name}`, () => editValue(d, "name"), "pen"); pen.disabled = !editable(d);
+    const pen = iconButton("pencil", t("Edit Shelly name of {name}", {name: d.name}), () => editValue(d, "name"), "pen"); pen.disabled = !editable(d);
     // Tooltips name both names (mouse hover, touch tap)
     const ha = el("div", d.name, "name"), shellyName = el("span", d.shelly_name || "–");
-    attachTip(ha, () => `Home Assistant device name: ${d.name}`, true);
-    attachTip(shellyName, () => `Shelly device name: ${d.shelly_name || "–"}`, true);
+    attachTip(ha, () => t("Home Assistant device name: {name}", {name: d.name}), true);
+    attachTip(shellyName, () => t("Shelly device name: {name}", {name: d.shelly_name || "–"}), true);
     // Battery icon right after the name (table and phone tiles)
     let battery = null;
     if (d.battery === true) {
       battery = box("span", "battery", icon("battery")); battery.setAttribute("role", "img");
-      battery.setAttribute("aria-label", "Battery device");
-      attachTip(battery, () => `Battery device: reachable only while it is awake\n${BATTERY_SOURCES[d.battery_source] || BATTERY_SOURCES.device}`, true);
+      battery.setAttribute("aria-label", t("Battery device"));
+      attachTip(battery, () => t("Battery device: reachable only while it is awake") + "\n" + (BATTERY_SOURCES[d.battery_source] || BATTERY_SOURCES.device), true);
     }
     // "Gen n" label beside the name: phone tiles only (the table has its own Gen column)
     const head = box("div", "name-line", ha, battery, d.gen ? el("span", `Gen ${d.gen}`, "tag") : null);
@@ -344,33 +363,37 @@ const COLUMNS = {
     // Dimmed while the battery device sleeps (its web UI does not answer then)
     const cls = "num" + (asleep(d) ? " dim" : "");
     const url = webUrl(d); if (!url) return [el("span", d.ip, cls)];
-    const a = el("a", d.ip, cls); a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer"; setTip(a, "Open the Shelly web UI");
+    const a = el("a", d.ip, cls); a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer"; setTip(a, t("Open the Shelly web UI"));
     return [a];
   }},
   gen: {label: "Gen", sort: d => d.gen, cell: d => [d.gen ?? "–"]},
-  firmware: {label: "Firmware", sort: d => d.type, cell: d => {
+  firmware: {label: t("Firmware"), sort: d => d.type, cell: d => {
     const offer = d.offer_version && hasUpdate(d);
     const line = box("div", "nowrap", el("span", shortVersion(d, d.version) || "–"));
     if (offer) line.append(el("span", "→", "arrow"), el("span", shortVersion(d, d.offer_version), "newver"));
     // Gen1: the full version strings stay available as tooltip (and in the status details)
     if (d.gen === 1 && (d.version || offer)) {
-      const full = [`Installed: ${d.version || "–"}`, offer ? `Available: ${d.offer_version}` : null].filter(Boolean).join(" · ");
+      const full = [t("Installed: {version}", {version: d.version || "–"}), offer ? t("Available: {version}", {version: d.offer_version}) : null].filter(Boolean).join(" · ");
       line.tabIndex = 0; attachTip(line, () => full, true);
     }
     // Held back (offer delay): clock with the held version and the date it is offered from
     if (held(d)) {
-      const note = box("div", "hold-note", icon("clock"), el("span", `${shortVersion(d, d.hold.version)} from ${d.hold.until}`)); note.tabIndex = 0;
+      const note = box("div", "hold-note", icon("clock"), el("span", t("{version} from {date}", {version: shortVersion(d, d.hold.version), date: d.hold.until}))); note.tabIndex = 0;
       attachTip(note, () => holdTip(d), true);
       return [line, el("div", d.type || "–", "sub"), note];
     }
-    return [line, el("div", d.type || "–", "sub")];
+    // Beta version on offer: violet "Beta" tag beside the firmware ID
+    const sub = box("div", "sub fw-id", el("span", d.type || "–"), d.beta && offer ? el("span", t("Beta"), "tag beta") : null);
+    // Scheduled installation: clock line with its time under the version
+    if (d.planned) return [line, sub, box("div", "hold-note plan-note", icon("clock"), el("span", t("Install at {time}", {time: d.planned.at_text})))];
+    return [line, sub];
   }},
-  status: {label: "Status", sort: d => STATUS_LABELS[shownStatus(d)] || d.status, cell: d => [box("div", "status-cell", statusCell(d), installButton(d), ignoredPill(d), removedPill(d))]},
-  action: {label: "Action", cell: d => [actionStrip(d)]},
-  last_update: {label: "Last update", optional: true, sort: d => d.last_update, cell: d => [el("span", d.last_update ? fmt(d.last_update) : "–", "nowrap")]},
-  host_name: {label: "Host name", optional: true, sort: d => d.host_name, cell: d => [el("span", d.host_name || "–", "mono")]},
+  status: {label: t("Status"), sort: d => STATUS_LABELS[shownStatus(d)] || d.status, cell: d => [box("div", "status-cell", statusCell(d), installButton(d), ignoredPill(d), removedPill(d))]},
+  action: {label: t("Action"), cell: d => [actionStrip(d)]},
+  last_update: {label: t("Last update"), optional: true, sort: d => d.last_update, cell: d => [el("span", d.last_update ? fmt(d.last_update) : "–", "nowrap")]},
+  host_name: {label: t("Host name"), optional: true, sort: d => d.host_name, cell: d => [el("span", d.host_name || "–", "mono")]},
   ntp: {label: "NTP", optional: true, sort: d => d.ntp, cell: d => [d.ntp || "–"]},
-  menu: {label: "", fixed: true, cell: d => [iconButton("dots", `Actions for ${d.name}`, e => openRowMenu(d, e.currentTarget))]},
+  menu: {label: "", fixed: true, cell: d => [iconButton("dots", t("Actions for {name}", {name: d.name}), e => openRowMenu(d, e.currentTarget))]},
   // Mobile card only (hidden on wide screens by CSS, not offered in the column chooser)
   details: {label: "", fixed: true, cell: d => [detailsCell(d)]},
 };
@@ -449,7 +472,7 @@ function tableHead() {
     const [sKey, dir] = prefs.devices.sort;
     if (col.sort) { th.classList.add("sortable"); if (sKey === key) th.dataset.dir = dir; }
     if (!col.fixed) {
-      th.tabIndex = 0; th.draggable = true; setTip(th, col.sort ? "Click to sort · drag or Alt+Arrow to move" : "Drag or Alt+Arrow to move");
+      th.tabIndex = 0; th.draggable = true; setTip(th, col.sort ? t("Click to sort · drag or Alt+Arrow to move") : t("Drag or Alt+Arrow to move"));
       th.ondragstart = e => { e.dataTransfer.setData("text/plain", key); e.dataTransfer.effectAllowed = "move"; };
       th.ondragover = e => { e.preventDefault(); th.classList.add("drop"); };
       th.ondragleave = () => th.classList.remove("drop");
@@ -496,18 +519,18 @@ const OTHER_KINDS = {blu_gateway: "BLU TRV", bluetooth: "BLU (Bluetooth)", zha: 
 /** "Where to update" of a Shelly of another integration. */
 function whereToUpdate(o) {
   switch (o.kind) {
-    case "blu_gateway": return o.gateway ? `Update in the Shelly app, or later via its gateway “${o.gateway}”` : "Update in the Shelly app";
-    case "bluetooth": return "Update in the Shelly app (Bluetooth)";
-    case "zha": return "Update with ZHA (Zigbee OTA)";
-    case "zigbee2mqtt": return "Update with Zigbee2MQTT";
-    case "matter": return "Update with the Home Assistant Matter server";
-    default: return "Update in the device's web interface or the Shelly app";
+    case "blu_gateway": return o.gateway ? t("Update in the Shelly app, or later via its gateway “{gateway}”", {gateway: o.gateway}) : t("Update in the Shelly app");
+    case "bluetooth": return t("Update in the Shelly app (Bluetooth)");
+    case "zha": return t("Update with ZHA (Zigbee OTA)");
+    case "zigbee2mqtt": return t("Update with Zigbee2MQTT");
+    case "matter": return t("Update with the Home Assistant Matter server");
+    default: return t("Update in the device's web interface or the Shelly app");
   }
 }
 /** Read-only card "Other Shellys": name, kind, model, firmware and where to update. */
 function othersCard(list) {
-  const head = box("div", "card-head", el("h2", `Other Shellys · ${list.length}`), el("span", "Display only – no update function here", "sub"));
-  const cols = box("div", "oth-row oth-head", ...["Name", "Kind", "Model", "Firmware", "Where to update"].map(t => el("span", t)));
+  const head = box("div", "card-head", el("h2", `${t("Other Shellys")} · ${list.length}`), el("span", t("Display only – no update function here"), "sub"));
+  const cols = box("div", "oth-row oth-head", ...[t("Name"), t("Kind"), t("Model"), t("Firmware"), t("Where to update")].map(x => el("span", x)));
   const rows = list.map(o => box("div", "oth-row", el("span", o.name, "name oth-name"), el("span", OTHER_KINDS[o.kind] || o.kind, "oth-kind"),
     el("span", o.model || "–", "oth-model"), el("span", o.firmware || "–", "oth-fw"), el("span", whereToUpdate(o), "oth-where")));
   return box("div", "card others", head, cols, ...rows);
@@ -533,33 +556,36 @@ export function renderDevices() {
   devSort.set(prefs.devices.sort);
   const rows = found.filter(filterFn(ui.devFilter)), bySection = new Map(SECTIONS.map(([key]) => [key, []]));
   for (const d of rows) bySection.get(sectionOf(d)).push(d);
-  for (const d of s.devices) if (sectionOf(d) === "updates") shownUpdates.add(d.id); else shownUpdates.delete(d.id);
+  for (const d of s.devices) if (["updates", "beta"].includes(sectionOf(d))) shownUpdates.add(d.id); else shownUpdates.delete(d.id);
   const cards = [];
   for (const [key, title] of SECTIONS) {
     const list = bySection.get(key);
     if (!list.length) continue;
-    if (key !== "updates") { cards.push(deviceCard(title, list)); continue; }
-    const sel = list.filter(d => ok.has(d.id));
-    const all = el("input"); all.type = "checkbox"; all.setAttribute("aria-label", "Select all installable updates");
+    if (key !== "updates" && key !== "beta") { cards.push(deviceCard(title, list)); continue; }
+    // "Updates Available" and "Beta Updates" each have their own selection and button:
+    // one dialog never mixes stable and beta versions
+    const sel = list.filter(d => ok.has(d.id)), mine = sel.filter(d => selected.has(d.id));
+    const all = el("input"); all.type = "checkbox";
+    all.setAttribute("aria-label", key === "beta" ? t("Select all installable beta updates") : t("Select all installable updates"));
     all.disabled = !sel.length; all.checked = sel.length > 0 && sel.every(d => selected.has(d.id));
     all.onchange = () => { for (const d of sel) all.checked ? selected.add(d.id) : selected.delete(d.id); render(true); };
-    const go = el("button", `Review & install (${selected.size})`, "primary"); go.disabled = !selected.size;
-    go.onclick = () => openInstall(s.devices.filter(d => selected.has(d.id)));
+    const go = el("button", t("Review & install ({n})", {n: mine.length}), "primary"); go.disabled = !mine.length;
+    go.onclick = () => openInstall(mine);
     cards.push(deviceCard(title, list, [all], [go]));
   }
   if (others.length && ["all", "others"].includes(ui.devFilter)) cards.push(othersCard(others));
   listingLine(s, cards);
-  if (!cards.length) cards.push(box("div", "card", el("div", s.devices.length || (s.others || []).length ? "No devices match." :
-    s.first_start_open ? "No devices yet – they are found by the first check." : "No devices yet – run “Check now”.", "empty")));
+  if (!cards.length) cards.push(box("div", "card", el("div", s.devices.length || (s.others || []).length ? t("No devices match.") :
+    s.first_start_open ? t("No devices yet – they are found by the first check.") : t("No devices yet – run “Check now”."), "empty")));
   $("dev-cards").replaceChildren(...cards);
 }
 // ---- Shellys not listed
 // Shellys of the Shelly integration that Home Assistant knows but the app does not list
 // (state field listing {listed, missing: [{name, model, reason}]}, updated by full checks)
 const MISSING_REASONS = {
-  disabled: ["Disabled in Home Assistant", "Enable the device (or its entry) in Settings → Devices & services → Shelly."],
-  discovered: ["Found, but not set up", "Home Assistant discovered it in the network – add it in Settings → Devices & services."],
-  ignored: ["Ignored in Home Assistant", "The discovery was ignored – stop ignoring it in Settings → Devices & services → Shelly, then add it."],
+  disabled: [t("Disabled in Home Assistant"), t("Enable the device (or its entry) in Settings → Devices & services → Shelly.")],
+  discovered: [t("Found, but not set up"), t("Home Assistant discovered it in the network – add it in Settings → Devices & services.")],
+  ignored: [t("Ignored in Home Assistant"), t("The discovery was ignored – stop ignoring it in Settings → Devices & services → Shelly, then add it.")],
 };
 /** Dialog "Shellys not listed": one entry per missing Shelly with its reason and what to do. */
 function openMissing() {
@@ -569,11 +595,11 @@ function openMissing() {
     return box("div", "miss-row", box("div", "miss-head", el("span", m.name, "name"), el("span", reason, "tag warn")),
       m.model ? el("div", m.model, "sub") : null, fix ? el("div", fix, "miss-fix") : null);
   });
-  modal("Shellys not listed", [
-    el("p", `Home Assistant knows ${total} Shellys of the Shelly integration; ${l.listed} of them are listed here.`),
-    section(`Not listed · ${l.missing.length}`, box("div", "miss-list", ...rows)),
-    section("Still missing?", el("p", "A Shelly that Home Assistant does not know cannot be listed – add it to the Shelly integration first. " +
-      "Shellys of other integrations (Bluetooth, Zigbee, Matter) are shown under “Other Shellys”.", "hint"))]);
+  modal(t("Shellys not listed"), [
+    el("p", t("Home Assistant knows {total} Shellys of the Shelly integration; {listed} of them are listed here.", {total, listed: l.listed})),
+    section(`${t("Not listed")} · ${l.missing.length}`, box("div", "miss-list", ...rows)),
+    section(t("Still missing?"), el("p", t("A Shelly that Home Assistant does not know cannot be listed – add it to the Shelly integration first. ") +
+      t("Shellys of other integrations (Bluetooth, Zigbee, Matter) are shown under “Other Shellys”."), "hint"))]);
 }
 /** Line "N of M Shellys listed · Why are K missing?" (only while at least one is missing):
  *  right in the toolbar on wide screens, above the first card on phones. */
@@ -583,8 +609,8 @@ function listingLine(s, cards) {
   if (!l || !l.missing || !l.missing.length) return;
   const make = () => {
     const b = el("button", null, "listing"); b.type = "button";
-    b.append(el("span", `${l.listed} of ${l.listed + l.missing.length} Shellys listed`),
-      el("span", `Why are ${l.missing.length} missing?`, "listing-link"));
+    b.append(el("span", t("{listed} of {total} Shellys listed", {listed: l.listed, total: l.listed + l.missing.length})),
+      el("span", t("Why are {n} missing?", {n: l.missing.length}), "listing-link"));
     b.onclick = openMissing; return b;
   };
   document.querySelector("#view-devices .tb-extra").prepend(make());
@@ -607,11 +633,11 @@ export function buildChooser() {
     };
     return b;
   });
-  const reset = el("button", "Reset columns", "sort-item reset-cols"); reset.type = "button"; reset.role = "menuitem";
+  const reset = el("button", t("Reset columns"), "sort-item reset-cols"); reset.type = "button"; reset.role = "menuitem";
   reset.onclick = () => { prefs.devices = {...defaultPrefs(), hidden: defaultHidden()}; savePrefs(); syncChooser(); render(true); };
-  const menu = box("div", "sort-menu", el("div", "Columns", "pop-title"), ...items, el("hr"), reset);
+  const menu = box("div", "sort-menu", el("div", t("Columns"), "pop-title"), ...items, el("hr"), reset);
   menu.role = "menu"; menu.id = "cols-devices";
-  columnsTool = toolButton("columns", "Columns", menu); columnsTool.node.id = "cols";
+  columnsTool = toolButton("columns", t("Columns"), menu); columnsTool.node.id = "cols";
   $("cols").replaceWith(columnsTool.node);
 }
 /** Check marks of the chooser from prefs; the dot while hidden columns or their order differ
@@ -637,38 +663,43 @@ function openRowMenu(d, anchor) {
   };
   // The full check blocks everything; otherwise only work on this device itself
   const s = ui.state || {}, running = d.installing || d.status === "installing";
-  const blocked = s.scanning ? s.busy || "Check in progress" : running ? "Installation is running" :
-    d.activity ? (d.activity === "reloading" ? "Device info is being reloaded" : "Device is being checked") : null;
+  const blocked = s.scanning ? s.busy || t("Check in progress") : running ? t("Installation is running") :
+    d.activity ? (d.activity === "reloading" ? t("Device info is being reloaded") : t("Device is being checked")) : null;
   // Group 1: updates
-  add("Check for updates", () => checkDevice(d), !blocked);
-  if (installable(d, ui.state)) add("Install update", () => openInstall([d]), true);   // only for Ready
-  if (held(d)) add("Offer update now", () => offerNow(d), !blocked);
+  add(t("Check for updates"), () => checkDevice(d), !blocked);
+  if (installable(d, ui.state)) add(t("Install update"), () => openInstall([d]), true);   // only for Ready
+  if (held(d)) add(t("Offer update now"), () => offerNow(d), !blocked);
+  // Scheduled installation: install it now (the usual dialog) or cancel it
+  if (d.planned) {
+    add(t("Install now"), () => openInstall([d]), !blocked && !d.activity);
+    add(t("Cancel scheduled installation"), () => cancelPlan(d), true);
+  }
   // Downgrade to a stored older version – Gen2+ only, also up to date / ignored devices
   // Disabled (no dialog) while no older version is stored or something blocks it; while
   // the option "Allow downgrades" is off it is shown disabled with the hint below it
-  if (d.gen >= 2 && !s.allow_downgrade) { add("Downgrade", () => {}, false); items.push(el("div", DOWNGRADE_OFF, "menu-hint")); }
-  else if (d.gen >= 2) add("Downgrade", () => openDowngrade(d), downgradable(d, ui.state) && d.downgrades > 0);
+  if (d.gen >= 2 && !s.allow_downgrade) { add(t("Downgrade"), () => {}, false); items.push(el("div", DOWNGRADE_OFF, "menu-hint")); }
+  else if (d.gen >= 2) add(t("Downgrade"), () => openDowngrade(d), downgradable(d, ui.state) && d.downgrades > 0);
   // Group 2: the device itself
   items.push(el("hr"));
-  add("Device details", () => showStatus(d), true);
-  add("Reload device info", () => reloadDevice(d), !blocked && !!d.ip);
-  if (blocked) items.push(el("div", `Not available – ${blocked}`, "menu-hint"));   // reason, also for touch
+  add(t("Device details"), () => showStatus(d), true);
+  add(t("Reload device info"), () => reloadDevice(d), !blocked && !!d.ip);
+  if (blocked) items.push(el("div", t("Not available – {reason}", {reason: blocked}), "menu-hint"));   // reason, also for touch
   const url = webUrl(d);
-  if (url) { const a = el("a", "Open web UI"); a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.role = "menuitem"; items.push(a); }
+  if (url) { const a = el("a", t("Open web UI")); a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.role = "menuitem"; items.push(a); }
   // Group 3: device settings
   items.push(el("hr"));
-  add("NTP server", () => editValue(d, "ntp"));
-  add("Power-on action", () => editAop(d), can && !!(d.outputs && d.outputs.length));
-  add("Eco mode", () => editEco(d), can && typeof d.eco === "boolean");
-  add(d.password_set ? "Device password (stored)" : "Device password", () => editPassword(d), !!d.ip && !!d.gen);
+  add(t("NTP server"), () => editValue(d, "ntp"));
+  add(t("Power-on action"), () => editAop(d), can && !!(d.outputs && d.outputs.length));
+  add(t("Eco mode"), () => editEco(d), can && typeof d.eco === "boolean");
+  add(d.password_set ? t("Device password (stored)") : t("Device password"), () => editPassword(d), !!d.ip && !!d.gen);
   // Group 4: ignore – a device removed from Home Assistant cannot be ignored, it can be
   // removed from the list instead
   items.push(el("hr"));
-  if (d.removed) add("Remove from list", () => forgetDevice(d), !blocked);
-  else add(d.ignored ? "Resume device" : "Ignore device", () => setIgnored(d, !d.ignored), !d.installing);
+  if (d.removed) add(t("Remove from list"), () => forgetDevice(d), !blocked);
+  else add(d.ignored ? t("Resume device") : t("Ignore device"), () => setIgnored(d, !d.ignored), !d.installing);
   // Group 5: restart
   items.push(el("hr"));
-  add("Restart", () => restartDevice(d), can, "red");
+  add(t("Restart"), () => restartDevice(d), can, "red");
   rowmenu.replaceChildren(...items); rowmenu.hidden = false;
   const r = anchor.getBoundingClientRect();
   rowmenu.style.top = Math.min(r.bottom + 4, innerHeight - rowmenu.offsetHeight - 8) + "px";
@@ -677,12 +708,12 @@ function openRowMenu(d, anchor) {
 }
 /** Check only this device (no installation); the server refuses a second check (409). */
 function checkDevice(d) {
-  api(`${devUrl(d)}/check`, {}).then(() => load(true)).catch(e => message("Check", e.message, "error"));
+  api(`${devUrl(d)}/check`, {}).then(() => load(true)).catch(e => message(t("Check"), e.message, "error"));
 }
 /** "Offer update now": lift the offer delay of the held version for this device; the
  *  server then checks the device, which provides the update (installed after approval). */
 function offerNow(d) {
-  api(`${devUrl(d)}/offer-now`, {}).then(() => load(true)).catch(e => message("Offer update now", e.message, "error"));
+  api(`${devUrl(d)}/offer-now`, {}).then(() => load(true)).catch(e => message(t("Offer update now"), e.message, "error"));
 }
 /** Reload Device Info: device-only read (no firmware lookup), row shows the
  *  loading state, then a short success or warning – no popup. */
@@ -690,7 +721,7 @@ async function reloadDevice(d) {
   const row = ui.state.devices.find(x => x.id === d.id); if (row) { row.activity = "reloading"; render(true); }
   try {
     const r = await api(`${devUrl(d)}/reload`, {});
-    r.warning ? toast(`${d.name}: ${r.warning}`, true) : toast(`${d.name}: device info reloaded`);
+    r.warning ? toast(`${d.name}: ${r.warning}`, true) : toast(t("{name}: device info reloaded", {name: d.name}));
   } catch (e) { toast(`${d.name}: ${e.message}`, true); }
   // The state object may be reused for an unchanged (304) answer: undo the local mark
   if (row && row.activity === "reloading") row.activity = null;
@@ -698,17 +729,17 @@ async function reloadDevice(d) {
 }
 /** Ignore or resume a device (local only; resuming sends nothing to the device). */
 function setIgnored(d, ignored) {
-  api(`${devUrl(d)}/ignore`, {ignored}).then(() => { selected.delete(d.id); load(true); }).catch(e => message("Ignore", e.message, "error"));
+  api(`${devUrl(d)}/ignore`, {ignored}).then(() => { selected.delete(d.id); load(true); }).catch(e => message(t("Ignore"), e.message, "error"));
 }
 /** Remove a device that was removed from Home Assistant from the list, after a
  *  confirmation (its stored data and stored password are forgotten). */
 function forgetDevice(d) {
-  const title = "Remove from list?";
-  modal(title, [el("p", `${d.name} was removed from Home Assistant / the Shelly integration. Its stored data and a password stored in this app are deleted.`),
-    el("p", "If the device is added to Home Assistant again, the next full check lists it anew.", "hint")],
-  [{text: "Cancel"}, {text: "Remove", kind: "danger", action: async () => {
+  const title = t("Remove from list?");
+  modal(title, [el("p", t("{name} was removed from Home Assistant / the Shelly integration. Its stored data and a password stored in this app are deleted.", {name: d.name})),
+    el("p", t("If the device is added to Home Assistant again, the next full check lists it anew."), "hint")],
+  [{text: t("Cancel")}, {text: t("Remove"), kind: "danger", action: async () => {
     try {
-      await api(`${devUrl(d)}/forget`, {confirm: true}); selected.delete(d.id); closeModal(); toast(`${d.name}: removed from the list`);
+      await api(`${devUrl(d)}/forget`, {confirm: true}); selected.delete(d.id); closeModal(); toast(t("{name}: removed from the list", {name: d.name}));
     } catch (e) { message(title, e.message, "error", "delete"); }
   }}], "delete");
 }

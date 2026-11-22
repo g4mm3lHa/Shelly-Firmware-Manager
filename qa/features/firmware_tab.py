@@ -243,7 +243,7 @@ def _sorting_and_downgrade(c):
     case, f, page, out, width = c.case, c.f, c.page, c.out, c.width
     f.locator("#tab-devices").click()
     labels = [e[0] for e in filter_entries(f, "devices")]
-    check(f"{case}: Devices filter entries", labels == ["All", "Updates", "Attention", "Not checked", "Up-To-Date", "Unprotected",
+    check(f"{case}: Devices filter entries", labels == ["All", "Updates", "Beta updates", "Scheduled", "Attention", "Not checked", "Up-To-Date", "Unprotected",
           "Cloud on", "On hold", "Asleep", "Ignored", "Removed", "Other Shellys"], str(labels))
     pick_filter(f, "devices", "Unprotected")
     shown = f.evaluate("() => [...document.querySelectorAll('#dev-cards tbody tr')].length")
@@ -320,7 +320,7 @@ def _sorting_and_downgrade(c):
     f.wait_for_selector(".fw-row")
     check(f"{case}: sort tool in the Firmware toolbar", _checked(f, "firmware") == ["type", "asc"], str(_checked(f, "firmware")))
     labels = [e[0] for e in filter_entries(f, "firmware")]
-    check(f"{case}: Firmware filter entries", labels == ["All", "Provided", "Installed", "Uploaded", "Imported", "Intermediate", "Gen1", "Unused"], str(labels))
+    check(f"{case}: Firmware filter entries", labels == ["All", "Provided", "Installed", "Uploaded", "Imported", "Intermediate", "Beta", "Gen1", "Unused"], str(labels))
     _unused_chip(c)
     pick_filter(f, "firmware", "Uploaded")
     tags = f.evaluate("() => [...document.querySelectorAll('.fw-row')].map(r => !!r.querySelector('.fw-ver .tag.warn'))")

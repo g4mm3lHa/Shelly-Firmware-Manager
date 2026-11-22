@@ -1,27 +1,33 @@
 // Logs tab: activity log with filters, grouping per device and deleting entries.
 import {
-  $, api, box, closeModal, el, filterControl, fmt, iconButton, keptDetails, mb, message, modal, openDetails, pad, searchTool, ui,
+  $, api, box, closeModal, el, filterControl, fmt, iconButton, keptDetails, mb, message, modal, openDetails, pad, searchTool, t, ui,
   valueList,
 } from "./core.js";
+import {lang} from "./i18n.js";
 import {OFFER_SOURCES} from "./install.js";
 import {OPTION_FIELDS} from "./app-settings.js";
 import {load, render} from "./main.js";
 
 // ---------------------------------------------------------------- Logs
+// The entries stay English in every language, including their type and outcome labels
+// (a screenshot reads the same everywhere); controls, filters and the weekday are translated.
 // Severity of an entry; entries written before 3.0 only have "ok"
 const severity = e => ["success", "warning", "error"].includes(e.severity) ? e.severity : e.ok === false ? "error" : "success";
 const SEVERITY_LABELS = {success: "Success", warning: "Warning", error: "Error"};
-const LOG_FILTERS = {all: ["All", () => true], checks: ["Checks", e => e.kind === "check"],
-  installs: ["Installations", e => e.kind === "install"], settings: ["Settings", e => ["setting", "password", "options"].includes(e.kind)],
-  warnings: ["Warnings", e => severity(e) === "warning"], errors: ["Errors", e => severity(e) === "error"]};
+const LOG_FILTERS = {all: [t("All"), () => true], checks: [t("Checks"), e => e.kind === "check"],
+  installs: [t("Installations"), e => e.kind === "install"], schedules: [t("Schedules"), e => e.kind === "schedule"],
+  settings: [t("Settings"), e => ["setting", "password", "options"].includes(e.kind)],
+  warnings: [t("Warnings"), e => severity(e) === "warning"], errors: [t("Errors"), e => severity(e) === "error"]};
 const logFilter = filterControl(Object.entries(LOG_FILTERS).map(([key, [label]]) => [key, label]),
   key => { ui.logFilter = key; render(true); });
 $("log-filter").replaceWith(logFilter.node);
 const KIND_LABELS = {check: "Check", download: "Download", upload: "Upload", install: "Installation", delete: "Deleted", setting: "Setting",
   password: "Password", options: "App settings", log: "Log", export: "Store export", import: "Store import", setup: "First start",
-  store: "Firmware store", device: "Device"};
-/** Device entry: removed from the list, or a held-back update offered now. */
+  store: "Firmware store", device: "Device", schedule: "Schedule"};
+/** Device entry: removed from the list, a held-back update offered now, or a provided
+ *  beta version withdrawn at the start (beta firmware switched off). */
 const deviceAction = e => e.action === "offered_now" ? `${e.device}: held update ${e.version || ""} offered now`
+  : e.action === "beta_withdrawn" ? `${e.device}: beta version ${e.version || ""} withdrawn – beta firmware is switched off`
   : `${e.device}: removed from the list`;
 /** Firmware files read back from the disk after the store lost its list (kind "store"). */
 const adoptedCount = e => (e.adopted || []).length;
@@ -37,7 +43,22 @@ const PASSWORD_ACTIONS = {stored: "password stored", enabled: "password protecti
 const passwordAction = e => (PASSWORD_ACTIONS[e.action] || e.action) + (e.stored === false ? " – not stored in this app" : "");
 /** Label of an app option for the log (key if unknown). */
 const optionLabel = key => (OPTION_FIELDS.find(f => f[0] === key) || [key, key])[1];
-const INSTALL_EVENTS = {started: "started", confirmed: "confirmed", unconfirmed: "not confirmed", failed: "failed"};
+const INSTALL_EVENTS = {started: "started", confirmed: "confirmed", unconfirmed: "not confirmed", failed: "failed",
+  scheduled: "scheduled", plan_cancelled: "schedule cancelled", plan_lapsed: "scheduled, not started", plan_missed: "scheduled, missed"};
+// Schedules tab: one entry per run (or missed run) and per change of a schedule
+const SCHEDULE_EVENTS = {created: "created", changed: "changed", deleted: "deleted"};
+const RUN_RESULTS = {ok: "okc", unreachable: "bad", refused: "bad"};
+/** Main line of a schedule entry. */
+function scheduleLine(e) {
+  if (e.event === "run") return `“${e.name}”: ${e.action} · ${e.trigger === "manual" ? "run now" : "scheduled"} · ${e.result} · ${e.duration ?? 0} s`;
+  if (e.event === "missed") return `“${e.name}”: ${e.action} missed (${e.at || "–"})`;
+  const parts = [`Schedule “${e.name}” ${SCHEDULE_EVENTS[e.event] || e.event}`];
+  if (e.event === "created") parts.push(e.action, e.repeat, e.devices);
+  return parts.filter(Boolean).join(" · ");
+}
+/** Devices of a schedule run, each coloured by its result, then the devices left out. */
+const runFindings = e => box("ul", null, ...(e.findings || []).map(f => el("li", `${f.device}: ${f.detail}`, RUN_RESULTS[f.result] || "neutral")),
+  ...(e.left_out || []).map(x => el("li", `${x.device}: left out – ${x.reason}`, "neutral")));
 // "install": check after installations, only in entries of 3.1.0-rc2 to 3.1.1-rc2
 const TRIGGER_LABELS = {manual: "Manual", scheduled: "Scheduled", device: "Single-device", install: "After-installation",
   step: "After-intermediate-version"};
@@ -63,10 +84,11 @@ function logContent(e) {
     }
     case "download":
       return [box("div", null, `Firmware downloaded: ${e.type} ${e.version} · ${mb(e.size || 0)} · SHA ${(e.sha256 || "").slice(0, 12)}… `,
-        e.https === false ? el("span", "HTTP only", "tag warn") : null)];
+        e.https === false ? el("span", "HTTP only", "tag warn") : null, e.beta ? el("span", "Beta", "tag beta") : null)];
     case "install":
       return [box("div", null, `${e.device}: ${e.downgrade ? "downgrade" : "installation"} ${INSTALL_EVENTS[e.event] || e.event} · ${arrow(e.old, e.new)} `,
-        e.unverified ? el("span", "Not verified by the update server", "tag warn") : null),
+        e.unverified ? el("span", "Not verified by the update server", "tag warn") : null, e.beta ? el("span", "Beta", "tag beta") : null),
+        e.at ? el("div", `Install at ${e.at}`, "sub") : null,
         e.restarted ? el("div", "Device restarted before the installation", "sub") : null, e.detail ? el("div", e.detail, "sub") : null].filter(Boolean);
     case "delete":
       if (e.unknown) return [el("div", `Unknown file deleted · ${mb(e.size || 0)} · SHA ${(e.sha256 || "").slice(0, 12)}…`)];
@@ -98,6 +120,12 @@ function logContent(e) {
         ...(e.adopted || []).map(f => el("div", `${f.type} ${f.version} · SHA ${(f.sha256 || "").slice(0, 12)}…`, "sub"))];
     case "device":
       return [el("div", deviceAction(e))];
+    case "schedule": {
+      if (e.event === "changed") return [el("div", scheduleLine(e)), ...(e.changes || []).map(c => el("div", c, "sub"))];
+      if (e.event === "missed") return [el("div", scheduleLine(e)), e.detail ? el("div", e.detail, "sub") : null].filter(Boolean);
+      if (e.event !== "run" || !(e.findings?.length || e.left_out?.length)) return [el("div", scheduleLine(e))];
+      return [keptDetails(`log-${e.ts}-sch`, scheduleLine(e), runFindings(e))];
+    }
     case "log":
       return [el("div", `Log cleared · ${e.entries ?? 0} entr${e.entries === 1 ? "y" : "ies"} deleted`)];
     default:
@@ -112,7 +140,7 @@ function checkFindings(e) {
     const sev = f.severity || (f.error ? "error" : "success");
     // Updates from the firmware store are marked (the server was not asked)
     const from = f.source && f.source !== "manufacturer" && OFFER_SOURCES[f.source] ? ` · ${OFFER_SOURCES[f.source]}` : "";
-    return el("li", f.error ? `${f.device}: ${f.error}` : `${f.device}: ${arrow(f.version, f.offer)}${from}`, sev === "error" ? "bad" : sev === "warning" ? "warnc" : "okc");
+    return el("li", f.error ? `${f.device}: ${f.error}` : `${f.device}: ${arrow(f.version, f.offer)}${f.beta ? " (beta)" : ""}${from}`, sev === "error" ? "bad" : sev === "warning" ? "warnc" : "okc");
   }), ...(e.ignored || []).map(name => el("li", `${name}: ignored – not checked`, "neutral")));
 }
 /** Mobile: short summary lines of an entry (details stay collapsed). */
@@ -136,6 +164,10 @@ function logSummary(e) {
     case "setup": return ["Import skipped"];
     case "store": return [`${adoptedCount(e)} read from the disk${e.unknown ? ` · ${e.unknown} unknown` : ""}`];
     case "device": return [deviceAction(e)];
+    case "schedule":
+      if (e.event === "run") return [`“${e.name}”: ${e.action}`, e.result];
+      if (e.event === "missed") return [`“${e.name}”: ${e.action} missed`];
+      return [`“${e.name}” ${SCHEDULE_EVENTS[e.event] || e.event}`];
     default: return [e.kind];
   }
 }
@@ -146,17 +178,17 @@ mobileQuery.addEventListener("change", () => render(true));
 const logDevice = e => e.device || (e.kind === "check" && e.devices === 1 && e.findings && e.findings.length === 1 ? e.findings[0].device : null) || null;
 /** Delete one log entry after a confirmation. */
 function deleteLogEntry(e) {
-  const title = "Delete log entry?";
-  modal(title, [valueList([["Time", fmt(e.ts)], ["Type", KIND_LABELS[e.kind] || e.kind], ["Entry", logSummary(e).join(" · ")]]),
-    el("p", "The entry is removed from the activity log for good.", "hint")],
-  [{text: "Cancel"}, {text: "Delete", kind: "danger", action: async () => {
+  const title = t("Delete log entry?");
+  modal(title, [valueList([[t("Time"), fmt(e.ts)], [t("Type"), KIND_LABELS[e.kind] || e.kind], [t("Entry"), logSummary(e).join(" · ")]]),
+    el("p", t("The entry is removed from the activity log for good."), "hint")],
+  [{text: t("Cancel")}, {text: t("Delete"), kind: "danger", action: async () => {
     try { await api(`api/logs/${encodeURIComponent(e.id)}/delete`, {confirm: true}); closeModal(); ui.logsLoaded = 0; load(true); }
     catch (err) { message(title, err.message, "error", "delete"); }
   }}], "delete");
 }
 /** Delete icon of an entry (entries of versions before 3.1.1 get their ID at the start). */
 function logDelete(e) {
-  const b = iconButton("delete", "Delete entry", () => deleteLogEntry(e), "red log-del"); b.disabled = !e.id;
+  const b = iconButton("delete", t("Delete entry"), () => deleteLogEntry(e), "red log-del"); b.disabled = !e.id;
   return b;
 }
 /** Desktop entry: time, type, content, user, delete. group = position in a run of
@@ -174,9 +206,10 @@ function logTile(e, d, group) {
   const sev = severity(e), summary = logSummary(e);
   const head = box("div", "log-head", el("span", `${pad(d.getHours())}:${pad(d.getMinutes())}`, "mono sub"),
     el("span", KIND_LABELS[e.kind] || e.kind, "tag"), el("span", SEVERITY_LABELS[sev], `tag sev-${sev}`), el("span", null, "spacer"), logDelete(e));
-  const body = box("div", "log-details", ...(e.kind === "check" ? (e.findings?.length || e.ignored?.length ? [checkFindings(e)] : [el("div", checkCounts(e), "sub")]) : logContent(e)));
+  const body = box("div", "log-details", ...(e.kind === "check" ? (e.findings?.length || e.ignored?.length ? [checkFindings(e)] : [el("div", checkCounts(e), "sub")]) :
+    e.kind === "schedule" && e.event === "run" ? [runFindings(e)] : logContent(e)));
   // The user stands top right, beside the first summary line
-  const lines = () => summary.map((t, i) => i === 0 && e.user ? box("div", "first", el("span", t), el("span", e.user, "user")) : el("div", t));
+  const lines = () => summary.map((x, i) => i === 0 && e.user ? box("div", "first", el("span", x), el("span", e.user, "user")) : el("div", x));
   const same = [...body.children].map(c => c.textContent.trim()).join("\n") === summary.join("\n");
   if (same) return box("div", "log-m" + (group ? ` grp grp-${group}` : ""), head, box("div", "log-sum", ...lines()));
   const det = el("details"), key = `logm-${e.ts}-${e.kind}`;
@@ -204,7 +237,7 @@ export function renderLogs() {
   shown.forEach((e, i) => {
     const d = new Date(e.ts * 1000), key = dayOf(e);
     if (key !== day) {
-      day = key; out.push(el("div", `${key} · ${d.toLocaleDateString("en", {weekday: "long"})}`, "day"));
+      day = key; out.push(el("div", `${key} · ${d.toLocaleDateString(lang, {weekday: "long"})}`, "day"));
       card = el("div", null, "card"); out.push(card);
     }
     const before = same(shown[i - 1], e), after = same(e, shown[i + 1]);
@@ -212,7 +245,7 @@ export function renderLogs() {
     card.append(mobileQuery.matches ? logTile(e, d, group) : logRow(e, d, group));
   });
   $("log-clear").disabled = !ui.logs.length;
-  if (!out.length) out.push(box("div", "card", el("div", ui.logs.length ? "No entries match." : "No log entries yet.", "empty")));
+  if (!out.length) out.push(box("div", "card", el("div", ui.logs.length ? t("No entries match.") : t("No log entries yet."), "empty")));
   $("log-list").replaceChildren(...out);
 }
 $("log-search").oninput = () => render(true);
@@ -220,9 +253,10 @@ searchTool($("log-search"));
 $("log-quiet").onchange = () => render(true);
 /** Delete the whole activity log after a confirmation (one entry naming the user stays). */
 $("log-clear").onclick = () => {
-  const title = "Delete all logs?", count = ui.logs.length;
-  modal(title, [el("p", `All ${count} log entr${count === 1 ? "y" : "ies"} are deleted for good – regardless of the filter. One entry stays that names who cleared the log.`)],
-    [{text: "Cancel"}, {text: "Delete all", kind: "danger", action: async () => {
+  const title = t("Delete all logs?"), count = ui.logs.length;
+  modal(title, [el("p", count === 1 ? t("The log entry is deleted for good – regardless of the filter. One entry stays that names who cleared the log.")
+    : t("All {n} log entries are deleted for good – regardless of the filter. One entry stays that names who cleared the log.", {n: count}))],
+    [{text: t("Cancel")}, {text: t("Delete all"), kind: "danger", action: async () => {
       try { await api("api/logs/clear", {confirm: true}); closeModal(); ui.logsLoaded = 0; load(true); }
       catch (err) { message(title, err.message, "error", "delete"); }
     }}], "delete");

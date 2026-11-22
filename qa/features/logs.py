@@ -64,8 +64,9 @@ def _logs(c):
       return [...ul.children].map(li => li.className); }""")
     check(f"{case}: findings coloured by their own severity, then the ignored devices",
           colours == ["okc", "warnc", "bad", "neutral", "neutral"], str(colours))
-    plain = f.evaluate("""() => { const li = document.querySelector('#log-list li.neutral'), body = getComputedStyle(document.body).color;
-      return li && li.textContent.startsWith('Garage door: ignored') && getComputedStyle(li).color === body; }""")
+    plain = f.evaluate("""() => { const li = [...document.querySelectorAll('#log-list li.neutral')]
+        .find(l => l.textContent.startsWith('Garage door: ignored')), body = getComputedStyle(document.body).color;
+      return !!li && getComputedStyle(li).color === body; }""")
     check(f"{case}: ignored devices in the normal text colour", plain)
     summary = f.locator("#log-list summary", has_text="30.7 s").first.inner_text()
     check(f"{case}: ignored devices counted in the summary", "2 ignored" in summary, summary)

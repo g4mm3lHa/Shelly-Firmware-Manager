@@ -212,6 +212,32 @@ if scenario in ("features", "docs"):  # next version: cloud, Bluetooth proxy, of
     (data / "fw" / f"{imported_sha}.zip").write_bytes(imported)
     m._register_firmware(f"{imported_sha}.zip", "Plus1", 2, "1.2.3", imported_sha, len(imported), True, source="import")
     m.firmware[f"{imported_sha}.zip"]["downloaded"] = now - 86400 * 2
+if scenario == "features":  # beta firmware, a scheduled installation and schedules
+    import timetable
+    m.beta_firmware = True
+    m.devices[f"{20:032x}"].update(status="ready", beta=True, offer_version="1.6.0-beta1", pending_version="1.6.0-beta1",
+                                    file=f"{sha}.zip", sha256=sha, offer_source="manufacturer", message="")
+    planned = m.devices[f"{17:032x}"]
+    planned["planned"] = {"at": now + 86400 + 3600, "by": "demo", "on": now - 600, "sha256": sha, "version": "1.4.0",
+                          "target": "1.5.0", "beta": False, "restart": False}
+    ids = list(m.devices)
+    m.schedules = [
+        {"id": "a1b2c3d4e5f6", "name": "Weekly restart", "on": True, "action": "restart", "pause": 10, "time": "04:00",
+         "repeat": {"kind": "weekdays", "days": [0, 3]}, "devices": "all", "anchor": None, "next": None,
+         "last": {"at": now - 2 * 86400, "severity": "warning", "text": "22 of 23 restarted · 1 not reachable · 2 left out",
+                  "counts": {"done": 22, "total": 23, "unreachable": 1, "refused": 0, "left": 2}}},
+        {"id": "0f1e2d3c4b5a", "name": "Bluetooth off at night", "on": False, "action": "ble_off", "pause": None, "time": "23:30",
+         "repeat": {"kind": "daily"}, "devices": ids[:5], "anchor": None, "next": None,
+         "last": {"at": now - 86400, "severity": "missed", "text": "Missed – the app was not running", "reason": "the app was not running"}},
+    ]
+    for item in m.schedules:
+        item["next"] = timetable.next_run(item, now, m.tz) if item["on"] else None
+    m.events.add("schedule", severity="warning", event="run", name="Weekly restart", action="Restart", trigger="scheduled",
+                 devices=23, done=22, duration=241, result="22 of 23 restarted · 1 not reachable · 2 left out", user="Schedule",
+                 findings=[{"device": "Hall", "result": "unreachable", "detail": "Device not reachable"}],
+                 left_out=[{"device": "Doorbell", "reason": "battery device"}, {"device": "Garage door", "reason": "ignored"}])
+    m.events.add("install", device="Bathroom", event="scheduled", type="Plus1", old="1.4.0", new="1.5.0",
+                 at=timetable.local_text(now + 86400 + 3600, m.tz), user="demo")
 if scenario == "legacy":  # an installation started before (device progress shown)
     ids = list(m.devices)
     m.devices[ids[7]].update(status="installing", ota_progress=55, message="The Shelly is downloading the firmware: 55 %")
