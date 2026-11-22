@@ -152,7 +152,7 @@ def run_case(pw, width, scheme, embedded, base=IDLE, tag="idle"):
         prog = f.evaluate("() => !document.getElementById('progress').hidden && document.getElementById('progress-text').textContent")
         check(page, f"{case}: global progress line", prog == "Checking devices · 18/25 completed · 2 unavailable · checking devices", str(prog))
         acts = f.evaluate("() => [...document.querySelectorAll('.p-activity')].map(p => p.textContent)")
-        check(page, f"{case}: per-row activity", {"Waiting", "Checking…", "Downloading…"} <= set(acts), str(sorted(set(acts))))
+        check(page, f"{case}: per-row activity", {"Waiting", "Checking …", "Downloading …"} <= set(acts), str(sorted(set(acts))))
     # Other tabs
     for tab in ("firmware", "logs", "settings"):
         f.locator(f"#tab-{tab}").click()

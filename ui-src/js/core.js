@@ -158,6 +158,8 @@ const ICONS = {
   importIcon: "M14,12L10,8V11H2V13H10V16M20,18V6C20,4.89 19.1,4 18,4H6A2,2 0 0,0 4,6V9H6V6H18V18H6V15H4V18A2,2 0 0,0 6,20H18A2,2 0 0,0 20,18Z",
   // Battery device marker after the device name (outline with a half-full bar)
   battery: "M16,20H8V6H16M16.67,4H15V2H9V4H7.33A1.33,1.33 0 0,0 6,5.33V20.67C6,21.4 6.6,22 7.33,22H16.67A1.33,1.33 0 0,0 18,20.67V5.33C18,4.6 17.4,4 16.67,4M15,13H9V18H15V13Z",
+  // Column chooser of the Devices tab (MDI "view-column-outline")
+  columns: "M4,5V18H21V5H4M14,7V16H11V7H14M6,7H9V16H6V7M19,16H16V7H19V16Z",
   pencil: "M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z",
 };
 /** Inline SVG icon from a path. */
@@ -166,9 +168,9 @@ export function icon(name) {
   svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("aria-hidden", "true"); svg.classList.add("svg");
   path.setAttribute("d", ICONS[name]); svg.append(path); return svg;
 }
-/** Round icon button with accessible label. */
+/** Round icon button with accessible label; the label is its tooltip. */
 export function iconButton(name, label, onclick, cls) {
-  const b = el("button", null, "icon" + (cls ? " " + cls : "")); b.title = label; b.setAttribute("aria-label", label);
+  const b = el("button", null, "icon" + (cls ? " " + cls : "")); setTip(b, label); b.setAttribute("aria-label", label);
   b.append(icon(name)); if (onclick) b.onclick = onclick; return b;
 }
 /** Settings kept per end device (browser storage); null if missing or unreadable. */
@@ -192,7 +194,7 @@ function closeTools() {
   }
 }
 /** Round toolbar icon with a popover holding content. Returns {node, button}. */
-function toolButton(name, label, ...content) {
+export function toolButton(name, label, ...content) {
   const b = iconButton(name, label, null, "tool-btn"); b.type = "button";
   b.setAttribute("aria-haspopup", "true"); b.setAttribute("aria-expanded", "false");
   const pop = box("div", "tool-pop", ...content); pop.hidden = true;
@@ -246,7 +248,7 @@ export function sortControl(fields, onChange) {
     for (const b of byDir) b.setAttribute("aria-checked", String(b.dataset.value === value[1]));
     const field = (fields.find(f => f[0] === value[0]) || fields[0])[1];
     const text = `Sort: ${field} · ${value[1] === "desc" ? "Descending" : "Ascending"}`;
-    t.button.title = text; t.button.setAttribute("aria-label", text);
+    setTip(t.button, text); t.button.setAttribute("aria-label", text);
   };
   set(current);
   return {node: t.node, set};
@@ -274,7 +276,7 @@ export function filterControl(items, onChange) {
     }
     const label = (items.find(i => i[0] === current) || items[0])[1];
     t.button.classList.toggle("has-value", current !== items[0][0]);
-    t.button.title = `Filter: ${label}`; t.button.setAttribute("aria-label", `Filter: ${label}`);
+    setTip(t.button, `Filter: ${label}`); t.button.setAttribute("aria-label", `Filter: ${label}`);
   };
   return {node: t.node, set};
 }
@@ -338,16 +340,26 @@ export function attachTip(node, text, tap = false) {
     if (tipOwner === node && tipTapped && !tip.hidden) hideTip(); else showTip(node, text(), true);
   });
 }
+// The app's own tooltip replaces the browser's (title attribute) everywhere: it looks the
+// same on every element, shows at once and also works on touch devices.
+const tipped = new WeakSet();     // nodes with an attached tooltip of setTip
+/** Tooltip text of a node in place of a title (icon buttons, toolbar tools, "Install",
+ *  links, column heads): shown on mouse hover and keyboard focus; a tap runs the node's
+ *  action as before. "" removes the text. A disabled button shows it on a tap too. */
+export function setTip(node, text) {
+  node.dataset.tip = text || "";
+  if (!tipped.has(node)) { tipped.add(node); attachTip(node, () => node.dataset.tip); }
+}
 // Touch: a tap elsewhere and scrolling hide the tooltip. A tap on a disabled button
-// shows its title (the reason why it is disabled): it has no action and receives no
+// shows its tooltip (the reason why it is disabled): it has no action and receives no
 // click, but pointer events.
 document.addEventListener("pointerdown", e => {
   lastPointer = e.pointerType || "mouse";
   if (isTap() && tipOwner && !tipOwner.contains(e.target)) hideTip();
 }, true);
 document.addEventListener("pointerup", e => {
-  const b = e.pointerType !== "mouse" && e.target.closest && e.target.closest("button:disabled[title]");
-  if (b) showTip(b, b.title, true);
+  const b = e.pointerType !== "mouse" && e.target.closest && e.target.closest("button:disabled[data-tip]");
+  if (b && b.dataset.tip) showTip(b, b.dataset.tip, true);
 }, true);
 addEventListener("scroll", () => { if (isTap()) hideTip(); }, true);
 $("fw-info").append(icon("info"));

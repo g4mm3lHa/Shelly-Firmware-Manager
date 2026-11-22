@@ -56,7 +56,7 @@ export function editValue(d, field) {
   withLive(d, title, live => {
     const input = el("input"); input.type = "text"; input.value = live[prop] || ""; input.maxLength = field === "name" ? 64 : 260;
     const old = live[prop] || "";
-    modal(title, [box("label", "field", label, input)], [{text: "Cancel"}, {text: field === "name" ? "Next" : "Save", kind: "primary", action: () => {
+    modal(title, [box("label", "field", label, input)], [{text: "Cancel"}, {text: field === "name" ? "Continue" : "Save", kind: "primary", action: () => {
       const value = input.value.trim();
       if (value === old) { message(title, "Nothing changed."); return; }
       if (field !== "name") { saveSettings(d, title, {[field]: value}, true); return; }
@@ -174,7 +174,6 @@ function passwordModes(d) {
 }
 export function editPassword(d) {
   const title = `Device password – ${d.name}`, modes = passwordModes(d);
-  const prot = d.auth_enabled === true ? "protected" : d.auth_enabled === false ? "not protected" : "unknown";
   const pw = el("input"), pw2 = el("input");
   for (const i of [pw, pw2]) { i.type = "password"; i.autocomplete = "new-password"; i.maxLength = d.gen === 1 ? 50 : 128; }
   const pwField = box("label", "field", "Password (user “admin”)", pw), pw2Field = box("label", "field", "Repeat password", pw2);
@@ -205,7 +204,7 @@ export function editPassword(d) {
   const tone = d.auth_enabled === true ? (d.password_set ? "good" : "warn") : d.auth_enabled === false ? "off" : "unknown";
   modal(title, [
     featureStrip("lock", "Password protection", tone, d.auth_enabled === true ? "Protected" : d.auth_enabled === false ? "Not protected" : "Unknown"),
-    valueList([["Device protection", prot], ["Stored in this app", d.password_set ? "yes" : "no"]]),
+    valueList([["Stored in this app", d.password_set ? "yes" : "no"]]),   // the protection state is in the strip
     radios, hint, pwField, pw2Field, storage,
     el("div", PASSWORD_WARNING, "warnbox")],
   [{text: "Cancel"}, {text: "Continue", kind: "primary", action: () => {
@@ -230,7 +229,7 @@ function passwordConfirm(d, title, mode, password, keep) {
       modal(title, [messageBody(done, "success"), PASSWORD_HA[mode] ? el("div", PASSWORD_HA[mode], "warnbox") : null].filter(Boolean));
     } catch (e) { message(title, e.message, "error"); }
   };
-  modal(title, content, [{text: "Cancel"}, {text: mode === "store" ? "Test & save" : m.label, kind: mode === "forget" || mode === "store" ? "primary" : "danger", action: send}]);
+  modal(title, content, [{text: "Cancel"}, {text: mode === "store" ? "Test & store" : m.label, kind: mode === "forget" || mode === "store" ? "primary" : "danger", action: send}]);
   if (m.risky) {
     const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; };
   }
@@ -272,9 +271,9 @@ export function bulkPasswords() {
     if (!set) storage.replaceChildren(el("p", stored, "hint"));
     else if (keep.checked) storage.replaceChildren(el("div", `${stored} ${ha}`, "warnbox"));
     else storage.replaceChildren(el("div", `${NOT_STORED} ${ha}`, "warnbox danger"));
+    // Step 1 is "Continue" (blue); the red button with the count follows in the confirmation
     const go = $("dlg-btns").lastChild;
-    if (go) { go.textContent = set ? `Set on ${n} device${n === 1 ? "" : "s"} …` : `Store for ${n} device${n === 1 ? "" : "s"} …`;
-      go.className = set ? "danger" : "primary"; go.disabled = !n; }
+    if (go) go.disabled = !n;
   };
   const fill = () => {
     const m = mode(), fits = devices.filter(d => bulkStep(d, m)[1]);
@@ -289,7 +288,7 @@ export function bulkPasswords() {
       d.auth_enabled === false ? "not protected" : "unknown";
     list.replaceChildren(box("label", "check bulk-all", all, ` All devices that fit (${fits.length} of ${devices.length})`),
       ...boxes.map(([cb, d, text, ok]) => box("div", "bulk-row" + (ok ? "" : " off"),
-        box("label", "check", cb, box("span", "bulk-dev", el("span", d.name || "?", "name"), el("span", `Gen${d.gen || "?"} · ${state(d)}`, "sub"))),
+        box("label", "check", cb, box("span", "bulk-dev", el("span", d.name || "?", "name"), el("span", `Gen ${d.gen || "?"} · ${state(d)}`, "sub"))),
         el("span", (ok ? "→ " : "") + text, ok ? "bulk-step" : "sub"))));
     update();
   };
@@ -301,7 +300,7 @@ export function bulkPasswords() {
   modal(BULK_TITLE, [section("Action", modes), section("Devices", devices.length ? list : el("p", "No devices yet – they are found by the check.", "hint")),
     section("Password (every selected device gets it)", box("div", null, box("label", "field", "Password (user “admin”)", pw), pw2Field)),
     keepLabel, storage, el("div", PASSWORD_WARNING, "warnbox")],
-  [{text: "Cancel"}, {text: "Continue", kind: "danger", action: () => {
+  [{text: "Cancel"}, {text: "Continue", kind: "primary", action: () => {
     const m = mode(), set = m === "set", picked = chosen(), password = pw.value;
     if (!picked.length) { message(BULK_TITLE, "No device selected.", "error", "lock"); return; }
     if (!password) { message(BULK_TITLE, "No password entered.", "error", "lock"); return; }
@@ -325,7 +324,7 @@ function bulkConfirm(mode, picked, password, keep) {
       bulkResult(mode, r.results, keep);
     } catch (e) { message(BULK_TITLE, e.message, "error", "lock"); }
   };
-  modal(BULK_TITLE, content, [{text: "Cancel"}, {text: set ? `Set on ${picked.length} device${picked.length === 1 ? "" : "s"}` : "Test & save", kind: set ? "danger" : "primary", action: send}], "lock");
+  modal(BULK_TITLE, content, [{text: "Cancel"}, {text: set ? `Set on ${picked.length} device${picked.length === 1 ? "" : "s"}` : "Test & store", kind: set ? "danger" : "primary", action: send}], "lock");
   if (set) { const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; }; }
 }
 const BULK_ICONS = {ok: ["check", "msg-success"], error: ["close", "msg-error"], skipped: ["alert", "msg-warning"]};

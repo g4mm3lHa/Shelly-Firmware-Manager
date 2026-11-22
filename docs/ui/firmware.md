@@ -4,11 +4,13 @@ Part of `docs/UI_DECISIONS.md` (approved, binding; change only with approval, in
 as the UI change). Read when you change the Firmware tab.
 
 ## Firmware tab
-- "Install" (red) behind every device a file is provided for (only those); changelog,
+- "Install" (red) behind every device a file is provided for (only those; on phones the
+  size of the status pill, 32 px, like in the device tile, 2026-11-22); changelog,
   download and delete icon on one line, on phones in the head of the version tile;
   changelog icon shows the changelog stored with the file (no request).
-- Version labels 12 px after the version, centred (`.fw-ver` flex); label
-  "intermediate" outlined yellow ("Uploaded" stays filled) with a tooltip without action
+- Version labels 12 px after the version, centred (`.fw-ver` flex): "Latest",
+  "Uploaded", "Intermediate" (sentence case, 2026-11-22); label
+  "Intermediate" outlined yellow ("Uploaded" stays filled) with a tooltip without action
   ("Intermediate version: required step before newer firmware can be installed
   safely"); phones: date right-aligned in the size line.
 - Column titles (2026-11-17, variant A): one head per card over the version rows
@@ -17,15 +19,16 @@ as the UI change). Read when you change the Firmware tab.
   Devices table, size and date with tabular digits, the opened device list centred as a
   block with left-aligned lines. Phones: no head, small labels Size, Stored, SHA-256
   inside the version tile (`data-label`).
-- "Upload firmware" button: upload icon of its dialog title after the text (16 px,
-  `aria-hidden`, vertically centred).
+- "Upload firmware" button: upload icon of its dialog title before the text (16 px,
+  `aria-hidden`, vertically centred; 2026-11-22, T8).
 - **Check rule in the texts (2026-11-21):** the tooltip of the info icon and the hint
   of the upload dialog name the rule as it is: Gen2+ – the Shelly update server decides
   which version is next, a stored file of that version (download or upload) is used
   instead of a download; Gen1 – the store comes first. An upload is used when the
   server offers exactly this version, or for a manual installation while the server
   cannot be reached; an older one allows a downgrade.
-- Delete dialog: both steps with red button; the note that a file may not be
+- Delete dialog: step 1 "Continue" in blue, step 2 red "Delete" (dialog rule b,
+  common.md, 2026-11-22); the note that a file may not be
   restorable is a red warning box (`warnbox danger`, text in the normal colour).
 - **Filter (3.5.0, popover since 3.8.0, mockup `3.8.0/06`):** All, Provided (provided to a device), Uploaded,
   Intermediate, Gen1, Unused (no device of the list has the firmware ID; while a

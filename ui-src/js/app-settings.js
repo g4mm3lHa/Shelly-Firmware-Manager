@@ -121,7 +121,7 @@ export function renderSettings() {
     }
     return box("div", "card", box("div", "card-head", el("h2", group)), box("div", "card-body", form));
   });
-  cards.push(passwordsCard());
+  cards.unshift(passwordsCard());   // Device Passwords first
   const save = el("button", "Save settings", "primary"); save.onclick = saveOptions;
   const dirty = el("span", "Unsaved changes", "unsaved"); dirty.hidden = true;
   const markDirty = () => { dirty.hidden = !Object.keys(optionChanges()).length; };
@@ -188,7 +188,7 @@ function saveOptions() {
         if (!r.restarting) { message("Settings", "Nothing changed."); return; }
         modal("Settings saved", [el("p", "The app is restarting …", "hint")], []);
         waitForRestart();
-      } catch (e) { message("Settings", e.message, "error"); }
+      } catch (e) { message("Save settings?", e.message, "error"); }   // keeps the title of this dialog
     }}]);
 }
 /** Poll until the restarted app answers again, then reload the page. */
@@ -211,15 +211,15 @@ function waitForRestart() {
 /** Block "Firmware store" of the card "Firmware & Storage" with the Export and Import
  *  buttons (full width of the card, between the options). */
 function storeBlock() {
-  const ex = el("button"); ex.append(icon("exportIcon"), " Export store …"); ex.id = "store-export"; ex.onclick = exportDialog;
-  const im = el("button"); im.append(icon("importIcon"), " Import store …"); im.id = "store-import"; im.onclick = importDialog;
+  const ex = el("button"); ex.append(icon("exportIcon"), " Export store"); ex.id = "store-export"; ex.onclick = exportDialog;
+  const im = el("button"); im.append(icon("importIcon"), " Import store"); im.id = "store-import"; im.onclick = importDialog;
   return box("div", "set-store", el("div", "Firmware store", "set-store-name"),
     el("p", "Move the complete firmware store to another Home Assistant instance: export it as one ZIP file (sealed with a password) and import it there. Device passwords are not exported.", "hint"),
     box("div", "store-btns", ex, im));
 }
 /** Settings card that opens the dialog for passwords of several devices. */
 function passwordsCard() {
-  const pw = el("button"); pw.append(icon("lock"), " Device passwords …"); pw.id = "set-passwords"; pw.onclick = bulkPasswords;
+  const pw = el("button"); pw.append(icon("lock"), " Device passwords"); pw.id = "set-passwords"; pw.onclick = bulkPasswords;
   return box("div", "card", box("div", "card-head", el("h2", "Device Passwords")), box("div", "card-body",
     el("p", "Store the existing password or set a new one on several devices in one step (each device is set, verified and stored on its own).", "hint"),
     box("div", "store-btns", pw)));
