@@ -59,6 +59,18 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
 - **Upload progress (3.4.1):** firmware upload and store import send the file in parts
   and show "Uploading <file> … n %" in the dialog, then "Checking <file> …" (import).
 
+## Next version (mockups `3.9.0`, approved 2026-11-22)
+- **Options (F1):** "Offer updates only after (days)" in "Checks" after "Check time";
+  "Keep installed versions" in "Firmware & Storage" after "Allow downgrades", below it
+  the line "n installed versions: x are stored (MB), y are downloaded at the next check
+  (about z MB each). Free: …" (hidden while no version counts).
+- **Import (F16):** yellow box "Import only a store you exported yourself …" in step 1 and
+  in the first-start dialog; step 2 without the source per file, group "new – will be
+  stored as “Imported”", hint that every file is stored as "Imported", checkbox "I created
+  this export myself or I trust its source" – the import button is enabled only then;
+  result "n new files stored as “Imported”". Export and its log entry count
+  "imported" too.
+
 ## Setting help and download base URL hints (2026-11-17)
 - Settings tab: help texts not shown under the fields; i-icon (16 px) next to the
   setting name, tooltip on mouse hover over name or icon and on keyboard focus of the

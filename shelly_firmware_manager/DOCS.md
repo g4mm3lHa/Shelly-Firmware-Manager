@@ -12,6 +12,8 @@ Assistant). Version history: `CHANGELOG.md` (Changelog tab).
 - [Using the app](#using-the-app)
   - [Devices](#devices)
   - [How a check works](#how-a-check-works)
+  - [Offer delay](#offer-delay)
+  - [Keep installed versions](#keep-installed-versions)
   - [Installing updates](#installing-updates)
   - [Downgrade (Gen2+)](#downgrade-gen2)
   - [Firmware](#firmware)
@@ -78,10 +80,12 @@ the app page – same names, help texts and order). Saving restarts the app.
 |---|---|---|---|
 | Check every (days) | 7 | 1–30 | Interval of the automatic check |
 | Check time | 02:45 | HH:MM | Time of day of the automatic check (Home Assistant time zone) |
+| Offer updates only after (days) | 0 | 0–60 | Holds a new firmware version back until it is this many days old, counted from its build date; 0 offers it at once (see [Offer delay](#offer-delay)) |
 | Download base URL for the Shellys | – | rules below | LAN IP of Home Assistant + port 8098, e.g. `http://192.168.1.20:8098`. Required for installations |
 | Serve downloads only to known Shellys | on | on / off | Firmware is only served to the device it is meant for. Switch off if downloads are rejected from a 172.30.x.x address |
 | Enable Gen1 updates | on | on / off | Gen1 support: all Gen1 devices of the Shelly integration are checked (see [Gen1 firmware](#gen1-firmware)) |
 | Allow downgrades | off | on / off | Installing an older stored firmware on Gen2+ devices (see [Downgrade](#downgrade-gen2)). Stays off until you switch it on, also after an update of the app |
+| Keep installed versions | on | on / off | Gen2+: also stores the firmware a device already runs while Shelly still offers it, so a downgrade stays possible after a bad update (see [Keep installed versions](#keep-installed-versions)) |
 | Max. import size (MB) | 100 | 1–2048 | Largest file accepted by **Import store** |
 | Max. log size (entries) | 1000 | 100–3000 | Size limit of the activity log |
 | Log retention (days) | 90 | 1–365 | Age limit of the activity log |
@@ -132,8 +136,9 @@ the Home Assistant theme (colours, light/dark) and works on phones.
 - Search, the **Filter** icon, sorting and a column chooser help with larger
   installations; sort order and columns are kept per browser. The **Filter** icon next to
   **Sort** opens a popover with the filters **All**, **Updates**, **Attention**, **Not
-  checked**, **Up-To-Date**, **Unprotected**, **Asleep**, **Ignored**, **Removed** and
-  **Other Shellys**, each with its count. A dot on the icon shows that a filter other than
+  checked**, **Up-To-Date**, **Unprotected**, **Cloud on**, **On hold** (only while
+  **Offer updates only after (days)** is above 0), **Asleep**, **Ignored**, **Removed**
+  and **Other Shellys**, each with its count. A dot on the icon shows that a filter other than
   **All** is active. The Firmware and Logs tabs have the same Filter icon with their own
   filters. **Unprotected** lists devices without password protection – set it per device
   from that list.
@@ -165,6 +170,12 @@ the Home Assistant theme (colours, light/dark) and works on phones.
   filter **All** or **Other Shellys**; the search applies to it. The app recognises
   these devices by the manufacturer text in Home Assistant, so a device may be missing.
   A listed Shelly that Home Assistant also knows over Bluetooth is not repeated here.
+- **Shellys not listed:** when Home Assistant knows Shellys of the Shelly integration
+  that the app does not list, a line above the list says "N of M Shellys listed · Why
+  are K missing?". It opens a list with the reason and what to do: the device or its
+  entry is **Disabled in Home Assistant**, Home Assistant **Found** it **but** it is
+  **not set up**, or the discovery was **Ignored in Home Assistant**. The list is updated
+  by each full check. A Shelly that Home Assistant does not know cannot be listed.
 - **Host name** exists only while **Resolve host names** is on (Settings tab,
   Advanced). Switching it on shows the column; the Columns chooser can hide it, on a
   phone it is a row in the details. It shows the host name set in the Shelly
@@ -176,19 +187,29 @@ the Home Assistant theme (colours, light/dark) and works on phones.
   version was not confirmed, or "Error" if the installation failed – then with
   **Install** for another attempt) until you check it again or the next full check runs.
 - The action icons show and change power-on action, eco mode, password protection,
-  access point, Bluetooth, actions and schedules and the websocket debug log, and
+  access point, Bluetooth, cloud, actions and schedules and the websocket debug log, and
   restart the device. The popup of an icon starts with the current state; "?" means the
   value is unknown. Every change is read back from the device; a value the device
   accepted but did not apply is reported as a warning and logged as failed. The lock is
   green if the device is protected and its password is stored in the app, yellow if the
   password is not stored here.
+- **Cloud** (cloud icon): yellow while the Shelly cloud is on, with the connection in
+  the tooltip. With the cloud off, the Shelly app and other Shelly cloud services no
+  longer reach the device from outside your network; Home Assistant and this app keep
+  working locally. Only the cloud switch is changed.
+- **Bluetooth proxy:** if Home Assistant uses the Shelly as Bluetooth proxy (its script
+  `aioshelly_ble_integration` runs on the device), the Bluetooth popup says so. Home
+  Assistant turns Bluetooth on again after you turn it off here. To switch it off for
+  good, first set **Bluetooth scanner mode** to **Disabled** in the options of the
+  device in the Shelly integration.
 - **Websocket debug log** (Gen2+, bug icon): turns on the debug log that the Shelly
   streams over a websocket; the Diagnostics page of the Shelly web UI (linked in the
   popup) shows it live. Turn it off afterwards – the log may contain network and
   configuration details and streaming uses device resources. Below firmware 1.0.0 the
   stream is not protected by the device password. Gen1 devices have no such log.
-- The row menu ⋮ offers per device: Check for updates, Install update, Downgrade, Device
-  Details (status, firmware, model, generation, firmware ID, NTP server and history),
+- The row menu ⋮ offers per device: Check for updates, Install update, Offer update now
+  (only while an update is on hold), Downgrade, Device details (status, firmware with
+  build date and way back, model, generation, firmware ID, NTP server and history),
   Reload device info, Open web UI, the device settings, Ignore / Resume device and
   Restart. On touch devices a tap on a disabled button shows the reason.
 - **Battery devices** (e.g. H&T, door/window sensors) sleep between wake-ups and answer
@@ -256,12 +277,44 @@ Shelly update server, firmware store, an uploaded or an imported file.
 The changelog of a provided version is requested once from the Shelly documentation
 and kept with the stored firmware; it is not requested again afterwards.
 
+### Offer delay
+
+With **Offer updates only after (days)** above 0, a new version is offered only once it
+is that many days old. The age counts from its build date: Gen2+ from the build ID that
+the Shelly update server names, Gen1 from the version text.
+
+Until then the device stays **Up-To-Date**, nothing is downloaded and no notification
+counts it. Below the version a clock line shows the held version and the date it is
+offered from; the filter **On hold** lists these devices.
+
+Row menu ⋮ → **Offer update now** lifts the hold for this version on this device and
+checks it at once; the update is installed only after your approval. Intermediate
+versions are held back the same way. Uploaded files and versions without a build date
+are offered at once.
+
+### Keep installed versions
+
+Shelly only offers the current version for download. With **Keep installed versions**
+on (default), a check also stores the version a Gen2+ device runs while it is up to
+date – only then does Shelly still offer that file. After the next update this file is
+the device's way back (see [Downgrade](#downgrade-gen2)).
+
+A device with an open update has no source for its installed version any more; the
+installation dialog then says that there is no way back. The line below the option in
+the Settings tab shows how many installed versions are stored, how many the next check
+downloads, and the free disk space.
+
 ### Installing updates
 
 1. Tick the devices under "Updates Available" and click **Review & install** (or use
    "Install update" in the row menu, or **Install** behind a device in the Firmware tab).
-2. The dialog shows installed and target version, size, SHA-256, source and the
-   changelog (security entries and entries for this model are highlighted).
+2. The dialog shows installed and target version, build date, size, SHA-256, source and
+   the changelog (security entries and entries for this model are highlighted). The
+   section **Before installing** checks two points: **Way back** (Gen2+: is the
+   installed version stored, so a downgrade stays possible?) and **Wi-Fi signal** (read
+   from the device when the dialog opens; −80 dBm and below is weak, the download may
+   fail). Devices on the cable have no signal line. For several devices only the
+   findings per device are listed.
 3. **Approve installation.** The Shelly downloads the firmware from the app and restarts.
 
 Gen2+ devices report their progress over the device connection (the status label shows
@@ -275,7 +328,9 @@ Devices without this connection (Gen1, or when it is not available) are checked 
 10 seconds until they report exactly the target version (at most 5 minutes). If that
 does not happen, the status becomes "Unconfirmed" with a diagnosis – see
 [Troubleshooting](#troubleshooting). A failed installation can be retried from the
-updates card. Scheduled checks create a
+updates card. The dialog of a retry shows the reason of the last attempt and offers
+**Restart the device first** (ticked): the app restarts the Shelly, waits up to two
+minutes until it answers again and then starts the installation (**Restart & install**). Scheduled checks create a
 Home Assistant notification when they find new updates.
 
 While a device is installed or checked, other devices can be checked and installed.
@@ -310,7 +365,9 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
 - All downloaded and uploaded firmware files, grouped by device type, with size, date,
   SHA-256 and the devices they are provided for. The top shows the number of files, their
   total size and the free disk space. Filters: Provided (to at least one device),
-  Uploaded, Intermediate, Gen1 and Unused (no listed device has this firmware ID; no file
+  Installed (a device runs this version now – its way back after the next update),
+  Uploaded, Imported (not confirmed by the Shelly update server yet), Intermediate, Gen1
+  and Unused (no listed device has this firmware ID; no file
   counts as unused while the ID of a device is unknown, e.g. a sleeping battery device).
   Search and sort work as in the Devices tab; versions inside a card stay newest first.
 - **Files on disk:** at start the app scans the firmware folder. A file that is on the
@@ -331,7 +388,8 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
 - Firmware is **never deleted automatically**. Delete files you no longer need with the
   bin icon (two confirmations). A file that is provided to devices can be deleted too:
   the dialog names them, they lose the provided update and show "Available" until they
-  are checked again. A file that is being installed cannot be deleted, nor every file
+  are checked again. For a version marked "Installed" the dialog warns that these
+  devices have no way back after their next update without it. A file that is being installed cannot be deleted, nor every file
   during **Check all** and the files of the checked device's type during a single check. To skip a stored version (Gen1: the store comes first),
   delete it.
 - **Upload firmware** adds a version you have from another source:
@@ -432,7 +490,8 @@ store in the Settings tab → **Firmware & Storage** → **Export store**:
 On the other instance: **Import store**, choose the file and enter the export
 password. The file is checked completely – seal, every file – before anything is
 stored; then the result shows how many files are new, already stored or in conflict
-(each group can be expanded; conflicts are expanded). **Import** stores the new files:
+(each group can be expanded; conflicts are expanded). Tick "I created this export
+myself or I trust its source" – only then **Import** stores the new files:
 
 - Each file is stored as "imported", whatever the export says about its source: the
   password only proves that the file was not changed since its export, not who made
@@ -479,6 +538,9 @@ Gen2+ firmware is downloaded over HTTPS only.
 | Error … Stored version X is ready and can be installed manually | The Shelly server could not be asked. Check again later, or install the stored version at your own risk |
 | Download does not match the SHA-256 named by the manufacturer's URL | The download was damaged or altered and was not stored – check again |
 | Many "Download rejected" lines in the app log | Only the first rejected request per address and 10 minutes is logged; the others are counted in one line |
+| The device did not answer within 2 minutes after its restart – nothing was installed | **Restart the device first** restarted the Shelly, but it did not come back in time. Check that it is online, then try the installation again |
+| No update is held back for this device | **Offer update now** found no held version any more (e.g. the device was checked meanwhile). Reload the page |
+| Weak Wi-Fi signal (−80 dBm or below) in the installation dialog | The Shelly downloads the firmware over Wi-Fi and the download may fail. Improve the reception (access point, antenna position) or install anyway and retry if it fails |
 | The Shelly reports X instead of the target version Y | Check the device; run "Check for updates" again |
 | Certificate of … is not publicly trusted | See [Certificate pinning](#certificate-pinning) |
 | The Shelly requires a password | Store the device password (see [Device passwords](#device-passwords)) |
@@ -562,6 +624,10 @@ in the firmware store and **Allow downgrades** is switched on (see
   through another Shelly (e.g. Bluetooth devices behind a gateway) are not listed as
   devices on purpose.
 - Battery devices can only be checked and updated while they are awake.
+- Keep installed versions: the installed version can be stored only while Shelly still
+  offers it, so a device that already has an open update has no way back stored.
+- Offer delay: the age counts from the build date; when Shelly started to offer a version
+  cannot be read.
 - Gen1: Shelly offers the firmware only over plain HTTP and without a checksum (see
   [Gen1 firmware](#gen1-firmware)); no downgrade; no installation progress.
 - A downgrade needs the older version in the firmware store – Shelly only offers the
@@ -598,8 +664,9 @@ The app connects only to:
   official changelog pages. Only the firmware ID (e.g. `Plus1`) and, for Gen2+ devices,
   the installed firmware version are part of the request; no other information about
   your devices or Home Assistant is sent.
-- **Home Assistant** via the Supervisor – device registry, notifications, the app's
-  own settings and its slug (for the link to the app page).
+- **Home Assistant** via the Supervisor – device registry, the Shelly config entries
+  and discovery flows (for **Shellys not listed**), notifications, the app's own
+  settings and its slug (for the link to the app page).
 
 While **Resolve host names** is on, the app looks up each device's host name (for
 example `shellyplus1pm-a0dd6c29c3e0.local`) through the name resolution of Home
@@ -643,7 +710,9 @@ What changes when you update from an older version:
   Gen1 file cannot be checked against Shelly. At the first start all stored Gen1 files
   are therefore marked as imported; a Gen1 update provided from them is withdrawn
   until the next check, which downloads Shelly's current file again. Delete stored
-  files you imported from an export you do not fully trust.
+  files you imported from an export you do not fully trust. **Keep installed versions**
+  is on after the update: the next check also downloads the version each up-to-date
+  Gen2+ device runs (about 1–2 MB per version). Switch it off if you do not need it.
 - **From 3.7.1 or older:** the list **Allowed Gen1 types** is gone; all Gen1 devices of
   the Shelly integration are checked. Turn off **Enable Gen1 updates** to skip them
   (they then show as **Not checked**). A saved value is ignored. Devices that disappear

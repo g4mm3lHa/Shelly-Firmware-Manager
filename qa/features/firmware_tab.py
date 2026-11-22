@@ -27,8 +27,9 @@ def _downgrade(c):
     f.wait_for_selector("#dlg-body .modes")
     labels = f.locator("#dlg-body .modes label").all_inner_texts()
     versions = [t.split("·")[0].strip() for t in labels]
-    check(f"{case}: all older versions, newest first", versions == ["1.3.1", "1.3.0", "1.2.0"], str(versions))
-    check(f"{case}: upload marked", "Uploaded" in labels[2] and "Uploaded" not in labels[0], str(labels))
+    check(f"{case}: all older versions, newest first", versions == ["1.3.1", "1.3.0", "1.2.3", "1.2.0"], str(versions))
+    check(f"{case}: upload marked", "Uploaded" in labels[3] and "Uploaded" not in labels[0], str(labels))
+    check(f"{case}: import marked", "Imported" in labels[2] and "Imported" not in labels[0], str(labels))
     check(f"{case}: dialog fits", f.evaluate("() => { const r = document.getElementById('dlg').getBoundingClientRect();"
                                              f" return r.left >= 0 && r.right <= {width}; }}"))
     page.screenshot(path=out / f"{case}-downgrade-list.png")
@@ -61,7 +62,7 @@ def _firmware_tab(c):
     f.locator("#tab-firmware").click()
     f.wait_for_selector(".fw-row")
     summary = f.locator("#fw-summary").text_content()
-    check(f"{case}: total size shown", summary.startswith("4 files") and "MB stored" in summary, summary)
+    check(f"{case}: total size shown", summary.startswith("5 files") and "MB stored" in summary, summary)
     tip = f.locator("#fw-info").get_attribute("data-tip")
     check(f"{case}: no automatic deletion hint", "never deleted automatically" in tip, tip[:60])
     rows = f.locator(".fw-row")
@@ -243,7 +244,7 @@ def _sorting_and_downgrade(c):
     f.locator("#tab-devices").click()
     labels = [e[0] for e in filter_entries(f, "devices")]
     check(f"{case}: Devices filter entries", labels == ["All", "Updates", "Attention", "Not checked", "Up-To-Date", "Unprotected",
-          "Asleep", "Ignored", "Removed", "Other Shellys"], str(labels))
+          "Cloud on", "On hold", "Asleep", "Ignored", "Removed", "Other Shellys"], str(labels))
     pick_filter(f, "devices", "Unprotected")
     shown = f.evaluate("() => [...document.querySelectorAll('#dev-cards tbody tr')].length")
     expected = next(n for label, n, _ in filter_entries(f, "devices") if label == "Unprotected")
@@ -307,7 +308,7 @@ def _sorting_and_downgrade(c):
     f.wait_for_selector(".fw-row")
     check(f"{case}: sort tool in the Firmware toolbar", _checked(f, "firmware") == ["type", "asc"], str(_checked(f, "firmware")))
     labels = [e[0] for e in filter_entries(f, "firmware")]
-    check(f"{case}: Firmware filter entries", labels == ["All", "Provided", "Uploaded", "Intermediate", "Gen1", "Unused"], str(labels))
+    check(f"{case}: Firmware filter entries", labels == ["All", "Provided", "Installed", "Uploaded", "Imported", "Intermediate", "Gen1", "Unused"], str(labels))
     _unused_chip(c)
     pick_filter(f, "firmware", "Uploaded")
     tags = f.evaluate("() => [...document.querySelectorAll('.fw-row')].map(r => !!r.querySelector('.fw-ver .tag.warn'))")

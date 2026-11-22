@@ -103,11 +103,12 @@ def _action_popups(c):
         rows = f.evaluate("""() => { const s = document.querySelector('#dev-cards td.c-action .act-strip'); const tops = {};
           for (const b of s.children) { const t = Math.round(b.getBoundingClientRect().top); tops[t] = (tops[t] || 0) + 1; }
           return {width: s.getBoundingClientRect().width, rows: Object.values(tops)}; }""")
-        check(f"{case}: action strip 170 px, two rows of 5 + 4 icons", rows["width"] == 170 and rows["rows"] == [5, 4], str(rows))
+        check(f"{case}: action strip 170 px, two rows of 5 icons", rows["width"] == 170 and rows["rows"] == [5, 5], str(rows))
     else:
         labeled = f.locator("#dev-cards tr", has_text="Hall").first.locator(".act-strip.labeled > *")
-        check(f"{case}: phone tile has the debug button", labeled.count() == 9
-              and labeled.nth(7).inner_text() == "Websocket debug log", str(labeled.all_inner_texts()))
+        check(f"{case}: phone tile has the debug and cloud buttons", labeled.count() == 10
+              and labeled.nth(8).inner_text() == "Websocket debug log" and labeled.nth(5).inner_text() == "Cloud",
+              str(labeled.all_inner_texts()))
         f.locator("#dev-cards tr", has_text="Hall").first.screenshot(path=out / f"{case}-tile-debug.png")
     # Popups opened by an action icon: strip under the title (icon circle 32 px, name, state)
     # Switch and restart popups: no question; the button names the action
@@ -262,8 +263,8 @@ def _battery(c):
 
 
 SECTION_TITLES = ["Updates Available", "Attention", "Not Checked", "Up-To-Date", "Asleep", "Ignored", "Removed", "Other Shellys"]
-FILTER_LABELS = ["All", "Updates", "Attention", "Not checked", "Up-To-Date", "Unprotected", "Asleep", "Ignored", "Removed",
-                 "Other Shellys"]
+FILTER_LABELS = ["All", "Updates", "Attention", "Not checked", "Up-To-Date", "Unprotected", "Cloud on", "On hold", "Asleep",
+                 "Ignored", "Removed", "Other Shellys"]
 
 
 def _host_names(c):
@@ -483,7 +484,7 @@ def _layout(c):
         check(f"{case}: no tooltip after a tap", tip_after_tap is True)
     card.locator("button.install").first.click()
     heads = f.evaluate("[...document.querySelectorAll('#dlg .dsec h3')].map(h => h.textContent)")
-    check(f"{case}: installation dialog in sections", heads == ["Device", "Firmware", "Changelog"], str(heads))
+    check(f"{case}: installation dialog in sections", heads == ["Device", "Firmware", "Before installing", "Changelog"], str(heads))
     page.screenshot(path=out / f"{case}-install-dialog.png")
     f.locator("#dlg-btns button", has_text="Cancel").click()
     if width < 700:   # phone tile: lines, flush button rows, Details button

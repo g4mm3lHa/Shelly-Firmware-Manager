@@ -49,11 +49,9 @@ OTA_TICK_S = 1  # events: check interval while the update runs
 
 # "Restart the device first" (retry after a failed installation): after the restart
 # command the device goes down, then it must answer again within RESTART_WAIT_S
-RESTART_SETTLE_S = 5
-
-RESTART_WAIT_S = 120
-
-RESTART_POLL_S = 3
+RESTART_SETTLE_S = 5  # wait before the first query (the device is still going down)
+RESTART_WAIT_S = 120  # the device must answer again within 2 minutes
+RESTART_POLL_S = 3  # query interval while waiting
 
 MAX_SERVED_IPS = 16  # download diagnosis: client addresses recorded per file
 

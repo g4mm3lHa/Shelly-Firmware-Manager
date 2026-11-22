@@ -63,10 +63,11 @@ function logContent(e) {
         e.https === false ? el("span", "HTTP only", "tag warn") : null)];
     case "install":
       return [box("div", null, `${e.device}: ${e.downgrade ? "downgrade" : "installation"} ${INSTALL_EVENTS[e.event] || e.event} · ${arrow(e.old, e.new)} `,
-        e.unverified ? el("span", "Not verified by the update server", "tag warn") : null), e.detail ? el("div", e.detail, "sub") : null].filter(Boolean);
+        e.unverified ? el("span", "Not verified by the update server", "tag warn") : null),
+        e.restarted ? el("div", "Device restarted before the installation", "sub") : null, e.detail ? el("div", e.detail, "sub") : null].filter(Boolean);
     case "delete":
       if (e.unknown) return [el("div", `Unknown file deleted · ${mb(e.size || 0)} · SHA ${(e.sha256 || "").slice(0, 12)}…`)];
-      return [el("div", `Firmware deleted: ${e.type} ${e.version}${e.source === "upload" ? " (uploaded)" : ""}`),
+      return [el("div", `Firmware deleted: ${e.type} ${e.version}${e.source === "upload" ? " (uploaded)" : e.source === "import" ? " (imported)" : ""}`),
         e.released?.length ? el("div", `No longer provided for: ${e.released.join(", ")}`, "sub") : null].filter(Boolean);
     case "upload":
       return [el("div", `Firmware uploaded: ${e.type} ${e.version} · ${mb(e.size || 0)} · SHA ${(e.sha256 || "").slice(0, 12)}… · ${e.sha_checked ? "SHA-256 checked" : "SHA-256 not checked"}`)];
@@ -80,7 +81,7 @@ function logContent(e) {
         ...(e.changes || []).map(c => el("div", c.redacted ? `${optionLabel(c.option)}: changed` : `${optionLabel(c.option)}: ${arrow(c.old, c.new)}`, "sub")),
         e.error ? el("div", e.error, "bad") : null].filter(Boolean);
     case "export":
-      return [el("div", `Firmware store exported · ${e.files ?? 0} file${e.files === 1 ? "" : "s"} (${e.downloads ?? 0} downloaded, ${e.uploads ?? 0} uploaded) · ${mb(e.size || 0)}`),
+      return [el("div", `Firmware store exported · ${e.files ?? 0} file${e.files === 1 ? "" : "s"} (${e.downloads ?? 0} downloaded, ${e.uploads ?? 0} uploaded, ${e.imports ?? 0} imported) · ${mb(e.size || 0)}`),
         e.damaged ? el("div", `${e.damaged} damaged stored file${e.damaged === 1 ? "" : "s"} left out (SHA-256 no longer matches)`, "warnc") : null].filter(Boolean);
     case "import": {
       const line = el("div", `Firmware store imported · ${e.stored ?? 0} new · ${e.same ?? 0} already stored (${e.updated ?? 0} with data added) · ${e.conflicts ?? 0} conflict${e.conflicts === 1 ? "" : "s"}`);

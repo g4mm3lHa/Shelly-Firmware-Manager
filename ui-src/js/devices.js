@@ -3,9 +3,9 @@ import {
   $, api, attachTip, box, closeModal, collator, devUrl, el, filterControl, fmt, hideTip, icon, iconButton, loadLocal, message,
   modal, openDetails, saveLocal, searchTool, section, selected, setTip, sortControl, toast, toolButton, ui, valueList, webUrl,
 } from "./core.js";
-import {DOWNGRADE_OFF, OFFER_SOURCES, openDowngrade, openInstall} from "./install.js";
+import {DOWNGRADE_OFF, OFFER_SOURCES, daysAgo, openDowngrade, openInstall} from "./install.js";
 import {
-  aopLabel, aopSummary, aopTone, editAop, editDebug, editEco, editPassword, editSwitch, editValue, featureStrip,
+  aopLabel, aopSummary, aopTone, editAop, editCloud, editDebug, editEco, editPassword, editSwitch, editValue, featureStrip,
   restartDevice,
 } from "./device-settings.js";
 import {load, queued, render} from "./main.js";
@@ -73,6 +73,11 @@ function sectionOf(d) {
 // device in the filtered list; an unknown state does not count); "Other Shellys": only
 // the read-only card of the Shellys of other integrations
 const inSection = key => d => sectionOf(d) === key;
+// Option "Offer updates only after (days)": a new version younger than that is held back,
+// the device stays up to date with the marker hold {version, built, until} (ISO dates)
+const held = d => !!(d.hold && d.hold.version);
+const holdTip = d => `${d.hold.version} was built on ${d.hold.built} (${daysAgo(d.hold.built)}). New versions are offered after ` +
+  `${ui.state.offer_after_days} days (Settings → Checks): from ${d.hold.until}.`;
 const FILTERS = [
   ["all", "All", () => true],
   ["updates", "Updates", inSection("updates")],
@@ -80,6 +85,8 @@ const FILTERS = [
   ["not_checked", "Not checked", inSection("not_checked"), "Devices never checked, and Gen1 devices while Gen1 updates are disabled"],
   ["up_to_date", "Up-To-Date", inSection("up_to_date")],
   ["unprotected", "Unprotected", d => d.auth_enabled === false],
+  ["cloud", "Cloud on", d => d.cloud === true, "Devices with the Shelly cloud switched on"],
+  ["hold", "On hold", held, "Devices with a new version that is not offered yet (Settings → Checks → “Offer updates only after”)"],
   ["asleep", "Asleep", inSection("asleep"), "Battery devices that did not answer the last check"],
   ["ignored", "Ignored", inSection("ignored")],
   ["removed", "Removed", inSection("removed"), "Devices removed from Home Assistant / the Shelly integration"],
@@ -111,7 +118,10 @@ function showStatus(d) {
     el("span", STATUS_LABELS[key] || d.status, "pill p-" + (key || "").replace(/[^a-z]/g, "")));
   const provided = hasUpdate(d) || failedInstall(d);
   modal(d.name, [head,
-    section("Firmware", valueList([["Installed", d.version], ["Available", d.offer_version],
+    section("Firmware", valueList([["Installed", d.version],
+      ["Available", held(d) ? `${d.hold.version} · on hold until ${d.hold.until}` : d.offer_version],
+      ["Build date", held(d) ? d.hold.built : d.offer_version ? d.offer_date : null],
+      ["Way back", d.way_back ? `${d.way_back.version} ${d.way_back.stored ? "is stored" : "is not stored"}` : null],
       ["Source", provided ? OFFER_SOURCES[d.offer_source] : null]])),
     section("Device", valueList([["Model", [d.model, d.gen ? `Gen ${d.gen}` : null].filter(Boolean).join(" · ")], ["Firmware ID", d.type], ["NTP", d.ntp]])),
     section("History", valueList([["Last check", fmt(d.last_check)], ["Last success", d.last_success ? fmt(d.last_success) : "never"],
@@ -158,6 +168,8 @@ const ACTION_ITEMS = [
   {key: "auth_enabled", icon: "lock", label: "Password protection", on: "protected", off: "not protected", edit: d => editPassword(d), always: true},
   {key: "ap", icon: "ap", label: "Access point", on: "on", off: "off", alert: true, edit: d => editSwitch(d, "ap")},
   {key: "ble", icon: "ble", label: "Bluetooth", on: "on", off: "off", edit: d => editSwitch(d, "ble")},
+  // Shelly cloud: yellow while on (the device is reachable from outside the network)
+  {key: "cloud", icon: "cloud", label: "Cloud", on: "on", off: "off", warn: true, edit: d => editCloud(d)},
   {key: "actions", icon: "actions", label: "Actions", on: "at least one active", off: "none active", alert: true, link: true},
   {key: "schedules", icon: "schedules", label: "Schedules", on: "at least one active", off: "none active", alert: true, link: true},
   // Debug output costs resources and may expose details: yellow while on
@@ -182,6 +194,8 @@ function actionButton(d, item, labeled) {
   // read or update the device); green only if protection is on and the password is stored
   const unstored = item.key === "auth_enabled" && state === "on" && !d.password_set;
   if (unstored) text += " – password not stored in this app";
+  if (item.key === "cloud" && state === "on") text += d.cloud_connected ? " – connected to the Shelly cloud" : " – not connected at the moment";
+  if (item.key === "ble" && state === "on" && d.ble_proxy) text += " – used by Home Assistant as Bluetooth proxy";
   const url = item.link ? webUrl(d) : null;
   const node = item.link && url && state !== "unsupported" ? el("a") : el("button");
   node.className = `act s-${state}${item.alert ? " alert" : ""}${unstored || (item.warn && state === "on") ? " c-warn" : ""}`;
@@ -342,6 +356,12 @@ const COLUMNS = {
     if (d.gen === 1 && (d.version || offer)) {
       const full = [`Installed: ${d.version || "–"}`, offer ? `Available: ${d.offer_version}` : null].filter(Boolean).join(" · ");
       line.tabIndex = 0; attachTip(line, () => full, true);
+    }
+    // Held back (offer delay): clock with the held version and the date it is offered from
+    if (held(d)) {
+      const note = box("div", "hold-note", icon("clock"), el("span", `${shortVersion(d, d.hold.version)} from ${d.hold.until}`)); note.tabIndex = 0;
+      attachTip(note, () => holdTip(d), true);
+      return [line, el("div", d.type || "–", "sub"), note];
     }
     return [line, el("div", d.type || "–", "sub")];
   }},
@@ -505,6 +525,10 @@ export function renderDevices() {
   const others = (s.others || []).filter(o => !q || [o.name, o.model, o.firmware, OTHER_KINDS[o.kind]].some(v => String(v || "").toLowerCase().includes(q)));
   if (!FILTERS.some(f => f[0] === ui.devFilter)) ui.devFilter = "all";
   // Counts of the filter entries respect the search
+  // "On hold" only while the option "Offer updates only after (days)" is above 0
+  const filterItem = devFilter.node.querySelector('.filter-item[data-value="hold"]');
+  if (filterItem) filterItem.hidden = !(s.offer_after_days > 0);
+  if (ui.devFilter === "hold" && !(s.offer_after_days > 0)) ui.devFilter = "all";
   devFilter.set(ui.devFilter, Object.fromEntries(FILTERS.map(([key, , fn]) => [key, key === "others" ? others.length : found.filter(fn).length])));
   devSort.set(prefs.devices.sort);
   const rows = found.filter(filterFn(ui.devFilter)), bySection = new Map(SECTIONS.map(([key]) => [key, []]));
@@ -524,10 +548,49 @@ export function renderDevices() {
     cards.push(deviceCard(title, list, [all], [go]));
   }
   if (others.length && ["all", "others"].includes(ui.devFilter)) cards.push(othersCard(others));
+  listingLine(s, cards);
   if (!cards.length) cards.push(box("div", "card", el("div", s.devices.length || (s.others || []).length ? "No devices match." :
     s.first_start_open ? "No devices yet – they are found by the first check." : "No devices yet – run “Check now”.", "empty")));
   $("dev-cards").replaceChildren(...cards);
 }
+// ---- Shellys not listed
+// Shellys of the Shelly integration that Home Assistant knows but the app does not list
+// (state field listing {listed, missing: [{name, model, reason}]}, updated by full checks)
+const MISSING_REASONS = {
+  disabled: ["Disabled in Home Assistant", "Enable the device (or its entry) in Settings → Devices & services → Shelly."],
+  discovered: ["Found, but not set up", "Home Assistant discovered it in the network – add it in Settings → Devices & services."],
+  ignored: ["Ignored in Home Assistant", "The discovery was ignored – stop ignoring it in Settings → Devices & services → Shelly, then add it."],
+};
+/** Dialog "Shellys not listed": one entry per missing Shelly with its reason and what to do. */
+function openMissing() {
+  const l = ui.state.listing, total = l.listed + l.missing.length;
+  const rows = l.missing.map(m => {
+    const [reason, fix] = MISSING_REASONS[m.reason] || [m.reason, ""];
+    return box("div", "miss-row", box("div", "miss-head", el("span", m.name, "name"), el("span", reason, "tag warn")),
+      m.model ? el("div", m.model, "sub") : null, fix ? el("div", fix, "miss-fix") : null);
+  });
+  modal("Shellys not listed", [
+    el("p", `Home Assistant knows ${total} Shellys of the Shelly integration; ${l.listed} of them are listed here.`),
+    section(`Not listed · ${l.missing.length}`, box("div", "miss-list", ...rows)),
+    section("Still missing?", el("p", "A Shelly that Home Assistant does not know cannot be listed – add it to the Shelly integration first. " +
+      "Shellys of other integrations (Bluetooth, Zigbee, Matter) are shown under “Other Shellys”.", "hint"))]);
+}
+/** Line "N of M Shellys listed · Why are K missing?" (only while at least one is missing):
+ *  right in the toolbar on wide screens, above the first card on phones. */
+function listingLine(s, cards) {
+  for (const n of document.querySelectorAll("#view-devices .listing")) n.remove();
+  const l = s.listing;
+  if (!l || !l.missing || !l.missing.length) return;
+  const make = () => {
+    const b = el("button", null, "listing"); b.type = "button";
+    b.append(el("span", `${l.listed} of ${l.listed + l.missing.length} Shellys listed`),
+      el("span", `Why are ${l.missing.length} missing?`, "listing-link"));
+    b.onclick = openMissing; return b;
+  };
+  document.querySelector("#view-devices .tb-extra").prepend(make());
+  const phone = make(); phone.classList.add("listing-phone"); cards.unshift(phone);
+}
+
 // ---- Column chooser
 // "Columns": round icon at the right end of the toolbar (wide screens only; the phone tiles
 // have a fixed layout). Its popover looks like the sort and filter tools: title, one entry
@@ -579,6 +642,7 @@ function openRowMenu(d, anchor) {
   // Group 1: updates
   add("Check for updates", () => checkDevice(d), !blocked);
   if (installable(d, ui.state)) add("Install update", () => openInstall([d]), true);   // only for Ready
+  if (held(d)) add("Offer update now", () => offerNow(d), !blocked);
   // Downgrade to a stored older version – Gen2+ only, also up to date / ignored devices
   // Disabled (no dialog) while no older version is stored or something blocks it; while
   // the option "Allow downgrades" is off it is shown disabled with the hint below it
@@ -614,6 +678,11 @@ function openRowMenu(d, anchor) {
 /** Check only this device (no installation); the server refuses a second check (409). */
 function checkDevice(d) {
   api(`${devUrl(d)}/check`, {}).then(() => load(true)).catch(e => message("Check", e.message, "error"));
+}
+/** "Offer update now": lift the offer delay of the held version for this device; the
+ *  server then checks the device, which provides the update (installed after approval). */
+function offerNow(d) {
+  api(`${devUrl(d)}/offer-now`, {}).then(() => load(true)).catch(e => message("Offer update now", e.message, "error"));
 }
 /** Reload Device Info: device-only read (no firmware lookup), row shows the
  *  loading state, then a short success or warning – no popup. */

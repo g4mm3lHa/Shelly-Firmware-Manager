@@ -93,7 +93,7 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
   `sys.debug.websocket.enable`, written via `Sys.SetConfig` with only that field, read
   back like other settings) grey off, yellow on, "?" unknown, Gen1 greyed out ("no
   websocket debug log").
-- Action column: `.act-strip` 170 px, two rows (5 + 4), column 190 px.
+- Action column: `.act-strip` 170 px, two rows (5 + 5 since the cloud icon), column 190 px.
 - Wide screens (2026-11-17): titles and content of all columns except "Device"
   centred (status cell and action strip too); IP and Firmware with
   `font-variant-numeric: tabular-nums`; IP in the normal font (2026-11-22, U11). Phone
@@ -109,6 +109,42 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
   strip.
 - Websocket debug popup: explanation, link `<web_url>#/diagnostics` (new tab,
   noopener), warning below firmware 1.0.0.
+
+## Next version: cloud, Bluetooth proxy, offer delay, missing Shellys, installation (mockups `3.9.0`, approved 2026-11-22)
+Wordings: `mockups/3.9.0/TEXTE.md`.
+- **Cloud (F13, F14):** tenth icon of the action column after Bluetooth (MDI cloud),
+  yellow while on, grey off, "?" unknown; tooltip "Cloud: on – connected to the Shelly
+  cloud" / "… – not connected at the moment" / "Cloud: off"; phones: button "Cloud" in the
+  details. Popup: status strip (yellow while on), row "Connection" while on, hint text,
+  "Turn off" / "Turn on". Filter "Cloud on" after "Unprotected".
+- **Bluetooth proxy (F15):** while Home Assistant's script runs on the Shelly
+  (`ble_proxy`), the Bluetooth popup shows a yellow box (Home Assistant turns Bluetooth
+  on again; switch "Bluetooth scanner mode" off first); "Turn off" stays possible; the
+  icon tooltip adds "– used by Home Assistant as Bluetooth proxy".
+- **Offer delay (F7, F8):** a held device stays in "Up-To-Date"; below the firmware ID a
+  clock line "<version> from <date>" with the tooltip (build date, age, days of the
+  option, date). Filter "On hold" after "Cloud on", only while the option is above 0.
+  Row menu "Offer update now" after "Install update" (lifts the hold, checks the device).
+  Device details: "Available: <version> · on hold until <date>".
+- **Device details (F5, F22):** rows "Build date" (offered or held version, date only)
+  and "Way back" ("<version> is stored" / "is not stored", Gen2+).
+- **Shellys not listed (F10, F11):** line "N of M Shellys listed · Why are K missing?"
+  (link style) only while at least one is missing: right in the toolbar before
+  "Columns" on wide screens, above the first card on phones; opens the dialog "Shellys
+  not listed" (intro, section "Not listed · K" with name, model, yellow reason tag and
+  what to do; section "Still missing?").
+- **Installation dialog (F4, F6, F12):** section "Before installing" after "Firmware" as a
+  check list (green check / yellow "!"): "Way back" (Gen2+) and "Wi-Fi signal" (read when
+  the dialog opens, "Reading …"; −80 dBm and below weak; devices on the cable or not
+  readable: no line). Several devices: only the findings per device, else one line
+  "every device". Row "Build date" (date · age) in the section "Firmware" (one device).
+  After a failed installation: section "Last attempt" with the reason, pre-ticked
+  "Restart the device first" and the button "Restart & install".
+- **Imported files (F18, F21):** source "Firmware store (imported file)" (table: "Import");
+  offered only while Shelly cannot be asked: yellow box (unconfirmed origin, no server;
+  Gen1 text without the intermediate-version sentence) and the checkbox "I accept the risk
+  of installing a file that Shelly has not confirmed". Downgrade to an imported file: box in
+  the dialog and the last confirmation, its checkbox also names the unconfirmed file.
 
 ## Device settings dialog
 - Every change is read back; a value the device accepted but did not apply → warning

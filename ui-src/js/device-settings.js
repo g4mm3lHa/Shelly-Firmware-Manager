@@ -102,13 +102,33 @@ export function editEco(d) {
 /** Access point / Bluetooth: only the on/off switch, no further configuration.
  *  [label, colour while on] – an active access point is shown red like in the action column. */
 const SWITCHES = {ap: ["Access point", "alert"], ble: ["Bluetooth", "good"]};
+// Bluetooth while Home Assistant runs its proxy script on the Shelly: Home Assistant turns
+// Bluetooth on again unless its scanner mode is disabled in the Shelly integration
+const BLE_PROXY = "Home Assistant uses this Shelly as a Bluetooth proxy (its script “aioshelly_ble_integration” is running). " +
+  "If you turn Bluetooth off here, Home Assistant turns it on again. To switch it off for good, first set “Bluetooth scanner mode” " +
+  "to “Disabled” in the options of this device in the Shelly integration.";
+const CLOUD_TEXT = "Only the cloud switch is changed. With the cloud off, the Shelly app and other Shelly cloud services no longer " +
+  "reach this device from outside your network. Home Assistant and this app keep working locally.";
+/** Shelly cloud: state strip (yellow while on), the connection, one confirmation. */
+export function editCloud(d) {
+  const title = `Cloud – ${d.name}`;
+  withLive(d, title, live => {
+    if (typeof live.cloud !== "boolean") { message(title, "This device does not offer a cloud switch."); return; }
+    const target = !live.cloud, word = target ? "on" : "off";
+    modal(title, [switchStrip("cloud", "Cloud", live.cloud, "warn"),
+      valueList([["Connection", live.cloud ? (live.cloud_connected ? "Connected to the Shelly cloud" : "Not connected at the moment") : null]]),
+      el("p", CLOUD_TEXT, "hint")],
+    [{text: "Cancel"}, {text: `Turn ${word}`, kind: "primary", action: () => saveSettings(d, title, {cloud: target}, true)}]);
+  });
+}
 export function editSwitch(d, key) {
   const [label, onTone] = SWITCHES[key], title = `${label} – ${d.name}`;
   withLive(d, title, live => {
     if (typeof live[key] !== "boolean") { message(title, `This device does not offer a ${label.toLowerCase()} switch.`); return; }
     const target = !live[key], word = target ? "on" : "off";
     modal(title, [switchStrip(key, label, live[key], onTone),
-      el("p", key === "ap" ? "Only the switch is changed; all other Wi-Fi settings stay as they are." : "Only the global Bluetooth switch is changed.", "hint")],
+      el("p", key === "ap" ? "Only the switch is changed; all other Wi-Fi settings stay as they are." : "Only the global Bluetooth switch is changed.", "hint"),
+      key === "ble" && live.ble && live.ble_proxy ? el("div", BLE_PROXY, "warnbox") : null].filter(Boolean),
     [{text: "Cancel"}, {text: `Turn ${word}`, kind: "primary", action: () => saveSettings(d, title, {[key]: target}, true)}]);
   });
 }

@@ -654,3 +654,46 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
 .msg-icon.sm{width:28px;height:28px}
 .msg-icon.sm svg{width:18px;height:18px}
 
+
+/* ---- Next version: check list before installing, offer delay, Shellys not listed, store tags ---- */
+/* Section "Before installing" of the installation dialog: green check or yellow "!" per line */
+.prechk{list-style:none;margin:2px 0 0;padding:0;display:flex;flex-direction:column}
+.prechk>li{display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--line)}
+.prechk>li:last-child{border-bottom:0}
+.prechk .pc-icon{flex:none;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;margin-top:1px;
+  background:color-mix(in srgb,var(--pc) 18%,transparent);color:var(--pc)}
+.prechk .pc-icon svg{width:14px;height:14px;fill:currentColor}
+.prechk>li.ok{--pc:var(--success-color)}
+.prechk>li.warn{--pc:var(--warning-color)}
+.prechk>li.wait{--pc:var(--secondary-text-color)}
+.prechk>li>div{min-width:0;line-height:1.4}
+.prechk strong{display:block;font-weight:500}
+.prechk>li>div>span{color:var(--secondary-text-color);font-size:var(--fs-small)}
+.prechk>li.warn>div>span{color:var(--primary-text-color)}
+.pc-fail{margin:0;color:var(--primary-text-color)}
+.hint.pc-sub{margin:2px 0 0 26px}
+/* Offer delay: held version with the date it is offered from, below the Firmware column */
+.hold-note{display:inline-flex;align-items:center;gap:4px;margin-top:2px;color:var(--secondary-text-color);font-size:var(--fs-small);white-space:nowrap}
+.hold-note svg{width:13px;height:13px;fill:currentColor}
+/* "N of M Shellys listed · Why are K missing?": toolbar on wide screens, above the cards on phones */
+button.listing{border:0;background:none;padding:6px 4px;color:var(--secondary-text-color);font-size:var(--fs-small);cursor:pointer;min-height:0}
+button.listing .listing-link{margin-left:6px;color:var(--primary-color);text-decoration:underline}
+button.listing.listing-phone{display:none}
+.miss-list{display:flex;flex-direction:column}
+.miss-row{padding:8px 0;border-bottom:1px solid var(--line)}
+.miss-row:last-child{border-bottom:0}
+.miss-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:space-between}
+.miss-head .name{font-weight:500;overflow-wrap:anywhere}
+.miss-head .tag{margin:0}
+.miss-row .sub{color:var(--secondary-text-color);font-size:var(--fs-small)}
+.miss-fix{margin-top:4px;font-size:var(--fs-small)}
+/* Firmware tab: version a device runs now (its way back) */
+.tag.inst{background:color-mix(in srgb,var(--success-color) 16%,transparent);color:color-mix(in srgb,var(--success-color) 60%,var(--primary-text-color))}
+/* Settings: line under "Keep installed versions" */
+.form .desc.set-note:empty{display:none}
+@media (min-width:701px){td.c-firmware .hold-note{justify-content:center}}
+@media (max-width:700px){
+  button.listing.listing-phone{display:block;width:100%;text-align:left;margin:-4px 0 8px;min-height:44px}
+  button.listing:not(.listing-phone){display:none}
+  td.c-firmware .hold-note{display:flex;white-space:normal}
+}

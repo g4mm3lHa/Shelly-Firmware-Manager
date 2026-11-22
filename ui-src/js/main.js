@@ -3,7 +3,7 @@ import {$, api, attachTip, closeModal, el, fmt, getState, hideTip, loadLocal, me
 import {buildChooser, closeRowMenu, loadPrefs, renderDevices, syncChooser} from "./devices.js";
 import {renderFirmware} from "./firmware.js";
 import {mobileQuery, renderLogs} from "./logs.js";
-import {importDialog, renderSettings} from "./app-settings.js";
+import {IMPORT_OWN, importDialog, renderSettings} from "./app-settings.js";
 import "./install.js";
 import "./device-settings.js";
 
@@ -78,7 +78,8 @@ function askFirstStart() {
   firstStartAsked = true; saveLocal("firstStartAsked", true);
   modal(WELCOME_TITLE, [
     el("p", "Moving from another Home Assistant instance? Import its exported firmware store first: the stored versions (also older ones Shelly no longer offers) and uploads are then available at once."),
-    el("p", FIRST_START, "hint"), el("div", "You can also import later: Settings → Firmware & Storage.", "hint")],
+    el("p", FIRST_START, "hint"), el("div", "You can also import later: Settings → Firmware & Storage.", "hint"),
+    el("div", IMPORT_OWN, "warnbox")],
   [{text: "Skip", action: () => skipFirstStart(WELCOME_TITLE)}, {text: "Import store", kind: "primary", action: importDialog}], "importIcon");
 }
 const WELCOME_TITLE = "Welcome – import a firmware store?";
