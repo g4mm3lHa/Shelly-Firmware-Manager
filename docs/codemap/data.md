@@ -32,7 +32,9 @@ newer stored version offered for a manual installation; cleared by the next chec
 `_fresh` (running checks only).
 
 Firmware entry (`state.firmware[<file name>]`): `type`, `gen`, `version`, `sha256`,
-`size`, `downloaded`, `https` (downloads), `source` (`download|upload`),
+`size`, `downloaded`, `https` (downloads), `source` (`download|upload|import`; `import`: every
+file of a store import, unverified – Gen2+ becomes `download` with `https` once an offer URL names its
+SHA-256),
 `sha_checked` (uploads), `changelog` (`{"date", "entries"}` of this version, set once
 the changelog page lists it; never requested again), `intermediate` (true once a check
 provided the file as an intermediate version; never set for older files), `adopted` (read back from the

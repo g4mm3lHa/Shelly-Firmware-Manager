@@ -224,23 +224,26 @@ A check (all devices, a single device or the schedule) works in this order:
    and the installed version – the way a Shelly asks itself; only these two values are
    sent. The server answers with the next allowed step for this version. Devices with
    the same firmware ID and version share one request.
-   - If the firmware store already holds exactly the offered version (downloaded or
-     uploaded, SHA-256 checked), it is used; otherwise it is downloaded once and stored.
-     A download must match the SHA-256 named in Shelly's download address.
+   - If the firmware store already holds the file Shelly's download address names
+     (same SHA-256), it is used; otherwise the file is downloaded once and stored. A
+     download must match that SHA-256. An uploaded file of exactly the offered version
+     is used instead, as your own choice (see Upload firmware below).
    - **Intermediate versions:** some old firmware versions must be updated to an
      intermediate version first (e.g. Plus1 1.0.7 → 1.3.3 → 1.7.x). Such an offer is
      marked as intermediate version. After its installation is confirmed, the device is
      checked again at once and the next step is provided – it is installed only after
      you approve it.
    - **Server not reachable:** the device shows the error. If a newer version is
-     stored, the error details say so: you can install it manually (checkbox and
+     stored (also an imported file), the error details say so: you can install it manually (checkbox and
      **Install** stay available), but at your own risk – without the server's answer it
      cannot be verified whether an intermediate version is needed first. The dialog asks
      you to accept this risk.
 3. **Gen1 devices: the firmware store comes first.** If the store holds a newer stable
-   version for the device's type, the **next higher** one is provided (step by step
-   through the stored versions); the Shelly list is only asked for devices without
-   one – one request for all Gen1 types.
+   version that a check downloaded from Shelly, the **next higher** one is provided
+   (step by step through the stored versions); the Shelly list is only asked for
+   devices without one – one request for all Gen1 types. Imported files are not
+   provided this way: only while the Shelly list cannot be asked, for a manual
+   installation at your own risk like on Gen2+.
 
 Every check that asks the Shelly update server also makes one reference request with
 fixed values (Plus1 1.0.7, which must be offered 1.3.3 – no data of your devices). If
@@ -248,7 +251,7 @@ the server answers differently, the check reports a warning: the server no longe
 evaluates the installed version, so required intermediate versions cannot be detected.
 
 The status details, the installation dialog and the log name the source of an update:
-Shelly update server, firmware store, or an uploaded file.
+Shelly update server, firmware store, an uploaded or an imported file.
 
 The changelog of a provided version is requested once from the Shelly documentation
 and kept with the stored firmware; it is not requested again afterwards.
@@ -431,11 +434,15 @@ password. The file is checked completely – seal, every file – before anythin
 stored; then the result shows how many files are new, already stored or in conflict
 (each group can be expanded; conflicts are expanded). **Import** stores the new files:
 
-- Each file keeps its source ("downloaded" from Shelly or "uploaded") and its original
-  date, changelog and intermediate marker. Gen1 files are imported even if Gen1 updates
-  are off or the type is not allowed.
-- Already stored (same SHA-256): not stored twice; missing data is added, and an upload
-  becomes "downloaded" if the export holds it as a download.
+- Each file is stored as "imported", whatever the export says about its source: the
+  password only proves that the file was not changed since its export, not who made
+  it. It keeps its original date, changelog and intermediate marker. Gen1 files are
+  imported even if Gen1 updates are off or the type is not allowed.
+- An imported Gen2+ file counts as downloaded from Shelly once the Shelly update server
+  offers exactly this file (same SHA-256); until then it is never provided instead of
+  Shelly's file. Only import exports you made yourself or got from someone you trust.
+- Already stored (same SHA-256): not stored twice; missing data is added, the source
+  of the stored file stays.
 - Conflict (same firmware ID and version, different file): the stored file is kept.
 
 The largest accepted file is set by **Max. import size (MB)**. Large files are sent in
@@ -622,8 +629,8 @@ the app. The app does not connect there and nothing about your system is sent.
   further: it may only run Python, read its program files, write its private storage and
   use the network – no other programs, no special privileges.
 
-Remaining risks: communication with the Shellys is unencrypted; Gen1 firmware and
-uploaded files cannot be verified; Gen1 passwords are stored in plain text; Shelly's
+Remaining risks: communication with the Shellys is unencrypted; Gen1 firmware, uploaded
+files and imported files that Shelly has not offered cannot be verified; Gen1 passwords are stored in plain text; Shelly's
 server interfaces are not officially guaranteed.
 
 ## Upgrading from older versions

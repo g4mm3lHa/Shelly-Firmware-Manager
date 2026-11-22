@@ -439,9 +439,9 @@ async def test_file_read_back_is_used_only_for_a_matching_offer(net):
     m.devices[A] = {"name": "Kitchen", "gen": 2, "type": "Plus1", "version": "1.4.0"}
     assert m.downgrade_versions(A) == [] and m._downgrade_candidates() == {}
     assert await m._store_offer({"type": "Plus1", "gen": 2, "version": "1.2.0"}) is None
-    assert await m._stored_firmware("Plus1", "1.3.0", uploads=True) is None
-    assert await m._stored_firmware("Plus1", "1.3.0", uploads=True, offered_sha="b" * 64) is None
-    found = await m._stored_firmware("Plus1", "1.3.0", uploads=True, offered_sha=sha)
+    assert await m._stored_firmware("Plus1", "1.3.0", 2) is None
+    assert await m._stored_firmware("Plus1", "1.3.0", 2, offered_sha="b" * 64) is None
+    found = await m._stored_firmware("Plus1", "1.3.0", 2, offered_sha=sha)
     assert found and found[0] == name and "adopted" not in m.firmware[name] and m.firmware[name]["https"] is True
     assert [v["version"] for v in m.downgrade_versions(A)] == ["1.3.0"]
 

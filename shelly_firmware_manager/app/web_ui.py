@@ -23,7 +23,6 @@ Protection layers:
 import asyncio
 import contextlib
 import hashlib
-import hmac
 import json
 import logging
 import re
@@ -41,7 +40,7 @@ from events import ENTRY_ID_RE, user_from
 from manager import Manager
 from manager_core import DOWNLOAD_BASE_MESSAGES
 from manager_store import PART_MAX, TRANSFER_ID_RE
-from shelly import FW_NAME_RE, MAX_FW_SIZE, ShellyError
+from shelly import FW_NAME_RE, MAX_FW_SIZE, ShellyError, parse_json, same_secret
 
 log = logging.getLogger("sfm.ui")
 
@@ -127,13 +126,13 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
         answer – also on refusals and on the answer to an unexpected error."""
         if request.remote != ingress_ip:
             return refusal(403, "Only reachable via Home Assistant Ingress")
-        if request.method not in ("GET", "HEAD"):
-            if not hmac.compare_digest(request.headers.get("X-CSRF-Token", ""), csrf_token):
-                return refusal(403, "Invalid CSRF token")
-            upload = request.match_info.route.name in BINARY_ROUTES
-            if request.content_type != (UPLOAD_TYPE if upload else "application/json"):
-                return refusal(415, "Binary file expected" if upload else "JSON expected")
         try:
+            if request.method not in ("GET", "HEAD"):
+                if not same_secret(request.headers.get("X-CSRF-Token", ""), csrf_token):
+                    return refusal(403, "Invalid CSRF token")
+                upload = request.match_info.route.name in BINARY_ROUTES
+                if request.content_type != (UPLOAD_TYPE if upload else "application/json"):
+                    return refusal(415, "Binary file expected" if upload else "JSON expected")
             response = await handler(request)
         except web.HTTPException as exc:  # error responses get the headers too
             exc.headers.update(SECURITY_HEADERS)
@@ -155,10 +154,11 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
         return device_id
 
     async def json_body(request: web.Request) -> dict[str, Any]:
-        """Request body as JSON object; anything else -> 400."""
+        """Request body as JSON object; anything else -> 400 (also a value nested too
+        deeply and an unknown charset in the Content-Type)."""
         try:
-            body = await request.json()
-        except ValueError:
+            body = parse_json(await request.text())
+        except (ValueError, LookupError):
             raise web.HTTPBadRequest(text="Invalid JSON") from None
         if not isinstance(body, dict):
             raise web.HTTPBadRequest(text="JSON object expected")

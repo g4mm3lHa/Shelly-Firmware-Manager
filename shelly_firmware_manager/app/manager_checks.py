@@ -7,12 +7,15 @@ single-device check is still possible).
 Gen2+: the manufacturer's server decides. It is asked per firmware ID and installed
 version the way a Shelly asks itself (header Shelly-Info, see shelly.fetch_offer), so
 it answers with the next allowed step – a required intermediate version first. A stored
-file of exactly the offered version is used instead of a download (downloads and
-uploads). If the server cannot be asked, a newer stored version is only offered for a
-manual installation at the user's risk (marker store_fallback). After a confirmed
-intermediate version the device is checked again at once (see manager_installs).
-Gen1: the firmware store comes first – the next higher stored version is provided; the
+file of exactly the offered version is used instead of a download only if the offer URL
+names its SHA-256 (or it is the user's own upload). If the server cannot be asked, a
+newer stored version is only offered for a manual installation at the user's risk
+(marker store_fallback). After a confirmed intermediate version the device is checked
+again at once (see manager_installs).
+Gen1: the firmware store comes first – the next higher stored download is provided; the
 manufacturer's list is only asked for devices without such a file, once per check.
+Imported files are never provided this way: only as store fallback while the list
+cannot be asked (see manager_store._store_offer).
 A check never installs anything.
 A device that is no longer in the device registry stays listed with the marker removed
 (see _mark_removed): the full check only tests whether it still answers at its last
@@ -41,6 +44,7 @@ from manager_core import (
     BATTERY_FROM_DEVICE,
     BATTERY_FROM_HA,
     Device,
+    SOURCE_IMPORT,
     SOURCE_UPLOAD,
     STATUS_ASLEEP,
     STATUS_AVAILABLE,
@@ -49,6 +53,7 @@ from manager_core import (
     STATUS_READY,
     STATUS_SKIPPED,
     holds_file,
+    markdown_text,
     severity_of,
     unexpected_text,
 )
@@ -232,10 +237,13 @@ OFFER_STORE = "store"  # stored download of an earlier check, server not asked
 
 OFFER_UPLOAD = "upload"  # manually uploaded file from the store, server not asked
 
+OFFER_IMPORT = "import"  # unverified file of a store import (store fallback only)
+
 OFFER_MESSAGES = {
     OFFER_MANUFACTURER: "Provided, not installed",
     OFFER_STORE: "Provided from the firmware store, not installed",
     OFFER_UPLOAD: "Provided from the firmware store (uploaded file), not installed",
+    OFFER_IMPORT: "Provided from the firmware store (imported file), not installed",
 }
 
 # User of scheduled checks and their downloads in the activity log
@@ -296,7 +304,7 @@ class Checks(DeviceSettings):
             except Exception as err:  # report overall errors (e.g. registry), do not crash
                 log.exception("Check failed")
                 failure = error_text(err, 500) or type(err).__name__
-                await self.notify("Shelly firmware check failed", failure, "sfm_summary")
+                await self.notify("Shelly firmware check failed", markdown_text(failure, 500), "sfm_summary")
             finally:
                 # Also runs on cancellation (app stop): no device stays "checking"
                 self._end_check()
@@ -675,7 +683,11 @@ class Checks(DeviceSettings):
             if stored:
                 self._provide_stored(dev, info, *stored)
                 return
-            offer = await self._manufacturer_offer(info, offers)
+            try:
+                offer = await self._manufacturer_offer(info, offers)
+            except (TimeoutError, ShellyError, aiohttp.ClientError, OSError) as err:
+                await self._store_fallback(dev, info, err)
+                raise
         else:
             offer = await self._step_offer(dev, info, offers)
         dev["offer_version"] = offer["version"] if offer else None
@@ -742,16 +754,17 @@ class Checks(DeviceSettings):
         if name in self._fresh:
             return OFFER_MANUFACTURER
         meta = self.firmware.get(name)
-        return OFFER_UPLOAD if meta and self._source(meta) == SOURCE_UPLOAD else OFFER_STORE
+        return self._stored_source(meta) if meta else OFFER_STORE
+
+    def _stored_source(self, meta: dict[str, Any]) -> str:
+        """Offer source (OFFER_*) of a stored file provided without a new download."""
+        return {SOURCE_UPLOAD: OFFER_UPLOAD, SOURCE_IMPORT: OFFER_IMPORT}.get(self._source(meta), OFFER_STORE)
 
     def _provide_stored(self, dev: Device, info: dict[str, Any], name: str, meta: dict[str, Any]) -> None:
         """Gen1: provide the next higher stored version (firmware store first)."""
         # A file downloaded by this very check is the manufacturer's current offer
         fresh_url = self._fresh.get(name)
-        if fresh_url:
-            source = OFFER_MANUFACTURER
-        else:
-            source = OFFER_UPLOAD if self._source(meta) == SOURCE_UPLOAD else OFFER_STORE
+        source = OFFER_MANUFACTURER if fresh_url else self._stored_source(meta)
         dev.update(
             status=STATUS_READY,
             offer_version=meta["version"],
@@ -805,16 +818,19 @@ class Checks(DeviceSettings):
         return newest["version"] if newest else None
 
     async def _store_fallback(self, dev: Device, info: dict[str, Any], err: BaseException) -> None:
-        """The manufacturer's server could not be asked for a Gen2+ device: a newer
-        stored version is offered for a manual installation (marker store_fallback,
-        the device stays in the error state) and the error is raised with a hint."""
-        stored = await self._store_offer(info)
+        """The manufacturer's server could not be asked: a newer stored version –
+        imported files included – is offered for a manual installation at the user's
+        risk (marker store_fallback: the installation needs the acknowledgment, the
+        device stays in the error state) and the error is raised with a hint. Gen1:
+        only imported files remain here, stored downloads are provided before
+        (store first)."""
+        stored = await self._store_offer(info, imports=True)
         if not stored:
             return
         name, meta = stored
         dev.update(
             offer_version=meta["version"],
-            offer_source=OFFER_UPLOAD if self._source(meta) == SOURCE_UPLOAD else OFFER_STORE,
+            offer_source=self._stored_source(meta),
             file=name,
             sha256=meta["sha256"],
             size=meta["size"],
@@ -879,7 +895,7 @@ class Checks(DeviceSettings):
         it (log text and the user of the download entry).
         Returns (file name, sha256, size)."""
         stored = await self._stored_firmware(
-            info["type"], offer["version"], uploads=info["gen"] >= 2, offered_sha=shelly.url_sha256(offer["url"])
+            info["type"], offer["version"], info["gen"], offered_sha=shelly.url_sha256(offer["url"])
         )
         if stored:
             name, meta = stored
@@ -1063,7 +1079,8 @@ class Checks(DeviceSettings):
             dev["notified_version"] = dev.get("offer_version")
         self.save()
         lines = "\n".join(
-            f"- {d.get('name')}: {d.get('version')} → {d.get('offer_version')}"
+            f"- {markdown_text(d.get('name'), 120)}: {markdown_text(d.get('version'))} → "
+            f"{markdown_text(d.get('offer_version'))}"
             for d in sorted(open_updates, key=lambda d: (d.get("name") or "").lower())
         )
         await self.notify(

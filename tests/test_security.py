@@ -6,6 +6,7 @@ Server banner, no request bodies. No network: test servers on 127.0.0.1 only."""
 
 import download_server
 import pytest
+from helpers import chunks
 from aiohttp.test_utils import TestClient, TestServer
 
 
@@ -63,6 +64,37 @@ async def test_refusals_carry_the_security_headers(client, mgr):
     for answer in (wrong_token, wrong_type):
         assert "default-src 'none'" in answer.headers["Content-Security-Policy"]
         assert answer.headers["X-Content-Type-Options"] == "nosniff" and "Server" not in answer.headers
+
+
+@pytest.mark.parametrize(
+    ("headers", "body", "status"),
+    [
+        ({"X-CSRF-Token": "ü" * 64}, b"{}", 403),  # non-ASCII token: wrong token, no error
+        ({"Content-Type": "application/json; charset=x-unknown"}, b"{}", 400),  # unknown charset
+        ({}, b'{"confirm": ' + b"[" * 50000 + b"]" * 50000 + b"}", 413),  # too large anyway
+        ({}, b"[" * 20000, 400),  # nested too deeply (RecursionError in json)
+    ],
+    ids=["non-ascii-token", "unknown-charset", "too-large", "too-deep"],
+)
+async def test_odd_requests_are_refused_with_the_security_headers(client, headers, body, status):
+    """Odd but small requests are refused as client errors (never a 500), with the headers."""
+    answer = await client.post(
+        "/api/logs/clear", data=body,
+        headers={"X-CSRF-Token": client.csrf, "Content-Type": "application/json", **headers},
+    )
+    assert answer.status == status
+    assert "default-src 'none'" in answer.headers["Content-Security-Policy"]
+
+
+async def test_non_ascii_tokens_of_transfers_are_unknown_tokens(client, mgr):
+    """A token with other characters while an upload and an import are staged: an
+    unknown token (409), never an error of the comparison."""
+    await mgr.stage_upload(chunks(b"u" * 5000), "fw.bin", 5000)
+    await mgr.stage_import(chunks(b"PK\x05\x06" + b"\0" * 18), 22)
+    for path in ("/api/firmware/upload/confirm", "/api/firmware/import/check", "/api/firmware/import/confirm"):
+        answer = await client.post(path, json={"token": "ü" * 32, "type": "Plus1", "version": "1.0.0", "password": "x"},
+                                   headers={"X-CSRF-Token": client.csrf})
+        assert answer.status == 409, path
 
 
 async def test_foreign_address_is_refused_with_the_security_headers(mgr):

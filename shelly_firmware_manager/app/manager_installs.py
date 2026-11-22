@@ -23,7 +23,7 @@ from shelly import DeviceAuth, ShellyError, error_text
 from manager_checks import Checks
 from manager_core import (
     PENDING, Device, STATUS_AVAILABLE, STATUS_CURRENT, STATUS_ERROR, STATUS_INSTALLING, STATUS_READY,
-    STATUS_UNCLEAR, holds_file, unexpected_text,
+    STATUS_UNCLEAR, holds_file, markdown_text, unexpected_text,
 )
 
 log = logging.getLogger("sfm.manager")
@@ -369,7 +369,7 @@ class Installs(Checks):
             message="Updated",
         )
         title = "Shelly downgraded" if dev.get("downgrade") else "Shelly updated"
-        await self.notify(f"{title}: {dev['name']}", info["version"], f"sfm_{device_id}")
+        await self.notify(f"{title}: {dev['name']}", markdown_text(info["version"]), f"sfm_{device_id}")
         return True
 
     async def _await_by_polling(self, device_id: str, dev: Device, ota: dict[str, Any]) -> tuple[bool, str | None]:

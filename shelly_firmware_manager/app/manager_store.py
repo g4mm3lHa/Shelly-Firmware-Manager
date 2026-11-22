@@ -38,7 +38,7 @@ from shelly import ShellyError, clip
 
 from manager_core import (
     DOWNLOAD_BASE_MESSAGES, Device, FirmwareMeta, ManagerCore, PART_PREFIX, SOURCE_DOWNLOAD,
-    SOURCE_UPLOAD, STATUS_AVAILABLE, STATUS_INSTALLING, holds_file,
+    SOURCE_IMPORT, SOURCE_UPLOAD, STATUS_AVAILABLE, STATUS_INSTALLING, holds_file,
 )
 
 log = logging.getLogger("sfm.manager")
@@ -92,9 +92,10 @@ class FirmwareStore(ManagerCore):
         sha_checked: bool | None = None,
     ) -> None:
         """Add a firmware to the store (basis for reuse and downgrades).
-        https: whether the download was protected by TLS (Gen1: never; uploads: None).
-        source: SOURCE_DOWNLOAD or SOURCE_UPLOAD; sha_checked (uploads only): whether
-        the user supplied a SHA-256 that matched the file."""
+        https: whether the download was protected by TLS (Gen1: never; uploads and
+        imports: None). source: SOURCE_DOWNLOAD, SOURCE_UPLOAD or SOURCE_IMPORT;
+        sha_checked (uploads only): whether the user supplied a SHA-256 that matched
+        the file."""
         meta: FirmwareMeta = {
             "type": clip(fw_type, 64),
             "gen": gen,
@@ -120,7 +121,20 @@ class FirmwareStore(ManagerCore):
     @staticmethod
     def _source(meta: FirmwareMeta) -> str:
         """Origin of a store entry; entries without the field (3.0.0 candidates) were downloaded."""
-        return SOURCE_UPLOAD if meta.get("source") == SOURCE_UPLOAD else SOURCE_DOWNLOAD
+        source = meta.get("source")
+        return source if source in (SOURCE_UPLOAD, SOURCE_IMPORT) else SOURCE_DOWNLOAD
+
+    def _confirm_by_offer(self, name: str, meta: FirmwareMeta) -> None:
+        """A manufacturer offer named the SHA-256 of this stored file (over TLS): an
+        imported or read-back file now counts as a verified download. Uploads keep
+        their source (the user's own file, labelled as such)."""
+        if self._adopted_unconfirmed(meta):
+            meta.pop("adopted", None)
+            meta["https"] = True
+        if self._source(meta) == SOURCE_IMPORT:
+            meta.update(source=SOURCE_DOWNLOAD, https=True)
+            log.info("Imported firmware %s %s confirmed by the update server (%s)", meta.get("type"),
+                     meta.get("version"), name)
 
     def _in_use(self) -> set[str]:
         """Files a device currently holds as update, is installing (incl. downgrades) or
@@ -249,39 +263,50 @@ class FirmwareStore(ManagerCore):
         return False
 
     async def _stored_firmware(
-        self, fw_type: str, version: str, uploads: bool = False, offered_sha: str | None = None
+        self, fw_type: str, version: str, gen: int, offered_sha: str | None = None
     ) -> tuple[str, FirmwareMeta] | None:
-        """Stored firmware for exactly this ID and version offered by the manufacturer's
-        server – after checksum verification. Downloads only, with uploads=True an
-        uploaded file too (a download of the same version is preferred).
-        offered_sha: SHA-256 named by the offer URL; an unverified file read back from
-        the disk (see _adopted_unconfirmed) is used only with exactly this SHA-256 – it
-        then counts as a verified download (marker adopted removed)."""
-        matches = [
-            (name, meta)
-            for name, meta in list(self.firmware.items())
-            if meta.get("type") == fw_type
-            and meta.get("version") == version
-            and (uploads or self._source(meta) == SOURCE_DOWNLOAD)
-            and (not self._adopted_unconfirmed(meta) or (offered_sha is not None and meta.get("sha256") == offered_sha))
-        ]
-        matches.sort(key=lambda item: self._source(item[1]) != SOURCE_DOWNLOAD)  # downloads first
+        """Stored firmware to provide instead of downloading exactly this ID and version
+        offered by the manufacturer's server – after checksum verification.
+
+        Gen2+: a stored file (any source) only if its SHA-256 is the one the offer URL
+        names (offered_sha); an imported or read-back file then counts as a verified
+        download (_confirm_by_offer). The deliberate exception is an upload of exactly
+        this version: the user's own file, provided as upload. Otherwise – also when
+        the URL names no SHA-256 – the file is downloaded.
+        Gen1 (the URL names no SHA-256): a stored download only, never an imported file."""
+
+        def named(meta: FirmwareMeta) -> bool:
+            """The offer URL names exactly this file."""
+            return offered_sha is not None and meta.get("sha256") == offered_sha
+
+        def usable(meta: FirmwareMeta) -> bool:
+            """May replace the download of the offered version."""
+            if meta.get("type") != fw_type or meta.get("version") != version:
+                return False
+            if gen < 2:
+                return self._source(meta) == SOURCE_DOWNLOAD
+            return named(meta) or (self._source(meta) == SOURCE_UPLOAD and not self._adopted_unconfirmed(meta))
+
+        matches = [(name, meta) for name, meta in list(self.firmware.items()) if usable(meta)]
+        matches.sort(key=lambda item: not named(item[1]))  # the file the offer names first
         for name, meta in matches:
             if await self._intact(name, meta):
-                if self._adopted_unconfirmed(meta):
-                    meta.pop("adopted", None)
-                    meta["https"] = True  # the SHA-256 came over TLS with the offer
+                if named(meta):
+                    self._confirm_by_offer(name, meta)
                 return name, meta
         return None
 
-    async def _store_offer(self, info: dict[str, Any]) -> tuple[str, FirmwareMeta] | None:
-        """The stored firmware to provide for a device before the manufacturer's
-        server is asked: the next higher stable version of its firmware ID.
+    async def _store_offer(self, info: dict[str, Any], imports: bool = False) -> tuple[str, FirmwareMeta] | None:
+        """The next higher stable stored version of the device's firmware ID: Gen1
+        store first (provided before the manufacturer's list is asked) and the store
+        fallback (offered for a manual installation at the user's risk while the
+        manufacturer's server cannot be asked).
 
-        Downloads and uploads count; of two files with the same version the
-        manufacturer download is preferred. Every candidate is verified by its
-        checksum first – a damaged file is skipped and the next one is taken.
-        Returns (file name, store entry) or None if nothing newer is stored."""
+        Downloads and uploads count, imported files only with imports=True (store
+        fallback: the user acknowledges the risk before installing); of two files with
+        the same version the manufacturer download is preferred. Every candidate is
+        verified by its checksum first – a damaged file is skipped and the next one is
+        taken. Returns (file name, store entry) or None if nothing newer is stored."""
         try:
             installed = shelly.parse_version(info["version"])
         except ShellyError:
@@ -292,12 +317,14 @@ class FirmwareStore(ManagerCore):
                 continue
             if self._adopted_unconfirmed(meta):
                 continue  # Gen2+ file read back from the disk: only for a matching offer
+            if self._source(meta) == SOURCE_IMPORT and not imports:
+                continue  # unverified import: never provided without the user's risk acknowledgment
             try:
                 parsed = shelly.parse_version(meta.get("version"))
             except ShellyError:
                 continue
             if parsed > installed and parsed[3] == 3:  # newer final release
-                candidates.append((parsed, self._source(meta) == SOURCE_UPLOAD, name))
+                candidates.append((parsed, self._source(meta) != SOURCE_DOWNLOAD, name))
         for _, _, name in sorted(candidates):
             meta = self.firmware.get(name, {})
             if meta and await self._intact(name, meta):
@@ -447,7 +474,7 @@ class FirmwareStore(ManagerCore):
         installed one, newest first. Gen1: never (empty list).
 
         One entry per version; a manufacturer download is preferred over an upload
-        of the same version."""
+        or an imported file of the same version."""
         dev = self.devices[device_id]
         if (dev.get("gen") or 1) < 2 or not dev.get("type"):
             return []
@@ -467,7 +494,9 @@ class FirmwareStore(ManagerCore):
             if parsed >= installed or parsed[3] != 3 or not (data_paths.FW_DIR / name).is_file():
                 continue  # not older, not a final release, or file missing
             current = best.get(version)
-            if current is None or (self._source(current[1]) == SOURCE_UPLOAD and self._source(meta) == SOURCE_DOWNLOAD):
+            if current is None or (
+                self._source(current[1]) != SOURCE_DOWNLOAD and self._source(meta) == SOURCE_DOWNLOAD
+            ):
                 best[version] = (name, meta)
         ordered = sorted(best.values(), key=lambda item: shelly.parse_version(item[1]["version"]), reverse=True)
         return [
@@ -589,7 +618,7 @@ class FirmwareStore(ManagerCore):
         elif (
             not part
             or not isinstance(transfer, str)
-            or not hmac.compare_digest(part["id"], transfer)
+            or not shelly.same_secret(transfer, part["id"])
             or part["total"] != total
         ):
             raise ShellyError("Transfer interrupted – please choose the file again")
@@ -632,7 +661,7 @@ class FirmwareStore(ManagerCore):
         if staged and time.monotonic() - staged["created"] > UPLOAD_TTL_S:
             self._drop_upload()
             staged = None
-        if not staged or not isinstance(token, str) or not hmac.compare_digest(staged["token"], token):
+        if not staged or not shelly.same_secret(token, staged["token"]):
             raise ShellyError("No pending upload – please upload the file again")
         return staged
 
@@ -843,7 +872,8 @@ class FirmwareStore(ManagerCore):
         the derived key stays in memory until the download (EXPORT_TTL_S). What can
         be refused is refused here, where the dialog shows it: the download itself
         runs through a browser link that cannot show an error. Returns {"token",
-        "password", "files", "downloads", "uploads", "size", "filename", "expires_in"}."""
+        "password", "files", "downloads", "uploads", "imports", "size", "filename",
+        "expires_in"}."""
         if not self.firmware:
             raise ShellyError("The firmware store is empty – nothing to export")
         if self._free_space() < self.store_size() + SPACE_MARGIN:
@@ -851,7 +881,7 @@ class FirmwareStore(ManagerCore):
         password = store_transfer.generate_password()
         salt = secrets.token_bytes(store_transfer.SALT_BYTES)
         key = await asyncio.to_thread(store_transfer.derive_key, password, salt)
-        uploads = sum(1 for m in self.firmware.values() if self._source(m) == SOURCE_UPLOAD)
+        sources = [self._source(m) for m in self.firmware.values()]
         self._export = {
             "token": secrets.token_hex(16),
             "key": key,
@@ -863,8 +893,9 @@ class FirmwareStore(ManagerCore):
             "token": self._export["token"],
             "password": password,
             "files": len(self.firmware),
-            "downloads": len(self.firmware) - uploads,
-            "uploads": uploads,
+            "downloads": sources.count(SOURCE_DOWNLOAD),
+            "uploads": sources.count(SOURCE_UPLOAD),
+            "imports": sources.count(SOURCE_IMPORT),
             "size": self.store_size(),
             "filename": time.strftime("shelly-firmware-store-%Y-%m-%d.zip"),
             "expires_in": EXPORT_TTL_S,  # seconds the download stays possible
@@ -877,8 +908,7 @@ class FirmwareStore(ManagerCore):
         if (
             not pending
             or time.monotonic() - pending["created"] > EXPORT_TTL_S
-            or not isinstance(token, str)
-            or not hmac.compare_digest(pending["token"], token)
+            or not shelly.same_secret(token, pending["token"])
         ):
             self._export = None
             raise ShellyError("Export expired – please start it again")
@@ -915,7 +945,7 @@ class FirmwareStore(ManagerCore):
         if staged and time.monotonic() - staged["created"] > IMPORT_TTL_S:
             self._drop_import()
             staged = None
-        if not staged or not isinstance(token, str) or not hmac.compare_digest(staged["token"], token):
+        if not staged or not shelly.same_secret(token, staged["token"]):
             raise ShellyError("No pending import – please choose the file again")
         return staged
 
@@ -963,8 +993,8 @@ class FirmwareStore(ManagerCore):
 
     def _classify(self, entries: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
         """Compare checked entries with the store: new, already stored (same SHA-256;
-        data that is missing here is added) and conflicts (same firmware ID and
-        version, different file: the stored file is kept)."""
+        data that is missing here is added, the source never changes) and conflicts
+        (same firmware ID and version, different file: the stored file is kept)."""
         result: dict[str, list[dict[str, Any]]] = {"new": [], "same": [], "conflict": []}
         for entry in entries:
             stored = self._by_sha(entry["sha256"])
@@ -982,8 +1012,6 @@ class FirmwareStore(ManagerCore):
         """What an import adds to an already stored file (summary text)."""
         stored = self._by_sha(entry["sha256"]) or {}
         notes = []
-        if entry["source"] == SOURCE_DOWNLOAD and self._source(stored) == SOURCE_UPLOAD:
-            notes.append("marked as downloaded")
         if "changelog" in entry and "changelog" not in stored:
             notes.append("changelog added")
         if entry.get("intermediate") and stored.get("intermediate") is not True:
@@ -1020,7 +1048,12 @@ class FirmwareStore(ManagerCore):
         """Step 3: store the new files of the checked import, add missing data to
         already stored ones, keep conflicting stored files. Refused during a check
         (the store must not change then); while it runs no check can start. Answers
-        an open first-start question."""
+        an open first-start question.
+
+        The seal only proves that the creator of the file knew its password, not who
+        made it: every new file gets the source SOURCE_IMPORT, whatever the manifest
+        says (see _stored_firmware and _store_offer), and an import never changes the
+        source of a stored file."""
         if self.checking or self.device_checks:
             raise ShellyError("Not possible during a check – please try again afterwards")
         if self._import_lock.locked():
@@ -1051,7 +1084,7 @@ class FirmwareStore(ManagerCore):
                         raise
                     self._register_firmware(
                         name, entry["type"], entry["gen"], entry["version"], entry["sha256"], entry["size"],
-                        https=entry.get("https"), source=entry["source"], sha_checked=entry.get("sha_checked"),
+                        source=SOURCE_IMPORT,
                     )
                     meta = self.firmware[name]
                     if entry["downloaded"]:
@@ -1067,11 +1100,6 @@ class FirmwareStore(ManagerCore):
                     if known is None or not self._merge_note(entry):
                         continue
                     meta = known
-                    if entry["source"] == SOURCE_DOWNLOAD and self._source(meta) == SOURCE_UPLOAD:
-                        meta.update(source=SOURCE_DOWNLOAD, https=entry.get("https"))
-                        meta.pop("sha_checked", None)
-                        if entry["downloaded"]:
-                            meta["downloaded"] = entry["downloaded"]
                     if "changelog" in entry and "changelog" not in meta:
                         meta["changelog"] = entry["changelog"]
                     if entry.get("intermediate"):

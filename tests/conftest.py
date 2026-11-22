@@ -4,6 +4,7 @@ No test opens a connection: the HA registry, the Shellys and the Shelly cloud ar
 replaced by in-memory fakes (FakeNet)."""
 
 import asyncio
+import hashlib
 import re
 import sys
 from pathlib import Path
@@ -36,6 +37,13 @@ OPTIONS = {
 # HA device IDs (32 hex characters, as checked by the web UI)
 A, B, C = ("0" * 31 + "a", "0" * 31 + "b", "0" * 31 + "c")
 
+
+
+def vendor_content(version):
+    """Bytes of the fake manufacturer file of a Gen2+ version (1.5.0: b"x" * 70000);
+    its offer URL ends in their SHA-256 like the real ones."""
+    content = b"x" * 70000
+    return content if version == "1.5.0" else version.encode() + content  # another version, another file
 
 class FakeNet:
     """In-memory replacement for registry, devices and manufacturer servers."""
@@ -135,7 +143,9 @@ def net(monkeypatch, tmp_path):
         return answer
 
     def offer(version):
-        return {"version": version, "url": f"https://fw.example/Plus1-{version}.zip", "steps": "1"}
+        # Like the real Gen2+ URLs the offer URL ends in the SHA-256 of the file
+        sha = hashlib.sha256(vendor_content(version)).hexdigest()
+        return {"version": version, "url": f"https://fw.example/Plus1-{version}/{sha}", "steps": "1"}
 
     async def fetch_offer(_session, fw_type, _pins=None, version=None):
         if (fw_type, version) == ("Plus1", "1.0.7"):  # reference request of every check
@@ -153,12 +163,8 @@ def net(monkeypatch, tmp_path):
         fake.downloads += 1
         if fake.download_gate is not None:
             await fake.download_gate.wait()
-        version = url.rsplit("-", 1)[-1].removesuffix(".zip")
-        content = b"x" * 70000
-        if version != "1.5.0":  # another offered version is another file
-            content = version.encode() + content
-        import hashlib
-
+        version = url.rsplit("/", 2)[-2].rsplit("-", 1)[-1]
+        content = vendor_content(version)
         sha = hashlib.sha256(content).hexdigest()
         (target_dir / f"{sha}.zip").write_bytes(content)
         return f"{sha}.zip", sha, len(content), True

@@ -39,7 +39,7 @@ import schedule
 from changelog import Changelogs
 from credentials import Credentials
 from events import EventLog
-from shelly import AuthError, DeviceAuth, ShellyError, clip, error_text
+from shelly import AuthError, DeviceAuth, ShellyError, clip, error_text, plain
 from tls import CertificatePins
 
 
@@ -156,9 +156,24 @@ ACTIVITY_RELOADING = "reloading"  # Reload Device Info is reading the device
 
 PART_PREFIX = ".part-"  # temporary download files (see shelly._store)
 
+# ASCII punctuation: escaped with a backslash in texts of the Home Assistant notification,
+# which renders Markdown (links, images, emphasis, HTML, autolinks); shown unchanged
+MARKDOWN_PUNCTUATION = re.compile(r"([!-/:-@\[-`{-~])")
+
+
+def markdown_text(value: object, limit: int = 64) -> str:
+    """A device name or version as literal text in Markdown: control and format
+    characters removed (see shelly.plain), every ASCII punctuation character escaped."""
+    return MARKDOWN_PUNCTUATION.sub(r"\\\1", plain(value, limit))
+
 SOURCE_DOWNLOAD = "download"  # downloaded from the manufacturer by a check
 
 SOURCE_UPLOAD = "upload"  # uploaded manually in the Firmware tab
+
+# Taken over from a store import: unverified like an upload (the seal of an export only
+# proves knowledge of its password, not who made it) until a manufacturer offer names
+# its SHA-256; it never replaces a manufacturer download otherwise
+SOURCE_IMPORT = "import"
 
 # download_base_url problems that block installations
 DOWNLOAD_BASE_MESSAGES = {

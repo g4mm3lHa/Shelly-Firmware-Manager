@@ -12,7 +12,7 @@ import manager_checks
 import manager_core
 import pytest
 import shelly
-from conftest import A, B, C
+from conftest import A, B, C, vendor_content
 from helpers import make_manager, store
 from shelly import ShellyError
 
@@ -506,10 +506,10 @@ async def test_check_severity_levels(mgr, net):
 
 
 async def test_server_decides_and_a_stored_file_of_the_offered_version_is_used(mgr, net):
-    """Gen2+: the server is asked per firmware ID and installed version; a stored file
-    of exactly the offered version is used instead of a download – newer stored
+    """Gen2+: the server is asked per firmware ID and installed version; the stored file
+    the offer URL names (same SHA-256) is used instead of a download – newer stored
     versions are not offered."""
-    name, _ = store(mgr, "Plus1", "1.5.0")
+    name, _ = store(mgr, "Plus1", "1.5.0", content=vendor_content("1.5.0"))
     store(mgr, "Plus1", "1.7.0")  # newer, but not offered by the server
     assert await mgr.scan(user="u")
     assert net.offer_calls == 2 and net.downloads == 0  # installed 1.4.0 and 1.5.0
@@ -532,11 +532,45 @@ async def test_uploaded_file_of_the_offered_version_is_used(mgr, net):
 
 
 async def test_download_is_preferred_over_an_upload_of_the_same_version(mgr, net):
+    """The file the offer URL names comes before an upload of the same version."""
     store(mgr, "Plus1", "1.5.0", source=manager_core.SOURCE_UPLOAD, content=b"u" * 3000)
-    name, _ = store(mgr, "Plus1", "1.5.0")
+    name, _ = store(mgr, "Plus1", "1.5.0", content=vendor_content("1.5.0"))
     mgr.devices[A] = {"name": "Kitchen"}
     await mgr.check_device(A)
     assert mgr.devices[A]["file"] == name and mgr.devices[A]["offer_source"] == "store"
+
+
+async def test_upload_of_the_offered_version_is_the_deliberate_exception(mgr, net):
+    """Gen2+: the user's own upload of exactly the offered version is provided although
+    the offer URL names another SHA-256 – labelled as upload, nothing downloaded."""
+    name, _ = store(mgr, "Plus1", "1.5.0", source=manager_core.SOURCE_UPLOAD, content=b"u" * 3000)
+    mgr.devices[A] = {"name": "Kitchen"}
+    await mgr.check_device(A)
+    assert mgr.devices[A]["file"] == name and mgr.devices[A]["offer_source"] == "upload" and net.downloads == 0
+
+
+@pytest.mark.parametrize("source", [manager_core.SOURCE_DOWNLOAD, manager_core.SOURCE_IMPORT])
+async def test_stored_file_with_another_sha_than_the_offer_is_not_used(mgr, net, source):
+    """Gen2+: a stored file of the offered version whose SHA-256 differs from the one the
+    offer URL names never replaces the manufacturer's file – whatever its source says
+    (e.g. an imported file labelled as a download by its creator): it is downloaded."""
+    foreign, _ = store(mgr, "Plus1", "1.5.0", source=source, content=b"foreign" * 3000)
+    mgr.devices[A] = {"name": "Kitchen"}
+    await mgr.check_device(A)
+    dev = mgr.devices[A]
+    assert net.downloads == 1 and dev["file"] != foreign and dev["offer_source"] == "manufacturer"
+    assert dev["source_url"].endswith(dev["sha256"])
+
+
+async def test_imported_file_named_by_the_offer_becomes_a_verified_download(mgr, net):
+    """An imported file whose SHA-256 the offer URL names is provided and from then on
+    counts as a download over HTTPS (confirmed by the update server)."""
+    name, _ = store(mgr, "Plus1", "1.5.0", source=manager_core.SOURCE_IMPORT, content=vendor_content("1.5.0"))
+    mgr.firmware[name]["https"] = None
+    mgr.devices[A] = {"name": "Kitchen"}
+    await mgr.check_device(A)
+    assert mgr.devices[A]["file"] == name and net.downloads == 0 and mgr.devices[A]["offer_source"] == "store"
+    assert mgr.firmware[name]["source"] == manager_core.SOURCE_DOWNLOAD and mgr.firmware[name]["https"] is True
 
 
 async def test_installed_version_is_sent_and_intermediate_versions_are_marked(mgr, net, monkeypatch):
@@ -636,7 +670,7 @@ async def test_stored_file_is_verified_once_per_check(mgr, net, monkeypatch):
     for i in range(9):
         net.devices[f"{i:031x}e"] = (f"Dev {i}", f"192.168.1.{50 + i}", "1.4.0", "1.5.0")
     net.offer_version = "1.6.0"
-    store(mgr, "Plus1", "1.6.0")
+    store(mgr, "Plus1", "1.6.0", content=vendor_content("1.6.0"))
     original, hashed = shelly.file_sha256, []
 
     def counting(target_dir, name):
@@ -731,6 +765,73 @@ async def test_gen1_store_first_for_every_type(net, monkeypatch):
     assert calls == [] and net.downloads == 0
     assert m.devices[A]["offer_source"] == "store" and m.devices[B]["status"] == manager_core.STATUS_READY
     assert m.devices[C]["offer_source"] == "store" and m.devices[C]["status"] == manager_core.STATUS_READY
+
+
+async def test_gen1_imported_file_is_not_provided_store_first(net, monkeypatch):
+    """Gen1: an imported file is no store first offer – the manufacturer's list is asked
+    and its file downloaded, also when the import claims a higher version."""
+    calls = gen1_net(net, monkeypatch, {A: "SHSW-1"})
+    m = make_manager(net)
+    m._registry = lambda: asyncio.sleep(0, net.registry())
+    m.devices[A] = {"name": "Hall"}
+    store(m, "SHSW-1", "20991231-235959/v9.9.9-gdeadbee", gen=1, source=manager_core.SOURCE_IMPORT)
+    await m.check_device(A)
+    dev = m.devices[A]
+    assert calls == [1] and net.downloads == 1
+    assert dev["offer_source"] == "manufacturer" and dev["pending_version"] == "20230913-112003/v1.14.0-gcb84623"
+
+
+async def test_gen1_imported_file_is_a_store_fallback_while_the_list_is_unreachable(net, monkeypatch):
+    """Gen1: while the manufacturer's list cannot be asked, an imported newer version is
+    only offered for a manual installation at the user's risk (store fallback)."""
+    gen1_net(net, monkeypatch, {A: "SHSW-1"})
+
+    async def unreachable(_session, _pins=None):
+        raise ShellyError("502, 'Bad Gateway'")
+
+    monkeypatch.setattr(shelly, "fetch_gen1_offers", unreachable)
+    m = make_manager(net)
+    m._registry = lambda: asyncio.sleep(0, net.registry())
+    m.devices[A] = {"name": "Hall"}
+    name, _ = store(m, "SHSW-1", "20230913-112003/v1.14.0-gcb84623", gen=1, source=manager_core.SOURCE_IMPORT)
+    await m.check_device(A)
+    dev = m.devices[A]
+    assert dev["status"] == manager_core.STATUS_ERROR and dev["store_fallback"] is True
+    assert dev["file"] == name and dev["offer_source"] == "import" and net.downloads == 0
+    assert "at your own risk" in dev["message"]
+
+
+async def test_gen2_store_fallback_names_an_imported_file(mgr, net):
+    """Gen2+: the store fallback also offers an imported file, with its own source."""
+    name, _ = store(mgr, "Plus1", "1.6.0", source=manager_core.SOURCE_IMPORT)
+    net.offer_error = ShellyError("502, 'Bad Gateway'")
+    mgr.devices[A] = {"name": "Kitchen"}
+    await mgr.check_device(A)
+    dev = mgr.devices[A]
+    assert dev["store_fallback"] is True and dev["file"] == name and dev["offer_source"] == "import"
+
+
+async def test_device_texts_are_literal_text_in_the_notification(mgr, net):
+    """Name and versions in the Home Assistant notification (Markdown): control and
+    bidi characters removed, Markdown characters escaped – nothing becomes a link."""
+    net.devices[A] = ("[Click](https://evil.example)\u202e", "192.168.1.10", "1.4.0\n# Big", "1.5.0")
+    await mgr.scan(automatic=True)
+    message = mgr.notified[-1][1]
+    assert "\\[Click\\]\\(https\\:\\/\\/evil\\.example\\)" in message and "\u202e" not in message
+    assert "1\\.4\\.0\\# Big" in message and "\n# Big" not in message
+
+
+def test_plain_removes_control_and_format_characters():
+    """shelly.plain: only printable text, length limited like clip."""
+    assert shelly.plain("1.2.3\n\r\x1b[31m\u202e\u2028x", 64) == "1.2.3[31mx"
+    assert shelly.plain("a" * 100, 10) == "a" * 10 and shelly.plain(None) == ""
+
+
+def test_parse_json_refuses_values_nested_too_deeply():
+    """A deeply nested value is invalid JSON (ValueError), not a RecursionError."""
+    with pytest.raises(ValueError, match="nested too deeply"):
+        shelly.parse_json(b"[" * 200000 + b"]" * 200000)
+    assert shelly.parse_json('{"a": [1]}') == {"a": [1]}
 
 
 # ---------------------------------------------------------------- Manufacturer server access

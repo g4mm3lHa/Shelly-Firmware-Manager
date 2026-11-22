@@ -25,11 +25,13 @@ Security:
 import asyncio
 import base64
 import hashlib
+import hmac
 import ipaddress
 import json
 import re
 import secrets
 import socket
+import unicodedata
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -134,6 +136,29 @@ UNSUPPORTED = "unsupported"  # the device/firmware does not offer the feature
 def clip(value: object, limit: int = 200) -> str:
     """Limit external values before they are stored or displayed."""
     return str(value if value is not None else "")[:limit]
+
+
+def plain(value: object, limit: int = 200) -> str:
+    """clip for device texts that also leave the app's own UI (Home Assistant
+    notification, log lines): control and format characters (line breaks, escape
+    sequences, bidi overrides …) and line/paragraph separators are removed."""
+    return "".join(c for c in clip(value, limit) if unicodedata.category(c)[0] != "C" and c not in "\u2028\u2029")
+
+
+def parse_json(text: str | bytes) -> Any:
+    """json.loads for data from outside: a value nested too deeply raises a
+    RecursionError in json, which is turned into the ValueError of invalid JSON."""
+    try:
+        return json.loads(text)
+    except RecursionError:
+        raise ValueError("JSON nested too deeply") from None
+
+
+def same_secret(given: object, expected: str) -> bool:
+    """Constant-time comparison of a value from outside (token, seal) with the expected
+    ASCII text; another type or a non-ASCII text is simply not equal (hmac refuses to
+    compare non-ASCII strings with a TypeError)."""
+    return isinstance(given, str) and given.isascii() and hmac.compare_digest(given, expected)
 
 
 def error_text(err: object, limit: int = 200) -> str:
@@ -390,7 +415,7 @@ async def _call(
                 continue
             raw = await read_limited(resp, MAX_DEVICE_BODY, "Response from the device too large")
             try:
-                return resp.status, json.loads(raw.decode("utf-8", "replace"))
+                return resp.status, parse_json(raw.decode("utf-8", "replace"))
             except ValueError:
                 return resp.status, None
     raise ShellyError("Authentication with the Shelly failed")  # not reached
@@ -493,8 +518,8 @@ def _identity(info: dict[str, Any], gen: int, protected: bool | None) -> dict[st
             "type": clip(info["app"], 64),
             "model": clip(info.get("model"), 64),
             "mac": clip(info.get("mac"), 32).upper(),
-            "version": clip(info["ver"], 64),
-            "build": clip(info["fw_id"], 128),
+            "version": plain(info["ver"], 64),
+            "build": plain(info["fw_id"], 128),
         }
     return {
         "auth_enabled": protected,
@@ -503,8 +528,8 @@ def _identity(info: dict[str, Any], gen: int, protected: bool | None) -> dict[st
         "type": clip(info["type"], 64),
         "model": clip(info["type"], 64),
         "mac": clip(info.get("mac"), 32).upper(),
-        "version": clip(info["fw"], 128),
-        "build": clip(info["fw"], 128),
+        "version": plain(info["fw"], 128),
+        "build": plain(info["fw"], 128),
     }
 
 
@@ -600,7 +625,7 @@ class OtaChannel:
             if self.auth is None:
                 raise AuthError("The Shelly requires a password – store it in the device's password dialog")
             try:
-                challenge = json.loads(str(error.get("message") or ""))
+                challenge = parse_json(str(error.get("message") or ""))
             except ValueError:
                 raise ShellyError("Invalid authentication request from the Shelly") from None
             frame: dict[str, Any] = {"id": 2, "src": self.src, "method": "Shelly.Update", "params": params}
@@ -649,7 +674,7 @@ class OtaChannel:
                     return None
                 continue  # binary, ping/pong: not part of the RPC protocol
             try:
-                frame = json.loads(msg.data)
+                frame = parse_json(msg.data)
             except ValueError:
                 continue
             if isinstance(frame, dict):
@@ -1033,7 +1058,7 @@ async def _cloud_json(
         session, url, pins, MAX_CLOUD_JSON, "Response from the manufacturer's server too large", headers
     )
     try:
-        return json.loads(raw.decode("utf-8", "replace"))
+        return parse_json(raw.decode("utf-8", "replace"))
     except ValueError as err:
         raise ShellyError("Invalid response from the manufacturer's server") from err
 
