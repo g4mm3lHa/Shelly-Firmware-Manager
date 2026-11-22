@@ -50,12 +50,15 @@ def rewrite(data, change):
     return out.getvalue()
 
 
-async def test_export_layout_and_roundtrip_keeps_source_and_date(mgr, net):
-    """Readable layout with manifest and checksums; an import into an empty store
-    restores every file with its source (download/upload), date and changelog."""
+async def test_export_layout_and_roundtrip_keeps_date_and_marks_files_imported(mgr, net):
+    """Readable layout with manifest and checksums (the source in the manifest and the
+    file name); an import into an empty store restores every file with its date and
+    changelog, but as unverified imported file (source import, no HTTPS marker): the
+    seal does not prove who made the export."""
     down, _ = store(mgr, "Plus1", "1.3.0")
     up, _ = store(mgr, "Plus1", "1.2.0", source=manager_core.SOURCE_UPLOAD)
     gen1, _ = store(mgr, "SHSW-1", "1.13.0", gen=1)
+    imp, _ = store(mgr, "Plus1", "1.1.0", source=manager_core.SOURCE_IMPORT)
     mgr.firmware[down]["downloaded"] = 1735787045
     mgr.firmware[down]["changelog"] = {"date": "2025-01-01", "entries": [{"text": "Fix", "models": ["Plus1"]}]}
     before = {n: dict(m) for n, m in mgr.firmware.items()}
@@ -65,21 +68,26 @@ async def test_export_layout_and_roundtrip_keeps_source_and_date(mgr, net):
     assert {"manifest.json", "SHA256SUMS.txt"} <= names
     assert "Gen2+/Plus1/Plus1-1.3.0.zip" in names
     assert "Gen2+/Plus1/Plus1-1.2.0-upload.zip" in names
+    assert "Gen2+/Plus1/Plus1-1.1.0-import.zip" in names
     assert any(n.startswith("Gen1/SHSW-1/SHSW-1-v1.13.0") for n in names)
     assert all(not n.startswith(manager_store.EXPORT_PREFIX) for n in os_listdir())
 
     forget_store(mgr)
     token = await stage(mgr, data)
     summary = await mgr.check_import(token, password.lower())  # case and spaces do not matter
-    assert summary["files"] == 3 and len(summary["new"]) == 3 and not summary["same"] and not summary["conflict"]
+    assert summary["files"] == 4 and len(summary["new"]) == 4 and not summary["same"] and not summary["conflict"]
+    assert {e["version"]: e["source"] for e in summary["new"]} == {
+        "1.3.0": "download", "1.2.0": "upload", "1.13.0": "download", "1.1.0": "import"
+    }
     assert not mgr.firmware  # nothing stored before the confirmation
     counts = await mgr.confirm_import(token, "tester")
-    assert counts["stored"] == 3 and counts["conflicts"] == 0
-    for name in (down, up, gen1):
+    assert counts["stored"] == 4 and counts["conflicts"] == 0
+    for name in (down, up, gen1, imp):
         meta = mgr.firmware[name]
         assert (data_paths.FW_DIR / name).is_file()
-        for key in ("type", "gen", "version", "sha256", "size", "source", "downloaded"):
+        for key in ("type", "gen", "version", "sha256", "size", "downloaded"):
             assert meta.get(key) == before[name].get(key), key
+        assert meta["source"] == manager_core.SOURCE_IMPORT and meta["https"] is None and "sha_checked" not in meta
     assert mgr.firmware[down]["changelog"]["entries"][0]["text"] == "Fix"
     assert [e for e in mgr.events.list() if e["kind"] == "import"][0]["user"] == "tester"
     assert not any(n.startswith((manager_store.IMPORT_PREFIX, manager_store.EXPORT_PREFIX)) for n in os_listdir())
@@ -134,8 +142,9 @@ async def test_changed_file_or_manifest_or_password_is_refused(mgr, net):
 
 
 async def test_same_and_conflicting_files(mgr, net):
-    """Same SHA-256: not stored twice, missing data is added and an upload becomes a
-    download. Same firmware ID and version with another file: the stored one is kept."""
+    """Same SHA-256: not stored twice, missing data is added, the source stays (an
+    upload never becomes a download). Same firmware ID and version with another file:
+    the stored one is kept."""
     keep, _ = store(mgr, "Plus1", "1.3.0")
     other, _ = store(mgr, "Plus1", "1.4.0")
     mgr.firmware[keep]["changelog"] = {"date": "2025-01-01", "entries": [{"text": "Fix", "models": []}]}
@@ -150,16 +159,93 @@ async def test_same_and_conflicting_files(mgr, net):
     summary = await mgr.check_import(token, password)
     assert not summary["new"]
     assert [(e["version"], e["note"]) for e in summary["same"]] == [
-        ("1.3.0", "marked as downloaded, changelog added")
+        ("1.3.0", "changelog added")
     ]
     assert [e["version"] for e in summary["conflict"]] == ["1.4.0"]
     counts = await mgr.confirm_import(token)
     assert counts == {"stored": 0, "updated": 1, "same": 1, "conflicts": 1}
-    assert mgr.firmware[keep]["source"] == manager_core.SOURCE_DOWNLOAD and "sha_checked" not in mgr.firmware[keep]
+    assert mgr.firmware[keep]["source"] == manager_core.SOURCE_UPLOAD and mgr.firmware[keep]["sha_checked"] is True
     assert mgr.firmware[keep]["changelog"]["entries"][0]["text"] == "Fix"
     assert other not in mgr.firmware and conflict in mgr.firmware  # stored file kept
     event = [e for e in mgr.events.list() if e["kind"] == "import"][0]
     assert event["severity"] == "warning" and event["conflicts_list"] == ["Plus1 1.4.0"]
+
+
+async def test_sealed_foreign_file_never_replaces_the_manufacturer_file(mgr, net):
+    """A correctly sealed export of a stranger (own password, own file labelled as a
+    download over HTTPS of the version the server will offer) – also at the first
+    start: the file is stored as unverified import, the check downloads the
+    manufacturer's file the offer URL names, and the import is not offered."""
+    foreign, foreign_sha = store(mgr, "Plus1", "1.5.0", content=b"foreign firmware" * 5000)
+    data, password = await export_bytes(mgr)
+    forget_store(mgr)
+    mgr.first_start_open = True
+    token = await stage(mgr, data)
+    summary = await mgr.check_import(token, password)
+    assert summary["new"][0]["source"] == "download"  # what the creator claims
+    assert (await mgr.confirm_import(token))["stored"] == 1 and not mgr.first_start_open
+    assert mgr.firmware[foreign]["source"] == manager_core.SOURCE_IMPORT and mgr.firmware[foreign]["https"] is None
+    mgr.devices[A] = {"name": "Kitchen"}
+    await mgr.check_device(A)
+    dev = mgr.devices[A]
+    assert net.downloads == 1 and dev["sha256"] != foreign_sha and dev["offer_source"] == "manufacturer"
+    assert mgr.firmware[foreign]["source"] == manager_core.SOURCE_IMPORT  # still unverified
+
+
+async def test_import_never_turns_an_upload_into_a_download(mgr, net):
+    """An export listing the SHA-256 of a stored upload as a download changes nothing
+    of the upload's source or SHA-256 marker."""
+    name, _ = store(mgr, "Plus1", "1.3.0")
+    data, password = await export_bytes(mgr)
+    mgr.firmware[name].update(source=manager_core.SOURCE_UPLOAD, https=None, sha_checked=False)
+    token = await stage(mgr, data)
+    summary = await mgr.check_import(token, password)
+    assert summary["same"][0]["note"] == ""
+    assert (await mgr.confirm_import(token))["updated"] == 0
+    assert mgr.firmware[name]["source"] == manager_core.SOURCE_UPLOAD and mgr.firmware[name]["sha_checked"] is False
+    assert mgr.firmware_list()[0]["source"] == "upload" and mgr.firmware_list()[0]["https"] is None
+
+
+async def test_import_adds_data_only_to_the_same_firmware_id_and_version(mgr, net):
+    """Same SHA-256 but another ID or version in the export: counted as already stored,
+    nothing is taken over (no foreign changelog or marker for a genuine file)."""
+    name, _ = store(mgr, "Plus1", "1.3.0")
+    mgr.firmware[name].update(changelog={"date": "2025-01-01", "entries": [{"text": "Foreign", "models": []}]},
+                              intermediate=True)
+    data, password = await export_bytes(mgr)
+    mgr.firmware[name] = {**mgr.firmware[name], "version": "1.3.1"}  # receiving store: other version
+    mgr.firmware[name].pop("changelog")
+    mgr.firmware[name].pop("intermediate")
+    token = await stage(mgr, data)
+    summary = await mgr.check_import(token, password)
+    assert len(summary["same"]) == 1 and summary["same"][0]["note"] == ""
+    assert (await mgr.confirm_import(token))["updated"] == 0
+    assert "changelog" not in mgr.firmware[name] and "intermediate" not in mgr.firmware[name]
+
+
+async def test_confirmed_import_drops_its_changelog(mgr, net):
+    """An imported file confirmed by the offer URL loses the changelog of the import:
+    the one of the Shelly documentation is requested instead."""
+    from conftest import vendor_content
+
+    name, _ = store(mgr, "Plus1", "1.5.0", source=manager_core.SOURCE_IMPORT, content=vendor_content("1.5.0"))
+    mgr.firmware[name]["changelog"] = {"date": "2025-01-01", "entries": [{"text": "Foreign", "models": []}]}
+    mgr.devices[A] = {"name": "Kitchen"}
+    await mgr.check_device(A)
+    assert mgr.firmware[name]["source"] == manager_core.SOURCE_DOWNLOAD and "changelog" not in mgr.firmware[name]
+
+
+def test_seal_that_is_no_hex_text_is_a_wrong_password(tmp_path):
+    """A seal with other characters (e.g. non-ASCII) is refused like a wrong one."""
+    archive = tmp_path / "x.zip"
+    body = {
+        "format": store_transfer.FORMAT, "format_version": store_transfer.FORMAT_VERSION, "app_version": "1",
+        "exported": 1, "kdf": {"name": "scrypt", **store_transfer.SCRYPT, "salt": "0" * 32}, "entries": [],
+    }
+    with zipfile.ZipFile(archive, "w") as z:
+        z.writestr("manifest.json", json.dumps({**body, "seal": "ü" * 64}))
+    with pytest.raises(TransferError, match="Wrong export password"):
+        store_transfer.read_export(archive, "AAAA")
 
 
 async def test_gen1_is_imported_even_when_gen1_is_off(mgr, net):

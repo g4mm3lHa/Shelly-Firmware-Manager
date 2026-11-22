@@ -15,10 +15,12 @@ const STORAGE = "Firmware & Storage";
 export const OPTION_FIELDS = [
   ["check_interval_days", "Check every (days)", "number", "1–30 days", "Checks"],
   ["check_time", "Check time", "time", "Local time of Home Assistant", "Checks"],
+  ["offer_after_days", "Offer updates only after (days)", "number", "Holds a new firmware version back until it is this many days old (age from its build date); 0 = offer at once. 0–60, default 0", "Checks"],
   ["download_base_url", "Download base URL for the Shellys", "text", "LAN IP address of Home Assistant + host port 8098, e.g. http://192.168.1.20:8098 (no host name; IP addresses only in private networks). Required for installations", "Download Server"],
   ["restrict_downloads_to_devices", "Serve downloads only to known Shellys", "bool", "Switch off if downloads are rejected from 172.30.x.x", "Download Server"],
   ["gen1_updates_enabled", "Enable Gen1 updates", "bool", "Gen1 firmware is only available via plain HTTP without a checksum", STORAGE],
   ["allow_downgrade", "Allow downgrades", "bool", "Installing an older stored firmware on Gen2+ devices (device menu and Firmware tab); off by default", STORAGE],
+  ["keep_installed", "Keep installed versions", "bool", "Also stores the firmware a device already runs while Shelly still offers it (Gen2+ only), so that a downgrade stays possible after a bad update; on by default", STORAGE],
   ["import_max_mb", "Max. import size (MB)", "number", "Largest file accepted by “Import store” (Settings → Firmware & Storage); 1–2048, default 100", STORAGE],
   ["log_entry_limit", "Max. log size (entries)", "number", "100–3000", "Logs"],
   ["log_retention_days", "Log retention (days)", "number", "1–365", "Logs"],
@@ -30,6 +32,17 @@ export const OPTION_FIELDS = [
 // directly before this option
 const STORE_BEFORE = "import_max_mb";
 let settingsInputs = {};
+/** Size in MB, from 1 GB on in GB. */
+const size = n => n >= 1073741824 ? (n / 1073741824).toFixed(1) + " GB" : mb(n);
+/** Line under "Keep installed versions": storage of the versions the Gen2+ devices run
+ *  (stored, downloaded by the next check with an estimated size) and the free space. */
+function installedNote(v) {
+  if (!v || !(v.stored + v.pending)) return "";
+  const total = v.stored + v.pending, parts = [`${v.stored} ${v.stored === 1 ? "is" : "are"} stored (${mb(v.stored_size)})`];
+  if (v.pending) parts.push(`${v.pending} ${v.pending === 1 ? "is" : "are"} downloaded at the next check` +
+    (v.pending_size ? ` (about ${Math.max(1, Math.round(v.pending_size / 1048576))} MB each)` : ""));
+  return `${total} installed version${total === 1 ? "" : "s"}: ${parts.join(", ")}.` + (v.free != null ? ` Free: ${size(v.free)}.` : "");
+}
 
 // The Shellys download the firmware from download_base_url, so it must point to Home
 // Assistant in the local network. The server accepts only an IP address in the private
@@ -117,11 +130,12 @@ export function renderSettings() {
         input.addEventListener("input", update); update();
         input.setAttribute("aria-describedby", `${help.id} ${warn.id} ${suggest.id}`);
       }
-      form.append(box("div", `set-field t-${type}`, box("div", "set-name", lab, info), box("div", "set-control", input), help, warn, suggest));
+      const note = key === "keep_installed" ? el("div", installedNote(o.installed_versions), "desc set-note") : null;
+      form.append(box("div", `set-field t-${type}`, box("div", "set-name", lab, info), box("div", "set-control", input), help, warn, suggest, note));
     }
     return box("div", "card", box("div", "card-head", el("h2", group)), box("div", "card-body", form));
   });
-  cards.push(passwordsCard());
+  cards.unshift(passwordsCard());   // Device Passwords first
   const save = el("button", "Save settings", "primary"); save.onclick = saveOptions;
   const dirty = el("span", "Unsaved changes", "unsaved"); dirty.hidden = true;
   const markDirty = () => { dirty.hidden = !Object.keys(optionChanges()).length; };
@@ -188,7 +202,7 @@ function saveOptions() {
         if (!r.restarting) { message("Settings", "Nothing changed."); return; }
         modal("Settings saved", [el("p", "The app is restarting …", "hint")], []);
         waitForRestart();
-      } catch (e) { message("Settings", e.message, "error"); }
+      } catch (e) { message("Save settings?", e.message, "error"); }   // keeps the title of this dialog
     }}]);
 }
 /** Poll until the restarted app answers again, then reload the page. */
@@ -211,20 +225,27 @@ function waitForRestart() {
 /** Block "Firmware store" of the card "Firmware & Storage" with the Export and Import
  *  buttons (full width of the card, between the options). */
 function storeBlock() {
-  const ex = el("button"); ex.append(icon("exportIcon"), " Export store …"); ex.id = "store-export"; ex.onclick = exportDialog;
-  const im = el("button"); im.append(icon("importIcon"), " Import store …"); im.id = "store-import"; im.onclick = importDialog;
+  const ex = el("button"); ex.append(icon("exportIcon"), " Export store"); ex.id = "store-export"; ex.onclick = exportDialog;
+  const im = el("button"); im.append(icon("importIcon"), " Import store"); im.id = "store-import"; im.onclick = importDialog;
   return box("div", "set-store", el("div", "Firmware store", "set-store-name"),
     el("p", "Move the complete firmware store to another Home Assistant instance: export it as one ZIP file (sealed with a password) and import it there. Device passwords are not exported.", "hint"),
     box("div", "store-btns", ex, im));
 }
 /** Settings card that opens the dialog for passwords of several devices. */
 function passwordsCard() {
-  const pw = el("button"); pw.append(icon("lock"), " Device passwords …"); pw.id = "set-passwords"; pw.onclick = bulkPasswords;
+  const pw = el("button"); pw.append(icon("lock"), " Device passwords"); pw.id = "set-passwords"; pw.onclick = bulkPasswords;
   return box("div", "card", box("div", "card-head", el("h2", "Device Passwords")), box("div", "card-body",
     el("p", "Store the existing password or set a new one on several devices in one step (each device is set, verified and stored on its own).", "hint"),
     box("div", "store-btns", pw)));
 }
 const EXPORT_TITLE = "Export firmware store", IMPORT_TITLE = "Import firmware store";
+// The seal proves that the file was not changed since the export, not who created it: a
+// warning in step 1 (and the first-start dialog), every new file is stored as "Imported"
+export const IMPORT_OWN = "Import only a store you exported yourself. The password proves that the file was not changed after the export – " +
+  "it does not prove who created it. A file from someone else can contain manipulated firmware.";
+const IMPORT_MARK = "Every file is stored as “Imported”, whatever the export says about its source. An imported file is used for an update " +
+  "only once the Shelly update server offers exactly this file (same SHA-256, Gen2+ only); it then counts as downloaded. While Shelly " +
+  "cannot be reached, imported files are offered only for a manual installation at your own risk.";
 /** Export: the server generates the password (shown only here) and a single-use
  *  download link; "Export" is enabled after "I have saved the password". */
 async function exportDialog() {
@@ -236,7 +257,7 @@ async function exportDialog() {
   // Not copyable (browser refuses both ways): the password is selected for a manual copy
   const copy = iconButton("copy", "Copy password", async () => { if (!await copyText(x.password)) { out.focus(); out.select(); } });
   const ack = el("input"); ack.type = "checkbox";
-  const files = `${x.files} (${x.downloads} downloaded, ${x.uploads} uploaded)`;
+  const files = `${x.files} (${x.downloads} downloaded, ${x.uploads} uploaded, ${x.imports || 0} imported)`;
   modal(EXPORT_TITLE, [
     valueList([["Files", files], ["Size", mb(x.size)], ["File", x.filename]]),
     box("label", "field", "Export password (generated, shown only now)", box("div", "pw-row", out, copy)),
@@ -264,7 +285,8 @@ export function importDialog() {
   modal(IMPORT_TITLE, [
     el("p", "Choose a file created by “Export store” of this app and enter its export password. The file is checked completely before anything is stored.", "hint"),
     box("label", "field", `Export file (.zip, max. ${max} MB – see “Max. import size”)`, file),
-    box("label", "field", "Export password", pw)],
+    box("label", "field", "Export password", pw),
+    el("div", IMPORT_OWN, "warnbox")],
   [{text: "Cancel"}, {text: "Check file", kind: "primary", action: async () => {
     const f = file.files[0];
     if (!f) { message(IMPORT_TITLE, "No file chosen.", "error", "importIcon"); return; }
@@ -288,13 +310,13 @@ async function checkImport(f, password) {
     message(IMPORT_TITLE, e.message, "error", "importIcon");
   }
 }
-const IMPORT_GROUPS = [["new", "new – will be stored", "p-uptodate"], ["same", "already stored – data added if missing", ""],
+const IMPORT_GROUPS = [["new", "new – will be stored as “Imported”", "p-uptodate"], ["same", "already stored – data added if missing", ""],
   ["conflict", "conflict – stored file kept", "p-available"]];
 /** Import step 2: result of the check as counts; every group can be expanded,
  *  conflicts are expanded from the start. Nothing is stored before "Import". */
 function importSummary(token, name, r) {
-  const line = e => `${e.type} ${e.version}${e.gen === 1 ? " (Gen1)" : ""} – ${e.source === "upload" ? "uploaded" : "downloaded"}` +
-    (e.note ? ` – ${e.note}` : "");
+  // The source named in the export is only its creator's claim: it is not shown
+  const line = e => `${e.type} ${e.version}${e.gen === 1 ? " (Gen1)" : ""}` + (e.note ? ` – ${e.note}` : "");
   const groups = IMPORT_GROUPS.map(([key, label, cls]) => {
     const rows = r[key] || [], d = el("details");
     d.open = key === "conflict" && rows.length > 0;
@@ -304,17 +326,22 @@ function importSummary(token, name, r) {
   });
   const n = r.new.length, label = n ? `Import ${n} file${n === 1 ? "" : "s"}` : "Finish import";
   const cancel = async () => { await api("api/firmware/import/cancel", {token}).catch(() => {}); closeModal(); };
+  const ack = el("input"); ack.type = "checkbox";
   modal(IMPORT_TITLE, [
     messageBody(`Seal and ${r.files === 1 ? "the file" : `all ${r.files} files`} checked – nothing was changed since the export.`, "success"),
     valueList([["File", name], ["Exported", r.exported ? fmt(r.exported) : "unknown"], ["Size", mb(r.size)]]),
-    section("Result", box("div", "imp-groups", ...groups))],
+    section("Result", box("div", "imp-groups", ...groups)),
+    el("p", IMPORT_MARK, "hint"),
+    box("label", "check", ack, " I created this export myself or I trust its source")],
   [{text: "Cancel", action: cancel}, {text: label, kind: "primary", action: async () => {
     try {
-      const c = await api("api/firmware/import/confirm", {token});
-      const parts = [`${c.stored} new file${c.stored === 1 ? "" : "s"} stored`];
+      const c = await api("api/firmware/import/confirm", {token, acknowledged: ack.checked});
+      const parts = [`${c.stored} new file${c.stored === 1 ? "" : "s"} stored as “Imported”`];
       if (c.updated) parts.push(`data added to ${c.updated} stored file${c.updated === 1 ? "" : "s"}`);
       if (c.conflicts) parts.push(`${c.conflicts} conflict${c.conflicts === 1 ? "" : "s"} – the stored files were kept`);
       message(IMPORT_TITLE, parts.join(", ") + ".", c.conflicts ? "warning" : "success", "importIcon");
     } catch (e) { message(IMPORT_TITLE, e.message, "error", "importIcon"); }
   }}], "importIcon");
+  // Enabled once the user states to have created the export or to trust its source
+  const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; };
 }

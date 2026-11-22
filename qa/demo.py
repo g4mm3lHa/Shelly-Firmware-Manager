@@ -176,6 +176,29 @@ m.events.add("check", severity="error", trigger="manual", devices=23, duration=3
              findings=[{"device": "Sauna", "version": "1.6.2", "offer": "2.0.3", "source": "manufacturer", "severity": "success"},
                        {"device": "Doorbell", "error": "Cannot connect to host 192.168.1.34:80", "severity": "warning"},
                        {"device": "Fridge", "error": "The Shelly rejected the password", "severity": "error"}])
+if scenario == "features":  # next version: cloud, Bluetooth proxy, offer delay, Shellys not listed, imported file
+    for i, key in enumerate(m.devices):
+        d = m.devices[key]
+        d["cloud"] = [True, False, None, False][i % 4]
+        d["cloud_connected"] = d["cloud"] is True and i % 8 == 0
+        if d.get("offer_version"):
+            d["offer_date"] = "2026-10-01"
+    m.devices[f"{1:032x}"]["ble_proxy"] = True
+    m.offer_after_days = 7
+    held_from = time.strftime("%Y-%m-%d", time.localtime(now + 5 * 86400))
+    built = time.strftime("%Y-%m-%d", time.localtime(now - 2 * 86400))
+    for i in (9, 11):
+        m.devices[f"{i:032x}"].update(status="up-to-date", offer_version=None, message="",
+                                      hold={"version": "1.6.0", "built": built, "until": held_from})
+    m.listing = {"listed": 25, "missing": [
+        {"name": "Garden shed plug", "model": "SNPL-00112EU", "reason": "disabled"},
+        {"name": "shellyplus1pm-a8032ab1c2d4", "model": None, "reason": "discovered"},
+        {"name": "shelly1-98F4AB", "model": None, "reason": "ignored"}]}
+    imported = b"Plus1 1.2.3 imported " * 5000
+    imported_sha = hashlib.sha256(imported).hexdigest()
+    (data / "fw" / f"{imported_sha}.zip").write_bytes(imported)
+    m._register_firmware(f"{imported_sha}.zip", "Plus1", 2, "1.2.3", imported_sha, len(imported), True, source="import")
+    m.firmware[f"{imported_sha}.zip"]["downloaded"] = now - 86400 * 2
 if scenario == "legacy":  # an installation started before (device progress shown)
     ids = list(m.devices)
     m.devices[ids[7]].update(status="installing", ota_progress=55, message="The Shelly is downloading the firmware: 55 %")
@@ -185,6 +208,14 @@ if scenario == "busy":
     m.progress = {"kind": "all", "total": 25, "done": 18, "errors": 2, "phase": "devices"}
     m.activity.update({ids[18]: "checking", ids[19]: "downloading"})
     m.activity.update(dict.fromkeys(ids[20:], "waiting"))
+
+
+async def demo_signal(device_id):
+    """Wi-Fi signal of the installation dialog: the demo reaches no device (some weak, Gen1 on the cable)."""
+    dev = m.devices[device_id]
+    return {"rssi": None if dev.get("gen") == 1 else -50 - (int(device_id, 16) * 7) % 40}
+
+m.wifi_signal = demo_signal
 
 
 async def wrap(_request):

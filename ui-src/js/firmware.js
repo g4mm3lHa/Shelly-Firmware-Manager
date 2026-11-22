@@ -1,10 +1,10 @@
 // Firmware tab: stored files, changelog, Install button per device, delete and upload.
 import {
   $, api, attachTip, box, closeModal, collator, copyText, el, filterControl, fmt, icon, iconButton, keptDetails, loadLocal, mb,
-  message, modal, saveLocal, searchTool, section, shaRow, sortControl, toast, ui, uploadFile, valueList,
+  message, modal, saveLocal, searchTool, section, setTip, shaRow, sortControl, toast, ui, uploadFile, valueList,
 } from "./core.js";
 import {installable, installBlocker} from "./devices.js";
-import {changelogNodes, DOWNGRADE_OFF, DOWNGRADE_WARNING, downgradeConfirm, fwSource, openInstall, UPLOAD_HINT} from "./install.js";
+import {changelogNodes, DOWNGRADE_OFF, DOWNGRADE_WARNING, downgradeConfirm, fwSource, IMPORT_WARNING, openInstall, UPLOAD_HINT} from "./install.js";
 import {render} from "./main.js";
 
 // ---------------------------------------------------------------- Sorting
@@ -40,15 +40,20 @@ function compareCards([ta, fa], [tb, fb]) {
 /** Devices of the list whose firmware ID is not known yet. */
 const unidentified = () => (ui.state?.devices || []).filter(d => !d.type);
 const unused = f => !(ui.state?.devices || []).some(d => !d.type || d.type === f.type);
+// "Installed": versions Gen2+ devices run now (kept as their way back, option keep_installed);
+// "Imported": files of an imported firmware store not confirmed by the Shelly update server
 const FW_FILTERS = {all: ["All", () => true], provided: ["Provided", f => f.devices.length > 0],
-  uploaded: ["Uploaded", f => f.source === "upload"], intermediate: ["Intermediate", f => !!f.intermediate],
+  installed: ["Installed", f => (f.installed || []).length > 0],
+  uploaded: ["Uploaded", f => f.source === "upload"], imported: ["Imported", f => f.source === "import"], intermediate: ["Intermediate", f => !!f.intermediate],
   gen1: ["Gen1", f => f.gen === 1], unused: ["Unused", unused]};
 /** Tooltip of "Unused" while the firmware ID of a device is not known yet (else none). */
 function unusedTip() {
   const open = unidentified().length;
   return open ? `Firmware ID of ${open} device${open === 1 ? "" : "s"} not known yet (never reached) – no file counts as unused until ${open === 1 ? "it is" : "they are"} checked once` : null;
 }
-const fwFilter = filterControl(Object.entries(FW_FILTERS).map(([key, [label]]) => [key, label, key === "unused" ? unusedTip : null]),
+const FW_TIPS = {unused: unusedTip, installed: () => "Versions that devices run at the moment – their way back after the next update",
+  imported: () => "Files from an imported firmware store that the Shelly update server has not confirmed yet"};
+const fwFilter = filterControl(Object.entries(FW_FILTERS).map(([key, [label]]) => [key, label, FW_TIPS[key] || null]),
   key => { ui.fwFilter = key; render(true); });
 $("fw-filter").replaceWith(fwFilter.node);
 
@@ -111,21 +116,21 @@ function firmwareHead() {
   return box("div", "fw-head", ...FW_COLUMNS.map(t => {
     const key = FW_SORT_HEADS[t], head = el("span", t);
     if (!key) return head;
-    head.className = "sortable"; head.tabIndex = 0; head.role = "button"; head.title = "Click to sort";
+    head.className = "sortable"; head.tabIndex = 0; head.role = "button"; setTip(head, "Click to sort");
     if (fwSort[0] === key) head.dataset.dir = fwSort[1];
     head.onclick = () => setFirmwareSort([key, fwSort[0] === key && fwSort[1] === "asc" ? "desc" : "asc"]);
     head.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); head.onclick(); } };
     return head;
   }));
 }
-/** Text of the "intermediate" label (tooltip without action, also on touch). */
+/** Text of the "Intermediate" label (tooltip without action, also on touch). */
 const INTERMEDIATE_TIP = "Intermediate version: required step before newer firmware can be installed safely";
 /** Device a firmware is provided for, with an "Install" button that opens the
  *  usual installation dialog (same conditions as "Install update" in the Devices tab). */
 function firmwareDevice(entry) {
   const s = ui.state || {devices: []}, d = s.devices.find(x => x.id === entry.id);
   const blocker = installBlocker(d, s), go = el("button", "Install", "danger small");
-  go.disabled = !!blocker; go.title = blocker || "Install this firmware on the device";
+  go.disabled = !!blocker; setTip(go, blocker || "Install this firmware on the device");
   go.setAttribute("aria-label", `Install on ${entry.name}`);
   go.onclick = () => { if (d && installable(d, ui.state)) openInstall([d]); };
   return box("li", null, el("span", entry.name), go);
@@ -137,6 +142,8 @@ async function openFirmwareChangelog(f) {
   try { modal(title, changelogNodes(await api(`api/firmware/${encodeURIComponent(f.name)}/changelog`)), undefined, "changelog"); }
   catch (e) { message(title, e.message, "error", "changelog"); }
 }
+const IMPORTED_TIP = "Imported with a firmware store – not confirmed by the Shelly update server yet";
+const devicesText = names => `${names.length} device${names.length === 1 ? "" : "s"}`;
 /** One version row with size, date, SHA (copy), devices and icon actions.
  *  older: an older Gen2+ version (gets the downgrade icon). */
 function firmwareRow(f, latest, older) {
@@ -148,22 +155,25 @@ function firmwareRow(f, latest, older) {
     : el("span", "–", "muted");
   devices.classList.add("fw-dev");
   const dl = el("a", null, "icon"); dl.href = `api/firmware/${encodeURIComponent(f.name)}/download`; dl.setAttribute("download", "");
-  dl.title = "Download"; dl.setAttribute("aria-label", `Download ${f.type} ${f.version}`); dl.append(icon("download"));
+  setTip(dl, "Download"); dl.setAttribute("aria-label", `Download ${f.type} ${f.version}`); dl.append(icon("download"));
   const del = iconButton("delete", f.deletable ? "Delete" : (f.locked || "Locked"), () => deleteFirmware(f), "red");
   del.disabled = !f.deletable;
   const log = iconButton("changelog", f.changelog ? "Changelog" : "No changelog stored – it is stored by a check that provides this firmware",
     () => openFirmwareChangelog(f));
   log.disabled = !f.changelog; log.setAttribute("aria-label", `Changelog of ${f.type} ${f.version}`);
   // Class names only place the cells on phones (grid areas); the desktop grid is unchanged
-  const uploaded = f.source === "upload" ? el("span", "Uploaded", "tag warn") : null;
-  if (uploaded) attachTip(uploaded, () => fwSource(f), true);
+  const uploaded = f.source === "upload" ? el("span", "Uploaded", "tag warn") : f.source === "import" ? el("span", "Imported", "tag warn") : null;
+  if (uploaded) attachTip(uploaded, () => f.source === "import" ? IMPORTED_TIP : fwSource(f), true);
+  // Version a device runs now: kept as its way back after the next update
+  const users = f.installed || [], inst = users.length ? el("span", "Installed", "tag inst") : null;
+  if (inst) attachTip(inst, () => `Installed on ${devicesText(users)}: ${users.join(", ")}\nKept as their way back after the next update`, true);
   // Once provided as an intermediate version by a check (permanent store marker)
-  const step = f.intermediate ? el("span", "intermediate", "tag step") : null;
+  const step = f.intermediate ? el("span", "Intermediate", "tag step") : null;
   if (step) attachTip(step, () => INTERMEDIATE_TIP, true);
   // Phones: small labels in the tile (data-label, shown by CSS only there)
   const size = el("span", mb(f.size || 0), "nowrap fw-size"), date = el("span", fmt(f.downloaded), "nowrap sub fw-date");
   size.dataset.label = "Size"; date.dataset.label = "Stored"; sha.dataset.label = "SHA-256";
-  return box("div", "fw-row", box("div", "fw-ver", el("span", f.version, "name"), latest ? el("span", "latest", "tag primary") : null, uploaded, step),
+  return box("div", "fw-row", box("div", "fw-ver", el("span", f.version, "name"), latest ? el("span", "Latest", "tag primary") : null, inst, uploaded, step),
     size, date, sha, devices, box("div", "actions", older ? downgradeButton(f) : null, log, dl, del));
 }
 // ---------------------------------------------------------------- Downgrade from the Firmware tab
@@ -192,10 +202,10 @@ function openFirmwareDowngrade(f) {
     valueList([["Firmware ID", f.type], ["Version", f.version], ["Size", mb(f.size || 0)], ["Stored", fmt(f.downloaded)],
       ["Source", fwSource(f), "src"], shaRow(f.sha256)]),
     section("Device (newer version installed)", list), el("div", DOWNGRADE_WARNING, "warnbox"),
-    f.source === "upload" ? el("div", UPLOAD_HINT, "warnbox") : null].filter(Boolean),
+    f.source === "upload" ? el("div", UPLOAD_HINT, "warnbox") : f.source === "import" ? el("div", IMPORT_WARNING, "warnbox") : null].filter(Boolean),
   [{text: "Cancel"}, {text: "Continue", kind: "primary", action: () => {
     downgradeConfirm(targets[Number(list.querySelector("input:checked").value)], f);
-  }}]);
+  }}], "history");
 }
 
 /** Delete a stored firmware: dialog, then a second confirmation with
@@ -204,16 +214,21 @@ function deleteFirmware(f) {
   const title = "Delete firmware?", details = valueList([["Firmware ID", f.type], ["Version", f.version], ["Source", fwSource(f)], shaRow(f.sha256)]);
   // A file provided to devices may be deleted: they lose the provided update
   const held = (f.devices || []).map(d => d.name);
-  modal(title, [details, held.length ? el("div", `Provided for ${held.join(", ")}: ${held.length === 1 ? "this device loses" : "these devices lose"} the provided update and ${held.length === 1 ? "is" : "are"} shown as "Available" until ${held.length === 1 ? "it is" : "they are"} checked again.`, "warnbox") : null,
+  // A version devices run now: without the file they have no way back after the next update
+  const users = f.installed || [];
+  const wayBack = users.length ? el("div", `Installed on ${devicesText(users)} (${users.slice(0, 3).join(", ")}${users.length > 3 ? ", …" : ""}): ` +
+    `without this file ${users.length === 1 ? "it has" : "they have"} no way back after the next update.`, "warnbox") : null;
+  modal(title, [details, wayBack, held.length ? el("div", `Provided for ${held.join(", ")}: ${held.length === 1 ? "this device loses" : "these devices lose"} the provided update and ${held.length === 1 ? "is" : "are"} shown as "Available" until ${held.length === 1 ? "it is" : "they are"} checked again.`, "warnbox") : null,
     // What cannot be restored: red warning box
     el("div", f.source === "upload" ? "An uploaded file can only be restored by uploading it again." :
+    f.source === "import" ? "An imported file can only be restored by importing its export again." :
     "Only versions that Shelly still offers can be downloaded again; older versions are gone for good.", "warnbox danger")].filter(Boolean),
-  [{text: "Cancel"}, {text: "Continue", kind: "danger", action: () => {
+  [{text: "Cancel"}, {text: "Continue", kind: "primary", action: () => {
     const ack = el("input"); ack.type = "checkbox";
     modal(title, [el("p", `Delete ${f.type} ${f.version} permanently?`), box("label", "check", ack, " I understand that this file cannot be restored by the app")],
       [{text: "Cancel"}, {text: "Delete", kind: "danger", action: async () => {
         try { await api(`api/firmware/${encodeURIComponent(f.name)}/delete`, {confirm: true, acknowledged: ack.checked}); closeModal(); }
-        catch (e) { message("Delete firmware", e.message, "error", "delete"); }
+        catch (e) { message(title, e.message, "error", "delete"); }
       }}], "delete");
     const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; };
   }}], "delete");
@@ -261,7 +276,7 @@ function uploadConfirm(r) {
     }
   }}], "upload");
 }
-$("fw-upload").append(icon("upload"));   // same icon as the upload dialog title (aria-hidden)
+$("fw-upload").prepend(icon("upload"));   // same icon as the upload dialog title, before the text (aria-hidden)
 $("fw-upload").onclick = openUpload;
 $("fw-search").oninput = () => render(true);
 searchTool($("fw-search"));

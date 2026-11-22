@@ -606,3 +606,51 @@ async def test_unexpected_error_ends_the_installation_as_failed(mgr, net, monkey
     assert A not in mgr.installing and mgr.approval_matches(A, sha)
     failed = [e for e in mgr.events.entries if e["kind"] == "install"][-1]
     assert failed["event"] == "failed" and failed["ok"] is False and failed["user"] == "alice"
+
+
+async def test_restart_first_waits_until_the_device_answers(run_install, monkeypatch):
+    """"Restart the device first": restart command, then the device must answer again
+    before the pre-check and the update command."""
+    monkeypatch.setattr(manager_installs, "RESTART_SETTLE_S", 0)
+    monkeypatch.setattr(manager_installs, "RESTART_POLL_S", 0)
+    order = []
+
+    async def restart(*_args):
+        order.append("restart")
+
+    monkeypatch.setattr(shelly, "restart", restart)
+    original = manager_installs.Installs._install
+
+    async def install(self, device_id, dev, sha, restart_first=False):
+        return await original(self, device_id, dev, sha, True)
+
+    monkeypatch.setattr(manager_installs.Installs, "_install", install)
+    ok, _diagnosis, _dev, _polls = await run_install("1.4.0", "1.5.0", ["1.4.0", "1.5.0"], served=True)
+    assert ok and order == ["restart"]
+
+
+async def test_restart_first_without_answer_installs_nothing(mgr, monkeypatch):
+    """No answer within the limit after the restart: error, no update command."""
+    monkeypatch.setattr(manager_installs, "RESTART_SETTLE_S", 0)
+    monkeypatch.setattr(manager_installs, "RESTART_POLL_S", 0)
+    monkeypatch.setattr(manager_installs, "RESTART_WAIT_S", 0.05)
+    dev = {"name": "Kitchen", "gen": 2, "origin": "http://192.168.1.10", "mac": "AA", "file": "x.zip",
+           "version": "1.4.0", "pending_version": "1.5.0", "pending_build": "b-old"}
+    triggered = []
+
+    async def gone(*_args, **_kwargs):
+        raise TimeoutError()
+
+    async def restart(*_args):
+        return None
+
+    async def trigger(*_args):
+        triggered.append(1)
+
+    monkeypatch.setattr(shelly, "file_sha256", lambda *_a: "s")
+    monkeypatch.setattr(shelly, "restart", restart)
+    monkeypatch.setattr(shelly, "device_info", gone)
+    monkeypatch.setattr(shelly, "trigger_update", trigger)
+    with pytest.raises(shelly.ShellyError, match="did not answer within 2 minutes"):
+        await mgr._install(A, dev, "s", restart_first=True)
+    assert not triggered

@@ -117,6 +117,8 @@ export const collator = new Intl.Collator("en", {numeric: true, sensitivity: "ba
 
 // Inline icons: Material Design Icons (Apache 2.0)
 const ICONS = {
+  cloud: "M19.35,10.03C18.67,6.59 15.64,4 12,4C9.11,4 6.6,5.64 5.35,8.03C2.34,8.36 0,10.9 0,14A6,6 0 0,0 6,20H19A5,5 0 0,0 24,15C24,12.36 21.95,10.22 19.35,10.03Z",
+  clock: "M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z",
   info: "M11,9H13V7H11M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,17H13V11H11V17Z",
   dots: "M12,16A2,2 0 0,1 14,18A2,2 0 0,1 12,20A2,2 0 0,1 10,18A2,2 0 0,1 12,16M12,10A2,2 0 0,1 14,12A2,2 0 0,1 12,14A2,2 0 0,1 10,12A2,2 0 0,1 12,10M12,4A2,2 0 0,1 14,6A2,2 0 0,1 12,8A2,2 0 0,1 10,6A2,2 0 0,1 12,4Z",
   restart: "M12,4C14.1,4 16.1,4.8 17.6,6.3C20.7,9.4 20.7,14.5 17.6,17.6C15.8,19.5 13.3,20.2 10.9,19.9L11.4,17.9C13.1,18.1 14.9,17.5 16.2,16.2C18.5,13.9 18.5,10.1 16.2,7.7C15.1,6.6 13.5,6 12,6V10.6L7,5.6L12,0.6V4M6.3,17.6C3.7,15 3.3,11 5.1,7.9L6.6,9.4C5.5,11.6 5.9,14.4 7.8,16.2C8.3,16.7 8.9,17.1 9.6,17.4L9,19.4C8,19 7.1,18.4 6.3,17.6Z",
@@ -158,6 +160,8 @@ const ICONS = {
   importIcon: "M14,12L10,8V11H2V13H10V16M20,18V6C20,4.89 19.1,4 18,4H6A2,2 0 0,0 4,6V9H6V6H18V18H6V15H4V18A2,2 0 0,0 6,20H18A2,2 0 0,0 20,18Z",
   // Battery device marker after the device name (outline with a half-full bar)
   battery: "M16,20H8V6H16M16.67,4H15V2H9V4H7.33A1.33,1.33 0 0,0 6,5.33V20.67C6,21.4 6.6,22 7.33,22H16.67A1.33,1.33 0 0,0 18,20.67V5.33C18,4.6 17.4,4 16.67,4M15,13H9V18H15V13Z",
+  // Column chooser of the Devices tab (MDI "view-column-outline")
+  columns: "M4,5V18H21V5H4M14,7V16H11V7H14M6,7H9V16H6V7M19,16H16V7H19V16Z",
   pencil: "M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z",
 };
 /** Inline SVG icon from a path. */
@@ -166,9 +170,9 @@ export function icon(name) {
   svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("aria-hidden", "true"); svg.classList.add("svg");
   path.setAttribute("d", ICONS[name]); svg.append(path); return svg;
 }
-/** Round icon button with accessible label. */
+/** Round icon button with accessible label; the label is its tooltip. */
 export function iconButton(name, label, onclick, cls) {
-  const b = el("button", null, "icon" + (cls ? " " + cls : "")); b.title = label; b.setAttribute("aria-label", label);
+  const b = el("button", null, "icon" + (cls ? " " + cls : "")); setTip(b, label); b.setAttribute("aria-label", label);
   b.append(icon(name)); if (onclick) b.onclick = onclick; return b;
 }
 /** Settings kept per end device (browser storage); null if missing or unreadable. */
@@ -192,7 +196,7 @@ function closeTools() {
   }
 }
 /** Round toolbar icon with a popover holding content. Returns {node, button}. */
-function toolButton(name, label, ...content) {
+export function toolButton(name, label, ...content) {
   const b = iconButton(name, label, null, "tool-btn"); b.type = "button";
   b.setAttribute("aria-haspopup", "true"); b.setAttribute("aria-expanded", "false");
   const pop = box("div", "tool-pop", ...content); pop.hidden = true;
@@ -246,7 +250,7 @@ export function sortControl(fields, onChange) {
     for (const b of byDir) b.setAttribute("aria-checked", String(b.dataset.value === value[1]));
     const field = (fields.find(f => f[0] === value[0]) || fields[0])[1];
     const text = `Sort: ${field} · ${value[1] === "desc" ? "Descending" : "Ascending"}`;
-    t.button.title = text; t.button.setAttribute("aria-label", text);
+    setTip(t.button, text); t.button.setAttribute("aria-label", text);
   };
   set(current);
   return {node: t.node, set};
@@ -274,7 +278,7 @@ export function filterControl(items, onChange) {
     }
     const label = (items.find(i => i[0] === current) || items[0])[1];
     t.button.classList.toggle("has-value", current !== items[0][0]);
-    t.button.title = `Filter: ${label}`; t.button.setAttribute("aria-label", `Filter: ${label}`);
+    setTip(t.button, `Filter: ${label}`); t.button.setAttribute("aria-label", `Filter: ${label}`);
   };
   return {node: t.node, set};
 }
@@ -338,16 +342,26 @@ export function attachTip(node, text, tap = false) {
     if (tipOwner === node && tipTapped && !tip.hidden) hideTip(); else showTip(node, text(), true);
   });
 }
+// The app's own tooltip replaces the browser's (title attribute) everywhere: it looks the
+// same on every element, shows at once and also works on touch devices.
+const tipped = new WeakSet();     // nodes with an attached tooltip of setTip
+/** Tooltip text of a node in place of a title (icon buttons, toolbar tools, "Install",
+ *  links, column heads): shown on mouse hover and keyboard focus; a tap runs the node's
+ *  action as before. "" removes the text. A disabled button shows it on a tap too. */
+export function setTip(node, text) {
+  node.dataset.tip = text || "";
+  if (!tipped.has(node)) { tipped.add(node); attachTip(node, () => node.dataset.tip); }
+}
 // Touch: a tap elsewhere and scrolling hide the tooltip. A tap on a disabled button
-// shows its title (the reason why it is disabled): it has no action and receives no
+// shows its tooltip (the reason why it is disabled): it has no action and receives no
 // click, but pointer events.
 document.addEventListener("pointerdown", e => {
   lastPointer = e.pointerType || "mouse";
   if (isTap() && tipOwner && !tipOwner.contains(e.target)) hideTip();
 }, true);
 document.addEventListener("pointerup", e => {
-  const b = e.pointerType !== "mouse" && e.target.closest && e.target.closest("button:disabled[title]");
-  if (b) showTip(b, b.title, true);
+  const b = e.pointerType !== "mouse" && e.target.closest && e.target.closest("button:disabled[data-tip]");
+  if (b && b.dataset.tip) showTip(b, b.dataset.tip, true);
 }, true);
 addEventListener("scroll", () => { if (isTap()) hideTip(); }, true);
 $("fw-info").append(icon("info"));

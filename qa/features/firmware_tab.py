@@ -27,8 +27,9 @@ def _downgrade(c):
     f.wait_for_selector("#dlg-body .modes")
     labels = f.locator("#dlg-body .modes label").all_inner_texts()
     versions = [t.split("·")[0].strip() for t in labels]
-    check(f"{case}: all older versions, newest first", versions == ["1.3.1", "1.3.0", "1.2.0"], str(versions))
-    check(f"{case}: upload marked", "Uploaded" in labels[2] and "Uploaded" not in labels[0], str(labels))
+    check(f"{case}: all older versions, newest first", versions == ["1.3.1", "1.3.0", "1.2.3", "1.2.0"], str(versions))
+    check(f"{case}: upload marked", "Uploaded" in labels[3] and "Uploaded" not in labels[0], str(labels))
+    check(f"{case}: import marked", "Imported" in labels[2] and "Imported" not in labels[0], str(labels))
     check(f"{case}: dialog fits", f.evaluate("() => { const r = document.getElementById('dlg').getBoundingClientRect();"
                                              f" return r.left >= 0 && r.right <= {width}; }}"))
     page.screenshot(path=out / f"{case}-downgrade-list.png")
@@ -61,7 +62,7 @@ def _firmware_tab(c):
     f.locator("#tab-firmware").click()
     f.wait_for_selector(".fw-row")
     summary = f.locator("#fw-summary").text_content()
-    check(f"{case}: total size shown", summary.startswith("4 files") and "MB stored" in summary, summary)
+    check(f"{case}: total size shown", summary.startswith("5 files") and "MB stored" in summary, summary)
     tip = f.locator("#fw-info").get_attribute("data-tip")
     check(f"{case}: no automatic deletion hint", "never deleted automatically" in tip, tip[:60])
     rows = f.locator(".fw-row")
@@ -69,12 +70,13 @@ def _firmware_tab(c):
         "els => els.map(e => { const r = e.getBoundingClientRect(); return Math.round(r.top + r.height / 2); })")
     check(f"{case}: changelog, download and delete icons on one line", len(centers) == 3 and max(centers) - min(centers) <= 1, str(centers))
     first_del = rows.first.locator("button[aria-label], button.red").last
-    check(f"{case}: provided file can be deleted", first_del.is_enabled() and first_del.get_attribute("title") == "Delete",
-          str(first_del.get_attribute("title")))
+    check(f"{case}: provided file can be deleted", first_del.is_enabled() and first_del.get_attribute("data-tip") == "Delete",
+          str(first_del.get_attribute("data-tip")))
     first_del.click()
     d = dialog(f)
-    check(f"{case}: delete dialog with red trash title icon and red Continue", f.locator("#dlg-title svg.ti-delete").count() == 1
-          and "danger" in f.locator("#dlg-btns button", has_text="Continue").get_attribute("class"))
+    check(f"{case}: delete dialog with red trash title icon and blue Continue (red only the final Delete)",
+          f.locator("#dlg-title svg.ti-delete").count() == 1
+          and f.locator("#dlg-btns button", has_text="Continue").get_attribute("class") == "primary")
     check(f"{case}: delete dialog names the devices that lose the provided update",
           "lose the provided update" in d["body"] or "loses the provided update" in d["body"], d["body"][:200])
     c.page.screenshot(path=c.out / f"{case}-delete-provided.png")
@@ -82,15 +84,15 @@ def _firmware_tab(c):
     check(f"{case}: upload tag in the list", f.locator(".fw-row .tag.warn", has_text="Uploaded").count() == 1)
     step = f.locator(".fw-row .tag.step")
     style = step.first.evaluate("e => { const s = getComputedStyle(e); return [s.backgroundColor, s.borderTopStyle, s.borderTopWidth]; }")
-    check(f"{case}: intermediate label outlined", step.count() == 1 and step.first.inner_text() == "intermediate"
+    check(f"{case}: intermediate label outlined", step.count() == 1 and step.first.inner_text() == "Intermediate"
           and style == ["rgba(0, 0, 0, 0)", "solid", "1px"], str(style))
     labels = f.evaluate("""() => [...document.querySelectorAll('.fw-row .fw-ver')].filter(v => v.querySelector('.tag')).map(v => {
       const n = v.querySelector('.name').getBoundingClientRect(), t = v.querySelector('.tag').getBoundingClientRect();
       return {gap: Math.round(t.left - n.right), dy: Math.abs((n.top + n.height / 2) - (t.top + t.height / 2))}; })""")
     check(f"{case}: labels 12 px after the version, centred", labels and all(x["gap"] == 12 and x["dy"] < 1.5 for x in labels), str(labels))
     up = f.evaluate("""() => { const b = document.getElementById('fw-upload'), s = b.querySelector('svg'), r = e => e.getBoundingClientRect();
-      const t = document.createRange(); t.selectNodeContents(b.firstChild); const tr = t.getBoundingClientRect();
-      return {size: Math.round(r(s).width), hidden: s.getAttribute('aria-hidden'), after: r(s).left > tr.right,
+      const t = document.createRange(); t.selectNodeContents(b.querySelector('span')); const tr = t.getBoundingClientRect();
+      return {size: Math.round(r(s).width), hidden: s.getAttribute('aria-hidden'), before: r(s).right < tr.left,
         dy: Math.abs((r(s).top + r(s).height / 2) - (tr.top + tr.height / 2)), name: b.textContent}; }""")
     if width < 700:   # phones: the icon only, round 44 px at the right end of toolbar row 2
         geo = f.evaluate("""() => { const b = document.getElementById('fw-upload'), r = b.getBoundingClientRect(),
@@ -100,8 +102,8 @@ def _firmware_tab(c):
         check(f"{case}: upload button as icon at the right end", geo["w"] == 44 and geo["h"] == 44 and geo["right"] <= 1
               and geo["text"] == "none" and geo["label"] == "Upload firmware" and up["hidden"] == "true", str(geo))
     else:
-        check(f"{case}: upload button with the upload icon after the text", up["size"] == 16 and up["hidden"] == "true"
-              and up["after"] and up["dy"] < 1.5 and up["name"] == "Upload firmware", str(up))
+        check(f"{case}: upload button with the upload icon before the text", up["size"] == 16 and up["hidden"] == "true"
+              and up["before"] and up["dy"] < 1.5 and up["name"] == "Upload firmware", str(up))
     head = f.evaluate("""() => { const h = document.querySelector('#fw-cards .fw-head'), row = document.querySelector('#fw-cards .fw-row');
       if (getComputedStyle(h).display === 'none') return {shown: false,
         labels: [...row.querySelectorAll('[data-label]')].map(e => getComputedStyle(e, '::before').content)};
@@ -154,7 +156,7 @@ def _firmware_tab(c):
     names = [t.replace("Install", "").strip() for t in entries.all_inner_texts()]
     check(f"{case}: devices ordered by name", names == sorted(names, key=str.lower) and "Kitchen light" in names, str(names))
     kitchen = entries.filter(has_text="Kitchen light").locator("button")   # got its update from the store
-    check(f"{case}: Install enabled for a ready device", kitchen.is_enabled(), str(kitchen.get_attribute("title")))
+    check(f"{case}: Install enabled for a ready device", kitchen.is_enabled(), str(kitchen.get_attribute("data-tip")))
     check(f"{case}: no overflow (firmware devices)", f.evaluate(OVERFLOW_JS) <= 0)
     page.screenshot(path=out / f"{case}-firmware-devices.png", full_page=True)
     kitchen.click()
@@ -170,7 +172,7 @@ def _firmware_tab(c):
     logs = f.locator(".fw-row .actions button[aria-label^='Changelog of']")
     check(f"{case}: one changelog icon per version", logs.count() == rows.count(), f"{logs.count()} / {rows.count()}")
     check(f"{case}: icon disabled without a stored changelog", logs.nth(1).is_disabled()
-          and "No changelog stored" in logs.nth(1).get_attribute("title"), str(logs.nth(1).get_attribute("title")))
+          and "No changelog stored" in logs.nth(1).get_attribute("data-tip"), str(logs.nth(1).get_attribute("data-tip")))
     if width < 700:   # touch: a tap on a disabled button shows why it is disabled
         logs.nth(1).tap(force=True)
         check(f"{case}: tap on a disabled button shows its reason", (tip_text(f) or "").startswith("No changelog stored"), str(tip_text(f)))
@@ -191,7 +193,7 @@ def _firmware_tab(c):
 
 def _checked(f, view):
     """Checked fields of the sort popover of a tab: [field, direction]."""
-    return f.evaluate(f"""() => [...document.querySelectorAll('#view-{view} .sort-item:not(.filter-item)[aria-checked=true]')]
+    return f.evaluate(f"""() => [...document.querySelectorAll('#view-{view} .sort-item[data-value]:not(.filter-item)[aria-checked=true]')]
       .map(b => b.dataset.value)""")
 
 
@@ -242,7 +244,7 @@ def _sorting_and_downgrade(c):
     f.locator("#tab-devices").click()
     labels = [e[0] for e in filter_entries(f, "devices")]
     check(f"{case}: Devices filter entries", labels == ["All", "Updates", "Attention", "Not checked", "Up-To-Date", "Unprotected",
-          "Asleep", "Ignored", "Removed", "Other Shellys"], str(labels))
+          "Cloud on", "On hold", "Asleep", "Ignored", "Removed", "Other Shellys"], str(labels))
     pick_filter(f, "devices", "Unprotected")
     shown = f.evaluate("() => [...document.querySelectorAll('#dev-cards tbody tr')].length")
     expected = next(n for label, n, _ in filter_entries(f, "devices") if label == "Unprotected")
@@ -259,7 +261,7 @@ def _sorting_and_downgrade(c):
             stacked: p.length === 2 && p[1].top >= p[0].bottom, lines: Math.round(s.height)}; }""")
         check(f"{case}: header – pills stacked, Check now right and centred", head["right"] and head["mid"] < 2
               and head["stacked"] and head["lines"] <= 48, str(head))
-    tools = f.locator("#view-devices .tool-btn")
+    tools = f.locator("#view-devices .tb-main .tool-btn")
     size = tools.first.evaluate("b => Math.round(b.getBoundingClientRect().width)")
     check(f"{case}: search, sort and filter icons in the Devices toolbar", tools.count() == 3 and size == (44 if width < 700 else 36),
           f"{tools.count()} / {size}")
@@ -306,7 +308,7 @@ def _sorting_and_downgrade(c):
     f.wait_for_selector(".fw-row")
     check(f"{case}: sort tool in the Firmware toolbar", _checked(f, "firmware") == ["type", "asc"], str(_checked(f, "firmware")))
     labels = [e[0] for e in filter_entries(f, "firmware")]
-    check(f"{case}: Firmware filter entries", labels == ["All", "Provided", "Uploaded", "Intermediate", "Gen1", "Unused"], str(labels))
+    check(f"{case}: Firmware filter entries", labels == ["All", "Provided", "Installed", "Uploaded", "Imported", "Intermediate", "Gen1", "Unused"], str(labels))
     _unused_chip(c)
     pick_filter(f, "firmware", "Uploaded")
     tags = f.evaluate("() => [...document.querySelectorAll('.fw-row')].map(r => !!r.querySelector('.fw-ver .tag.warn'))")

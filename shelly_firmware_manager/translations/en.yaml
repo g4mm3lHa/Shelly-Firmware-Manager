@@ -7,6 +7,10 @@ configuration:
   check_time:
     name: Check time
     description: Local time of Home Assistant
+  offer_after_days:
+    name: Offer updates only after (days)
+    description: >-
+      Holds a new firmware version back until it is this many days old (age from its build date); 0 = offer at once. 0–60, default 0
   download_base_url:
     name: Download base URL for the Shellys
     description: >-
@@ -21,6 +25,10 @@ configuration:
     name: Allow downgrades
     description: >-
       Installing an older stored firmware on Gen2+ devices (device menu and Firmware tab); off by default
+  keep_installed:
+    name: Keep installed versions
+    description: >-
+      Also stores the firmware a device already runs while Shelly still offers it (Gen2+ only), so that a downgrade stays possible after a bad update; on by default
   import_max_mb:
     name: Max. import size (MB)
     description: >-

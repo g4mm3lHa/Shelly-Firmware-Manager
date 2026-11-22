@@ -24,12 +24,15 @@ Security:
 
 import asyncio
 import base64
+import datetime
 import hashlib
+import hmac
 import ipaddress
 import json
 import re
 import secrets
 import socket
+import unicodedata
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,6 +49,9 @@ MIN_FW_SIZE = 1024  # anything smaller is certainly no firmware
 FW_EXTENSIONS = (".zip", ".bin", ".gbl")
 FW_NAME_RE = re.compile(r"^[0-9a-f]{64}\.(zip|bin|gbl)$")
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
+# Build date at the start of a Gen2+ build_id ("20241011-114455/1.4.4-g6d2a586") or a Gen1
+# version text ("20230913-112003/v1.14.0-gcb84623"): YYYYMMDD-HHMMSS
+BUILD_DATE_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})-\d{6}(?:/|$)")
 _ERROR_LABEL_RE = re.compile(r"\b(?:message|url)=(?=['\"])")  # labels of aiohttp's ClientResponseError
 VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)(\d+))?")
 
@@ -134,6 +140,29 @@ UNSUPPORTED = "unsupported"  # the device/firmware does not offer the feature
 def clip(value: object, limit: int = 200) -> str:
     """Limit external values before they are stored or displayed."""
     return str(value if value is not None else "")[:limit]
+
+
+def plain(value: object, limit: int = 200) -> str:
+    """clip for device texts that also leave the app's own UI (Home Assistant
+    notification, log lines): control and format characters (line breaks, escape
+    sequences, bidi overrides …) and line/paragraph separators are removed."""
+    return "".join(c for c in clip(value, limit) if unicodedata.category(c)[0] != "C" and c not in "\u2028\u2029")
+
+
+def parse_json(text: str | bytes) -> Any:
+    """json.loads for data from outside: a value nested too deeply raises a
+    RecursionError in json, which is turned into the ValueError of invalid JSON."""
+    try:
+        return json.loads(text)
+    except RecursionError:
+        raise ValueError("JSON nested too deeply") from None
+
+
+def same_secret(given: object, expected: str) -> bool:
+    """Constant-time comparison of a value from outside (token, seal) with the expected
+    ASCII text; another type or a non-ASCII text is simply not equal (hmac refuses to
+    compare non-ASCII strings with a TypeError)."""
+    return isinstance(given, str) and given.isascii() and hmac.compare_digest(given, expected)
 
 
 def error_text(err: object, limit: int = 200) -> str:
@@ -390,7 +419,7 @@ async def _call(
                 continue
             raw = await read_limited(resp, MAX_DEVICE_BODY, "Response from the device too large")
             try:
-                return resp.status, json.loads(raw.decode("utf-8", "replace"))
+                return resp.status, parse_json(raw.decode("utf-8", "replace"))
             except ValueError:
                 return resp.status, None
     raise ShellyError("Authentication with the Shelly failed")  # not reached
@@ -493,8 +522,8 @@ def _identity(info: dict[str, Any], gen: int, protected: bool | None) -> dict[st
             "type": clip(info["app"], 64),
             "model": clip(info.get("model"), 64),
             "mac": clip(info.get("mac"), 32).upper(),
-            "version": clip(info["ver"], 64),
-            "build": clip(info["fw_id"], 128),
+            "version": plain(info["ver"], 64),
+            "build": plain(info["fw_id"], 128),
         }
     return {
         "auth_enabled": protected,
@@ -503,8 +532,8 @@ def _identity(info: dict[str, Any], gen: int, protected: bool | None) -> dict[st
         "type": clip(info["type"], 64),
         "model": clip(info["type"], 64),
         "mac": clip(info.get("mac"), 32).upper(),
-        "version": clip(info["fw"], 128),
-        "build": clip(info["fw"], 128),
+        "version": plain(info["fw"], 128),
+        "build": plain(info["fw"], 128),
     }
 
 
@@ -600,7 +629,7 @@ class OtaChannel:
             if self.auth is None:
                 raise AuthError("The Shelly requires a password – store it in the device's password dialog")
             try:
-                challenge = json.loads(str(error.get("message") or ""))
+                challenge = parse_json(str(error.get("message") or ""))
             except ValueError:
                 raise ShellyError("Invalid authentication request from the Shelly") from None
             frame: dict[str, Any] = {"id": 2, "src": self.src, "method": "Shelly.Update", "params": params}
@@ -649,7 +678,7 @@ class OtaChannel:
                     return None
                 continue  # binary, ping/pong: not part of the RPC protocol
             try:
-                frame = json.loads(msg.data)
+                frame = parse_json(msg.data)
             except ValueError:
                 continue
             if isinstance(frame, dict):
@@ -702,6 +731,78 @@ def _flag(value: object) -> bool | str:
     return value if isinstance(value, bool) else UNSUPPORTED
 
 
+def build_date(text: object) -> str | None:
+    """Build date "YYYY-MM-DD" from the start of a Gen2+ build ID or a Gen1 version
+    text (see BUILD_DATE_RE); None if the text does not start with a valid date. The
+    manufacturer's servers name no release date: the build date is the only one."""
+    match = BUILD_DATE_RE.match(text) if isinstance(text, str) else None
+    if not match:
+        return None
+    try:
+        return datetime.date(*(int(part) for part in match.groups())).isoformat()
+    except ValueError:
+        return None
+
+
+# Script that the Shelly integration of Home Assistant installs on a Gen2+ Shelly to use it
+# as Bluetooth proxy (aioshelly BLE_SCRIPT_NAME); Home Assistant turns Bluetooth on again
+# while it runs
+BLE_PROXY_SCRIPT = "aioshelly_ble_integration"
+
+
+async def _ble_proxy(session: aiohttp.ClientSession, origin: str, auth: DeviceAuth | None) -> bool | None:
+    """True if Home Assistant's Bluetooth proxy script runs on the device (Script.List:
+    name BLE_PROXY_SCRIPT, running), False if not or the device has no scripts, None
+    if it could not be read."""
+    try:
+        data = await _rpc(session, origin, "Script.List", auth=auth)
+    except UnsupportedError:
+        return False
+    except (TimeoutError, ShellyError, aiohttp.ClientError):
+        return None
+    scripts = data.get("scripts")
+    if not isinstance(scripts, list):
+        return None
+    return any(
+        isinstance(e, dict) and e.get("name") == BLE_PROXY_SCRIPT and e.get("running") is True for e in scripts
+    )
+
+
+async def _cloud_connected(session: aiohttp.ClientSession, origin: str, auth: DeviceAuth | None) -> bool | None:
+    """Gen2+: whether the device is connected to the Shelly cloud now (Cloud.GetStatus),
+    None if it could not be read."""
+    try:
+        status = await _rpc(session, origin, "Cloud.GetStatus", auth=auth)
+    except (TimeoutError, ShellyError, aiohttp.ClientError):
+        return None
+    connected = status.get("connected")
+    return connected if isinstance(connected, bool) else None
+
+
+async def wifi_signal(
+    session: aiohttp.ClientSession, gen: int, origin: str, auth: DeviceAuth | None = None
+) -> int | None:
+    """Wi-Fi signal of the device in dBm, read now (Gen2+ Wifi.GetStatus, Gen1 /status
+    wifi_sta). None if the device is not connected over Wi-Fi (e.g. a Pro device on
+    the cable, or no Wi-Fi at all); ShellyError if it is connected but reports no
+    usable value (the dialog shows "unknown")."""
+    if gen >= 2:
+        try:
+            status = await _rpc(session, origin, "Wifi.GetStatus", auth=auth)
+        except UnsupportedError:
+            return None
+        connected = status.get("status") == "got ip"
+    else:
+        status = (await _device_json(session, origin, "/status", auth)).get("wifi_sta") or {}
+        connected = isinstance(status, dict) and status.get("connected") is True
+    if not connected:
+        return None
+    rssi = status.get("rssi") if isinstance(status, dict) else None
+    if isinstance(rssi, bool) or not isinstance(rssi, (int, float)) or not -120 <= rssi <= 0:
+        raise ShellyError("The device reported no usable Wi-Fi signal")  # shown as "unknown"
+    return int(rssi)
+
+
 def _positive(value: object) -> bool:
     """True if a reported period is a number above 0 (a sleeping battery device)."""
     return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
@@ -747,9 +848,14 @@ async def read_settings(
     auth: DeviceAuth | None = None,
     extended: bool = False,
 ) -> dict[str, Any]:
-    """Shelly name, NTP server, eco mode, AP, Bluetooth and websocket debug switch,
-    battery flag and power-on action of all outputs – one request (Gen2+
+    """Shelly name, NTP server, eco mode, AP, Bluetooth, cloud and websocket debug
+    switch, battery flag and power-on action of all outputs – one request (Gen2+
     Shelly.GetConfig, Gen1 /settings).
+
+    cloud_connected: whether the device is connected to the Shelly cloud while the
+    cloud is on (Gen2+ one more request, Cloud.GetStatus; None if unknown or off).
+    ble_proxy: Gen2+ with Bluetooth on – whether Home Assistant's Bluetooth proxy
+    script runs (one more request, Script.List; None if unknown).
 
     battery is True for a battery device that sleeps between wake-ups (Gen2+
     wakeup_period > 0 in the sys status – read with Sys.GetStatus only when extended –
@@ -775,6 +881,11 @@ async def read_settings(
         # then runs on demand) and ble.rpc.enable is no global switch.
         extra["ble"] = _flag((config.get("ble") or {}).get("enable"))
         extra["debug_ws"] = _flag(((system.get("debug") or {}).get("websocket") or {}).get("enable"))
+        extra["cloud"] = _flag((config.get("cloud") or {}).get("enable"))
+        extra["cloud_connected"] = (
+            await _cloud_connected(session, origin, auth) if extra["cloud"] is True else None
+        )
+        extra["ble_proxy"] = await _ble_proxy(session, origin, auth) if extra["ble"] is True else False
         if _positive(system.get("wakeup_period")):
             extra["battery"] = True
         if extended:
@@ -806,6 +917,11 @@ async def read_settings(
         extra["ap"] = _flag((settings.get("wifi_ap") or {}).get("enabled"))
         extra["ble"] = UNSUPPORTED  # Gen1 devices have no Bluetooth switch
         extra["debug_ws"] = UNSUPPORTED  # Gen1 devices have no websocket debug log
+        cloud = settings.get("cloud") or {}
+        extra["cloud"] = _flag(cloud.get("enabled") if isinstance(cloud, dict) else None)
+        connected = cloud.get("connected") if isinstance(cloud, dict) and extra["cloud"] is True else None
+        extra["cloud_connected"] = connected if isinstance(connected, bool) else None
+        extra["ble_proxy"] = False
         extra["battery"] = _positive((settings.get("sleep_mode") or {}).get("period"))
         # Gen1 device ID (also its mDNS host name), e.g. shelly1-B929CC
         extra["gen1_hostname"] = clip((settings.get("device") or {}).get("hostname"), 64) or None
@@ -863,6 +979,7 @@ def validate_settings(changes: dict[str, Any], outputs: list[dict[str, Any]]) ->
         ("ap", "access point"),
         ("ble", "Bluetooth"),
         ("debug_ws", "websocket debug log"),
+        ("cloud", "cloud"),
     ):
         if key in changes:
             if not isinstance(changes[key], bool):
@@ -905,6 +1022,9 @@ async def write_settings(
         if "ble" in changes:  # legacy global switch only (callers check it is supported)
             result = await _rpc(session, origin, "BLE.SetConfig", {"config": {"enable": changes["ble"]}}, auth)
             restart |= bool(result.get("restart_required"))
+        if "cloud" in changes:  # only cloud.enable – the server address stays
+            result = await _rpc(session, origin, "Cloud.SetConfig", {"config": {"enable": changes["cloud"]}}, auth)
+            restart |= bool(result.get("restart_required"))
         for key, value in changes.get("aop", {}).items():
             kind, _, index = key.partition(":")
             output = {"id": int(index), "config": {"initial_state": value}}
@@ -928,6 +1048,8 @@ async def write_settings(
         query["eco_mode_enabled"] = "true" if changes["eco"] else "false"
     if query:
         await _device_json(session, origin, "/settings", auth, query)
+    if "cloud" in changes:
+        await _device_json(session, origin, "/settings/cloud", auth, {"enabled": "1" if changes["cloud"] else "0"})
     for key, value in changes.get("aop", {}).items():
         kind, _, index = key.partition(":")
         if kind not in GEN1_OUTPUT_KINDS or not index.isdigit():
@@ -1033,7 +1155,7 @@ async def _cloud_json(
         session, url, pins, MAX_CLOUD_JSON, "Response from the manufacturer's server too large", headers
     )
     try:
-        return json.loads(raw.decode("utf-8", "replace"))
+        return parse_json(raw.decode("utf-8", "replace"))
     except ValueError as err:
         raise ShellyError("Invalid response from the manufacturer's server") from err
 
@@ -1082,7 +1204,9 @@ async def fetch_cloud_text(
 async def fetch_offer(
     session: aiohttp.ClientSession, fw_type: str, pins: CertificatePins | None = None, version: str | None = None
 ) -> dict[str, str] | None:
-    """Stable firmware offer {'version', 'url', 'steps'} of a Gen2+ firmware ID, or None.
+    """Stable firmware offer {'version', 'url', 'steps', 'build'} of a Gen2+ firmware ID,
+    or None. 'build' is the build ID the server names (starts with the build date, see
+    build_date; "" if none).
 
     version: installed version of the device. It is sent the way a Shelly asks for
     updates itself – header Shelly-Info with only the firmware ID ("app") and the
@@ -1098,7 +1222,12 @@ async def fetch_offer(
     if not isinstance(stable, dict) or not stable.get("url"):
         return None
     steps = max(1, _int_field(stable, "nsteps", 1))
-    return {"version": clip(stable.get("version"), 64), "url": str(stable["url"]), "steps": str(steps)}
+    return {
+        "version": clip(stable.get("version"), 64),
+        "url": str(stable["url"]),
+        "steps": str(steps),
+        "build": plain(stable.get("build_id"), 128),
+    }
 
 
 async def fetch_gen1_offers(session: aiohttp.ClientSession, pins: CertificatePins | None = None) -> dict[str, Any]:

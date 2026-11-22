@@ -21,8 +21,15 @@ INT_RANGES = {
     "log_retention_days": (1, 365),
     "log_entry_limit": (100, 3000),
     "import_max_mb": (1, 2048),
+    "offer_after_days": (0, 60),
 }
-BOOLS = ("restrict_downloads_to_devices", "gen1_updates_enabled", "allow_downgrade", "resolve_host_names")
+BOOLS = (
+    "restrict_downloads_to_devices",
+    "gen1_updates_enabled",
+    "allow_downgrade",
+    "resolve_host_names",
+    "keep_installed",
+)
 DEFAULTS = {
     "check_interval_days": 7,
     "check_time": "02:45",
@@ -31,6 +38,8 @@ DEFAULTS = {
     "log_retention_days": 90,
     "log_entry_limit": 1000,
     "import_max_mb": 100,
+    "keep_installed": True,
+    "offer_after_days": 0,
 }
 # All option keys of config.yaml. Anything else in options.json is ignored everywhere,
 # so an unknown (e.g. removed) key can never reach the UI, the log or a save request –

@@ -5,8 +5,8 @@ any archive tool opens:
 
     manifest.json        all store entries plus the seal
     SHA256SUMS.txt       "<sha256>  <path>" per file, for a check without this app
-    Gen2+/<type>/<type>-<version>[-upload].<ext>
-    Gen1/<type>/<type>-v<x.y.z>[-upload].<ext>
+    Gen2+/<type>/<type>-<version>[-upload|-import].<ext>
+    Gen1/<type>/<type>-v<x.y.z>[-upload|-import].<ext>
 
 The seal is an HMAC-SHA256 over the canonical JSON of the manifest (everything except
 the seal itself) with a key derived from the export password (scrypt, standard
@@ -17,6 +17,8 @@ password only seals – the archive is not encrypted (firmware is public anyway)
 An import reads only the files the sealed manifest names (never extracts by archive
 names), checks each against its SHA-256 and size and accepts the manifest at the top
 level or in one folder (an archive that was unpacked and packed again).
+The seal proves that the file is unchanged since its creator sealed it – not who that
+was: the manager stores every imported file as unverified (source "import").
 
 Pure functions without manager state; the manager (manager_store) decides what is
 stored. All functions here block (file I/O, scrypt) and run in a worker thread.
@@ -44,6 +46,10 @@ FORMAT_VERSION = 1  # manifest "format_version"; other versions are refused
 MANIFEST = "manifest.json"
 
 SUMS = "SHA256SUMS.txt"
+
+# Values of an entry's "source": a manufacturer download, a user's upload, or a file the
+# exporting store took over from an import itself (never verified there)
+SOURCES = ("download", "upload", "import")
 
 MAX_MANIFEST = 8 * 1024 * 1024  # bytes; upper limit for the manifest of an import
 
@@ -145,8 +151,9 @@ def archive_path(meta: dict[str, Any], ext: str) -> str:
         folder = "Gen1"
     else:
         folder = "Gen2+"
-    upload = "-upload" if meta.get("source") == "upload" else ""
-    return f"{folder}/{fw_type}/{fw_type}-{PATH_PART_RE.sub('_', version)}{upload}{ext}"
+    source = meta.get("source")
+    mark = f"-{source}" if source in SOURCES and source != "download" else ""
+    return f"{folder}/{fw_type}/{fw_type}-{PATH_PART_RE.sub('_', version)}{mark}{ext}"
 
 
 def _export_entry(meta: dict[str, Any], path: str) -> dict[str, Any]:
@@ -155,11 +162,11 @@ def _export_entry(meta: dict[str, Any], path: str) -> dict[str, Any]:
     entry: dict[str, Any] = {
         "path": path,
         **{k: meta.get(k) for k in ("type", "gen", "version", "sha256", "size", "downloaded")},
-        "source": "upload" if meta.get("source") == "upload" else "download",
+        "source": meta["source"] if meta.get("source") in SOURCES else "download",
     }
     if entry["source"] == "upload":
         entry["sha_checked"] = bool(meta.get("sha_checked"))
-    else:
+    elif entry["source"] == "download":
         entry["https"] = meta.get("https") if isinstance(meta.get("https"), bool) else None
     if meta.get("intermediate") is True:
         entry["intermediate"] = True
@@ -175,7 +182,7 @@ def build_export(
 
     Every file is checked against its SHA-256 first: a damaged or missing file is
     left out (counted as "damaged"), never sealed. Returns the counts
-    {"files", "downloads", "uploads", "size", "damaged"}."""
+    {"files", "downloads", "uploads", "imports", "size", "damaged"}."""
     entries: list[dict[str, Any]] = []
     sources: list[Path] = []
     used: set[str] = set()
@@ -212,11 +219,12 @@ def build_export(
         archive.writestr(SUMS, sums)
         for entry, source in zip(entries, sources, strict=True):
             archive.write(source, entry["path"])
-    uploads = sum(1 for e in entries if e["source"] == "upload")
+    counted = [e["source"] for e in entries]
     return {
         "files": len(entries),
-        "downloads": len(entries) - uploads,
-        "uploads": uploads,
+        "downloads": counted.count("download"),
+        "uploads": counted.count("upload"),
+        "imports": counted.count("import"),
         "size": sum(int(e["size"] or 0) for e in entries),
         "damaged": damaged,
     }
@@ -295,7 +303,7 @@ def _clean_entry(raw: object) -> dict[str, Any]:
         raise TransferError("Damaged manifest: invalid version")
     downloaded = raw.get("downloaded")
     source = raw.get("source")
-    if source not in ("download", "upload"):
+    if source not in SOURCES:
         raise TransferError("Damaged manifest: invalid source")
     entry: dict[str, Any] = {
         "path": path,
@@ -311,7 +319,7 @@ def _clean_entry(raw: object) -> dict[str, Any]:
     }
     if source == "upload":
         entry["sha_checked"] = raw.get("sha_checked") is True
-    else:
+    elif source == "download":
         https = raw.get("https")
         entry["https"] = https if isinstance(https, bool) else gen != 1
     if raw.get("intermediate") is True:
@@ -351,7 +359,7 @@ def read_export(path: Path, password: str) -> dict[str, Any]:
             ):
                 raise TransferError("Damaged export: seal missing")
             body = {k: v for k, v in manifest.items() if k != "seal"}
-            if not hmac.compare_digest(_seal(derive_key(password, bytes.fromhex(salt_hex)), body), seal):
+            if not shelly.same_secret(seal, _seal(derive_key(password, bytes.fromhex(salt_hex)), body)):
                 raise TransferError("Wrong export password, or the file list was changed after the export")
             raw_entries = manifest.get("entries")
             if not isinstance(raw_entries, list) or len(raw_entries) > MAX_ENTRIES:
