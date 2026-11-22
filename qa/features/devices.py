@@ -486,7 +486,7 @@ def _layout(c):
         check(f"{case}: no tooltip after a tap", tip_after_tap is True)
     card.locator("button.install").first.click()
     heads = f.evaluate("[...document.querySelectorAll('#dlg .dsec h3')].map(h => h.textContent)")
-    check(f"{case}: installation dialog in sections", heads == ["Device", "Firmware", "Before installing", "Changelog", "Start"], str(heads))
+    check(f"{case}: installation dialog in sections", heads == ["Device", "Firmware", "Before installing", "Start", "Changelog"], str(heads))
     page.screenshot(path=out / f"{case}-install-dialog.png")
     f.locator("#dlg-btns button", has_text="Cancel").click()
     if width < 700:   # phone tile: lines, flush button rows, Details button

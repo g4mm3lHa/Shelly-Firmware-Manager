@@ -131,9 +131,13 @@ def store_transfer(browser, out):
         check(f"{c}: no first-start notice", f.locator("#notice").is_hidden())
         f.click("#tab-settings")
         f.wait_for_selector("#store-export")
-        heads = f.locator("#settings-form h2").all_text_contents()
-        check(f"{c}: cards in the Settings tab", heads == ["Device Passwords", "Checks", "Download Server", "Firmware & Storage", "Logs",
-                                                          "Advanced", "Display"], str(heads))
+        # Cards in independent column stacks (1440 px: two, phones: one); card n stands in
+        # stack n mod columns, so reading the stacks row by row gives the card order
+        stacks = f.evaluate("""() => [...document.querySelectorAll('#settings-form .set-stack')]
+          .map(s => [...s.querySelectorAll('h2')].map(h => h.textContent))""")
+        heads = [s[i] for i in range(max(map(len, stacks), default=0)) for s in stacks if i < len(s)]
+        check(f"{c}: cards in the Settings tab", len(stacks) == (1 if width < 1168 else 2) and heads == [
+            "Device Passwords", "Checks", "Download Server", "Firmware & Storage", "Logs", "Advanced", "Display"], str(stacks))
         order = f.evaluate("""() => [...document.querySelectorAll('#settings-form .form > *')]
           .map(e => e.classList.contains('set-store') ? 'store' : (e.querySelector('input,select,textarea,.pins') || {}).id || '')
           .filter(x => ['opt-allow_downgrade', 'store', 'opt-import_max_mb'].includes(x))""")

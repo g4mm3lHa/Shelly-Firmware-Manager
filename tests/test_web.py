@@ -59,6 +59,9 @@ async def test_double_tap_gets_409(client, mgr, net):
     await wait_idle(mgr)
     checks = [e for e in mgr.events.entries if e["kind"] == "check" and e.get("trigger") == "device"]
     assert len(checks) == 2
+    # newest log entry for the Logs tab (reload, unread mark); no schedule running
+    state = await (await client.get("/api/state")).json()
+    assert state["log_latest"] == mgr.events.entries[-1]["ts"] and state["schedule_running"] is None
 
 
 async def test_double_scan_gets_409(client, mgr, net):

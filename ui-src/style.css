@@ -63,6 +63,10 @@ a{color:var(--primary-color)}
   padding:8px 16px;display:flex;align-items:center;gap:6px}
 .tab svg{width:18px;height:18px;fill:currentColor}
 .tab.active{color:var(--primary-color);border-bottom-color:var(--primary-color)}
+/* Logs tab: unread entries (yellow round "!" after the name, on phones after the icon) */
+.tab-unread{display:inline-flex;align-items:center;justify-content:center;flex:none;width:16px;height:16px;
+  border-radius:50%;background:var(--warning-color);color:#000;font-size:11px;font-weight:700;line-height:1}
+.tab-unread[hidden]{display:none}
 
 /* Controls */
 button,select,input{font:inherit;color:var(--primary-text-color)}
@@ -439,7 +443,10 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
 .form-actions{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:4px}
 .unsaved{color:var(--warn-text);font-size:var(--fs-small)}.unsaved[hidden]{display:none}
 .set-changelog{margin:16px 0 0}
-.settings-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(560px,1fr));gap:0 16px;align-items:start}
+/* Settings cards in independent column stacks (app-settings.js: 1, 2 or 3 columns), so a
+   short card does not leave a gap under it */
+.settings-grid{display:flex;gap:16px;align-items:flex-start}
+.set-stack{flex:1 1 0;min-width:0}
 /* Firmware store block inside "Firmware & Storage": full width, between the options */
 .set-store{grid-column:1/-1;padding:12px 0;border-top:1px solid var(--line);
   border-bottom:1px solid var(--line)}
@@ -593,7 +600,6 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
   .fw-row>.actions{grid-area:act;justify-content:flex-end;align-items:center;gap:2px}
   a.icon{min-width:44px;min-height:44px}
   .fw-row>.actions>*{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px}
-  .settings-grid{grid-template-columns:1fr}
   .log{grid-template-columns:52px 1fr}
   .log .user{grid-column:2}
   .log-head .spacer{flex:1}
@@ -749,4 +755,5 @@ button.listing.listing-phone{display:none}
   /* Tabs: only the active tab shows its name, the others only their icon */
   .tabs-icons .tab:not(.active){font-size:0;flex:0 0 52px;gap:0}.tabs-icons .tab.active{flex:1}
   .tabs-icons .tab svg{width:22px;height:22px}
+  .tabs-icons .tab:not(.active) .tab-unread{margin-left:2px}
 }

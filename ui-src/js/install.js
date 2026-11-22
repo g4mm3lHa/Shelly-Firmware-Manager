@@ -116,10 +116,12 @@ const BETA_WARNING = t("Beta firmware: a pre-release version of Shelly for testi
 const PLAN_DAYS = 7;
 const isoDay = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 /** Confirmation dialog: one device with all details, several as an overview; approval
- *  bound to the SHA-256. Section "Start": now, or "Install at" a date and time (the
- *  approval is given now and stored until then). A beta version needs its own tick. */
+ *  bound to the SHA-256. Section "Start" (above the changelog): now, or "Install at" a
+ *  date and time (the approval is given now and stored until then). A beta version
+ *  needs its own tick. */
 export function openInstall(devs) {
-  const content = [], restart = el("input"); restart.type = "checkbox";
+  // changelogs: shown below the section "Start"
+  const content = [], changelogs = [], restart = el("input"); restart.type = "checkbox";
   const retry = devs.length === 1 && !!devs[0].install_failed, betas = devs.filter(d => d.beta);
   if (devs.length === 1) {
     const d = devs[0];
@@ -137,7 +139,7 @@ export function openInstall(devs) {
     if (d.offer_source === "upload") content.push(el("div", UPLOAD_HINT, "warnbox"));
     if (d.beta) content.push(el("div", BETA_WARNING, "warnbox"));
     if (d.step_target != null) content.push(el("p", stepHint(d), "hint"));
-    content.push(section(t("Changelog"), changelogBox(d)));
+    changelogs.push(section(t("Changelog"), changelogBox(d)));
   } else {
     // Phones show the rows as two-line entries (style.css, class inst-list)
     const table = el("table", null, "inst-list"), h = el("tr");
@@ -157,7 +159,7 @@ export function openInstall(devs) {
     for (const d of devs) {
       const det = el("details"); det.append(el("summary", `${t("Changelog")} – ${d.name}`));
       det.ontoggle = () => { if (det.open && det.children.length === 1) det.append(changelogBox(d)); };
-      content.push(det);
+      changelogs.push(det);
     }
   }
   // A stored version offered without the server's answer needs the risk acknowledgment;
@@ -181,7 +183,7 @@ export function openInstall(devs) {
   const atHint = el("p", (devs.length === 1 ? t("Your approval is stored for this file (SHA-256).") : t("Your approval is stored for these files (SHA-256).")) + " " +
     t("At that time (time zone of Home Assistant) the app installs without asking again – only if the device still runs the version shown here and the file is still provided. Otherwise nothing is installed and the log names the reason. You can cancel it in the Schedules tab or the device menu."), "hint pc-sub");
   content.push(section(t("Start"), box("div", "modes inst-start", box("label", "check", now, " " + t("Now")),
-    box("label", "check", at, " " + t("Install at")), box("div", "sub-check inst-when", day, clock)), atHint));
+    box("label", "check", at, " " + t("Install at")), box("div", "sub-check inst-when", day, clock)), atHint), ...changelogs);
   const betaAck = el("input"); betaAck.type = "checkbox";
   if (betas.length) content.push(box("label", "check beta-ack", betaAck, " " + t("I understand that beta firmware is a pre-release and may contain bugs.")));
   const restartHint = el("p", "", "hint"); content.push(restartHint);

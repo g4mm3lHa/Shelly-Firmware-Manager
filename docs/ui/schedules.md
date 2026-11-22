@@ -13,14 +13,19 @@ as the UI change). Read when you change the Schedules tab or the schedule dialog
   names both ways (add a schedule; "Install at" in the installation dialog).
 - **Dialog "Add schedule" / "Edit schedule" (F12–F15):** name, action (Restart, Cloud on,
   Cloud off, Bluetooth on, Bluetooth off – one action per schedule), pause between devices
-  in seconds (restart only, default 10, 0 = all at once), time, repeat (Daily / On weekdays
+  in seconds (restart only, default 3, 0 = all at once), time, repeat (Daily / On weekdays
   with Mon–Sun / Every n days), devices (All Shellys, new ones included automatically /
   selected list with tags "Ignored", "Battery", "Removed", "No Bluetooth", "No cloud"),
   "Schedule is on"; hint which devices a run leaves out; yellow box for a Bluetooth proxy
-  of Home Assistant, saving stays possible. Buttons "Cancel" / "Save" (blue).
+  of Home Assistant, saving stays possible. Buttons "Cancel" / "Save" (blue). An error
+  (e.g. no name) appears in red below the fields; the dialog stays open with all entries
+  (live test rc1, approved 2026-11-22).
 - **Run now (F19 b):** play icon before the pencil of each schedule; confirmation dialog
   "Run schedule now?" (blue "Run now"); refused with a message while a check, an
   installation or another schedule runs.
+- **Running and last result (live test rc1, approved 2026-11-22):** a run shows "Running …" under
+  "Last run" only; no line under the page title. Counts relate to all chosen devices,
+  left-out ones included ("2 of 3 restarted · 1 left out").
 - **Logs (F18):** kind "Schedule" and filter "Schedules": one entry per run (name, action,
   devices, duration, result; findings expandable), "missed" as warning, creating, changing
   and deleting a schedule; scheduled installations under "Installation".

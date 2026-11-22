@@ -46,7 +46,7 @@ SETTING_ACTIONS = {
 }
 REPEATS = ("daily", "weekdays", "every")
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-PAUSE_DEFAULT_S = 10  # default pause between two restarts
+PAUSE_DEFAULT_S = 3  # default pause between two restarts
 PAUSE_MAX_S = 600  # longest pause between two restarts
 EVERY_MAX_DAYS = 365  # "Every n days": 1–365
 NAME_MAX = 64  # characters of a schedule name

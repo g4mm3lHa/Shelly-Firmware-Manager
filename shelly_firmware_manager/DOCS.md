@@ -80,7 +80,8 @@ Only original Shelly firmware is supported; see [Known limitations](#known-limit
 ## Configuration
 
 All options can be changed in the app's **Settings** tab (or the Configuration tab of
-the app page – same names, help texts and order). Saving restarts the app.
+the app page – same names, help texts and order, in English or German like Home
+Assistant). Saving restarts the app.
 
 | Option | Default | Allowed | Meaning |
 |---|---|---|---|
@@ -369,18 +370,20 @@ date and time – once, at most 7 days ahead, in the time zone of Home Assistant
 "Scheduled" with the time, and the tab **Schedules** lists it.
 
 At that time the app installs without asking again, but only if the device still runs the
-version shown in the dialog and the file is still provided. Otherwise nothing is installed
-and the scheduled installation lapses:
+version shown in the dialog and the file is still provided. If a full check, a schedule
+or work on the device itself is running then, the installation waits up to 30 minutes and
+stays "Scheduled". Otherwise nothing is installed and the scheduled installation lapses:
 
 - a check found another version or file, or beta firmware was switched off;
-- a full check or a schedule runs at that time, or the device is being checked or installed;
+- the running work took longer than 30 minutes;
 - installations are disabled (download base URL);
-- the app was not running at that time (more than 5 minutes late).
+- the app was not running at that time. It never installs later, also not right after a
+  restart, so an installation does not start at an unexpected time.
 
-The log names the reason; Home Assistant shows a notification for every scheduled
-installation that ran or lapsed, except for one the app missed. Cancel it in the row
-menu or the tab **Schedules**; **Install now** in the row menu opens the dialog again and
-replaces the scheduled time.
+The log names the reason. Home Assistant shows one notification for every scheduled
+installation: installed, failed, lapsed or missed. Cancel it in the row menu or the tab
+**Schedules**; **Install now** in the row menu opens the dialog again and replaces the
+scheduled time.
 
 ### Beta firmware
 
@@ -389,7 +392,8 @@ server names for a Gen2+ device. A device with a beta on offer is listed under *
 Updates**; the version has a violet "Beta" tag. The installation dialog warns that a beta
 is a pre-release and needs the tick "I understand that beta firmware is a pre-release and
 may contain bugs." – also for a scheduled installation. The offer delay does not apply to
-betas.
+betas. Shelly offers betas only now and then and not for every model; the app log names
+for every checked device whether a beta was offered.
 
 The way back to a stable version is a downgrade, so it needs that version in the firmware
 store (see [Keep installed versions](#keep-installed-versions)). When you switch the
@@ -463,16 +467,18 @@ A schedule does one action on several Shellys at a fixed time: **Restart**, **Cl
 **Cloud off**, **Bluetooth on** or **Bluetooth off**. **Add schedule** asks for a name, the
 action, the time (time zone of Home Assistant) and the repeat: **Daily**, **On weekdays**
 or **Every** n days. Devices are **All Shellys** (new ones are included automatically) or
-a list you tick. A restart runs device by device with a pause (default 10 seconds, 0 = all
+a list you tick. A restart runs device by device with a pause (default 3 seconds, 0 = all
 at once), so the network and Home Assistant are not hit at once.
 
 A run leaves out ignored and removed devices, battery devices (they sleep) and devices
 without the switch (Gen1 has no Bluetooth switch); the dialog and the log name them. While
-a check, an installation or another schedule runs, a due run waits up to 30 minutes; a run
-the app missed (not running) or that waited longer is skipped and logged as "missed". **Run now** (play icon) starts
+a check, an installation or another schedule runs, a due run waits up to 30 minutes. A run
+that waited longer, or whose time passed while the app was not running, is skipped and
+logged as "missed"; it is not made up for after a restart. **Run now** (play icon) starts
 a schedule at once after a confirmation.
 
-The card lists each schedule with its next run and the last result; the checkbox switches
+The card lists each schedule with its next run and the last result ("2 of 3 restarted · 1
+left out" counts all chosen devices); the checkbox switches
 a schedule off and on. The card **Scheduled Installations** lists the approved installations
 waiting for their time (see [Scheduled installation](#scheduled-installation)). Every run is
 written to the log; Home Assistant shows a notification only when a device was not
@@ -495,6 +501,9 @@ in its details in the normal text colour – they are not contacted and never ma
 entry a warning or error. Removed devices are counted too ("1 removed"); each one is a
 warning if it still answers at its last address and an error if not. Filters and a device search help to find entries. Passwords never appear in the log. Consecutive
 entries of the same device are marked by a bar at the side.
+
+The tab updates itself when a new entry is written. A yellow "!" on the tab marks entries
+written since you last opened it in this browser.
 
 The bin icon deletes a single entry, **Delete all logs** the whole log (each after a
 confirmation). After clearing, one entry remains that names who cleared the log.
@@ -633,7 +642,8 @@ Gen2+ firmware is downloaded over HTTPS only.
 | The app stopped and did not start again | Turn on **Watchdog** and **Start on boot** on the app page. With the Watchdog on, Home Assistant restarts the app after it stopped unexpectedly |
 | The app is shown as running but does not respond | The container health check (a TCP connection to port 8098 every 30 seconds) is meant to make Home Assistant restart the app after three failures if the Watchdog is on. Otherwise restart the app by hand and report the lines of the app log if it happens again |
 | Beta version withdrawn – beta firmware is switched off in the settings (Logs tab) | **Offer beta firmware** was switched off; the offered beta is no longer offered. Check the device to get the stable offer |
-| Shelly firmware: scheduled installation – … was not started (notification) | The reason follows in the text: the version or file changed, a check or schedule ran at that time, or installations are disabled. Approve the installation again |
+| Shelly firmware: scheduled installation – … was not started (notification) | The reason follows in the text: the version or file changed, a check or schedule ran longer than 30 minutes, or installations are disabled. Approve the installation again |
+| Shelly firmware: scheduled installation – … was missed (notification) | The app was not running at the scheduled time; it does not install later. Approve the installation again |
 | Not possible now – … (Run now) | A check, an installation or another schedule runs. Try again when it has finished |
 | Schedule “…” is running – please try again afterwards | **Check now** and installations wait for the end of a schedule run. Try again when the run has finished (Logs tab) |
 | Schedule run: … not reachable / refused (notification) | Some devices did not answer or refused the change. The log entry of the run names them; check those devices |

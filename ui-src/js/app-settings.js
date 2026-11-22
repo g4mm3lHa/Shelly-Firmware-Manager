@@ -145,10 +145,27 @@ export function renderSettings() {
   const save = el("button", t("Save settings"), "primary"); save.onclick = saveOptions;
   const dirty = el("span", t("Unsaved changes"), "unsaved"); dirty.hidden = true;
   const markDirty = () => { dirty.hidden = !Object.keys(optionChanges()).length; };
-  const wrap = box("div", "settings-grid", ...cards);
+  const wrap = box("div", "settings-grid");
+  settingsCards = cards; layoutSettings(wrap);
   wrap.addEventListener("input", markDirty); wrap.addEventListener("change", markDirty); wrap.addEventListener("click", () => setTimeout(markDirty));
   $("settings-form").replaceChildren(wrap, box("div", "form-actions", dirty, save), changelogNote());   // common save area
   markDirty();   // a suggested download base URL is an unsaved change
+}
+// Columns of the Settings tab: the cards fill independent stacks from left to right (card
+// n goes to stack n mod columns), so the cards of a column follow each other without the
+// gaps of shared row heights. Three columns from 1600 px, two from 1168 px (two cards of
+// at least 560 px), else one. A changed width moves the same card elements: typed values stay.
+const SETTINGS_THREE = matchMedia("(min-width:1600px)"), SETTINGS_TWO = matchMedia("(min-width:1168px)");
+let settingsCards = [];
+/** Distribute the settings cards over the column stacks of the grid element. */
+function layoutSettings(wrap) {
+  const n = SETTINGS_THREE.matches ? 3 : SETTINGS_TWO.matches ? 2 : 1;
+  const stacks = Array.from({length: n}, () => box("div", "set-stack"));
+  settingsCards.forEach((card, i) => stacks[i % n].append(card));
+  wrap.replaceChildren(...stacks);
+}
+for (const query of [SETTINGS_THREE, SETTINGS_TWO]) {
+  query.addEventListener("change", () => { const wrap = document.querySelector(".settings-grid"); if (wrap) layoutSettings(wrap); });
 }
 // Path of this app's page in Home Assistant (server: slug from the Supervisor); the list
 // of apps until it is known

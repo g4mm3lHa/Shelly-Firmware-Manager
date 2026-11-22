@@ -127,7 +127,11 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   at" with date and time (once, at most 7 days ahead, time zone of Home Assistant); with
   "Install at" the red button reads "Approve & schedule", the title stays "Install
   update?", the hint under the fields names the conditions (F3) and where to cancel. A
-  beta needs its tick also when scheduling.
+  beta needs its tick also when scheduling. The section stands above the changelog
+  (live test rc1, approved 2026-11-22).
+- **Logs tab, unread entries (live test rc1, approved 2026-11-22):** a small yellow round "!" after the
+  tab name (phones: after the icon) while the log holds entries newer than the newest one
+  this browser has shown in the Logs tab; opening the tab clears it.
 - **Language (F20–F25):** card "Display" at the end of the Settings tab with "Language":
   "Same as Home Assistant" (default, fallback English), English, Deutsch; applies at once,
   per browser, not part of "Save settings". German uses "du" (without address where

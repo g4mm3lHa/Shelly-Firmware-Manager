@@ -58,5 +58,5 @@ UI checks: `qa/features/<area>.py` (runner `qa/ui_features.py`), `qa/ui_test.py`
 `docs/codemap/tests.md`.
 
 App definition besides `config.yaml`: `apparmor.txt`, `README.md` / `DOCS.md` (app store),
-`translations/en.yaml`. Check flow: `tools/dev/check.sh [tests|ui|full|build]`; rules of
+`translations/en.yaml` and `de.yaml`. Check flow: `tools/dev/check.sh [tests|ui|full|build]`; rules of
 ruff, mypy and pytest in `pyproject.toml`.

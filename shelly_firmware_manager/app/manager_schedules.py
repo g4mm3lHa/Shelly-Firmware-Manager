@@ -8,17 +8,25 @@ run of a schedule: timetable.py.
 Scheduled installation: the approval of the installation dialog is stored on the
 device ("planned") and carried out once at its time. It installs only the exact file
 (SHA-256) that was approved, on a device that still runs the version shown in the
-dialog; otherwise the plan lapses (log warning, Home Assistant notification). A plan
-whose time the app missed by more than MISSED_AFTER_S lapses as well (log only). The
-result of a scheduled installation is also sent as Home Assistant notification.
+dialog; otherwise the plan lapses (log warning, Home Assistant notification). While a
+full check, a schedule run or work on the device itself goes on, the plan waits up to
+RUN_WAIT_S (it stays "planned" meanwhile), then it lapses. The result of a scheduled
+installation is sent as one Home Assistant notification (not also the usual "Shelly
+updated").
+
+Missed: a job is never made up for. Its time lies before the start of the app, or the
+timetable started it more than LATE_SLACK_S after its time (timer slack only, e.g. a
+blocked event loop or a suspended host): a schedule run is logged as missed, a
+scheduled installation lapses (log warning and Home Assistant notification).
 
 Schedule run: one action on the chosen devices; runs one at a time. While a check, an
 installation, Reload Device Info or a store import runs, the run waits up to
 RUN_WAIT_S, then it counts as missed. Left out (and named in the log): removed,
 ignored and battery devices, devices that are installing, being checked or were
 never checked, devices without the switch (Bluetooth: Gen1 too). One log entry per
-run; a Home Assistant notification once per run if a device was not reached or
-refused the action. A missed run is only logged.
+run; its counts relate to all chosen devices, left-out ones included ("2 of 3
+restarted · 1 left out"). A Home Assistant notification once per run if a device was
+not reached or refused the action. A missed run is only logged.
 """
 
 import asyncio
@@ -37,8 +45,10 @@ from manager_installs import Installs
 
 log = logging.getLogger("sfm.manager")
 
-MISSED_AFTER_S = 300  # a job started more than 5 min after its time counts as missed
-RUN_WAIT_S = 1800  # a schedule run waits at most 30 min for a check or installation
+# A job started later than this after its time counts as missed: no grace period, only
+# the slack of the timer itself (jobs are set to whole minutes)
+LATE_SLACK_S = 30
+RUN_WAIT_S = 1800  # a schedule run or scheduled installation waits at most 30 min for running work
 RUN_WAIT_POLL_S = 10  # and looks again every 10 s
 NOTIFY_TITLE_PLAN = "Shelly firmware: scheduled installation"
 SCHEDULE_USER = "Schedule"  # user of a run started by its time (log)
@@ -57,6 +67,11 @@ class Schedules(Installs):
         super().__init__(*args, **kwargs)
         self._timetable_tasks: set[asyncio.Task[Any]] = set()
         self._running_id: str | None = None  # ID of the schedule whose run is going on
+        # device ID -> its scheduled installation that is due and being carried out or
+        # waiting for running work (the plan stays on the device until it starts)
+        self._plans_due: dict[str, dict[str, Any]] = {}
+        # Start of the app: a job whose time lies before it was missed (never made up for)
+        self.started = time.time()
 
     # ------------------------------------------------------------------------ Start of the app
 
@@ -100,21 +115,34 @@ class Schedules(Installs):
 
     # ----------------------------------------------------------------- Timetable loop (main.py)
 
+    def _late(self, planned: float, now: float) -> str | None:
+        """Why a job due at `planned` and started at `now` counts as missed (None: on
+        time). Nothing is made up for: a time before the start of the app is missed."""
+        if planned < self.started:
+            return "the app was not running at that time"
+        if now - planned > LATE_SLACK_S:
+            return f"the app started it {round(now - planned)} s late"
+        return None
+
     def due_in(self, now: float) -> float:
-        """Seconds until the next scheduled installation or schedule run (inf: none)."""
-        times = [float(d["planned"]["at"]) for d in self.devices.values() if d.get("planned")]
+        """Seconds until the next scheduled installation or schedule run (inf: none);
+        plans already being carried out do not count."""
+        times = [
+            float(d["planned"]["at"])
+            for k, d in self.devices.items()
+            if d.get("planned") and self._plans_due.get(k) is not d["planned"]
+        ]
         times += [float(s["next"]) for s in self.schedules if s.get("on") and isinstance(s.get("next"), (int, float))]
         return max(0.0, min(times) - now) if times else float("inf")
 
     def start_due(self, now: float) -> None:
         """Start every job whose time has come, each as its own task: scheduled
         installations first (a schedule run due at the same time then waits for them),
-        then the schedules. A job is taken off synchronously, so it starts only once."""
+        then the schedules. A job is marked synchronously, so it starts only once."""
         for device_id, dev in list(self.devices.items()):
             plan = dev.get("planned")
-            if plan and float(plan["at"]) <= now:
-                dev.pop("planned")
-                self.save()
+            if plan and float(plan["at"]) <= now and self._plans_due.get(device_id) is not plan:
+                self._plans_due[device_id] = plan
                 self._spawn(self._run_plan(device_id, plan, now))
         for item in self.schedules:
             planned = item.get("next")
@@ -199,18 +227,22 @@ class Schedules(Installs):
         self.timetable_changed.set()
         return True
 
-    def _plan_blocker(self, device_id: str, dev: Device, plan: dict[str, Any]) -> str | None:
-        """Why a scheduled installation cannot start now (None: it can)."""
+    def _plan_waits_for(self, device_id: str, dev: Device) -> str | None:
+        """Running work a due scheduled installation waits for (None: nothing)."""
         if self.checking:
             return "a full check was running"
         if self.schedule_running is not None:
             return f"the schedule “{self.schedule_running}” was running"
-        if self.download_base_issue:
-            return "installations are disabled (download base URL)"
         if device_id in self.installing or dev.get("status") == STATUS_INSTALLING:
-            return "the device was already installing"
+            return "the device was installing"
         if device_id in self.device_checks or device_id in self.reloading:
             return "the device was being checked"
+        return None
+
+    def _plan_blocker(self, device_id: str, dev: Device, plan: dict[str, Any]) -> str | None:
+        """Why a due scheduled installation cannot be carried out (None: it can)."""
+        if self.download_base_issue:
+            return "installations are disabled (download base URL)"
         if dev.get("version") != plan.get("version"):
             return f"the device runs {plain(dev.get('version'), 64) or 'another version'} now"
         if plan.get("beta") and not self.beta_firmware:
@@ -219,22 +251,63 @@ class Schedules(Installs):
             return "the approved file is no longer provided"
         return None
 
-    async def _run_plan(self, device_id: str, plan: dict[str, Any], now: float) -> None:
-        """Carry out a scheduled installation (already taken off the device)."""
+    def _take_plan(self, device_id: str, plan: dict[str, Any]) -> Device | None:
+        """Take a due plan off its device; None if it is no longer there (cancelled,
+        replaced, lapsed after a check, installed now or the device left the list)."""
         dev = self.devices.get(device_id)
-        if dev is None:
-            return  # device removed from the list meanwhile
-        if now - float(plan["at"]) > MISSED_AFTER_S:
-            await self._plan_lapsed(device_id, dev, plan, "the app was not running at that time", notify=False)
-            return
+        if dev is None or dev.get("planned") is not plan:
+            return None
+        dev.pop("planned")
+        self.save()
+        self.timetable_changed.set()
+        return dev
+
+    async def _run_plan(self, device_id: str, plan: dict[str, Any], now: float) -> None:
+        """Carry out a due scheduled installation: missed if it is late (see _late);
+        waits up to RUN_WAIT_S for running work (the plan stays on the device and can
+        still be cancelled), then installs or lapses."""
+        try:
+            missed = self._late(float(plan["at"]), now)
+            if missed:
+                if (dev := self._take_plan(device_id, plan)) is not None:
+                    await self._plan_lapsed(device_id, dev, plan, missed, missed=True)
+                return
+            deadline = time.monotonic() + RUN_WAIT_S
+            while True:
+                current = self.devices.get(device_id)
+                if current is None or current.get("planned") is not plan:
+                    return  # cancelled, replaced or lapsed meanwhile
+                waits_for = self._plan_waits_for(device_id, current)
+                if waits_for is None:
+                    break
+                if time.monotonic() >= deadline:
+                    if (dev := self._take_plan(device_id, plan)) is not None:
+                        reason = f"{waits_for} for more than {RUN_WAIT_S // 60} minutes"
+                        await self._plan_lapsed(device_id, dev, plan, reason)
+                    return
+                await asyncio.sleep(RUN_WAIT_POLL_S)
+            if (dev := self._take_plan(device_id, plan)) is None:
+                return
+            await self._install_planned(device_id, dev, plan)
+        finally:
+            if self._plans_due.get(device_id) is plan:
+                del self._plans_due[device_id]
+
+    async def _install_planned(self, device_id: str, dev: Device, plan: dict[str, Any]) -> None:
+        """Install a scheduled installation (taken off the device); one notification
+        with the result."""
         blocker = self._plan_blocker(device_id, dev, plan)
         if blocker:
             await self._plan_lapsed(device_id, dev, plan, blocker)
             return
         restart_first = bool(plan.get("restart")) and bool(dev.get("install_failed"))
-        ok = await self.install(
-            device_id, str(plan["sha256"]), approved_by=f"{plan.get('by')} (scheduled)", restart_first=restart_first
-        )
+        self.notify_muted.add(device_id)  # the result is notified below, once
+        try:
+            ok = await self.install(
+                device_id, str(plan["sha256"]), approved_by=f"{plan.get('by')} (scheduled)", restart_first=restart_first
+            )
+        finally:
+            self.notify_muted.discard(device_id)
         name = markdown_text(dev.get("name"), 120)
         if ok:
             text = f"{name}: {markdown_text(plan.get('target'))} installed as scheduled."
@@ -246,12 +319,12 @@ class Schedules(Installs):
         await self.notify(NOTIFY_TITLE_PLAN, text, f"sfm_planned_{device_id}")
 
     async def _plan_lapsed(
-        self, device_id: str, dev: Device, plan: dict[str, Any], reason: str, notify: bool = True
+        self, device_id: str, dev: Device, plan: dict[str, Any], reason: str, missed: bool = False
     ) -> None:
-        """A scheduled installation that is not carried out: log warning and (unless
-        missed) a Home Assistant notification. The device keeps its provided file."""
+        """A scheduled installation that is not carried out (missed: its time passed
+        unused): log warning and Home Assistant notification. The device keeps its
+        provided file."""
         at = _clock(plan.get("at"), self.tz)
-        missed = not notify
         self.events.add(
             "install",
             severity="warning",
@@ -266,13 +339,13 @@ class Schedules(Installs):
         )
         log.warning("%s: scheduled installation (%s) not started: %s", dev.get("name"), at, reason)
         self.save()
-        if notify:
-            await self.notify(
-                NOTIFY_TITLE_PLAN,
-                f"{markdown_text(dev.get('name'), 120)}: the installation of {markdown_text(plan.get('target'))} "
-                f"scheduled for {markdown_text(at)} was not started – {markdown_text(reason, 300)}.",
-                f"sfm_planned_{device_id}",
-            )
+        await self.notify(
+            NOTIFY_TITLE_PLAN,
+            f"{markdown_text(dev.get('name'), 120)}: the installation of {markdown_text(plan.get('target'))} "
+            f"scheduled for {markdown_text(at)} was {'missed' if missed else 'not started'} – "
+            f"{markdown_text(reason, 300)}.",
+            f"sfm_planned_{device_id}",
+        )
 
     def _review_plans(self) -> None:
         """After a check: a plan whose device now runs another version or no longer
@@ -419,8 +492,9 @@ class Schedules(Installs):
             item = self._schedule(sid)
         except KeyError:
             return  # deleted meanwhile
-        if now - planned > MISSED_AFTER_S:
-            self._missed(item, planned, "the app was not running at that time")
+        late = self._late(planned, now)
+        if late:
+            self._missed(item, planned, late)
             return
         deadline = time.monotonic() + RUN_WAIT_S
         while (blocker := self._run_blocker() or ("first start" if self.first_start_open else None)) is not None:
@@ -520,6 +594,11 @@ class Schedules(Installs):
         try:
             targets, left = self._targets(item)
             results: list[dict[str, str]] = []
+            if action == "restart":
+                log.info(
+                    "Schedule %s: restart of %d device(s), %s", item.get("name"), len(targets),
+                    f"{item.get('pause')} s pause between devices" if item.get("pause") else "all at once",
+                )
             if action == "restart" and item.get("pause"):
                 for index, device_id in enumerate(targets):
                     if index:
@@ -529,12 +608,13 @@ class Schedules(Installs):
                 results = list(await asyncio.gather(*(self._act(d, action, user) for d in targets)))
             self._record_run(item, trigger, user, results, left, time.monotonic() - started)
             failed = [r for r in results if r["result"] != "ok"]
+            chosen = len(results) + len(left)
             if failed:
                 names = ", ".join(markdown_text(r["device"], 120) for r in failed[:20])
                 more = f" and {len(failed) - 20} more" if len(failed) > 20 else ""
                 await self.notify(
                     f"Shelly schedule “{plain(item.get('name'), 64)}”",
-                    f"{len(failed)} of {len(results)} device(s) not reached or refused the action: {names}{more}.\n\n"
+                    f"{len(failed)} of {chosen} device(s) not reached or refused the action: {names}{more}.\n\n"
                     "Details in the Logs tab of the “Shelly Firmware” panel.",
                     f"sfm_schedule_{item.get('id')}",
                 )
@@ -551,13 +631,15 @@ class Schedules(Installs):
         left: list[dict[str, str]],
         duration: float,
     ) -> None:
-        """Log entry and "Last run" of a finished run."""
+        """Log entry and "Last run" of a finished run; "n of m" counts all chosen
+        devices, the left-out ones included."""
         action = str(item["action"])
+        chosen = len(results) + len(left)
         done = sum(1 for r in results if r["result"] == "ok")
         unreachable = sum(1 for r in results if r["result"] == "unreachable")
         refused = sum(1 for r in results if r["result"] == "refused")
         verb = "restarted" if action == "restart" else "switched"
-        parts = [f"{done} of {len(results)} {verb}"] if results else ["No device to run on"]
+        parts = [f"{done} of {chosen} {verb}"] if results else ["No device to run on"]
         if unreachable:
             parts.append(f"{unreachable} not reachable")
         if refused:
@@ -588,7 +670,8 @@ class Schedules(Installs):
             "text": text,
             "counts": {
                 "done": done,
-                "total": len(results),
+                "total": chosen,  # chosen devices, left-out ones included
+                "run": len(results),  # devices the action ran on
                 "unreachable": unreachable,
                 "refused": refused,
                 "left": len(left),

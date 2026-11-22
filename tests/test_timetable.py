@@ -155,17 +155,71 @@ async def test_scheduled_installation_runs_at_its_time(mgr, net, updating):
     events = [(e["kind"], e.get("event"), e.get("user")) for e in mgr.events.entries]
     assert ("install", "scheduled", "alice") in events and ("install", "confirmed", "alice (scheduled)") in events
     assert "installed as scheduled" in mgr.notified[-1][1]
+    # one notification for the scheduled installation, not also the usual "Shelly updated"
+    assert not [n for n in mgr.notified if n[0].startswith("Shelly updated")] and not mgr.notify_muted
 
 
-async def test_missed_plan_lapses_without_notification(mgr, net, updating):
+async def test_missed_plan_lapses_with_notification(mgr, net, updating):
+    """Started later than the timer slack: missed, logged and notified, nothing installed."""
     await mgr.scan()
     at = mgr.plan_install(A, mgr.devices[A]["sha256"], soon(), "alice")
     mgr.notified.clear()
-    mgr.start_due(at + manager_schedules.MISSED_AFTER_S + 1)  # the app was not running at that time
+    mgr.start_due(at + manager_schedules.LATE_SLACK_S + 1)
     await asyncio.gather(*list(mgr._timetable_tasks))
     assert mgr.devices[A]["version"] == "1.4.0" and mgr.devices[A]["status"] == manager_core.STATUS_READY
+    assert "planned" not in mgr.devices[A]
     lapsed = mgr.events.entries[-1]
-    assert lapsed["event"] == "plan_missed" and lapsed["severity"] == "warning" and not mgr.notified
+    assert lapsed["event"] == "plan_missed" and lapsed["severity"] == "warning"
+    assert "was missed" in mgr.notified[-1][1] and mgr.notified[-1][2] == f"sfm_planned_{A}"
+
+
+async def test_plan_due_before_the_app_started_is_missed(mgr, net, updating):
+    """No catch-up after a restart: a time before the start of the app is missed even
+    when the timetable sees it within seconds."""
+    await mgr.scan()
+    at = mgr.plan_install(A, mgr.devices[A]["sha256"], soon(), "alice")
+    mgr.started = at + 1  # the app started one second after the time
+    await run_jobs(mgr, at + 2)
+    assert mgr.devices[A]["version"] == "1.4.0" and mgr.events.entries[-1]["event"] == "plan_missed"
+    assert "not running" in mgr.events.entries[-1]["detail"]
+
+
+async def test_plan_waits_for_running_work_then_installs(mgr, net, updating, monkeypatch):
+    """Due while a full check runs: the plan stays planned, is not started twice and
+    installs once the check ended."""
+    monkeypatch.setattr(manager_schedules, "RUN_WAIT_POLL_S", 0.01)
+    await mgr.scan()
+    at = mgr.plan_install(A, mgr.devices[A]["sha256"], soon(), "alice")
+    mgr.progress = {"phase": "devices"}  # a full check runs
+    mgr.start_due(at)
+    await asyncio.sleep(0.03)
+    assert mgr.devices[A].get("planned") and mgr.due_in(at) == float("inf")
+    mgr.start_due(at + 1)  # already due: not started again
+    assert len(mgr._timetable_tasks) == 1
+    mgr.progress = None
+    await asyncio.gather(*list(mgr._timetable_tasks))
+    assert mgr.devices[A]["version"] == "1.5.0" and "planned" not in mgr.devices[A] and not mgr._plans_due
+
+
+async def test_waiting_plan_lapses_or_is_cancelled(mgr, net, updating, monkeypatch):
+    """A plan that waits longer than RUN_WAIT_S lapses with a notification; one
+    cancelled while it waits is not installed."""
+    monkeypatch.setattr(manager_schedules, "RUN_WAIT_S", 0.05)
+    monkeypatch.setattr(manager_schedules, "RUN_WAIT_POLL_S", 0.01)
+    await mgr.scan()
+    at = mgr.plan_install(A, mgr.devices[A]["sha256"], soon(), "alice")
+    mgr.schedule_running = "Night restart"
+    await run_jobs(mgr, at)
+    entry = mgr.events.entries[-1]
+    assert entry["event"] == "plan_lapsed" and "Night restart" in entry["detail"] and "more than" in entry["detail"]
+    assert "planned" not in mgr.devices[A] and "was not started" in mgr.notified[-1][1]
+    at = mgr.plan_install(A, mgr.devices[A]["sha256"], soon(), "alice")
+    mgr.start_due(at)
+    await asyncio.sleep(0.02)
+    assert mgr.cancel_plan(A, "bob")
+    mgr.schedule_running = None
+    await asyncio.gather(*list(mgr._timetable_tasks))
+    assert mgr.devices[A]["version"] == "1.4.0" and mgr.events.entries[-1]["event"] == "plan_cancelled"
 
 
 async def test_plan_lapses_when_the_device_changed(mgr, net, updating):
@@ -276,7 +330,7 @@ async def test_restart_run_leaves_out_devices_and_logs_once(mgr, net, actions):
     assert actions["restart"] == ["http://192.168.1.10"]
     run = mgr.events.entries[-1]
     assert run["kind"] == "schedule" and run["event"] == "run" and run["trigger"] == "schedule"
-    assert run["result"] == "1 of 1 restarted · 2 left out" and run["severity"] == "success"
+    assert run["result"] == "1 of 3 restarted · 2 left out" and run["severity"] == "success"
     assert {x["reason"] for x in run["left_out"]} == {"ignored", "battery device"}
     view = mgr.public_state()["schedules"][0]
     assert view["last"]["text"] == run["result"] and view["next"] > item["next"] - 1 and not view["running"]
@@ -335,10 +389,15 @@ async def test_missed_run_and_waiting_for_running_work(mgr, net, actions, monkey
     await mgr.scan()
     item = mgr.create_schedule(schedule_data(), "alice")
     mgr.notified.clear()
-    await run_jobs(mgr, item["next"] + manager_schedules.MISSED_AFTER_S + 1)
+    await run_jobs(mgr, item["next"] + manager_schedules.LATE_SLACK_S + 1)
     missed = mgr.events.entries[-1]
     assert missed["event"] == "missed" and missed["severity"] == "warning" and not actions["restart"]
     assert mgr.public_state()["schedules"][0]["last"]["severity"] == "missed" and not mgr.notified
+    # due before the start of the app (stopped over the time): missed, not made up for
+    mgr.started = mgr.schedules[0]["next"] + 45
+    await run_jobs(mgr, mgr.schedules[0]["next"] + 46)
+    assert mgr.events.entries[-1]["event"] == "missed" and "not running" in mgr.events.entries[-1]["detail"]
+    mgr.started = 0
     monkeypatch.setattr(manager_schedules, "RUN_WAIT_S", 0.05)
     monkeypatch.setattr(manager_schedules, "RUN_WAIT_POLL_S", 0.01)
     mgr.installing.add(A)
@@ -354,7 +413,10 @@ async def test_run_blocks_the_full_check_and_installations(mgr, net, actions, mo
     mgr.reserve_schedule_run(item["id"])
     with pytest.raises(shelly.ShellyError, match="Night restart"):
         mgr.reserve_check("all")
-    assert "Night restart" in mgr.busy
+    state = mgr.public_state()
+    assert state["schedule_running"] == "Night restart" and not state["busy"]  # no header line for a run
+    with pytest.raises(shelly.ShellyError, match="Night restart"):
+        await mgr.save_options({"log_entry_limit": 500})
     await mgr.run_schedule_now(item["id"], "bob")
     assert mgr.schedule_running is None and mgr.events.entries[-1]["trigger"] == "manual"
     assert mgr.events.entries[-1]["user"] == "bob"

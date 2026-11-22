@@ -1019,20 +1019,26 @@ class Checks(DeviceSettings):
         version of the server's answer when it is higher than the stable offer and the
         installed version. The beta is taken from the answer for the installed version,
         else from the answer without it. A beta offer carries "channel": "beta"."""
+        name = dev.get("name")
         if dev.get("step_target") is not None:
+            log.info("%s: beta not asked – intermediate version %s comes first", name, offer["version"])
             return offer
         source = offer if offer.get("beta_url") else await self._newest_offer(info, offers) or {}
         version, url = source.get("beta_version"), source.get("beta_url")
         if not version or not url:
+            log.info("%s: no beta version offered by the Shelly update server", name)
             return offer
         try:
             newer = shelly.parse_version(version) > max(
                 shelly.parse_version(offer["version"]), shelly.parse_version(info["version"])
             )
         except ShellyError:
+            log.info("%s: beta version %s not used (unknown version format)", name, shelly.plain(version, 64))
             return offer  # unknown version format: the stable offer stays
         if not newer:
+            log.info("%s: beta version %s offered, not newer than %s", name, version, offer["version"])
             return offer
+        log.info("%s: beta version %s offered", name, version)
         return {"version": version, "url": url, "steps": "1", "build": source.get("beta_build", ""), "channel": "beta"}
 
     async def _store_fallback(self, dev: Device, info: dict[str, Any], err: BaseException) -> None:

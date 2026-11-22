@@ -45,4 +45,4 @@ Schedule entry (`state.schedules[]`, see `timetable.py`): `id` (12 hex), `name`,
 (`restart|cloud_on|cloud_off|ble_on|ble_off`), `pause` (restart only), `time` (HH:MM),
 `repeat` (`{kind: daily}`, `{kind: weekdays, days}`, `{kind: every, n}`), `devices` (`"all"` or
 device IDs), `anchor` (first day of "every n days"), `next` (epoch, None while off), `last`
-(`{at, severity, text}` with `counts` of a run or `reason` of a missed run).
+(`{at, severity, text}` with `counts` of a run – `done`, `total` (chosen devices incl. left out), `run` (acted on), `unreachable`, `refused`, `left` – or `reason` of a missed run).

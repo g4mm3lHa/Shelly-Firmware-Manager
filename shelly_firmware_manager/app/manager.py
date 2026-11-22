@@ -110,6 +110,9 @@ class Manager(Schedules):
             "offer_after_days": self.offer_after_days,
             "last_scan": self.last_scan,
             "busy": self.busy,
+            "schedule_running": self.schedule_running,  # name of the schedule whose run is going on
+            # time of the newest log entry: the Logs tab reloads and marks unread entries
+            "log_latest": self.events.entries[-1].get("ts", 0) if self.events.entries else 0,
             "schedule": {
                 "days": self.check_days,
                 "time": self.check_time,

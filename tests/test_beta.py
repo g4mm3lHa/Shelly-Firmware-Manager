@@ -44,6 +44,19 @@ async def test_no_beta_while_the_option_is_off(mgr, net):
     assert not any(net.beta_requests)
 
 
+async def test_app_log_names_offered_or_no_beta(net, caplog):
+    """Option on: every checked Gen2+ device gets one app log line whether the server
+    offered a beta version or none."""
+    caplog.set_level("INFO", logger="sfm.manager")
+    m = await beta_manager(net)
+    await m.scan()
+    assert "Kitchen: no beta version offered by the Shelly update server" in caplog.text
+    caplog.clear()
+    net.beta_version = "1.6.0-beta1"
+    await m.check_device(A)
+    assert "Kitchen: beta version 1.6.0-beta1 offered" in caplog.text
+
+
 async def test_higher_beta_is_offered_and_marked(net):
     """Option on: a beta higher than the stable offer is provided, marked as beta, in
     its own section and never held back by the offer delay."""
