@@ -135,6 +135,21 @@ class EventLog:
             log.warning("Log could not be written: %s", err)
         return entry
 
+    def latest(self) -> int:
+        """Mark of the newest entry for the UI (unread "!" of the Logs tab, reload of
+        the tab): its time in seconds × 1000 plus the number of newest entries written in
+        that same second, so it grows with every new entry, also within one second.
+        0 for an empty log."""
+        if not self.entries:
+            return 0
+        ts = int(self.entries[-1].get("ts", 0))
+        same = 0
+        for entry in reversed(self.entries):
+            if int(entry.get("ts", 0)) != ts:
+                break
+            same += 1
+        return ts * 1000 + min(same, 999)
+
     def list(self) -> list[dict[str, Any]]:
         """All entries, newest first (the UI groups them by day)."""
         return self.entries[::-1]

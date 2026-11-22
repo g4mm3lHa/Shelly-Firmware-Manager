@@ -23,11 +23,11 @@ Device entry (`state.devices[<HA device id>]`): identity `name`, `shelly_name`,
 `eco`, `ap`, `ble`, `ble_proxy` (Home Assistant's Bluetooth proxy script runs), `cloud`, `cloud_connected`, `debug_ws` (websocket debug log, Gen1 unsupported), `outputs`, `actions`, `schedules`, `auth_enabled`,
 `battery` (sleeping battery device, read from the device while awake: Gen2+ `wakeup_period` > 0 in `Sys.GetStatus` (checks and reloads) or the sys config, Gen1
 `sleep_mode.period` > 0; kept while the device does not answer; without a value of the device a Shelly battery sensor in HA sets it), `battery_source` (`device|home_assistant`), `settings_error`; `host_name` (host name of `configuration_url`, else `<shelly_id or gen1_hostname>.local`; looked up at every check while option `resolve_host_names` is on, None unless it resolves; dropped at the start while it is off; display only), `gen1_hostname` (Gen1 `/settings` `device.hostname`), `address_issue` (`{reason: missing|unresolved|not_private, message}` while the registry gives no usable address); removed `removed` (time it left the registry; Ignored mark dropped), `removed_reachable` (answered at its last address at the last check); flags `ignored`; runtime only (not trusted after a restart)
-`ota_progress`, `ota_phase` ("restarting"), `downgrade`; `updated` (confirmed or unconfirmed installation, until the next full
+`ota_progress`, `ota_phase` ("restarting"), `downgrade` and `downgrade_from` (section before the downgrade; both dropped at start); `updated` (confirmed or unconfirmed installation, until the next full
 check or single check of the device), `install_failed` (failed installation, not a downgrade: file stays
 provided for a retry, same lifetime as `updated`), `store_fallback` (Gen2+: server not reachable,
 newer stored version offered for a manual installation; cleared by the next check of the device),
-`step_target` (Gen2+: provided version is an intermediate version; newest version or ""), `beta` (provided version is a beta of the update server), `planned` ("Install at": `{at, by, on, sha256, version, target, beta, restart}`, see `manager_schedules`), `offer_date` (build date of the provided version, ISO date), `hold` (`{version, built, until}` while option `offer_after_days` holds a new version back; the device stays up to date), `hold_released` (version "Offer update now" released for this device). Memory only: `Manager.activity`, `progress`,
+`step_target` (Gen2+: provided version is an intermediate version; newest version or ""), `beta` (provided version is a beta of the update server), `planned` ("Install at": `{at, by, on, sha256, version, target, beta, restart, fallback_ack}`, see `manager_schedules`), `offer_date` (build date of the provided version, ISO date), `hold` (`{version, built, until}` while option `offer_after_days` holds a new version back; the device stays up to date), `hold_released` (version "Offer update now" released for this device). Memory only: `Manager.activity`, `progress`,
 `installing`, `reloading`, `device_checks`, `downloads`, `_provisions` / `_provision_waiters` / `_fetching`, `_upload`, `_scan_user` / `_check_users` / `_verifying` /
 `_fresh` (running checks only).
 
@@ -44,5 +44,5 @@ fallback or downgrade).
 Schedule entry (`state.schedules[]`, see `timetable.py`): `id` (12 hex), `name`, `on`, `action`
 (`restart|cloud_on|cloud_off|ble_on|ble_off`), `pause` (restart only), `time` (HH:MM),
 `repeat` (`{kind: daily}`, `{kind: weekdays, days}`, `{kind: every, n}`), `devices` (`"all"` or
-device IDs), `anchor` (first day of "every n days"), `next` (epoch, None while off), `last`
+device IDs; empty only on a switched-off schedule whose devices were removed from the list), `anchor` (first day of "every n days"), `next` (epoch, None while off), `last`
 (`{at, severity, text}` with `counts` of a run – `done`, `total` (chosen devices incl. left out), `run` (acted on), `unreachable`, `refused`, `left` – or `reason` of a missed run).

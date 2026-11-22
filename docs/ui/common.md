@@ -142,4 +142,6 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   Geräte, Zeitpläne, Einstellungen, Jetzt prüfen, Updates verfügbar, Beta-Updates, Achtung,
   Aktuell, Bereit, Verfügbar, Geplant, Fehler, Installieren, Prüfen & installieren,
   Freigeben & einplanen, Rückweg, Firmware-Ablage, Prüfungen, Gerätepasswörter, Erweitert,
-  Anzeige; unchanged: Firmware, Logs, Changelog, Downgrade, Beta, Cloud, Gen 2.
+  Anzeige; unchanged: Firmware, Logs, Changelog, Downgrade, Beta, Cloud, Gen 2. The Status
+  column of the Devices table is wider in German, so "Installieren" stays beside its
+  pill (final build 3.10.0).

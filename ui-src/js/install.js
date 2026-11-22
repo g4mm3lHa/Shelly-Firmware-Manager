@@ -1,5 +1,5 @@
 // Installation and downgrade dialogs (approval bound to the SHA-256 of the provided file).
-import {$, api, box, closeModal, devUrl, el, fmt, icon, mb, message, modal, pad, section, selected, shaRow, t, toast, valueList} from "./core.js";
+import {$, api, box, closeModal, devUrl, el, fmt, icon, mb, message, modal, pad, section, selected, shaRow, t, toast, ui, valueList} from "./core.js";
 import {load} from "./main.js";
 
 // ---------------------------------------------------------------- Installation
@@ -115,6 +115,16 @@ const BETA_WARNING = t("Beta firmware: a pre-release version of Shelly for testi
 // "Install at": once, at most 7 days ahead, in the time zone of Home Assistant
 const PLAN_DAYS = 7;
 const isoDay = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+/** "YYYY-MM-DD" of a time (ms) in the time zone of Home Assistant – the server checks the
+ *  chosen date there; the browser's own date if the zone is unknown to the browser. */
+function haDay(ms) {
+  const zone = ui.state && ui.state.schedule ? ui.state.schedule.timezone : undefined;
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit"}).formatToParts(new Date(ms));
+    const part = type => (parts.find(x => x.type === type) || {}).value;
+    return `${part("year")}-${part("month")}-${part("day")}`;
+  } catch (e) { return isoDay(new Date(ms)); }
+}
 /** Confirmation dialog: one device with all details, several as an overview; approval
  *  bound to the SHA-256. Section "Start" (above the changelog): now, or "Install at" a
  *  date and time (the approval is given now and stored until then). A beta version
@@ -176,8 +186,8 @@ export function openInstall(devs) {
   // Start: now, or once at a chosen date and time (default: tomorrow 03:00)
   const now = el("input"), at = el("input"), day = el("input"), clock = el("input");
   now.type = at.type = "radio"; now.name = at.name = "inst-start"; now.checked = true;
-  const today = new Date(), last = new Date(today.getTime() + PLAN_DAYS * 86400000), tomorrow = new Date(today.getTime() + 86400000);
-  day.type = "date"; day.min = isoDay(today); day.max = isoDay(last); day.value = isoDay(tomorrow);
+  const today = Date.now();
+  day.type = "date"; day.min = haDay(today); day.max = haDay(today + PLAN_DAYS * 86400000); day.value = haDay(today + 86400000);
   clock.type = "time"; clock.value = "03:00";
   day.setAttribute("aria-label", t("Date")); clock.setAttribute("aria-label", t("Time"));
   const atHint = el("p", (devs.length === 1 ? t("Your approval is stored for this file (SHA-256).") : t("Your approval is stored for these files (SHA-256).")) + " " +

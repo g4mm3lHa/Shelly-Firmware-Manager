@@ -102,6 +102,53 @@ def test_install_time_limits():
             timetable.install_time(text, now, BERLIN)
 
 
+def test_install_at_and_every_n_days_over_daylight_saving():
+    """"Install at" in the spring gap runs at the first valid instant after it, in the
+    repeated autumn hour at its first occurrence; "every n days" keeps its clock time
+    across the change (the interval is one hour shorter)."""
+    gap = timetable.install_time("2026-03-29T02:30", epoch("2026-03-28 12:00"), BERLIN)
+    assert local(gap) == "2026-03-29 03:00"
+    twice = timetable.install_time("2026-10-25T02:30", epoch("2026-10-24 12:00"), BERLIN)
+    assert twice == datetime(2026, 10, 25, 2, 30, tzinfo=BERLIN, fold=0).timestamp()
+    item = {"on": True, "time": "03:00", "repeat": {"kind": "every", "n": 2}, "anchor": "2026-03-28"}
+    first = timetable.next_run(item, epoch("2026-03-27 12:00"), BERLIN)
+    second = timetable.next_run(item, first, BERLIN)
+    assert (local(first), local(second)) == ("2026-03-28 03:00", "2026-03-30 03:00")
+    assert second - first == 2 * 86400 - 3600
+
+
+def test_stored_schedules_are_checked():
+    """A schedule read from state.json: valid ones are kept (also a switched-off one
+    without devices), damaged ones raise ValueError."""
+    good = {**timetable.validate(schedule_data(devices=[A]), {A}), "id": "a" * 12, "anchor": None,
+            "next": 1.0, "last": None}
+    assert timetable.check_stored(good) == good
+    off = {**good, "action": "cloud_off", "pause": None, "devices": [], "on": False, "next": None}
+    assert timetable.check_stored(off)["devices"] == []
+    for bad in [{"id": "x"}, {"time": 3}, {"repeat": None}, {"next": "soon"}, {"anchor": "2026-02-30"},
+                {"last": []}, {"devices": []}]:
+        with pytest.raises(ValueError):
+            timetable.check_stored({**good, **bad})
+    assert timetable.check_plan({"at": 1, "sha256": "x"}) and not timetable.check_plan({"at": "1", "sha256": "x"})
+
+
+async def test_damaged_schedule_in_the_state_file_is_dropped(mgr, net):
+    """A damaged schedule or scheduled installation in state.json is dropped with a
+    warning; the app starts with the rest."""
+    from helpers import make_manager
+
+    await mgr.scan()
+    mgr.create_schedule(schedule_data(), "alice")
+    mgr.create_schedule(schedule_data(name="Broken"), "alice")
+    mgr.schedules[1]["time"] = None
+    mgr.devices[A]["planned"] = {"at": "tomorrow"}
+    mgr.save()
+    again = make_manager(net)
+    await again.start_timetable()
+    assert [x["name"] for x in again.schedules] == ["Night restart"] and "planned" not in again.devices[A]
+    assert again.due_in(time.time()) > 0
+
+
 def test_texts_for_the_log():
     names = {A: "Kitchen", B: "Hall", C: "Garage", "d" * 32: "Attic"}
     assert timetable.devices_text("all", names) == "All Shellys"
@@ -242,6 +289,64 @@ async def test_check_with_a_new_offer_lapses_the_plan(mgr, net, updating):
     await asyncio.gather(*list(mgr._timetable_tasks))
     assert "planned" not in mgr.devices[A]
     assert mgr.events.entries[-1]["event"] == "plan_lapsed"
+
+
+async def test_plan_lapses_when_the_server_cannot_confirm_the_file(mgr, net, updating):
+    """Approved while the update server confirmed the file; a later check without its
+    answer offers the same file as store fallback: the plan lapses with a notification.
+    A plan approved for the store fallback (risk acknowledged) is kept and installs."""
+    await mgr.scan()
+    sha = mgr.devices[A]["sha256"]
+    mgr.plan_install(A, sha, soon(), "alice")
+    net.offer_error = shelly.ShellyError("408, 'Request Timeout'")
+    await mgr.check_device(A)
+    await asyncio.gather(*list(mgr._timetable_tasks))
+    assert mgr.devices[A]["store_fallback"] is True and "planned" not in mgr.devices[A]
+    entry = mgr.events.entries[-1]
+    assert entry["event"] == "plan_lapsed" and entry["detail"] == "the update server could not confirm the file"
+    assert "could not confirm" in mgr.notified[-1][1]
+    at = mgr.plan_install(A, sha, soon(), "alice")  # approved with the risk acknowledgment
+    assert mgr.devices[A]["planned"]["fallback_ack"] is True
+    await mgr.check_device(A)
+    assert mgr.devices[A].get("planned")
+    await run_jobs(mgr, at)
+    assert mgr.devices[A]["version"] == "1.5.0"
+    started = [e for e in mgr.events.entries if e.get("event") == "started"][-1]
+    assert started["unverified"] is True
+
+
+async def test_plan_lapses_on_an_ignored_or_removed_device(mgr, net, updating):
+    """An ignored device is not installed at its time; a device removed from Home
+    Assistant loses its plan at the next check."""
+    await mgr.scan()
+    sha = mgr.devices[A]["sha256"]
+    at = mgr.plan_install(A, sha, soon(), "alice")
+    mgr.set_ignored(A, True)
+    await run_jobs(mgr, at)
+    assert mgr.devices[A]["version"] == "1.4.0" and mgr.events.entries[-1]["detail"] == "the device is ignored"
+    mgr.set_ignored(A, False)
+    mgr.plan_install(A, sha, soon(), "alice")
+    net.removed.add(A)
+    await mgr.scan()
+    await asyncio.gather(*list(mgr._timetable_tasks))
+    assert "planned" not in mgr.devices[A]
+    assert mgr.events.entries[-1]["detail"] == "the device was removed from Home Assistant"
+
+
+async def test_http_install_refused_for_ignored_or_reloading_device(client, mgr, net):
+    """Installing now: refused for an ignored device and while its info is reloaded –
+    a scheduled installation is kept then."""
+    await mgr.scan()
+    hdr = {"X-CSRF-Token": client.csrf}
+    sha = mgr.devices[A]["sha256"]
+    mgr.plan_install(A, sha, soon(), "alice")
+    mgr.reloading.add(A)
+    r = await client.post(f"/api/devices/{A}/install", json={"sha256": sha, "confirm": True}, headers=hdr)
+    assert r.status == 409 and "reloaded" in await r.text() and mgr.devices[A].get("planned")
+    mgr.reloading.discard(A)
+    mgr.devices[A]["ignored"] = True
+    r = await client.post(f"/api/devices/{A}/install", json={"sha256": sha, "confirm": True}, headers=hdr)
+    assert r.status == 409 and "ignored" in await r.text() and mgr.devices[A].get("planned")
 
 
 async def test_plan_refused_for_a_wrong_approval_or_time(mgr, net):
@@ -404,6 +509,94 @@ async def test_missed_run_and_waiting_for_running_work(mgr, net, actions, monkey
     await run_jobs(mgr, mgr.schedules[0]["next"])
     assert mgr.events.entries[-1]["event"] == "missed" and "installations" in mgr.events.entries[-1]["detail"]
     assert not actions["restart"]
+
+
+async def test_unexpected_error_and_app_stop_during_a_run_are_logged(mgr, net, actions, monkeypatch):
+    """An error no code path expects counts as refused for its device, the run is still
+    logged; a run cut off by the app stop is logged as interrupted with what was done."""
+    await mgr.scan()
+    real = mgr.restart_device
+
+    async def restart(device_id, *args, **kwargs):
+        if device_id == A:
+            raise RuntimeError("boom")
+        return await real(device_id, *args, **kwargs)
+
+    monkeypatch.setattr(mgr, "restart_device", restart)
+    item = mgr.create_schedule(schedule_data(devices=[A, B]), "alice")
+    await run_jobs(mgr, item["next"])
+    run = mgr.events.entries[-1]
+    assert run["event"] == "run" and run["result"] == "1 of 2 restarted · 1 refused"
+    assert run["findings"][0]["detail"].startswith("Unexpected error (RuntimeError")
+    monkeypatch.setattr(mgr, "restart_device", real)
+    slow = mgr.create_schedule(schedule_data(name="Slow", pause=600, devices=[A, B]), "alice")
+    mgr.reserve_schedule_run(slow["id"])
+    done = len(actions["restart"])
+    task = asyncio.create_task(mgr.run_schedule_now(slow["id"], "bob"))
+    for _ in range(100):
+        await asyncio.sleep(0)
+        if len(actions["restart"]) > done:
+            break
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    run = mgr.events.entries[-1]
+    assert run["result"] == "1 of 2 restarted · interrupted – the app stopped" and run["severity"] == "warning"
+    assert slow["last"]["counts"]["interrupted"] is True and mgr.schedule_running is None
+
+
+async def test_automatic_check_waits_for_a_schedule_run(mgr, net, monkeypatch):
+    """An automatic check due while a schedule runs waits for the end of the run; if it
+    still runs after RUN_WAIT_S, the check is skipped and logged."""
+    monkeypatch.setattr(manager_schedules, "RUN_WAIT_POLL_S", 0.01)
+    mgr.schedule_running = "Night restart"
+    task = asyncio.create_task(mgr.scan(automatic=True))
+    await asyncio.sleep(0.03)
+    assert not task.done() and not mgr.checking
+    mgr.schedule_running = None
+    assert await task is True
+    monkeypatch.setattr(manager_schedules, "RUN_WAIT_S", 0.03)
+    mgr.schedule_running = "Night restart"
+    assert await mgr.scan(automatic=True) is False
+    entry = mgr.events.entries[-1]
+    assert entry["kind"] == "check" and "Night restart" in entry["skipped"]
+
+
+async def test_removed_device_is_struck_from_its_schedules(mgr, net):
+    """Remove from list: the device leaves every schedule (logged as a change); a
+    schedule left without devices is switched off, can be edited again and survives a
+    restart."""
+    from helpers import make_manager
+
+    await mgr.scan()
+    both = mgr.create_schedule(schedule_data(devices=[A, C]), "alice")
+    only = mgr.create_schedule(schedule_data(name="Garage only", devices=[C]), "alice")
+    net.removed.add(C)
+    await mgr.scan()
+    mgr.forget_device(C, confirm=True, user="bob")
+    assert both["devices"] == [A] and both["on"] and both["next"]
+    assert only["devices"] == [] and only["on"] is False and only["next"] is None
+    changed = [e for e in mgr.events.entries if e.get("event") == "changed"]
+    assert changed[0]["changes"] == ["Devices: Kitchen, Garage → Kitchen"] and changed[0]["user"] == "bob"
+    assert changed[1]["changes"] == ["Switched off", "Devices: Garage → No device"]
+    mgr.update_schedule(both["id"], schedule_data(devices=[A], on=False), "bob")  # no "unknown device"
+    again = make_manager(net)
+    assert [x["devices"] for x in again.schedules] == [[A], []]
+
+
+async def test_device_back_with_a_new_id_stays_in_its_schedules(mgr, net):
+    """A Shelly removed from Home Assistant and added again (new device ID, same MAC):
+    its schedules follow the new ID."""
+    await mgr.scan()
+    item = mgr.create_schedule(schedule_data(devices=[A, C]), "alice")
+    net.removed.add(C)
+    new = "0" * 31 + "d"
+    net.extra_registry.append({"id": new, "name": "Garage", "identifiers": [["shelly", new]],
+                               "configuration_url": "http://192.168.1.12/",
+                               "connections": [["mac", "aa:bb:cc:00:00:0c"]]})
+    await mgr.scan()
+    assert new in mgr.devices and item["devices"] == [A, new]
+    assert mgr.public_state()["schedules"][0]["count"] == 2
 
 
 async def test_run_blocks_the_full_check_and_installations(mgr, net, actions, monkeypatch):

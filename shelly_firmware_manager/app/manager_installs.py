@@ -23,7 +23,7 @@ from shelly import DeviceAuth, ShellyError, error_text
 from manager_checks import Checks
 from manager_core import (
     PENDING, Device, STATUS_AVAILABLE, STATUS_CURRENT, STATUS_ERROR, STATUS_INSTALLING, STATUS_READY,
-    STATUS_UNCLEAR, holds_file, markdown_text, unexpected_text,
+    STATUS_UNCLEAR, holds_file, markdown_text, section_of, unexpected_text,
 )
 
 log = logging.getLogger("sfm.manager")
@@ -150,6 +150,7 @@ class Installs(Checks):
                 source_url=None,
                 offer_source=None,
                 downgrade=True,
+                downgrade_from=section_of(dev),  # the device list keeps the device in this section
             )
             self.save()
         dev["message"] = "Approved, waiting for a free installation slot"
@@ -199,6 +200,7 @@ class Installs(Checks):
         finally:
             self.installing.discard(device_id)
             dev.pop("downgrade", None)
+            dev.pop("downgrade_from", None)
             self.cleanup_firmware()  # housekeeping only, stored firmware stays
             self.save()
 

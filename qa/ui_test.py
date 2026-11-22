@@ -95,7 +95,7 @@ def run_case(pw, width, scheme, embedded, base=IDLE, tag="idle"):
     ov = f.evaluate(OVERFLOW_JS)
     check(page, f"{case}: no horizontal overflow (devices)", ov <= 0, f"overflow {ov}px")
     tabs = f.evaluate(TABS_JS)
-    check(page, f"{case}: all 4 tabs inside viewport", all(t["right"] <= width and t["left"] >= 0 for t in tabs), str(tabs))
+    check(page, f"{case}: all {len(tabs)} tabs inside viewport", all(t["right"] <= width and t["left"] >= 0 for t in tabs), str(tabs))
     if width <= 700:
         small = f.evaluate(TARGETS_JS)
         # status pills and the Install button next to them (same size): >= 32 px

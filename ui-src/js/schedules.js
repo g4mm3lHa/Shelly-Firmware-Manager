@@ -21,6 +21,7 @@ function devicesText(s) {
   if (s.devices === "all") return t("All Shellys ({n})", {n: s.count});
   const names = new Map(ui.state.devices.map(d => [d.id, d.name]));
   const ids = Array.isArray(s.devices) ? s.devices : [], shown = ids.slice(0, 3).map(id => names.get(id) || "?");
+  if (!ids.length) return t("No device");   // all its devices were removed from the list: switched off, choose again
   return shown.join(", ") + (ids.length > 3 ? " " + t("and {n} more", {n: ids.length - 3}) : "");
 }
 /** Short result of the last run, from its counts (English text of the server otherwise). */
@@ -30,10 +31,11 @@ function lastText(last) {
   if (!c) return last.text || "";
   const restart = last.action === "restart";
   // "n of m": m = all chosen devices, left-out ones included ("run": devices acted on)
-  const parts = [(c.run ?? c.total) ? t(restart ? "{done} of {total} restarted" : "{done} of {total} switched", {done: c.done, total: c.total}) : t("No device to run on")];
+  const parts = [(c.run ?? c.total) || c.interrupted ? t(restart ? "{done} of {total} restarted" : "{done} of {total} switched", {done: c.done, total: c.total}) : t("No device to run on")];
   if (c.unreachable) parts.push(t("{n} not reachable", {n: c.unreachable}));
   if (c.refused) parts.push(t("{n} refused", {n: c.refused}));
   if (c.left) parts.push(t("{n} left out", {n: c.left}));
+  if (c.interrupted) parts.push(t("interrupted – the app stopped"));
   return parts.join(" · ");
 }
 /** Cell of a row; on phones a labelled line of the tile (data-label). */

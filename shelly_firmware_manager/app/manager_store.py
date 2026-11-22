@@ -65,6 +65,8 @@ STABLE_VERSION_RE = re.compile(r"^\d{1,4}\.\d{1,4}\.\d{1,4}$")  # stable Gen2+ v
 BETA_VERSION_RE = re.compile(r"^\d{1,4}\.\d{1,4}\.\d{1,4}-(beta|rc)\d{1,3}$")
 
 DOWNGRADE_OFF = "Downgrades are off – enable “Allow downgrades” in Settings"  # option allow_downgrade is off
+# A scheduled installation ("Install at") blocks a downgrade of its device, like "Install"
+DOWNGRADE_PLANNED = "Cancel the scheduled installation first"
 
 EXPORT_PREFIX = PART_PREFIX + "export-"  # temporary export file (removed at start)
 
@@ -684,6 +686,8 @@ class FirmwareStore(ManagerCore):
             return "Downgrades are not offered for Gen1 devices"
         if not self.allow_downgrade:
             return DOWNGRADE_OFF
+        if dev.get("planned"):
+            return DOWNGRADE_PLANNED
         if self.checking:
             return "Check in progress – please try again afterwards"
         if self.download_base_issue:

@@ -578,6 +578,11 @@ class Checks(DeviceSettings):
             except ShellyError as err:
                 log.warning("Stored password of %s not moved: %s", entry.get("name"), err)
             log.info("%s is back in Home Assistant with a new device ID – stored data kept", self._entry_name(entry))
+            self._moved_device(old, device_id)
+
+    def _moved_device(self, old: str, new: str) -> None:
+        """Hook after a device moved to a new device ID (see _readopt_removed); the
+        Schedules layer updates the schedules that name it."""
 
     @staticmethod
     def _apply_ha_battery(dev: Device, has_sensor: bool) -> None:

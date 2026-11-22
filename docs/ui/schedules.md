@@ -26,6 +26,10 @@ as the UI change). Read when you change the Schedules tab or the schedule dialog
 - **Running and last result (live test rc1, approved 2026-11-22):** a run shows "Running …" under
   "Last run" only; no line under the page title. Counts relate to all chosen devices,
   left-out ones included ("2 of 3 restarted · 1 left out").
+- **Device removed from the list (review 3.10.0, F3 a, approved 2026-11-22):** it is struck
+  from every schedule that names it (log "changed"); a schedule left without devices is
+  switched off and shows "No device" until devices are chosen again. A device back in Home
+  Assistant with a new ID stays in its schedules.
 - **Logs (F18):** kind "Schedule" and filter "Schedules": one entry per run (name, action,
   devices, duration, result; findings expandable), "missed" as warning, creating, changing
   and deleting a schedule; scheduled installations under "Installation".
