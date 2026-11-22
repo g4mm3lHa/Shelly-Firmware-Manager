@@ -536,6 +536,13 @@ async def test_http_wifi_signal_and_restart_flag(client, mgr, net, monkeypatch):
     monkeypatch.setattr(shelly, "wifi_signal", signal)
     r = await client.get(f"/api/devices/{A}/signal")
     assert r.status == 200 and await r.json() == {"rssi": -71}
+
+    async def unreadable(*_args, **_kwargs):
+        raise shelly.ShellyError("The device reported no usable Wi-Fi signal")
+
+    monkeypatch.setattr(shelly, "wifi_signal", unreadable)  # the dialog shows "unknown"
+    r = await client.get(f"/api/devices/{A}/signal")
+    assert r.status == 409
     started = []
 
     async def install(device_id, sha, approved_by, downgrade=False, restart_first=False):

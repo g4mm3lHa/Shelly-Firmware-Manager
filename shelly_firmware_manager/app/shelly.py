@@ -784,7 +784,8 @@ async def wifi_signal(
 ) -> int | None:
     """Wi-Fi signal of the device in dBm, read now (Gen2+ Wifi.GetStatus, Gen1 /status
     wifi_sta). None if the device is not connected over Wi-Fi (e.g. a Pro device on
-    the cable, or no Wi-Fi at all) or reports no value."""
+    the cable, or no Wi-Fi at all); ShellyError if it is connected but reports no
+    usable value (the dialog shows "unknown")."""
     if gen >= 2:
         try:
             status = await _rpc(session, origin, "Wifi.GetStatus", auth=auth)
@@ -794,9 +795,11 @@ async def wifi_signal(
     else:
         status = (await _device_json(session, origin, "/status", auth)).get("wifi_sta") or {}
         connected = isinstance(status, dict) and status.get("connected") is True
-    rssi = status.get("rssi") if isinstance(status, dict) else None
-    if not connected or isinstance(rssi, bool) or not isinstance(rssi, (int, float)) or not -120 <= rssi <= 0:
+    if not connected:
         return None
+    rssi = status.get("rssi") if isinstance(status, dict) else None
+    if isinstance(rssi, bool) or not isinstance(rssi, (int, float)) or not -120 <= rssi <= 0:
+        raise ShellyError("The device reported no usable Wi-Fi signal")  # shown as "unknown"
     return int(rssi)
 
 

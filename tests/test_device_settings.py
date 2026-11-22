@@ -546,7 +546,8 @@ async def test_cloud_change_is_logged_and_read_back(mgr, net, monkeypatch):
 
 async def test_wifi_signal_only_for_a_device_on_wifi(device_api):
     """Wi-Fi signal: Gen2+ Wifi.GetStatus with status "got ip", Gen1 /status wifi_sta;
-    a device on the cable (no Wi-Fi connection) or without a value has none."""
+    a device on the cable (no Wi-Fi connection) has none; connected without a usable
+    value is an error (the dialog shows "unknown")."""
     _calls, answers = device_api
     answers["Wifi.GetStatus"] = {"status": "got ip", "rssi": -83}
     assert await shelly.wifi_signal(None, 2, "http://192.168.1.10") == -83
@@ -557,4 +558,8 @@ async def test_wifi_signal_only_for_a_device_on_wifi(device_api):
     answers["/status"] = {"wifi_sta": {"connected": True, "rssi": -58}}
     assert await shelly.wifi_signal(None, 1, "http://192.168.1.10") == -58
     answers["/status"] = {"wifi_sta": {"connected": True, "rssi": "strong"}}
-    assert await shelly.wifi_signal(None, 1, "http://192.168.1.10") is None
+    with pytest.raises(ShellyError):
+        await shelly.wifi_signal(None, 1, "http://192.168.1.10")
+    answers["Wifi.GetStatus"] = {"status": "got ip"}
+    with pytest.raises(ShellyError):
+        await shelly.wifi_signal(None, 2, "http://192.168.1.10")

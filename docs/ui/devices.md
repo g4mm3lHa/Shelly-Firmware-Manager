@@ -135,8 +135,8 @@ Wordings: `mockups/3.9.0/TEXTE.md`.
   what to do; section "Still missing?").
 - **Installation dialog (F4, F6, F12):** section "Before installing" after "Firmware" as a
   check list (green check / yellow "!"): "Way back" (Gen2+) and "Wi-Fi signal" (read when
-  the dialog opens, "Reading …"; −80 dBm and below weak; devices on the cable or not
-  readable: no line). Several devices: only the findings per device, else one line
+  the dialog opens, "Reading …"; −80 dBm and below weak; devices on the cable: no line;
+  not readable: yellow line "Wi-Fi signal: unknown", a finding, approved 2026-11-22). Several devices: only the findings per device, else one line
   "every device". Row "Build date" (date · age) in the section "Firmware" (one device).
   After a failed installation: section "Last attempt" with the reason, pre-ticked
   "Restart the device first" and the button "Restart & install".

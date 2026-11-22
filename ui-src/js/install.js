@@ -69,12 +69,15 @@ function checkLine(ok, title, text) {
     box("span", "pc-icon", ok === null ? null : icon(ok ? "check" : "alert")), box("div", null, el("strong", title), el("span", text)));
 }
 /** Wi-Fi signal of the devices, read now (null: not on Wi-Fi or not readable). */
+// The device did not answer or reported no usable value (shown as "unknown")
+const UNKNOWN_SIGNAL = "unknown";
 async function readSignals(devs) {
-  return Promise.all(devs.map(d => api(`${devUrl(d)}/signal`).then(r => r.rssi ?? null).catch(() => null)));
+  return Promise.all(devs.map(d => api(`${devUrl(d)}/signal`).then(r => r.rssi ?? null).catch(() => UNKNOWN_SIGNAL)));
 }
 /** Section "Before installing": way back and Wi-Fi signal; for several devices only
  *  the findings per device (or one line "every device" without findings). The signal is
- *  read when the dialog opens ("Reading …"); devices on the cable have no signal line. */
+ *  read when the dialog opens ("Reading …"); devices on the cable have no signal line, a
+ *  value that could not be read is shown as "unknown" (yellow, a finding). */
 function beforeInstalling(devs) {
   const list = el("ul", null, "prechk"), one = devs.length === 1;
   const back = () => {
@@ -88,9 +91,10 @@ function beforeInstalling(devs) {
     if (!values) return [checkLine(null, "Wi-Fi signal", "Reading …")];
     const read = devs.map((d, i) => [d, values[i]]).filter(([, v]) => v !== null);
     if (!read.length) return [];
-    if (one) return [checkLine(!weak(read[0][1]), "Wi-Fi signal", weak(read[0][1]) ? WEAK_TEXT(read[0][1]) : signalText(read[0][1]))];
-    const bad = read.filter(([, v]) => weak(v));
-    return bad.length ? bad.map(([d, v]) => checkLine(false, `Wi-Fi signal – ${d.name}`, WEAK_TEXT(v)))
+    const finding = v => v === UNKNOWN_SIGNAL ? "unknown" : WEAK_TEXT(v);
+    const bad = read.filter(([, v]) => v === UNKNOWN_SIGNAL || weak(v));
+    if (one) return [checkLine(!bad.length, "Wi-Fi signal", bad.length ? finding(read[0][1]) : signalText(read[0][1]))];
+    return bad.length ? bad.map(([d, v]) => checkLine(false, `Wi-Fi signal – ${d.name}`, finding(v)))
       : [checkLine(true, "Wi-Fi signal", "Good or fair on every device.")];
   };
   const block = section("Before installing", list);

@@ -313,7 +313,8 @@ downloads, and the free disk space.
    section **Before installing** checks two points: **Way back** (Gen2+: is the
    installed version stored, so a downgrade stays possible?) and **Wi-Fi signal** (read
    from the device when the dialog opens; −80 dBm and below is weak, the download may
-   fail). Devices on the cable have no signal line. For several devices only the
+   fail). Devices on the cable have no signal line; "unknown" means the device did not
+   report a value. For several devices only the
    findings per device are listed.
 3. **Approve installation.** The Shelly downloads the firmware from the app and restarts.
 

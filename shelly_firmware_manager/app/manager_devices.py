@@ -285,7 +285,8 @@ class DeviceSettings(FirmwareStore):
     async def wifi_signal(self, device_id: str) -> dict[str, int | None]:
         """Wi-Fi signal of the device in dBm, read now for the installation dialog
         (same restrictions as reading the settings; not stored, not logged):
-        {"rssi": dBm or None} – None for a device that is not on Wi-Fi (cable)."""
+        {"rssi": dBm or None} – None for a device that is not on Wi-Fi (cable); a value
+        that cannot be read raises ShellyError (the dialog shows "unknown")."""
         dev = self._settings_device(device_id)
         try:
             rssi = await shelly.wifi_signal(self.session, dev["gen"], dev["origin"], self._auth(device_id, dev))
