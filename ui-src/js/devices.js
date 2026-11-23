@@ -698,11 +698,11 @@ function openRowMenu(d, anchor) {
   }
   // Downgrade to a stored older version – Gen2+ only, also up to date / ignored devices,
   // and only while the option "Allow downgrades" is on (else the entry is not shown).
-  // Disabled (no dialog) while no older version is stored or something blocks it
-  if (d.gen < 2 || !s.allow_downgrade) { /* no downgrade entry */ }
-  // A scheduled installation blocks it like "Install": disabled with the hint below it
-  else if (d.planned) { add(t("Downgrade"), () => {}, false); items.push(el("div", t("Cancel the scheduled installation first"), "menu-hint")); }
-  else add(t("Downgrade"), () => openDowngrade(d), downgradable(d, ui.state) && d.downgrades > 0);
+  // Disabled (no dialog) while no older version is stored or something blocks it; a
+  // scheduled installation blocks it like "Install": disabled with the hint below it
+  if (d.gen >= 2 && s.allow_downgrade && d.planned) {
+    add(t("Downgrade"), () => {}, false); items.push(el("div", t("Cancel the scheduled installation first"), "menu-hint"));
+  } else if (d.gen >= 2 && s.allow_downgrade) add(t("Downgrade"), () => openDowngrade(d), downgradable(d, ui.state) && d.downgrades > 0);
   // Group 2: the device itself
   items.push(el("hr"));
   add(t("Device details"), () => showStatus(d), true);
