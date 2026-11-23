@@ -6,7 +6,8 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
 ## Settings tab
 - Settings tab design approved.
 - **Settings cards (3.5.0; Device Passwords first since 2026-11-22):** Device Passwords, Checks, Download Server (download base URL, serve only to
-  known Shellys), Firmware & Storage (Gen1 updates, Allow downgrades, block
+  known Shellys), Firmware & Storage (Gen1 updates, Allow downgrades – ticking it opens the
+  popup "Allow downgrades?", see `devices.md`, block
   "Firmware store" with export/import, Max. import size), Backups (3.11.0, F16: "Back up
   before every installation", on; "Keep backups per device", 10, 1–50, with the note how
   many backups are stored; the firmware store hint, the export dialog and the import

@@ -62,8 +62,8 @@ as the UI change). Read when you change the Firmware tab.
   text; one chevron after the text (down when closed, up when open), like the Details
   button of the phone tiles but without a border.
 - **Downgrade icon (2026-11-19):** history icon before the changelog icon on every
-  older (not the newest) version of a Gen2+ card; disabled with the reason as title
-  while "Allow downgrades" is off (same hint as the row menu) or no device of this type
-  has a newer version installed. Dialog "Downgrade to <type> <version>": value list,
-  section with a radio list of these devices (name · installed version), downgrade
-  warning, Continue → the known second confirmation.
+  older (not the newest) version of a Gen2+ card, only while "Allow downgrades" is on
+  (3.11.1); disabled with the reason as title while no device of this type has a newer
+  version installed. Dialog "Downgrade to <type> <version>": value list,
+  section with a radio list of these devices (name · installed version), red downgrade
+  warning, Continue → the last step (see "Downgrade warning" in `devices.md`).
