@@ -16,6 +16,12 @@ random nonce of the header); the tag is an HMAC-SHA256 over everything before it
 downloaded or exported backup uses a key derived from its password instead (scrypt,
 parameters and salt in the header) – the key of this app never leaves /data.
 
+The key derivation (SCRYPT, SALT_BYTES, derive_key, kdf_salt) is shared with the store
+export (store_transfer): the key of an export password seals its manifest (HMAC over
+JSON, which starts with "{") and is the key of the backup files inside it (HMAC over
+"enc"/"mac" plus nonce). The two inputs can never be equal; a future format version
+would derive one named key per purpose.
+
 A file is only decrypted after its tag was verified; the unpacked size is limited.
 The index holds no settings, only what the lists show; a lost or damaged index is
 built again from the files.
@@ -73,11 +79,14 @@ MAC_RE = re.compile(r"^[0-9A-F]{12}$")  # MAC address as a backup names its devi
 # schedule, or before another backup was restored
 REASONS = ("manual", "update", "downgrade", "schedule", "restore")
 
-SCRYPT = {"n": 2**15, "r": 8, "p": 1}  # scrypt cost of a password key; only exactly these values are accepted
+# scrypt cost of a password key (backup files and store exports); only exactly these values are accepted
+SCRYPT = {"n": 2**15, "r": 8, "p": 1}
 
 SCRYPT_MAXMEM = 64 * 1024 * 1024  # bytes; memory limit of the key derivation
 
-SALT_BYTES = 16
+SALT_BYTES = 16  # random salt of a password key
+
+SALT_RE = re.compile(rf"[0-9a-f]{{{SALT_BYTES * 2}}}")  # salt as the header of a file names it
 
 # Fields of an index entry (the meta data of the file plus size and the two markers)
 ENTRY_TEXT = {"device": 64, "model": 64, "type": 64, "fw": 64, "note": 160}
@@ -94,13 +103,23 @@ def normalize_mac(value: object) -> str | None:
 
 
 def derive_key(password: str, salt: bytes) -> bytes:
-    """Key of a downloaded or exported backup: scrypt with the fixed cost SCRYPT (about 0.1 s)."""
+    """Key of a password (downloaded or exported backup, store export): scrypt with the
+    fixed cost SCRYPT (about 0.1 s)."""
     return hashlib.scrypt(password.encode(), salt=salt, maxmem=SCRYPT_MAXMEM, dklen=KEY_BYTES, **SCRYPT)
 
 
 def password_header(salt: bytes) -> dict[str, Any]:
-    """Header field of a file sealed with a password key."""
+    """Field "kdf" of a file sealed with a password key (backup header, export manifest)."""
     return {"name": "scrypt", **SCRYPT, "salt": salt.hex()}
+
+
+def kdf_salt(kdf: object) -> bytes | None:
+    """Salt of a field "kdf" as password_header writes it; None if it is no such field
+    or names other parameters (a weaker cost is never accepted)."""
+    if not isinstance(kdf, dict) or kdf.get("name") != "scrypt" or any(kdf.get(k) != v for k, v in SCRYPT.items()):
+        return None
+    salt = kdf.get("salt")
+    return bytes.fromhex(salt) if isinstance(salt, str) and SALT_RE.fullmatch(salt) else None
 
 
 def _subkeys(key: bytes, nonce: bytes) -> tuple[bytes, bytes]:
@@ -159,17 +178,10 @@ def read_header(blob: bytes) -> tuple[dict[str, Any], int]:
 def password_salt(header: dict[str, Any]) -> bytes:
     """Salt of a file sealed with a password; BackupError if the file was not sealed
     with one (a stored file of an app) or names other parameters."""
-    kdf = header.get("kdf")
-    salt = kdf.get("salt") if isinstance(kdf, dict) else None
-    if (
-        not isinstance(kdf, dict)
-        or kdf.get("name") != "scrypt"
-        or any(kdf.get(k) != v for k, v in SCRYPT.items())
-        or not isinstance(salt, str)
-        or not re.fullmatch(rf"[0-9a-f]{{{SALT_BYTES * 2}}}", salt)
-    ):
+    salt = kdf_salt(header.get("kdf"))
+    if salt is None:
         raise BackupError("This file was not downloaded with a password – it cannot be imported")
-    return bytes.fromhex(salt)
+    return salt
 
 
 def open_sealed(key: bytes, blob: bytes, wrong_key: str) -> tuple[dict[str, Any], dict[str, Any]]:

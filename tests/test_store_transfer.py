@@ -8,6 +8,7 @@ import io
 import json
 import zipfile
 
+import backup_store
 import data_paths
 import manager_core
 import manager_transfer
@@ -240,7 +241,7 @@ def test_seal_that_is_no_hex_text_is_a_wrong_password(tmp_path):
     archive = tmp_path / "x.zip"
     body = {
         "format": store_transfer.FORMAT, "format_version": store_transfer.FORMAT_VERSION, "app_version": "1",
-        "exported": 1, "kdf": {"name": "scrypt", **store_transfer.SCRYPT, "salt": "0" * 32}, "entries": [],
+        "exported": 1, "kdf": {"name": "scrypt", **backup_store.SCRYPT, "salt": "0" * 32}, "entries": [],
     }
     with zipfile.ZipFile(archive, "w") as z:
         z.writestr("manifest.json", json.dumps({**body, "seal": "ü" * 64}))

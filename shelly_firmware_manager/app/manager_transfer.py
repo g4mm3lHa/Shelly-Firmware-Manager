@@ -331,8 +331,8 @@ class Transfers(FirmwareStore):
         if self._free_space() < self.store_size() + SPACE_MARGIN:
             raise ShellyError("Not enough free disk space for the export")
         password = store_transfer.generate_password()
-        salt = secrets.token_bytes(store_transfer.SALT_BYTES)
-        key = await asyncio.to_thread(store_transfer.derive_key, password, salt)
+        salt = secrets.token_bytes(backup_store.SALT_BYTES)
+        key = await asyncio.to_thread(backup_store.derive_key, password, salt)
         sources = [self._source(m) for m in self.firmware.values()]
         self._export = {
             "token": secrets.token_hex(16),
