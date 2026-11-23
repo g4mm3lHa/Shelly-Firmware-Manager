@@ -770,7 +770,8 @@ class ManagerCore:
         Reload Device Info, restore or run of a schedule). kind "device": not during the full check, and not for
         a device that is being checked, installed, reloaded or restored – other devices may be
         checked or installed at the same time. No check starts while a store import
-        writes its files. Raises ShellyError otherwise."""
+        writes its files; while a schedule runs only single-device checks start.
+        Raises ShellyError otherwise."""
         if self.first_start_open:
             raise ShellyError(FIRST_START_BLOCK)
         if self.checking:

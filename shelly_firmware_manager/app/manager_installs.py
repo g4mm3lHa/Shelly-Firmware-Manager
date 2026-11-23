@@ -280,7 +280,13 @@ class Installs(Checks):
         self, device_id: str, dev: Device, sha: str, restart_first: bool = False
     ) -> tuple[bool, str | None]:
         """Actual installation: optional restart, pre-check, update command, wait for
-        the target version. Returns (confirmed, diagnosis or None)."""
+        the target version. Returns (confirmed, diagnosis or None).
+
+        The pre-check (_verify_unchanged: same MAC, still the checked build) runs before
+        a restart and again before the update command, so a device swapped at the
+        address or updated meanwhile is never sent the approved file. Gen2+ sends the
+        command over the RPC WebSocket (OTA events), HTTP only if nothing was sent
+        there; Gen1 over HTTP."""
         # 1. The approval is valid only for exactly this file and this device state
         if await asyncio.to_thread(shelly_cloud.file_sha256, data_paths.FW_DIR, dev["file"]) != sha:
             raise ShellyError("Firmware file was modified")

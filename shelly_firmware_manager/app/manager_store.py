@@ -351,7 +351,8 @@ class FirmwareStore(ManagerCore):
     def _delete_lock(self, name: str) -> str | None:
         """Reason why a stored firmware cannot be deleted now, else None. A file that
         is only provided to devices can be deleted (see delete_firmware). The full
-        check locks all files, a single-device check the files of its device type."""
+        check locks all files, a single-device check the file of its device and every
+        file of its device type, a running installation its file."""
         if self.checking:
             return "Locked during a check"
         meta = self.firmware.get(name, {})
@@ -646,7 +647,10 @@ class FirmwareStore(ManagerCore):
         )
 
     def downgrade_blocker(self, device_id: str) -> str | None:
-        """Why no downgrade can be started for the device now, else None."""
+        """Why no downgrade can be started for the device now, else None: Gen1,
+        DOWNGRADE_OFF while the option allow_downgrade is off, DOWNGRADE_PLANNED while an
+        installation of the device is scheduled, and while the device is installed,
+        checked or reloaded or was never checked successfully (no address, build or MAC)."""
         dev = self.devices[device_id]
         if (dev.get("gen") or 1) < 2:
             return "Downgrades are not offered for Gen1 devices"
