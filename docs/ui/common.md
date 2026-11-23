@@ -138,10 +138,10 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   cards/dialogs, the theme's button radius for buttons and outlined tile buttons), two
   lines (fine = theme divider, strong = at least 3:1), one warning text colour
   (`--warn-text`), control height (33 / 44 px). New styles use these tokens.
-- **Warning text (3.11.0, live test rc3, 2026-11-23):** every yellow text uses
+- **Warning text (3.11.0, live tests rc3 and rc4, 2026-11-23):** every yellow text uses
   `--warn-text`: log lines, tags, pills, "Unsaved changes", the header status and hints.
   It is the warning colour turned towards orange (70 % warning, 30 % error colour), then
-  mixed 55 % towards the text colour: at least 5:1 on cards and unread log rows in the
+  mixed 50 % towards the text colour: at least 5:1 on cards and unread log rows in the
   light fallback colours, at least 8:1 in the dark ones, and clearly apart from the green
   success text. The pure warning colour stays for lines, fills and icons.
 - **Contrast of coloured text (3.11.0, mockups `3.11.0-kontrast` variant A, approved

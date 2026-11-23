@@ -10,9 +10,10 @@ import {
 // old -> new) -> send. NTP and AOP are saved directly; the dialog only stays open
 // for errors, "nothing changed" or a restart notice.
 const FIELDS = {name: {label: t("Shelly name"), prop: "shelly_name"}, ntp: {label: t("NTP server"), prop: "ntp"}};
-// Gen1 values (last, switch) carry the names of the Gen1 web interface
-const AOP_LABELS = {off: t("Off"), on: t("On"), restore_last: t("Restore last state"), last: t("Restore last mode"),
-  match_input: t("Match input"), switch: t("Switch"), toggle: t("Toggle")};
+// Values the Shelly reports, in English in every language as on the device itself (not
+// translated); Gen1 values (last, switch) carry the names of the Gen1 web interface
+const AOP_LABELS = {off: "Off", on: "On", restore_last: "Restore last state", last: "Restore last mode",
+  match_input: "Match input", switch: "Switch", toggle: "Toggle"};
 export const aopLabel = v => AOP_LABELS[v] || v || "–";
 const AOP_RESTORE = ["restore_last", "last"];
 /** Colour of the power-on action: green if every output restores its last state. */

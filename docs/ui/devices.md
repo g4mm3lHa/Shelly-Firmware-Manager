@@ -159,7 +159,9 @@ Wordings: `mockups/3.9.0/TEXTE.md`.
   dialog naming the settings, activity log entry failed, `not_applied` in the API
   answer.
 - Gen1 power-on labels as in the Gen1 web interface ("Restore last mode", "Switch"),
-  Gen2+ "Restore last state", "Match input".
+  Gen2+ "Restore last state", "Match input". These values come from the Shelly and stay
+  English in every language, as on the device (choices, pill, action column; live test
+  rc4, 2026-11-23); "Mixed" and the dialog texts are translated.
 
 ## Phone tiles (mockups approved 2026-11-12, T1 of 2026-11-19 in 3.5.0)
 - Line 1 = tile head like the head of a firmware card (2026-11-19): checkbox, name
