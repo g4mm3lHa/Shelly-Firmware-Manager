@@ -12,7 +12,7 @@ import {bulkPasswords} from "./device-settings.js";
 // All app options, grouped into cards in this order (Title Case card heads). Saving
 // goes through the Supervisor and restarts the app. [key, label, type, description, group]
 // in English (same texts as translations/en.yaml), translated when shown.
-const OPTION_GROUPS = ["Checks", "Download Server", "Firmware & Storage", "Logs", "Advanced"];
+const OPTION_GROUPS = ["Checks", "Download Server", "Firmware & Storage", "Backups", "Logs", "Advanced"];
 const STORAGE = "Firmware & Storage";
 export const OPTION_FIELDS = [
   ["check_interval_days", "Check every (days)", "number", "1–30 days", "Checks"],
@@ -25,6 +25,8 @@ export const OPTION_FIELDS = [
   ["beta_firmware", "Offer beta firmware", "bool", "Also offers beta versions of the Shelly update server – Gen2+ only, Gen1 devices get no beta versions. They are marked “Beta”, listed under “Beta Updates” and installed only after your approval and an extra confirmation; the offer delay does not apply to them. Off by default", STORAGE],
   ["keep_installed", "Keep installed versions", "bool", "Also stores the firmware a device already runs while Shelly still offers it (Gen2+ only), so that a downgrade stays possible after a bad update; on by default", STORAGE],
   ["import_max_mb", "Max. import size (MB)", "number", "Largest file accepted by “Import store” (Settings → Firmware & Storage); 1–2048, default 100", STORAGE],
+  ["backup_before_install", "Back up before every installation", "bool", "Stores the settings of a device right before an update or downgrade is installed on it; on by default", "Backups"],
+  ["backup_keep", "Keep backups per device", "number", "The newest backups of each device are kept, older ones are removed automatically; a backup marked “Kept” stays. 1–50, default 10", "Backups"],
   ["log_entry_limit", "Max. log size (entries)", "number", "100–3000", "Logs"],
   ["log_retention_days", "Log retention (days)", "number", "1–365", "Logs"],
   ["max_parallel_installs", "Max. parallel installations", "number", "1–20; further approvals wait", "Advanced"],
@@ -95,6 +97,16 @@ function suggestedBaseUrl() {
   return lan ? `http://${host}:8098` : "";
 }
 
+/** Line under "Keep backups per device": what is stored now and where it is managed. */
+function backupsNote(totals) {
+  const where = t("Manage them in the Backups tab; a schedule with the action “Backup” stores them regularly.");
+  if (!totals || !totals.count) return t("No backups are stored yet.") + " " + where;
+  const size = totals.size >= 1048576 ? mb(totals.size) : `${Math.max(1, Math.round(totals.size / 1024))} KB`;
+  const stored = totals.count === 1 ? t("1 backup of 1 device is stored ({size}), encrypted.", {size})
+    : totals.devices === 1 ? t("{n} backups of 1 device are stored ({size}), encrypted.", {n: totals.count, size})
+      : t("{n} backups of {devices} devices are stored ({size}), encrypted.", {n: totals.count, devices: totals.devices, size});
+  return stored + " " + where;
+}
 /** Build the grouped settings cards with one common Save button. */
 export function renderSettings() {
   const o = ui.options; settingsInputs = {};
@@ -135,7 +147,8 @@ export function renderSettings() {
         input.addEventListener("input", update); update();
         input.setAttribute("aria-describedby", `${help.id} ${warn.id} ${suggest.id}`);
       }
-      const note = key === "keep_installed" ? el("div", installedNote(o.installed_versions), "desc set-note") : null;
+      const note = key === "keep_installed" ? el("div", installedNote(o.installed_versions), "desc set-note")
+        : key === "backup_keep" ? el("div", backupsNote(ui.state && ui.state.backup_totals), "desc set-note") : null;
       form.append(box("div", `set-field t-${type}`, box("div", "set-name", lab, info), box("div", "set-control", input), help, warn, suggest, note));
     }
     return box("div", "card", box("div", "card-head", el("h2", t(group))), box("div", "card-body", form));
@@ -251,7 +264,7 @@ function storeBlock() {
   const ex = el("button"); ex.append(icon("exportIcon"), " " + t("Export store")); ex.id = "store-export"; ex.onclick = exportDialog;
   const im = el("button"); im.append(icon("importIcon"), " " + t("Import store")); im.id = "store-import"; im.onclick = importDialog;
   return box("div", "set-store", el("div", t("Firmware store"), "set-store-name"),
-    el("p", t("Move the complete firmware store to another Home Assistant instance: export it as one ZIP file (sealed with a password) and import it there. Device passwords are not exported."), "hint"),
+    el("p", t("Move the complete firmware store to another Home Assistant instance: export it as one ZIP file (sealed with a password) and import it there. The backups of the device settings are part of the export. Device passwords are not exported."), "hint"),
     box("div", "store-btns", ex, im));
 }
 /** Card "Display": language of this page, stored in this browser only. */
@@ -294,7 +307,8 @@ async function exportDialog() {
   const ack = el("input"); ack.type = "checkbox";
   const files = t("{files} ({downloads} downloaded, {uploads} uploaded, {imports} imported)", {files: x.files, downloads: x.downloads, uploads: x.uploads, imports: x.imports || 0});
   modal(EXPORT_TITLE, [
-    valueList([[t("Files"), files], [t("Size"), mb(x.size)], [t("File"), x.filename]]),
+    valueList([[t("Files"), files], [t("Backups"), x.backups ? t(x.backups === 1 ? "{n} backup of device settings" : "{n} backups of device settings", {n: x.backups}) : null],
+      [t("Size"), mb(x.size)], [t("File"), x.filename]]),
     box("label", "field", t("Export password (generated, shown only now)"), box("div", "pw-row", out, copy)),
     el("p", t("The password seals the file: the import checks that no file and no entry was changed. It is not stored anywhere – the file cannot be imported without it."), "hint"),
     box("label", "check", ack, " " + t("I have saved the password"))],
@@ -364,7 +378,8 @@ function importSummary(token, name, r) {
   const ack = el("input"); ack.type = "checkbox";
   modal(IMPORT_TITLE, [
     messageBody(t(r.files === 1 ? "Seal and the file checked – nothing was changed since the export." : "Seal and all {n} files checked – nothing was changed since the export.", {n: r.files}), "success"),
-    valueList([[t("File"), name], [t("Exported"), r.exported ? fmt(r.exported) : t("unknown")], [t("Size"), mb(r.size)]]),
+    valueList([[t("File"), name], [t("Exported"), r.exported ? fmt(r.exported) : t("unknown")], [t("Size"), mb(r.size)],
+      [t("Backups"), r.backups ? t("{n} in the file · {new} new", {n: r.backups, new: r.backups_new || 0}) : null]]),
     section(t("Result"), box("div", "imp-groups", ...groups)),
     el("p", IMPORT_MARK, "hint"),
     box("label", "check", ack, " " + t("I created this export myself or I trust its source"))],
@@ -374,6 +389,7 @@ function importSummary(token, name, r) {
       const parts = [t(c.stored === 1 ? "1 new file stored as “Imported”" : "{n} new files stored as “Imported”", {n: c.stored})];
       if (c.updated) parts.push(t(c.updated === 1 ? "data added to 1 stored file" : "data added to {n} stored files", {n: c.updated}));
       if (c.conflicts) parts.push(t(c.conflicts === 1 ? "1 conflict – the stored files were kept" : "{n} conflicts – the stored files were kept", {n: c.conflicts}));
+      if (c.backups) parts.push(t(c.backups === 1 ? "{n} backup of device settings imported" : "{n} backups of device settings imported", {n: c.backups}));
       message(IMPORT_TITLE, parts.join(", ") + ".", c.conflicts ? "warning" : "success", "importIcon");
     } catch (e) { message(IMPORT_TITLE, e.message, "error", "importIcon"); }
   }}], "importIcon");

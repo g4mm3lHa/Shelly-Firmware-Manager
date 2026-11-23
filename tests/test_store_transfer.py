@@ -163,7 +163,7 @@ async def test_same_and_conflicting_files(mgr, net):
     ]
     assert [e["version"] for e in summary["conflict"]] == ["1.4.0"]
     counts = await mgr.confirm_import(token)
-    assert counts == {"stored": 0, "updated": 1, "same": 1, "conflicts": 1}
+    assert counts == {"stored": 0, "updated": 1, "same": 1, "conflicts": 1, "backups": 0}
     assert mgr.firmware[keep]["source"] == manager_core.SOURCE_UPLOAD and mgr.firmware[keep]["sha_checked"] is True
     assert mgr.firmware[keep]["changelog"]["entries"][0]["text"] == "Fix"
     assert other not in mgr.firmware and conflict in mgr.firmware  # stored file kept

@@ -8,7 +8,7 @@ files in sync when modules, stored fields, routes or test files change.
 
 | Detail file | Content | Read when you change |
 |---|---|---|
-| `docs/codemap/modules.md` | backend modules, key names, the seven manager layers | `shelly_firmware_manager/app/*.py` |
+| `docs/codemap/modules.md` | backend modules, key names, the eight manager layers | `shelly_firmware_manager/app/*.py` |
 | `docs/codemap/data.md` | files below `/data` and their fields | stored data |
 | `docs/codemap/api.md` | HTTP routes → handlers → manager | `web_ui.py` |
 | `docs/codemap/ui.md` | UI modules and what they export | `ui-src/` |
@@ -30,14 +30,17 @@ both servers in parallel (cancels checks/installations, saves the state), exit 0
 - `manager_core.py` (1): state, persistence, options, check slots → `test_check.py`, `test_options.py`, `test_state.py`
 - `manager_store.py` (2): firmware store, upload, downgrade, export/import → `test_firmware_store.py`, `test_store_transfer.py`
 - `manager_devices.py` (3): device settings, passwords → `test_device_settings.py`
-- `manager_checks.py` (4): full and single checks, offers → `test_check.py`
-- `manager_installs.py` (5): installation, OTA, verification → `test_install.py`
-- `manager_schedules.py` (6): scheduled installations, schedules and their runs → `test_timetable.py`
-- `manager.py` (7): `Manager`, `public_state` → `test_web.py`
+- `manager_backups.py` (4): backups of device settings: store, restore, download, import → `test_backups.py`
+- `manager_checks.py` (5): full and single checks, offers → `test_check.py`
+- `manager_installs.py` (6): installation, OTA, verification → `test_install.py`
+- `manager_schedules.py` (7): scheduled installations, schedules and their runs → `test_timetable.py`
+- `manager.py` (8): `Manager`, `public_state` → `test_web.py`
 - `web_ui.py`: Ingress UI + JSON API, CSRF/size middleware → `test_web.py`, `test_security.py`
 - `download_server.py`: LAN download server for the Shellys → `test_security.py`
 - `shelly.py`: device and manufacturer access, SSRF/size guards → `test_check.py`, `test_device_settings.py`
 - `store_transfer.py`: export/import archive (pure functions) → `test_store_transfer.py`
+- `backup_store.py`: encrypted backup files and their list (no device access) → `test_backups.py`
+- `shelly_backup.py`: read, compare and restore the settings of one device → `test_backups.py`
 - `schedule.py`: schedule, DST → `test_schedule.py`
 - `timetable.py`: schedules and "Install at": validation, next run (pure functions) → `test_timetable.py`
 - `app_options.py`: option validation → `test_options.py`
@@ -52,7 +55,7 @@ both servers in parallel (cancels checks/installations, saves the state), exit 0
 `core.js` shared state and helpers · `i18n.js` language and `t()` (`i18n-de.js` German
 texts) · `devices.js` Devices tab · `install.js` install and downgrade dialogs ·
 `device-settings.js` device dialogs · `firmware.js` Firmware tab · `schedules.js`
-Schedules tab · `logs.js` Logs tab · `app-settings.js` Settings tab · `main.js` entry,
+Schedules tab · `backups.js` Backups tab and backup dialogs · `logs.js` Logs tab · `app-settings.js` Settings tab · `main.js` entry,
 header, tabs, polling.
 UI checks: `qa/features/<area>.py` (runner `qa/ui_features.py`), `qa/ui_test.py`; details in
 `docs/codemap/tests.md`.

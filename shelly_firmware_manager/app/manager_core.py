@@ -1,16 +1,17 @@
-"""Manager, layer 1 of 7: state, persistence, Home Assistant access, app options and the
+"""Manager, layer 1 of 8: state, persistence, Home Assistant access, app options and the
 check slot.
 
 The manager is one object built from layers, each in its own module and each extending
 the one before: ManagerCore (this file) -> FirmwareStore (manager_store) ->
-DeviceSettings (manager_devices) -> Checks (manager_checks) -> Installs
-(manager_installs) -> Schedules (manager_schedules) -> Manager (manager). A layer only uses what the layers below it
-provide; the complete object is manager.Manager.
+DeviceSettings (manager_devices) -> Backups (manager_backups) -> Checks (manager_checks)
+-> Installs (manager_installs) -> Schedules (manager_schedules) -> Manager (manager). A
+layer only uses what the layers below it provide; the complete object is manager.Manager.
 
 State lives in /data/state.json (with the previous save as backup state.bak, see
 ManagerCore.save and _load), firmware in /data/firmware, device passwords in
-/data/credentials.json, changelogs in /data/changelog.json and the activity log in
-/data/events.json (all private to the app, paths in data_paths).
+/data/credentials.json, changelogs in /data/changelog.json, the activity log in
+/data/events.json and the backups of device settings in /data/backups (all private to
+the app, paths in data_paths).
 The full check ("check all") runs exclusively (asyncio.Lock): it starts only while no
 single-device check, installation or Reload Device Info runs, and blocks all of them
 while it runs. Single-device checks and installations of different devices run in
@@ -37,6 +38,7 @@ import app_options
 import data_paths
 import schedule
 import timetable
+from backup_store import BackupStore
 from changelog import Changelogs
 from credentials import Credentials
 from events import EventLog
@@ -209,6 +211,12 @@ def severity_of(err: BaseException) -> str:
     return "warning"
 
 
+def unreachable(err: BaseException) -> bool:
+    """True if the device did not answer at all (timeout, connection failure) – not
+    for an answer the device gave, e.g. a refused password."""
+    return isinstance(err, (TimeoutError, aiohttp.ClientConnectionError, OSError))
+
+
 def unexpected_text(err: BaseException) -> str:
     """Status message for an error no code path expects (e.g. a device answer of an
     unexpected shape): names the error type; the traceback is in the app log."""
@@ -246,6 +254,10 @@ class ManagerCore:
         self.keep_installed = options["keep_installed"] is True
         # A new version is offered only once it is this many days old (build date); 0 = at once
         self.offer_after_days = int(options["offer_after_days"])
+        # Backups of the device settings: one before every installation, and how many
+        # of the newest are kept per device (see manager_backups)
+        self.backup_before_install = options["backup_before_install"] is True
+        self.backup_keep = int(options["backup_keep"])
         self.session = session
         self.token = token
         self.pins = pins  # certificate pins for shelly.cloud
@@ -291,6 +303,14 @@ class ManagerCore:
         # installation sends one notification of its own), memory only
         self.notify_muted: set[str] = set()
         self.reloading: set[str] = set()  # device IDs whose Reload Device Info is running
+        # Device whose backup is being restored (one at a time): nothing else touches it meanwhile
+        self.restoring: set[str] = set()
+        # "Back up now" for several devices and the running or last restore, for the
+        # dialogs of the UI (memory only, see manager_backups)
+        self.backup_job: dict[str, Any] | None = None
+        self.restore_job: dict[str, Any] | None = None
+        self._backup_download: dict[str, Any] | None = None  # prepared download of one backup
+        self._backup_import: dict[str, Any] | None = None  # staged backup file of an import
         # (firmware ID, version) -> running provide task (single flight)
         self._provisions: dict[tuple[str, str], asyncio.Future[tuple[str, str, int]]] = {}
         # (firmware ID, version) -> devices waiting for that provide task (full and
@@ -338,6 +358,7 @@ class ManagerCore:
         self.credentials = Credentials(data_paths.CREDENTIALS_FILE)
         self.changelogs = Changelogs(data_paths.CHANGELOG_FILE)
         self.events = EventLog(data_paths.EVENTS_FILE, options["log_retention_days"], options["log_entry_limit"])
+        self.backups = BackupStore(data_paths.BACKUP_DIR)
         self._load()
         self.schedule, changed = schedule.configure(
             self.schedule, self.check_days, self.check_time, time.time(), self.tz
@@ -741,8 +762,8 @@ class ManagerCore:
         Two quick requests (double tap, two browsers) can therefore never start the
         same check twice, and an approval arriving in between is refused.
         kind "all": only while nothing else runs (no single-device check, installation,
-        Reload Device Info or run of a schedule). kind "device": not during the full check, and not for
-        a device that is being checked, installed or reloaded – other devices may be
+        Reload Device Info, restore or run of a schedule). kind "device": not during the full check, and not for
+        a device that is being checked, installed, reloaded or restored – other devices may be
         checked or installed at the same time. No check starts while a store import
         writes its files. Raises ShellyError otherwise."""
         if self.first_start_open:
@@ -755,6 +776,8 @@ class ManagerCore:
             raise ShellyError("Store import in progress – please try again in a moment")
         if self.reloading and (kind != "device" or device_id in self.reloading):
             raise ShellyError("Device info is being reloaded – please try again in a moment")
+        if self.restoring and (kind != "device" or device_id in self.restoring):
+            raise ShellyError("A backup is being restored – please try again afterwards")
         if kind == "device":
             if device_id is None:
                 raise ValueError("device_id required for a single-device check")
@@ -795,6 +818,8 @@ class ManagerCore:
             parts.append(f"Installations running: {len(self.installing)}")
         if self.reloading:
             parts.append("Reloading device info")
+        if self.restoring:
+            parts.append("Restoring a backup")
         return " · ".join(parts) or None
 
     def _progress(self) -> dict[str, Any]:

@@ -1,7 +1,7 @@
 """Feature UI checks (Playwright) against the demo servers – one runner for all
 feature suites; the checks live in qa/features/ (base.py: shared helpers; one module per area).
 
-Suites, in this order (the last two change the demo state in their last case):
+Suites, in this order (the last three change the demo state in their last case):
 - download_url_hint   Settings: hints for download_base_url (LAN IP, public IP,
                       credentials, query, localhost, host names). Demo "idle" on 8801.
 - setting_help        Settings: help texts as tooltips of the setting name and its
@@ -34,7 +34,12 @@ Suites, in this order (the last two change the demo state in their last case):
                       confirmation), first-start question with notice bar, files
                       above the Ingress limit sent in parts. Demos
                       "idle" 8801 and "first" 8806 (Skip changes it: last case only).
-Modules: setting_help, download_url (hint + notice), schedules, store_transfer; firmware_store runs the area
+- backups             Backups tab (cards, rows, reasons), "Backups" dialog of a device, restore
+                      (differences, network tick, progress, result), download and import of
+                      one backup, "Back up now", check line of the installation dialog,
+                      unread mark of the Logs tab, page behind an open dialog, six tabs in
+                      English and German. Demo "features" on 8808 (own demo: it changes it).
+Modules: setting_help, download_url (hint + notice), schedules, store_transfer, backups; firmware_store runs the area
 modules devices, firmware_tab and logs. Open only the module of the area you work on.
 Usage: python qa/ui_features.py <shots-dir> [--full] [suite ...]   (qa/run_ui.py starts
 the demos; --full: all viewports of firmware_store, final gate)
@@ -45,6 +50,7 @@ import sys
 from pathlib import Path
 
 from common import launch
+from features.backups import backups
 from features.base import SUITE, results
 from features.download_url import download_url_hint, download_url_notice, download_url_suggestion
 from features.firmware_store import firmware_store
@@ -55,7 +61,7 @@ from playwright.sync_api import sync_playwright
 
 SUITES = {"download_url_hint": download_url_hint, "setting_help": setting_help, "download_url_notice": download_url_notice,
           "download_url_suggestion": download_url_suggestion, "schedules": schedules,
-          "firmware_store": firmware_store, "store_transfer": store_transfer}
+          "firmware_store": firmware_store, "store_transfer": store_transfer, "backups": backups}
 
 
 def main():

@@ -7,6 +7,7 @@ import {mobileQuery, renderLogs} from "./logs.js";
 import {IMPORT_OWN, importDialog, renderSettings} from "./app-settings.js";
 import "./install.js";
 import {renderSchedules} from "./schedules.js";
+import {renderBackups} from "./backups.js";
 import "./device-settings.js";
 
 // ---------------------------------------------------------------- Rendering, tabs & polling
@@ -26,30 +27,37 @@ export function render(force) {
   setTip($("scan"), s.first_start_open ? FIRST_START_BLOCK : s.schedule_running ? t("Schedule “{name}” is running", {name: s.schedule_running}) : "");
   if (s.first_start_open) askFirstStart();
   else if (loadLocal("firstStartAsked")) saveLocal("firstStartAsked", null);   // answered: a reinstallation asks again
-  const key = JSON.stringify([ui.view, mobileQuery.matches, s, ui.view === "firmware" ? ui.firmware : ui.view === "logs" ? ui.logs : null]);
+  const key = JSON.stringify([ui.view, mobileQuery.matches, s,
+    ui.view === "firmware" ? ui.firmware : ui.view === "logs" ? [ui.logs, ui.logsUnreadFrom] : ui.view === "backups" ? ui.backups : null]);
   if (!force && key === ui.rendered) return;
   ui.rendered = key; hideTip();
   if (ui.view === "devices") renderDevices();
   else if (ui.view === "firmware") renderFirmware();
   else if (ui.view === "logs") renderLogs();
   else if (ui.view === "schedules") renderSchedules();
+  else if (ui.view === "backups") renderBackups();
 }
-/** Logs tab: a yellow "!" while the log holds entries newer than the newest one this
- *  browser has shown in the Logs tab (per browser; on the first visit nothing counts
- *  as unread). Opening the Logs tab marks everything as read. log_latest is a mark that
- *  grows with every entry, also within one second (stored as "logsMark"). */
+/** Logs tab: a yellow "!" while the log holds an error entry newer than the newest entry
+ *  this browser has shown in the Logs tab (per browser; on the first visit nothing counts
+ *  as unread; warnings and successes never set it). Opening the Logs tab marks
+ *  everything as read; the entries that were unread at that moment stay lightly
+ *  highlighted until the tab is left (ui.logsUnreadFrom: the mark read before). The
+ *  marks grow with every entry, also within one second (stored as "logsMark"). */
 function markUnreadLogs(s) {
   const latest = s.log_latest || 0, stored = loadLocal("logsMark");
   let seen = typeof stored === "number" ? stored : latest;
-  if (ui.view === "logs") seen = latest;
+  if (ui.view === "logs") {
+    if (ui.logsUnreadFrom == null) ui.logsUnreadFrom = seen;
+    seen = latest;
+  } else ui.logsUnreadFrom = null;
   if (seen !== stored) saveLocal("logsMark", seen);
   const tab = $("tab-logs");
   let mark = tab.querySelector(".tab-unread");
   if (!mark) {
-    mark = box("span", "tab-unread", el("span", "!"), el("span", t("Unread log entries"), "sr-only"));
+    mark = box("span", "tab-unread", el("span", "!"), el("span", t("Unread error entries in the log"), "sr-only"));
     mark.firstChild.setAttribute("aria-hidden", "true"); tab.append(mark);
   }
-  mark.hidden = !(latest > seen);
+  mark.hidden = !((s.log_latest_error || 0) > seen);
 }
 /** Header: last check and check cycle as two neutral pills; the cycle uses the
  *  Home Assistant time zone (not the browser's). */
@@ -134,7 +142,7 @@ function renderProgress(p) {
   const bar = $("progress-bar");
   if (p.total) { bar.max = p.total; bar.value = p.done; } else bar.removeAttribute("value");   // indeterminate
 }
-const VIEWS = ["devices", "firmware", "schedules", "logs", "settings"];
+const VIEWS = ["devices", "firmware", "schedules", "backups", "logs", "settings"];
 /** Switch tab and load its data. */
 function showView(v) {
   ui.view = v; closeRowMenu();
@@ -160,8 +168,10 @@ const POLL_IDLE_MS = 30000, POLL_BUSY_MS = 3000;
 // long after it, so the Devices, Schedules and Logs tabs show it at once
 const DUE_DELAY_MS = 2000;
 let duePolled = 0;   // time of the last job the page refreshed for (epoch s)
-/** Something runs: a check, an installation, a schedule run or another device activity. */
-const isActive = s => !!(s && (s.busy || s.progress || s.schedule_running || s.devices.some(d => d.installing || d.activity)));
+/** Something runs: a check, an installation, a schedule run, a backup run, a restore or
+ *  another device activity. */
+const isActive = s => !!(s && (s.busy || s.progress || s.schedule_running || (s.backup_job && !s.backup_job.finished) ||
+  (s.restore && !s.restore.finished) || s.devices.some(d => d.installing || d.activity)));
 /** Time of the next schedule run or scheduled installation the page has not refreshed
  *  for yet (epoch s; Infinity: none). */
 function nextDue(s) {
@@ -195,6 +205,9 @@ export async function load(force) {
     if (ui.view === "firmware") { const f = await api("api/firmware"); ui.firmware = f.firmware; ui.firmwareTotal = f.total_size || 0; ui.firmwareFree = f.free_space ?? null; }
     // Logs tab: reloaded when a new entry was written (newest entry time) or work ended
     if (ui.view === "logs" && (force || workEnded(ui.state, s) || s.log_latest !== ui.state?.log_latest || Date.now() - ui.logsLoaded > 30000)) { ui.logs = (await api("api/logs")).entries; ui.logsLoaded = Date.now(); }
+    // Backups tab: its lists are fetched again whenever the state changed (a backup was
+    // stored or removed, an attempt failed, a device was renamed)
+    if (ui.view === "backups" && (force || !ui.backups || s !== ui.state)) ui.backups = await api("api/backups");
     ui.state = s;
     authRetry = 0;
     render(force);

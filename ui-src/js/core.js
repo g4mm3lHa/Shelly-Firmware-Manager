@@ -14,6 +14,8 @@ if (window.parent !== window) document.documentElement.classList.add("embedded")
 export const $ = id => document.getElementById(id);
 export const ui = {state: null, firmware: [], firmwareTotal: 0, firmwareFree: null, logs: [], options: null, view: "devices",
   devFilter: "all", fwFilter: "all", logFilter: "all", rendered: "",
+  backups: null,        // lists of the Backups tab (api/backups); null until fetched
+  logsUnreadFrom: null, // Logs tab open: mark of the newest entry read before it was opened
   logsLoaded: 0};       // time of the last log fetch (0 = fetch at the next refresh)
 export const selected = new Set();       // device IDs ticked for a (multi) installation
 export const openDetails = new Set();    // keys of expanded <details>, kept across re-renders
@@ -165,6 +167,8 @@ const ICONS = {
   // Column chooser of the Devices tab (MDI "view-column-outline")
   columns: "M4,5V18H21V5H4M14,7V16H11V7H14M6,7H9V16H6V7M19,16H16V7H19V16Z",
   plus: "M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z",
+  // Backups: tab, "Back up now", restore dialogs (MDI "backup-restore")
+  backup: "M12,3A9,9 0 0,0 3,12H0L4,16L8,12H5A7,7 0 0,1 12,5A7,7 0 0,1 19,12A7,7 0 0,1 12,19C10.5,19 9.09,18.5 7.94,17.7L6.5,19.14C8.04,20.3 9.94,21 12,21A9,9 0 0,0 21,12A9,9 0 0,0 12,3M14,12A2,2 0 0,0 12,10A2,2 0 0,0 10,12A2,2 0 0,0 12,14A2,2 0 0,0 14,12Z",
   play: "M8,5.14V19.14L19,12.14L8,5.14Z",
   pencil: "M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z",
 };
@@ -393,10 +397,21 @@ export function modal(title, content, buttons = [{text: t("Close")}], titleIcon)
     };
     return b;
   }));
-  if (!dlg.open) dlg.showModal();
+  if (!dlg.open) { lockPage(true); dlg.showModal(); }
 }
 /** Close the dialog and refresh. */
 export function closeModal() { if (dlg.open) dlg.close(); load(); }
+/** True while the dialog is open. */
+export const modalOpen = () => dlg.open;
+/** The page behind an open dialog does not scroll (the dialog's own content does). The
+ *  width the hidden scrollbar took is kept as padding, so the page does not jump. */
+function lockPage(on) {
+  const root = document.documentElement;
+  document.body.style.paddingRight = on ? `${Math.max(0, innerWidth - root.clientWidth)}px` : "";
+  root.classList.toggle("dlg-open", on);
+}
+// Every way of closing ends the lock: a button, the X and the Escape key
+dlg.addEventListener("close", () => lockPage(false));
 $("dlg-x").append(icon("close"));
 $("dlg-x").onclick = closeModal;
 // Icon of a message kind; "info" (neutral notes such as "Nothing changed.") has none

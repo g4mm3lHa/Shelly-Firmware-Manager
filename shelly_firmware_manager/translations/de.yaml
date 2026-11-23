@@ -37,6 +37,14 @@ configuration:
     name: Max. Importgröße (MB)
     description: >-
       Größte Datei, die „Ablage importieren“ annimmt (Einstellungen → Firmware & Speicher); 1–2048, Standard 100
+  backup_before_install:
+    name: Vor jeder Installation sichern
+    description: >-
+      Speichert die Einstellungen eines Geräts, direkt bevor ein Update oder Downgrade darauf installiert wird; standardmäßig an
+  backup_keep:
+    name: Backups je Gerät aufbewahren
+    description: >-
+      Die neuesten Backups jedes Geräts bleiben erhalten, ältere werden automatisch entfernt; ein als „Behalten“ markiertes Backup bleibt. 1–50, Standard 10
   log_entry_limit:
     name: Max. Log-Größe (Einträge)
     description: 100–3000

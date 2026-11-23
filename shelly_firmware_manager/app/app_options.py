@@ -22,6 +22,7 @@ INT_RANGES = {
     "log_entry_limit": (100, 3000),
     "import_max_mb": (1, 2048),
     "offer_after_days": (0, 60),
+    "backup_keep": (1, 50),
 }
 BOOLS = (
     "restrict_downloads_to_devices",
@@ -30,6 +31,7 @@ BOOLS = (
     "beta_firmware",
     "resolve_host_names",
     "keep_installed",
+    "backup_before_install",
 )
 DEFAULTS = {
     "check_interval_days": 7,
@@ -41,6 +43,8 @@ DEFAULTS = {
     "import_max_mb": 100,
     "keep_installed": True,
     "offer_after_days": 0,
+    "backup_before_install": True,
+    "backup_keep": 10,
 }
 # All option keys of config.yaml. Anything else in options.json is ignored everywhere,
 # so an unknown (e.g. removed) key can never reach the UI, the log or a save request –

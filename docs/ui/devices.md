@@ -140,6 +140,13 @@ Wordings: `mockups/3.9.0/TEXTE.md`.
   "every device". Row "Build date" (date · age) in the section "Firmware" (one device).
   After a failed installation: section "Last attempt" with the reason, pre-ticked
   "Restart the device first" and the button "Restart & install".
+- **Backups (3.11.0, mockups `3.11.0-backups`, approved 2026-11-22):** row menu group 3:
+  "Backups" last, after "Device password" (F15). Device details: section "Backups" (Last
+  backup, Stored, small button "Show backups"). Dialog "Backups" of a device: name, model,
+  pill "n of N stored", its backups (rows as in the Backups tab, see `backups.md`),
+  "Import backup" / "Close" / blue "Back up now". Installation and downgrade dialog: check
+  line "Backup" in "Before installing" while "Back up before every installation" is on; a
+  failed backup stops the installation with the reason, also for "Install at" (F6).
 - **Imported files (F18, F21):** source "Firmware store (imported file)" (table: "Import");
   offered only while Shelly cannot be asked: yellow box (unconfirmed origin, no server;
   Gen1 text without the intermediate-version sentence) and the checkbox "I accept the risk

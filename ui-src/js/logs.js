@@ -16,6 +16,8 @@ const severity = e => ["success", "warning", "error"].includes(e.severity) ? e.s
 const SEVERITY_LABELS = {success: "Success", warning: "Warning", error: "Error"};
 const LOG_FILTERS = {all: [t("All"), () => true], checks: [t("Checks"), e => e.kind === "check"],
   installs: [t("Installations"), e => e.kind === "install"], schedules: [t("Schedules"), e => e.kind === "schedule"],
+  // Backups: their own entries and the runs of a schedule with the action "Backup"
+  backups: [t("Backups"), e => e.kind === "backup" || (e.kind === "schedule" && e.action === "Backup")],
   settings: [t("Settings"), e => ["setting", "password", "options"].includes(e.kind)],
   warnings: [t("Warnings"), e => severity(e) === "warning"], errors: [t("Errors"), e => severity(e) === "error"]};
 const logFilter = filterControl(Object.entries(LOG_FILTERS).map(([key, [label]]) => [key, label]),
@@ -23,7 +25,7 @@ const logFilter = filterControl(Object.entries(LOG_FILTERS).map(([key, [label]])
 $("log-filter").replaceWith(logFilter.node);
 const KIND_LABELS = {check: "Check", download: "Download", upload: "Upload", install: "Installation", delete: "Deleted", setting: "Setting",
   password: "Password", options: "App settings", log: "Log", export: "Store export", import: "Store import", setup: "First start",
-  store: "Firmware store", device: "Device", schedule: "Schedule"};
+  store: "Firmware store", device: "Device", schedule: "Schedule", backup: "Backup"};
 /** Device entry: removed from the list, a held-back update offered now, or a provided
  *  beta version withdrawn at the start (beta firmware switched off). */
 const deviceAction = e => e.action === "offered_now" ? `${e.device}: held update ${e.version || ""} offered now`
@@ -48,6 +50,40 @@ const INSTALL_EVENTS = {started: "started", confirmed: "confirmed", unconfirmed:
 // Schedules tab: one entry per run (or missed run) and per change of a schedule
 const SCHEDULE_EVENTS = {created: "created", changed: "changed", deleted: "deleted"};
 const RUN_RESULTS = {ok: "okc", unreachable: "bad", refused: "bad"};
+// Backups of the device settings: one entry per stored, failed, removed, restored,
+// downloaded or imported backup
+const BACKUP_REASONS = {manual: "manual", update: "before update", downgrade: "before downgrade", schedule: "schedule", restore: "before restore"};
+const BACKUP_EVENTS = {stored: "stored", failed: "failed", pruned: "removed", deleted: "deleted", restored: "restored",
+  restore_failed: "restore failed", downloaded: "downloaded", imported: "imported"};
+const kb = n => n >= 1048576 ? mb(n) : `${Math.max(1, Math.round((n || 0) / 1024))} KB`;
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+/** Contents of a backup ("settings, 2 scripts, 3 schedules, 1 webhook"; Gen1: "settings, 1 action"). */
+const backupParts = p => !p ? "" : p.actions != null ? `settings, ${plural(p.actions, "action")}${p.partial ? " (actions not readable)" : ""}`
+  : `settings, ${plural(p.scripts ?? 0, "script")}, ${plural(p.schedules ?? 0, "schedule")}, ${plural(p.webhooks ?? 0, "webhook")}`;
+/** Reason of a backup with its note ("before update 1.4.0 → 1.5.0", "schedule “Weekly backup”"). */
+const backupReason = e => (BACKUP_REASONS[e.reason] || e.reason || "") + (e.note ? (e.reason === "schedule" ? ` “${e.note}”` : ` ${e.note}`) : "");
+/** Main line of a backup entry. */
+function backupLine(e) {
+  const of = `backup of ${fmt(e.backup_at)}`;
+  switch (e.event) {
+    case "stored": return `${e.device}: backup stored · ${backupReason(e)} · ${kb(e.size)} · ${backupParts(e.parts)}`;
+    case "failed": return `${e.device}: backup failed · ${backupReason(e)}`;
+    case "pruned": return `${e.device}: ${of} removed – more than ${e.keep} stored`;
+    case "deleted": return `${e.device}: ${of} deleted`;
+    case "restored": return `${e.device}: ${of} restored · ${(e.restored || []).join(", ")} · ${plural(e.changes ?? 0, "change")}` +
+      (e.not_applied ? ` · ${e.not_applied} not applied` : "");
+    case "restore_failed": return `${e.device}: restoring the ${of} failed`;
+    case "downloaded": return `${e.device}: ${of} downloaded`;
+    case "imported": return `${e.device}: ${of} imported · ${kb(e.size)} · ${backupParts(e.parts)}`;
+    default: return `${e.device}: backup ${e.event}`;
+  }
+}
+/** Lines below a backup entry: the error, and for a restore what was not applied. */
+const backupDetails = e => [
+  e.event === "restored" && e.confirmed === false ? el("div", "The device could not be read again – nothing is confirmed", "bad") : null,
+  e.event === "restored" && e.restart === false ? el("div", "The device did not answer again after the restart", "bad") : null,
+  e.error ? el("div", e.error, "bad") : null,
+  e.findings?.length ? box("ul", null, ...e.findings.map(f => el("li", `${f.part} · ${f.key}${f.error ? `: ${f.error}` : ""}`, "warnc"))) : null].filter(Boolean);
 /** Main line of a schedule entry. */
 function scheduleLine(e) {
   if (e.event === "run") return `“${e.name}”: ${e.action} · ${e.trigger === "manual" ? "run now" : "scheduled"} · ${e.result} · ${e.duration ?? 0} s`;
@@ -107,11 +143,13 @@ function logContent(e) {
         e.error ? el("div", e.error, "bad") : null].filter(Boolean);
     case "export":
       return [el("div", `Firmware store exported · ${e.files ?? 0} file${e.files === 1 ? "" : "s"} (${e.downloads ?? 0} downloaded, ${e.uploads ?? 0} uploaded, ${e.imports ?? 0} imported) · ${mb(e.size || 0)}`),
+        e.backups ? el("div", `${plural(e.backups, "backup")} of device settings included`, "sub") : null,
         e.damaged ? el("div", `${e.damaged} damaged stored file${e.damaged === 1 ? "" : "s"} left out (SHA-256 no longer matches)`, "warnc") : null].filter(Boolean);
     case "import": {
       const line = el("div", `Firmware store imported · ${e.stored ?? 0} new · ${e.same ?? 0} already stored (${e.updated ?? 0} with data added) · ${e.conflicts ?? 0} conflict${e.conflicts === 1 ? "" : "s"}`);
-      if (!e.conflicts_list || !e.conflicts_list.length) return [line];
-      return [line, el("div", `Conflicts – stored file kept: ${e.conflicts_list.join(", ")}`, "sub")];
+      const backups = e.backups ? el("div", `${plural(e.backups, "backup")} of device settings imported`, "sub") : null;
+      if (!e.conflicts_list || !e.conflicts_list.length) return [line, backups].filter(Boolean);
+      return [line, backups, el("div", `Conflicts – stored file kept: ${e.conflicts_list.join(", ")}`, "sub")].filter(Boolean);
     }
     case "setup":
       return [el("div", "First start: firmware store import skipped")];
@@ -126,6 +164,8 @@ function logContent(e) {
       if (e.event !== "run" || !(e.findings?.length || e.left_out?.length)) return [el("div", scheduleLine(e))];
       return [keptDetails(`log-${e.ts}-sch`, scheduleLine(e), runFindings(e))];
     }
+    case "backup":
+      return [el("div", backupLine(e)), ...backupDetails(e)];
     case "log":
       return [el("div", `Log cleared · ${e.entries ?? 0} entr${e.entries === 1 ? "y" : "ies"} deleted`)];
     default:
@@ -168,6 +208,7 @@ function logSummary(e) {
       if (e.event === "run") return [`“${e.name}”: ${e.action}`, e.result];
       if (e.event === "missed") return [`“${e.name}”: ${e.action} missed`];
       return [`“${e.name}” ${SCHEDULE_EVENTS[e.event] || e.event}`];
+    case "backup": return [`${e.device}: backup ${BACKUP_EVENTS[e.event] || e.event}`];
     default: return [e.kind];
   }
 }
@@ -191,18 +232,33 @@ function logDelete(e) {
   const b = iconButton("delete", t("Delete entry"), () => deleteLogEntry(e), "red log-del"); b.disabled = !e.id;
   return b;
 }
+/** Marks of the entries as the server counts them (EventLog.latest): the time × 1000
+ *  plus the position among the entries of the same second. entries: newest first. */
+function entryMarks(entries) {
+  const marks = new Map();
+  let ts = null, n = 0;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    n = e.ts === ts ? n + 1 : 1; ts = e.ts;
+    marks.set(e, e.ts * 1000 + Math.min(n, 999));
+  }
+  return marks;
+}
+/** Classes of an entry: its place in a group of the same device, and "unread" (lightly
+ *  highlighted) if it is newer than what this browser had read when the tab was opened. */
+const entryClass = (group, unread) => (group ? ` grp grp-${group}` : "") + (unread ? " unread" : "");
 /** Desktop entry: time, type, content, user, delete. group = position in a run of
  *  entries of the same device ("first" | "mid" | "last" | null): marked by a side bar. */
-function logRow(e, d, group) {
+function logRow(e, d, group, unread) {
   const sev = severity(e);
-  return box("div", "log" + (group ? ` grp grp-${group}` : ""), el("span", `${pad(d.getHours())}:${pad(d.getMinutes())}`, "mono sub"),
+  return box("div", "log" + entryClass(group, unread), el("span", `${pad(d.getHours())}:${pad(d.getMinutes())}`, "mono sub"),
     el("span", KIND_LABELS[e.kind] || e.kind, "tag"),   // neutral like on phones: the outcome has its own label
     box("div", "log-body" + (sev === "error" ? " bad" : ""), el("span", SEVERITY_LABELS[sev], `tag sev-${sev}`), box("div", null, ...logContent(e))),
     el("span", e.user || "", "user"), logDelete(e));
 }
 /** Mobile entry: time/type/outcome, short summary, details collapsed. Details that
  *  only repeat the summary are left out: the summary is shown without expansion. */
-function logTile(e, d, group) {
+function logTile(e, d, group, unread) {
   const sev = severity(e), summary = logSummary(e);
   const head = box("div", "log-head", el("span", `${pad(d.getHours())}:${pad(d.getMinutes())}`, "mono sub"),
     el("span", KIND_LABELS[e.kind] || e.kind, "tag"), el("span", SEVERITY_LABELS[sev], `tag sev-${sev}`), el("span", null, "spacer"), logDelete(e));
@@ -211,7 +267,7 @@ function logTile(e, d, group) {
   // The user stands top right, beside the first summary line
   const lines = () => summary.map((x, i) => i === 0 && e.user ? box("div", "first", el("span", x), el("span", e.user, "user")) : el("div", x));
   const same = [...body.children].map(c => c.textContent.trim()).join("\n") === summary.join("\n");
-  if (same) return box("div", "log-m" + (group ? ` grp grp-${group}` : ""), head, box("div", "log-sum", ...lines()));
+  if (same) return box("div", "log-m" + entryClass(group, unread), head, box("div", "log-sum", ...lines()));
   const det = el("details"), key = `logm-${e.ts}-${e.kind}`;
   det.open = openDetails.has(key);
   det.ontoggle = () => { det.open ? openDetails.add(key) : openDetails.delete(key); };
@@ -221,7 +277,7 @@ function logTile(e, d, group) {
   (last.classList.contains("first") ? last.firstChild : last).append(chev);
   sum.append(...shown);
   det.append(sum, body);
-  return box("div", "log-m" + (group ? ` grp grp-${group}` : ""), head, det);
+  return box("div", "log-m" + entryClass(group, unread), head, det);
 }
 /** Logs tab: grouped by day, filter, device search, quiet checks. */
 export function renderLogs() {
@@ -233,6 +289,7 @@ export function renderLogs() {
   const dayOf = e => { const d = new Date(e.ts * 1000); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
   // Directly consecutive entries of the same device on the same day form a group
   const same = (a, b) => !!a && !!b && !!logDevice(a) && logDevice(a) === logDevice(b) && dayOf(a) === dayOf(b);
+  const marks = entryMarks(ui.logs), readUntil = ui.logsUnreadFrom;
   let day = null, card = null;
   shown.forEach((e, i) => {
     const d = new Date(e.ts * 1000), key = dayOf(e);
@@ -242,7 +299,8 @@ export function renderLogs() {
     }
     const before = same(shown[i - 1], e), after = same(e, shown[i + 1]);
     const group = before && after ? "mid" : before ? "last" : after ? "first" : null;
-    card.append(mobileQuery.matches ? logTile(e, d, group) : logRow(e, d, group));
+    const unread = readUntil != null && marks.get(e) > readUntil;
+    card.append(mobileQuery.matches ? logTile(e, d, group, unread) : logRow(e, d, group, unread));
   });
   $("log-clear").disabled = !ui.logs.length;
   if (!out.length) out.push(box("div", "card", el("div", ui.logs.length ? t("No entries match.") : t("No log entries yet."), "empty")));

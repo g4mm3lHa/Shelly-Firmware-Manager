@@ -1,4 +1,4 @@
-"""Manager, layer 2 of 7: the firmware store, downgrade candidates, manual uploads and
+"""Manager, layer 2 of 8: the firmware store, downgrade candidates, manual uploads and
 the export/import of the whole store.
 
 Stored firmware is never deleted automatically: the user deletes files in the
@@ -9,7 +9,8 @@ at start like an incomplete download), then confirmed with type and version. Onl
 upload is staged at a time.
 
 The whole store can be exported as one sealed ZIP file and imported on another
-instance (format and checks: store_transfer). The export password is generated here
+instance (format and checks: store_transfer); the backups of device settings travel
+with it, encrypted with the key of the export password. The export password is generated here
 and shown once; an import is staged (temporary file, PART_PREFIX), checked completely
 and stored only after the user confirmed the summary. A fresh installation asks
 whether to import before its first check (first_start_open, see ManagerCore).
@@ -30,6 +31,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
+import backup_store
 import data_paths
 import shelly
 import store_transfer
@@ -1011,10 +1013,11 @@ class FirmwareStore(ManagerCore):
         The password is returned once (shown in the dialog) and kept nowhere – only
         the derived key stays in memory until the download (EXPORT_TTL_S). What can
         be refused is refused here, where the dialog shows it: the download itself
-        runs through a browser link that cannot show an error. Returns {"token",
-        "password", "files", "downloads", "uploads", "imports", "size", "filename",
-        "expires_in"}."""
-        if not self.firmware:
+        runs through a browser link that cannot show an error. The backups of the
+        device settings are part of the export, encrypted with the key of the export
+        password. Returns {"token", "password", "files", "downloads", "uploads",
+        "imports", "size", "backups", "filename", "expires_in"}."""
+        if not self.firmware and not self.backups.entries:
             raise ShellyError("The firmware store is empty – nothing to export")
         if self._free_space() < self.store_size() + SPACE_MARGIN:
             raise ShellyError("Not enough free disk space for the export")
@@ -1037,6 +1040,7 @@ class FirmwareStore(ManagerCore):
             "uploads": sources.count(SOURCE_UPLOAD),
             "imports": sources.count(SOURCE_IMPORT),
             "size": self.store_size(),
+            "backups": len(self.backups.entries),
             "filename": time.strftime("shelly-firmware-store-%Y-%m-%d.zip"),
             "expires_in": EXPORT_TTL_S,  # seconds the download stays possible
         }
@@ -1057,21 +1061,63 @@ class FirmwareStore(ManagerCore):
             raise ShellyError("Not enough free disk space for the export")
         target = data_paths.FW_DIR / f"{EXPORT_PREFIX}{secrets.token_hex(8)}"
         snapshot = {n: dict(m) for n, m in self.firmware.items()}
+        backups, unreadable = self._export_backups(pending["key"], pending["salt"])
         try:
             counts = await asyncio.to_thread(
                 store_transfer.build_export, data_paths.FW_DIR, snapshot, pending["key"], pending["salt"], app_version,
-                target,
+                target, backups,
             )
         except BaseException:
             target.unlink(missing_ok=True)
             raise
+        counts["damaged"] += unreadable
         user = pending["user"]
         log.info(
-            "Firmware store exported by %s (%d files, %d damaged left out)", user, counts["files"], counts["damaged"]
+            "Firmware store exported by %s (%d files, %d backups, %d damaged left out)",
+            user, counts["files"], counts["backups"], counts["damaged"],
         )
         extra: dict[str, Any] = dict(counts)
         self.events.add("export", severity="warning" if counts["damaged"] else None, user=user, **extra)
         return target, time.strftime("shelly-firmware-store-%Y-%m-%d.zip")
+
+    def _export_backups(self, key: bytes, salt: bytes) -> tuple[list[tuple[str, bytes]], int]:
+        """The stored backups of device settings as files of an export, each encrypted
+        with the key of the export password: ([(path, content)], number of backups
+        that could not be read and are left out)."""
+        files: list[tuple[str, bytes]] = []
+        unreadable = 0
+        for entry in list(self.backups.entries):
+            try:
+                content = self.backups.sealed_copy(entry["id"], key, salt)
+            except backup_store.BackupError as err:
+                log.warning("Backup %s left out of the export: %s", entry["id"], err)
+                unreadable += 1
+                continue
+            path = f"{store_transfer.BACKUP_FOLDER}/{entry['mac']}/{entry['id']}{backup_store.EXTENSION}"
+            files.append((path, content))
+        return files, unreadable
+
+    def _import_backups(self, staged: dict[str, Any]) -> int:
+        """Store the backups of device settings of a checked import that are not
+        stored yet, encrypted with the key of this app and marked as imported; a
+        "Kept" mark comes with the backup. A file that cannot be read is skipped
+        (logged). Returns the number of stored backups."""
+        checked = staged["checked"]
+        stored = 0
+        for entry in checked["backups"]:
+            if self.backups.get(entry["id"]) is not None:
+                continue
+            try:
+                content = store_transfer.read_backup(staged["path"], checked["prefix"], entry)
+                meta, data = backup_store.open_sealed(checked["key"], content, "not readable with the export password")
+                clean = backup_store.clean_meta(meta)
+                if self.backups.known(clean):
+                    continue
+                self.backups.add(clean, data, kept=meta.get("kept") is True, imported=True)
+                stored += 1
+            except (ValueError, OSError, KeyError, zipfile.BadZipFile) as err:
+                log.warning("Backup %s of the import skipped: %s", entry["path"], err)
+        return stored
 
     def _drop_import(self) -> None:
         """Forget the staged import and remove its temporary file."""
@@ -1191,6 +1237,9 @@ class FirmwareStore(ManagerCore):
             "new": [brief(e) for e in groups["new"]],
             "same": [brief(e, self._merge_note(e)) for e in groups["same"]],
             "conflict": [brief(e) for e in groups["conflict"]],
+            # Backups of device settings in the export: how many are new, how many stored already
+            "backups": len(checked["backups"]),
+            "backups_new": sum(1 for b in checked["backups"] if self.backups.get(b["id"]) is None),
         }
 
     async def confirm_import(self, token: object, user: str = "unknown", acknowledged: object = True) -> dict[str, int]:
@@ -1257,6 +1306,7 @@ class FirmwareStore(ManagerCore):
                     if entry.get("intermediate"):
                         meta["intermediate"] = True
                     merged += 1
+                backups = self._import_backups(staged)
                 self._drop_import()
                 if self.first_start_open:
                     self.first_start_open = False
@@ -1265,6 +1315,7 @@ class FirmwareStore(ManagerCore):
                 self._import_storing = False
         counts: dict[str, Any] = {
             "stored": stored, "updated": merged, "same": len(groups["same"]), "conflicts": len(groups["conflict"]),
+            "backups": backups,
         }
         log.info("Firmware store imported by %s: %s", user, counts)
         self.events.add(

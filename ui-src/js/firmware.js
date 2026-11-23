@@ -157,7 +157,7 @@ function firmwareRow(f, latest, older) {
   attachTip(sha, () => f.sha256 || "", true);
   const devices = f.devices.length
     ? keptDetails(`fw-${f.name}`, t("For {devices}", {devices: devicesText(f.devices)}), box("ul", null, ...f.devices.map(firmwareDevice)))
-    : el("span", "–", "muted");
+    : el("span", "–", "muted fw-none");   // no device: the placeholder of the column, not shown in the phone tile
   devices.classList.add("fw-dev");
   const dl = el("a", null, "icon"); dl.href = `api/firmware/${encodeURIComponent(f.name)}/download`; dl.setAttribute("download", "");
   setTip(dl, t("Download")); dl.setAttribute("aria-label", t("Download {firmware}", {firmware: `${f.type} ${f.version}`})); dl.append(icon("download"));
@@ -178,8 +178,11 @@ function firmwareRow(f, latest, older) {
   // Phones: small labels in the tile (data-label, shown by CSS only there)
   const size = el("span", mb(f.size || 0), "nowrap fw-size"), date = el("span", fmt(f.downloaded), "nowrap sub fw-date");
   size.dataset.label = t("Size"); date.dataset.label = t("Stored"); sha.dataset.label = "SHA-256";
-  return box("div", "fw-row", box("div", "fw-ver", el("span", f.version, "name"), latest ? el("span", t("Latest"), "tag primary") : null,
-    isBeta(f.version) ? el("span", t("Beta"), "tag beta") : null, inst, uploaded, step),
+  // The labels form one group: beside the version, or together on the next line where
+  // the width does not allow that (phones) – never one beside and one below
+  const labels = [latest ? el("span", t("Latest"), "tag primary") : null, isBeta(f.version) ? el("span", t("Beta"), "tag beta") : null,
+    inst, uploaded, step].filter(Boolean);
+  return box("div", "fw-row", box("div", "fw-ver", el("span", f.version, "name"), labels.length ? box("span", "fw-tags", ...labels) : null),
     size, date, sha, devices, box("div", "actions", older ? downgradeButton(f) : null, log, dl, del));
 }
 // ---------------------------------------------------------------- Downgrade from the Firmware tab

@@ -32,6 +32,7 @@ OPTIONS = {
     "log_entry_limit": 1000,
     "allow_downgrade": True,
     "keep_installed": False,  # switched on by the tests of "Keep installed versions"
+    "backup_before_install": False,  # switched on by the tests of the backups
 }
 
 
@@ -113,6 +114,7 @@ def net(monkeypatch, tmp_path):
         "CREDENTIALS_FILE": data / "credentials.json",
         "CHANGELOG_FILE": data / "changelog.json",
         "EVENTS_FILE": data / "events.json",
+        "BACKUP_DIR": data / "backups",
     }.items():
         monkeypatch.setattr(data_paths, name, value)
 

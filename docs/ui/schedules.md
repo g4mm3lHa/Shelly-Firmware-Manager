@@ -33,3 +33,10 @@ as the UI change). Read when you change the Schedules tab or the schedule dialog
 - **Logs (F18):** kind "Schedule" and filter "Schedules": one entry per run (name, action,
   devices, duration, result; findings expandable), "missed" as warning, creating, changing
   and deleting a schedule; scheduled installations under "Installation".
+- **Action "Backup" (3.11.0, F9, approved 2026-11-22):** sixth action with the backup
+  icon, no pause. A run stores a backup only for devices whose settings changed since
+  their newest backup: "n stored · n unchanged · n not backed up" (plus "n left out").
+  Battery devices are tried and count as left out while asleep. Logs: kind "Backup" and
+  filter "Backups" (stored, failed, restored, deleted, downloaded, imported, removed by
+  the limit); the run of a schedule stays one entry of the kind "Schedule" and is shown
+  by both filters.
