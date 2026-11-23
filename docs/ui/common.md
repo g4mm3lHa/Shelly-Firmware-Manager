@@ -54,7 +54,7 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   `aria-selected` and name their panel. Error and warning messages in dialogs are
   announced (`role="alert"`), successes as status. No arrow keys in menus and tabs.
 - **Row menu (⋮), five groups with separators:** 1 Check for updates, Install update,
-  Offer update now (only while an update is on hold), Downgrade (hint below it) | 2 Device details, Reload device info ("Not available" hint
+  Offer update now (only while an update is on hold), Downgrade (only while "Allow downgrades" is on; hint below it) | 2 Device details, Reload device info ("Not available" hint
   below it), Open web UI | 3 NTP server, Power-on action, Eco mode, Device password,
   Backups (3.11.0) |
   4 Ignore / Resume device (removed devices: Remove from list) | 5 Restart (red). Phones:

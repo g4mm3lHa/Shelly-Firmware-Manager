@@ -1,5 +1,20 @@
 # Changelog
 
+## 3.11.1
+
+Released 2026-11-23. Stronger downgrade warning with a risk tick, and no downgrade
+entries while downgrades are off.
+
+Changed
+- Downgrade: red warning "Downgrade at your own risk" (can brick the Shelly) in every
+  downgrade dialog, also at the bottom of the version list.
+- Downgrade confirmation: the red "Downgrade" button works only after the tick "I
+  understand the risk".
+- While downgrades are off, the row menu has no Downgrade entry and the Firmware tab
+  no downgrade icon.
+- Ticking "Allow downgrades" in Settings shows the downgrade warning; it needs the tick
+  "I understand the risk", Cancel takes it back.
+
 ## 3.11.0
 
 Released 2026-11-23. Backups of the device settings by hand, before every installation

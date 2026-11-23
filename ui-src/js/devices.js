@@ -4,7 +4,7 @@ import {
   matches, message, modal, modelGen, openDetails, saveLocal, searchText, searchTool, section, selected, setTip, sortControl, t, toast, toolButton,
   ui, valueList, webUrl,
 } from "./core.js";
-import {DOWNGRADE_OFF, OFFER_SOURCES, cancelPlan, daysAgo, openDowngrade, openInstall} from "./install.js";
+import {OFFER_SOURCES, cancelPlan, daysAgo, openDowngrade, openInstall} from "./install.js";
 import {
   aopLabel, aopSummary, aopTone, editAop, editCloud, editDebug, editEco, editPassword, editSwitch, editValue, featureStrip,
   restartDevice,
@@ -696,13 +696,13 @@ function openRowMenu(d, anchor) {
     add(t("Install now"), () => openInstall([d]), !blocked && !d.activity);
     add(t("Cancel scheduled installation"), () => cancelPlan(d), true);
   }
-  // Downgrade to a stored older version – Gen2+ only, also up to date / ignored devices
-  // Disabled (no dialog) while no older version is stored or something blocks it; while
-  // the option "Allow downgrades" is off it is shown disabled with the hint below it
-  if (d.gen >= 2 && !s.allow_downgrade) { add(t("Downgrade"), () => {}, false); items.push(el("div", DOWNGRADE_OFF, "menu-hint")); }
-  // A scheduled installation blocks it like "Install": disabled with the hint below it
-  else if (d.gen >= 2 && d.planned) { add(t("Downgrade"), () => {}, false); items.push(el("div", t("Cancel the scheduled installation first"), "menu-hint")); }
-  else if (d.gen >= 2) add(t("Downgrade"), () => openDowngrade(d), downgradable(d, ui.state) && d.downgrades > 0);
+  // Downgrade to a stored older version – Gen2+ only, also up to date / ignored devices,
+  // and only while the option "Allow downgrades" is on (else the entry is not shown).
+  // Disabled (no dialog) while no older version is stored or something blocks it; a
+  // scheduled installation blocks it like "Install": disabled with the hint below it
+  if (d.gen >= 2 && s.allow_downgrade && d.planned) {
+    add(t("Downgrade"), () => {}, false); items.push(el("div", t("Cancel the scheduled installation first"), "menu-hint"));
+  } else if (d.gen >= 2 && s.allow_downgrade) add(t("Downgrade"), () => openDowngrade(d), downgradable(d, ui.state) && d.downgrades > 0);
   // Group 2: the device itself
   items.push(el("hr"));
   add(t("Device details"), () => showStatus(d), true);

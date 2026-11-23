@@ -3,7 +3,7 @@
 
 from types import SimpleNamespace
 
-from features.base import FEATURES, FULL, IDLE, MISSING, OVERFLOW_JS, check, menu_items, open_page
+from features.base import FEATURES, FULL, IDLE, MISSING, OVERFLOW_JS, check, menu_items, open_page, pick_filter
 from features.devices import (_action_popups, _battery, _device_list, _keep_listed, _layout, _name_tips,
                               _next_steps, _sections)
 from features.firmware_tab import _downgrade, _firmware_delete_and_upload, _firmware_tab, _sorting_and_downgrade
@@ -25,13 +25,16 @@ def firmware_store(browser, out):
             items = dict(menu_items(f, "Hall"))
             check(f"{case}: downgrade disabled without a stored older version", items.get(entry) is True, str(items))
             ctx.close()
-            # Option "Allow downgrades" off (demo "missing"): disabled with the Settings hint
+            # Option "Allow downgrades" off (demo "missing"): no menu entry, no Firmware-tab icon
             ctx, page, f, errors = open_page(browser, MISSING, width, scheme, embedded)
             items = dict(menu_items(f, "Hall"))
-            hint = f.locator("#rowmenu .menu-hint").all_inner_texts()
-            check(f"{case}: downgrade off – entry disabled with hint", items.get(entry) is True
-                  and any("Allow downgrades" in h for h in hint), str(hint))
+            check(f"{case}: downgrade off – no menu entry", entry not in items, str(items))
             page.screenshot(path=out / f"{case}-downgrade-off.png")
+            page.keyboard.press("Escape")
+            f.click("#tab-firmware")
+            pick_filter(f, "firmware", "All")
+            icons = f.locator(".fw-row .actions button[aria-label^='Downgrade to']").count()
+            check(f"{case}: downgrade off – no downgrade icon", icons == 0, str(icons))
             ctx.close()
         ctx, page, f, errors = open_page(browser, FEATURES, width, scheme, embedded, ignore=("/upload/confirm",))
 

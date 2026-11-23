@@ -7,6 +7,7 @@ import {
 } from "./core.js";
 import {autoLanguage, languageChoice, LANGUAGES, setLanguage} from "./i18n.js";
 import {bulkPasswords} from "./device-settings.js";
+import {downgradeWarning} from "./install.js";
 
 // ---------------------------------------------------------------- App settings
 // All app options, grouped into cards in this order (Title Case card heads). Saving
@@ -119,6 +120,7 @@ export function renderSettings() {
         : type === "time" ? input("time", {step: 60, value: o[key] || ""}) : type === "pins" ? pinsEditor(o[key] || []) : input("text", {value: o[key] ?? ""});
       if (key === "download_base_url" && !control.value) control.value = suggestedBaseUrl();   // only a suggestion: counts as unsaved
       control.id = id; settingsInputs[key] = control;
+      if (key === "allow_downgrade") control.addEventListener("change", () => { if (control.checked) confirmDowngrades(control); });
       // One block per option: name with help icon, control (and the live warning of
       // the download base URL). On wide screens the block is "display: contents", so the
       // name/control grid is unchanged. The help text is a tooltip of the name and the
@@ -157,6 +159,16 @@ export function renderSettings() {
   wrap.addEventListener("input", markDirty); wrap.addEventListener("change", markDirty); wrap.addEventListener("click", () => setTimeout(markDirty));
   $("settings-form").replaceChildren(wrap, box("div", "form-actions", dirty, save), changelogNote());   // common save area
   markDirty();   // a suggested download base URL is an unsaved change
+}
+/** Popup when "Allow downgrades" is ticked: the red downgrade warning; the red "Enable"
+ *  needs the tick "I understand the risk". Cancel, the X and Escape take the tick back.
+ *  Like every option it applies only after saving. */
+function confirmDowngrades(control) {
+  const [ack, ackLabel] = checkbox(t("I understand the risk"));
+  const untick = () => { control.checked = false; control.dispatchEvent(new Event("change", {bubbles: true})); closeModal(); };
+  modal(t("Allow downgrades?"), [downgradeWarning(), ackLabel, el("p", t("Applies only after saving."), "hint")],
+    [{text: t("Cancel"), cancel: true, action: untick}, {text: t("Enable"), kind: "danger", action: closeModal}], "history");
+  ackGate(ack);
 }
 // Columns of the Settings tab: the cards fill independent stacks from left to right (card
 // n goes to stack n mod columns), so the cards of a column follow each other without the
