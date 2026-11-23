@@ -1,5 +1,24 @@
 # Changelog
 
+## 3.11.1
+
+Release candidate. All settings only in the app's Settings tab; stronger downgrade
+warning, and no downgrade entries while downgrades are off.
+
+Changes in rc1
+
+Changed
+- Settings are stored by the app; the Configuration tab of the app page only points to
+  the Settings tab. Saved values are taken over once at the first start.
+- Downgrade: red warning "Downgrade at your own risk" (can brick the Shelly) in every
+  downgrade dialog, also at the bottom of the version list.
+- Downgrade from the row menu: two steps; the installation dialog needs the tick "I
+  understand the risk" before its red "Downgrade" button works.
+- While downgrades are off, the row menu has no Downgrade entry and the Firmware tab
+  no downgrade icon.
+- Ticking "Allow downgrades" in Settings shows the downgrade warning; it needs the tick
+  "I understand the risk", Cancel takes it back.
+
 ## 3.11.0
 
 Released 2026-11-23. Backups of the device settings by hand, before every installation
