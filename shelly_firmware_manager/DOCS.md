@@ -134,8 +134,8 @@ correct the address.
 
 ## Using the app
 
-The app has five tabs: **Devices**, **Firmware**, **Schedules**, **Logs** and
-**Settings**. It follows the Home Assistant theme (colours, light/dark) and works on
+The app has six tabs: **Devices**, **Firmware**, **Schedules**, **Backups**, **Logs**
+and **Settings**. It follows the Home Assistant theme (colours, light/dark) and works on
 phones; there only the active tab shows its name. The user interface is in English or
 German (see [Settings](#settings)).
 
@@ -522,11 +522,15 @@ A backup is made
   up"); battery devices are backed up when a run finds them awake;
 - before a restore (reason **Before restore**), so a restore can be taken back.
 
+A device that should answer and does not (or whose last check failed with an error) is an
+error in the log, also within a run or a schedule; a battery device that sleeps is a
+warning.
+
 The tab lists every device with its newest backup; the chevron opens all its backups with
 date, reason, firmware, contents and size. The card **No Backup** names the devices
 without one and why (no backup yet, password not stored, asleep, not reachable). Per
 device the newest **Keep backups per device** backups stay, older ones are removed
-automatically. The lock marks a backup as **Kept**: it is never removed automatically and
+automatically. The pin marks a backup as **Kept**: it is never removed automatically and
 does not count. The bin deletes a backup after a confirmation. A device removed from Home
 Assistant keeps its backups but gets no new ones.
 
@@ -746,9 +750,11 @@ it differently:
 - Older versions stay stored, so a downgrade is possible (Gen2+).
 - You review and install several devices in one dialog.
 
-**Does the app manage scripts, backups or other settings of a Shelly?** No. Other tools
-cover the broad management of Shellys; this app does one job – safe firmware updates –
-plus the few device settings listed under [Devices](#devices).
+**Does the app manage scripts, backups or other settings of a Shelly?** It backs up the
+settings of every Shelly, scripts, schedules and webhooks included, and restores them
+part by part (see [Backups](#backups)). It changes only the few device settings listed
+under [Devices](#devices); scripts and other settings are edited on the Shelly or with
+other tools. The main job stays safe firmware updates.
 
 **Which Shellys does the app list?** Every device of the Home Assistant Shelly
 integration that has its own address in your network, Gen1 to Gen4. Devices that are
@@ -767,7 +773,8 @@ downloads the firmware; the Shellys fetch it from the app on port 8098.
 **Does the app install updates on its own?** No. A check only provides the firmware.
 Every installation needs your approval in the installation dialog.
 
-**Does it offer beta firmware?** No, only stable versions.
+**Does it offer beta firmware?** Only if you switch on **Offer beta firmware** (Gen2+);
+each beta needs an extra confirmation (see [Beta firmware](#beta-firmware)).
 
 **Is there a beta version of the app?** Release candidates of the next version appear in
 the `beta` branch of the repository. To try one, add

@@ -101,7 +101,8 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
 - Popups opened by an action icon and the notes of greyed-out icons start with a
   **status strip** (32 px tinted icon circle in the action-column colour, feature name,
   state pill On/Off, Protected/Not protected/Unknown, Not available, Not supported;
-  restart without pill; power-on pill = current value "Restore last state" / "Mixed").
+  restart without pill; power-on pill = current value "Restore last state" / "Mixed"; a
+  pill too long for the line moves below the name, right-aligned).
   Switch popups (eco, access point, Bluetooth, websocket debug log) ask no question:
   strip + button, the button names the action ("Turn on" / "Turn off"). Restart popup:
   no question, hint "The device will be unavailable for a few seconds.", button

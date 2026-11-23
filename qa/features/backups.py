@@ -320,15 +320,22 @@ def _logs(c):
     f.locator("#tab-devices").click()
     refresh_state(page, f)
     mark = f.locator("#tab-logs .tab-unread")
+    # The run of "Back up now" before reached not every device that should answer: an error
+    check(f"{case}: Logs – mark for the backup run with a device not stored", mark.is_visible())
+
+    def state(error):
+        def answer(route):
+            headers = {k: v for k, v in route.request.headers.items() if k.lower() != "if-none-match"}
+            s = route.fetch(headers=headers).json()
+            s["log_latest_error"] = s["log_latest"] if error else None
+            route.fulfill(json=s)
+        return answer
+
+    page.route("**/api/state", state(False))
+    refresh_state(page, f)
     check(f"{case}: Logs – no mark for warnings and successes", mark.is_hidden())
-
-    def state(route):
-        headers = {k: v for k, v in route.request.headers.items() if k.lower() != "if-none-match"}
-        s = route.fetch(headers=headers).json()
-        s["log_latest_error"] = s["log_latest"]
-        route.fulfill(json=s)
-
-    page.route("**/api/state", state)
+    page.unroute("**/api/state")
+    page.route("**/api/state", state(True))
     refresh_state(page, f)
     check(f"{case}: Logs – mark for an unread error entry", mark.is_visible() and mark.inner_text().startswith("!"), mark.inner_text())
     red = f.evaluate("""() => { const probe = document.createElement('div'); probe.style.background = 'var(--error-color)';

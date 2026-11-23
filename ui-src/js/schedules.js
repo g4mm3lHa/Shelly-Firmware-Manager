@@ -14,7 +14,7 @@ const ACTIONS = {restart: t("Restart"), cloud_on: t("Cloud on"), cloud_off: t("C
 const ACTION_ICONS = {restart: "restart", cloud_on: "cloud", cloud_off: "cloud", ble_on: "ble", ble_off: "ble", backup: "backup"};
 const DAYS = [t("Mon"), t("Tue"), t("Wed"), t("Thu"), t("Fri"), t("Sat"), t("Sun")];
 const PAUSE_DEFAULT = 3, PAUSE_MAX = 600, EVERY_MAX = 365, NAME_MAX = 64;
-const SEVERITY = {success: [t("Success"), "sev-success"], warning: [t("Warning"), "sev-warning"], missed: [t("Missed"), "sev-warning"]};
+const SEVERITY = {success: [t("Success"), "sev-success"], warning: [t("Warning"), "sev-warning"], error: [t("Error"), "sev-error"], missed: [t("Missed"), "sev-warning"]};
 const isBle = action => action === "ble_on" || action === "ble_off";
 const isCloud = action => action === "cloud_on" || action === "cloud_off";
 

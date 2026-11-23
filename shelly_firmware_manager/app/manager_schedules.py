@@ -50,6 +50,7 @@ import timetable
 from shelly import UNSUPPORTED, ShellyError, error_text, plain
 
 from manager_backups import BACKUP_PARALLEL, RESULT_STORED
+from events import worst
 from manager_core import (
     PENDING, Device, STATUS_INSTALLING, STATUS_SKIPPED, markdown_text, unexpected_text,
 )
@@ -644,7 +645,8 @@ class Schedules(Installs):
         """The action of a schedule on one device: {"device", "result", "detail"}
         with result ok / unreachable / refused. Backup: also unchanged (the device
         reports the settings of its newest backup: nothing is stored) and asleep (a
-        battery device that did not answer)."""
+        battery device that did not answer), plus "severity" of the device (see
+        Backups._backup_result)."""
         dev = self.devices.get(device_id) or {}
         name = str(dev.get("name") or "?")
         if action == "backup":
@@ -653,7 +655,12 @@ class Schedules(Installs):
                     device_id, "schedule", schedule_name, user, only_changed=True, log_entry=False
                 )
             result = "ok" if outcome["result"] == RESULT_STORED else str(outcome["result"])
-            return {"device": name, "result": result, "detail": str(outcome.get("detail") or outcome["result"])}
+            return {
+                "device": name,
+                "result": result,
+                "detail": str(outcome.get("detail") or outcome["result"]),
+                "severity": str(outcome["severity"]),
+            }
         try:
             if action == "restart":
                 await self.restart_device(device_id)
@@ -764,6 +771,8 @@ class Schedules(Installs):
             parts.append("interrupted – the app stopped")
         text = " · ".join(parts)
         severity = "success" if results and done + unchanged == len(results) and not interrupted else "warning"
+        if action == "backup":  # a device that should have answered makes the run an error
+            severity = worst(severity, *(r.get("severity", "success") for r in results))
         self.events.add(
             "schedule",
             severity=severity,

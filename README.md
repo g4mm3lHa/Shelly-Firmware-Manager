@@ -15,7 +15,7 @@
 
 Home Assistant app that keeps your Shelly devices (Gen1 to Gen4) up to date – locally
 and under your control. It finds all Shellys of the Shelly integration, checks for new
-stable firmware, downloads it and serves it to the devices from its own download server
+firmware, downloads it and serves it to the devices from its own download server
 in your network. Nothing is installed without your approval.
 How this differs from the update entities of the Shelly integration is answered in the
 [FAQ](shelly_firmware_manager/DOCS.md#faq).

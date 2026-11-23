@@ -16,6 +16,16 @@ Changed
   discarded, the backup dialogs return to the device's list.
 - Lists in dialogs (Back up now, bulk passwords, schedule devices, run results) sort
   names like the tables ("Shelly 2" before "Shelly 10").
+- Backups tab: a pin marks a kept backup instead of the lock, which read as a password
+  or encryption.
+- Schedules tab: a backup run with an unreachable device shows "Error" as its last run.
+
+Fixed
+- Backups: a device that does not answer is an error in the log, also in a backup run
+  and a schedule "Backup"; a battery device asleep stays a warning.
+- No "Checking …" line under the page title while a device is checked; its row shows it.
+- Phones: in the popups of the action icons a long state (e.g. power-on action in
+  German) moves below the name instead of overlapping it.
 
 Changes in rc2
 

@@ -171,6 +171,7 @@ async def test_reservation_blocks_second_check(mgr, net):
     assert mgr.device_checks == {A: "running", B: "running"} and mgr.progress is None
     assert mgr.activity[A] == manager_core.ACTIVITY_CHECKING
     assert mgr.busy == "Checking 2 devices"
+    assert mgr.busy_note is None  # no line under the page title: the rows show "Checking …"
     net.gate.set()
     await asyncio.gather(task, other)
     assert not mgr.checking and mgr.activity == {} and mgr.device_checks == {}

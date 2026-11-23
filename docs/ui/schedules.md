@@ -7,7 +7,7 @@ as the UI change). Read when you change the Schedules tab or the schedule dialog
 - **Tab (F10):** toolbar note "Times in the time zone of Home Assistant" and "Add
   schedule" (plus icon). Card "Schedules · n": on/off checkbox, name (free text; restart:
   pause below it), action with icon, repeat, devices, next run, last run (time, outcome
-  tag Success / Warning / Missed, short result), pencil and red trash; switched-off rows
+  tag Success / Warning / Error / Missed, short result), pencil and red trash; switched-off rows
   dimmed. Card "Scheduled Installations · n": device, version (with "Beta" tag), install
   at, approved (time · user), "Cancel". Phones: tiles with labelled lines and the strong
   line (see `common.md`). Empty state
@@ -37,7 +37,9 @@ as the UI change). Read when you change the Schedules tab or the schedule dialog
 - **Action "Backup" (3.11.0, F9, approved 2026-11-22):** sixth action with the backup
   icon, no pause. A run stores a backup only for devices whose settings changed since
   their newest backup: "n stored · n unchanged · n not backed up" (plus "n left out").
-  Battery devices are tried and count as left out while asleep. Logs: kind "Backup" and
+  Battery devices are tried and count as left out while asleep. A device that should
+  answer and does not (or whose last check failed with an error) makes the run an Error
+  (live test rc2, approved 2026-11-23). Logs: kind "Backup" and
   filter "Backups" (stored, failed, restored, deleted, downloaded, imported, removed by
   the limit); the run of a schedule stays one entry of the kind "Schedule" and is shown
   by both filters.

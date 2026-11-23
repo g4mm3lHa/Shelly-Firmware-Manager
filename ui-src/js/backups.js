@@ -82,14 +82,14 @@ function backupRow(d, b, back) {
   const restore = el("button", t("Restore"), "small"); restore.onclick = () => openRestore(d, b, back);
   if (!d.id) { restore.disabled = true; setTip(restore, t("The device of this backup is no longer listed – it can only be downloaded or deleted")); }
   const when = fmt(b.at);
-  const keep = iconButton("lock", b.kept ? t("Kept – click to let it be removed automatically again") : t("Keep – never remove this backup automatically"),
+  const keep = iconButton("pin", b.kept ? t("Kept – click to let it be removed automatically again") : t("Keep – never remove this backup automatically"),
     async () => {
       try { await api(`api/backups/${b.id}/keep`, {kept: !b.kept}); await back(); }
       catch (e) { toast(e.message, true); }
     }, "bk-keep" + (b.kept ? " on" : ""));
   keep.setAttribute("aria-pressed", String(!!b.kept));
   const row = box("div", "bk-item",
-    bkCell("", "bk-date", el("span", when, "nowrap"), b.kept ? box("span", "bk-pin", icon("lock"), el("span", t("Kept"))) : null),
+    bkCell("", "bk-date", el("span", when, "nowrap"), b.kept ? box("span", "bk-pin", icon("pin"), el("span", t("Kept"))) : null),
     bkCell(t("Reason"), "bk-reason", reasonTag(b)),
     bkCell(t("Firmware"), "bk-fw", el("span", b.fw || "–", "nowrap")),
     bkCell(t("Contents"), "bk-parts", el("span", partsText(b.parts)), b.parts && b.parts.partial ? el("span", t("Actions not readable"), "tag warn") : null),

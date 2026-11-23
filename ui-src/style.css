@@ -254,14 +254,15 @@ html.dlg-open{overflow:hidden}
 /* Icon before the title (changelog, delete, upload, installation) */
 .dlg-head h2 .ti{width:var(--icon-l);height:var(--icon-l);flex:none;color:var(--secondary-text-color)}
 .dlg-head h2 .ti-delete,.dlg-head h2 .ti-chip{color:var(--error-color)}
-/* Status strip of the popups opened by an action icon: icon, feature name, state */
-.fstrip{display:flex;align-items:center;gap:12px;margin:12px 0 4px;padding:8px 12px;border-radius:var(--radius-m);
+/* Status strip of the popups opened by an action icon: icon, feature name, state; a long
+   state (German, phones) moves below the name instead of overlapping it */
+.fstrip{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;margin:12px 0 4px;padding:8px 12px;border-radius:var(--radius-m);
   background:color-mix(in srgb,var(--primary-text-color) 5%,transparent)}
 .fstrip .fs-icon{display:inline-flex;align-items:center;justify-content:center;flex:none;width:32px;height:32px;
   border-radius:50%;color:var(--tone);background:color-mix(in srgb,var(--tone) 16%,transparent)}
 .fstrip .fs-icon svg{width:var(--icon);height:var(--icon);fill:currentColor}
-.fstrip .fs-name{flex:1;font-weight:500;min-width:0}
-.fstrip .fs-pill{--tone:inherit}
+.fstrip .fs-name{flex:1 1 auto;font-weight:500;min-width:0;overflow-wrap:anywhere}
+.fstrip .fs-pill{--tone:inherit;margin-left:auto;white-space:normal}
 #dlg-body{padding:4px 20px 12px;overflow:auto;max-height:calc(100vh - 200px);overscroll-behavior:contain}
 #dlg-body>p.hint{margin:14px 0 2px}
 .btns{display:flex;justify-content:flex-end;gap:8px;padding:12px 20px 16px;border-top:1px solid var(--line)}
@@ -820,7 +821,7 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
 .bk-list.in-dlg :is(.bk-fw,.bk-parts,.bk-size){grid-column:1/-1;display:inline;color:var(--secondary-text-color);font-size:var(--fs-small)}
 .bk-list.in-dlg .bk-fw::before{content:attr(data-label) " "}
 .bk-more{margin-top:8px}
-/* Kept backup: grey lock = can be kept, primary colour = kept */
+/* Kept backup: grey pin = can be kept, primary colour = kept */
 button.icon.bk-keep{color:var(--secondary-text-color);opacity:.55}button.icon.bk-keep.on{color:var(--link-text);opacity:1}
 /* Job bar above the cards (backup run, restore): neutral, with "Show" */
 .notice.bk-job{margin:0 0 12px;border-left-color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 10%,var(--card-background-color))}

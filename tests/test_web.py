@@ -56,7 +56,7 @@ async def test_double_tap_gets_409(client, mgr, net):
     assert (r1.status, r2.status, r3.status, r4.status) == (200, 409, 409, 200)  # B: in parallel
     state = await (await client.get("/api/state")).json()
     assert not state["scanning"] and state["progress"] is None
-    assert state["busy"] == "Checking 2 devices"
+    assert state["busy"] == "Checking 2 devices" and state["busy_note"] is None
     net.gate.set()
     await wait_idle(mgr)
     checks = [e for e in mgr.events.entries if e["kind"] == "check" and e.get("trigger") == "device"]

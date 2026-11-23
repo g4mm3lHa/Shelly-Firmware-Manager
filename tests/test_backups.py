@@ -9,6 +9,7 @@ import json
 
 import backup_store
 import manager_backups
+import manager_core
 import pytest
 import shelly
 import shelly_backup
@@ -449,11 +450,12 @@ async def test_failed_backups_name_the_reason(backed, net, shellys):
     with pytest.raises(ShellyError, match="Device not reachable"):
         await mgr.backup_now(A, "alice")
     assert mgr.devices[A]["backup_failed"]["reason"] == "unreachable"
-    assert backup_events(mgr, "failed")[-1]["severity"] == "warning"
+    assert backup_events(mgr, "failed")[-1]["severity"] == "error"  # it should answer
     mgr.devices[A]["battery"] = True
     with pytest.raises(ShellyError):
         await mgr.backup_now(A, "alice")
     assert next(d for d in mgr.backups_view()["devices"] if d["id"] == A)["none"]["reason"] == "asleep"
+    assert backup_events(mgr, "failed")[-1]["severity"] == "warning"  # it sleeps
     fake(shellys, net, A).down = False
 
     async def locked(_method, _params=None):
@@ -494,7 +496,7 @@ async def test_back_up_now_for_several_devices(backed, net, shellys):
     # One log entry for the run names every device; none per device
     assert not backup_events(mgr, "stored") and not backup_events(mgr, "failed")
     (entry,) = backup_events(mgr, "run")
-    assert entry["severity"] == "warning" and entry["user"] == "alice" and entry["devices"] == 3
+    assert entry["severity"] == "error" and entry["user"] == "alice" and entry["devices"] == 3
     assert entry["stored"] == 2 and entry["result"] == "2 stored · 1 not backed up"
     findings = {f["device"]: f for f in entry["findings"]}
     assert [f["device"] for f in entry["findings"]] == sorted(findings, key=str.casefold)
@@ -502,7 +504,24 @@ async def test_back_up_now_for_several_devices(backed, net, shellys):
     assert kitchen["result"] == "stored" and kitchen["severity"] == "success" and kitchen["size"] == results[A]["size"]
     assert kitchen["parts"] == results[A]["parts"] and "id" not in kitchen and "detail" not in kitchen
     down = findings[mgr.devices[B]["name"]]
-    assert down["result"] == "unreachable" and down["severity"] == "warning" and "Device not reachable" in down["detail"]
+    assert down["result"] == "unreachable" and down["severity"] == "error" and "Device not reachable" in down["detail"]
+
+
+async def test_backup_run_rates_never_checked_devices_like_their_check(backed):
+    """A device without a successful check is not backed up: an error if its check
+    rated it an error (e.g. it did not answer), a warning otherwise (a battery device
+    asleep)."""
+    mgr = backed
+    for device_id in (B, C):
+        mgr.devices[device_id].pop("origin")
+    mgr.devices[B].update(status=manager_core.STATUS_ERROR, error_level="error")
+    mgr.devices[C].update(status=manager_core.STATUS_ASLEEP, error_level="warning", battery=True)
+    await mgr.run_backups(mgr.reserve_backup_run([A, B, C]), "alice")
+    (entry,) = backup_events(mgr, "run")
+    findings = {f["device"]: f for f in entry["findings"]}
+    assert findings[mgr.devices[B]["name"]]["severity"] == "error"
+    assert findings[mgr.devices[C]["name"]]["severity"] == "warning"
+    assert "not been checked" in findings[mgr.devices[C]["name"]]["detail"] and entry["severity"] == "error"
 
 
 async def test_backup_run_names_sleeping_devices_and_an_interruption(backed, net, shellys):
@@ -574,7 +593,8 @@ async def test_backup_before_the_installation(net, shellys, monkeypatch, quick_i
 
 async def test_schedule_backup_stores_only_changes(backed, net, shellys):
     """A backup run stores what changed since the newest backup; an ignored device is
-    left out, a sleeping battery device too (not failed); one log entry per run."""
+    left out, a sleeping battery device too (not failed); a device that does not
+    answer makes the run an error; one log entry per run."""
     mgr = backed
     data = {
         "name": "Weekly backup",
@@ -601,7 +621,8 @@ async def test_schedule_backup_stores_only_changes(backed, net, shellys):
     mgr.start_due(mgr.schedules[0]["next"])
     await asyncio.gather(*list(mgr._timetable_tasks))
     run = mgr.events.entries[-1]
-    assert run["result"] == "1 stored · 0 unchanged · 1 not backed up · 1 left out" and run["severity"] == "warning"
+    assert run["result"] == "1 stored · 0 unchanged · 1 not backed up · 1 left out" and run["severity"] == "error"
+    assert mgr.schedules[0]["last"]["severity"] == "error"  # a device that should answer did not
     assert len(mgr.backups.of("AABBCC00000A")) == 2 and "Hall" in mgr.notified[-1][1]
     fake(shellys, net, B).down = False
     mgr.start_due(mgr.schedules[0]["next"])
@@ -640,7 +661,7 @@ async def test_preview_and_restore(backed, net, shellys):
     mgr.reserve_restore(backup["id"], ["scripts", "settings"], False, "alice")
     state = mgr.public_state()
     assert state["restore"]["steps"] == ["backup", "settings", "scripts", "verify"] and "user" not in state["restore"]
-    assert "Restoring a backup" in state["busy"]
+    assert "Restoring a backup" in state["busy"] and state["busy_note"] == "Restoring a backup"
     for blocked in (
         lambda: mgr.reserve_check("all"),
         lambda: mgr.reserve_check("device", A),

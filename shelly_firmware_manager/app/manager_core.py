@@ -820,6 +820,16 @@ class ManagerCore:
         if self.device_checks:
             names = [str(self.devices.get(i, {}).get("name") or "device") for i in self.device_checks]
             parts.append(f"Checking {names[0]}" if len(names) == 1 else f"Checking {len(names)} devices")
+        if note := self.busy_note:
+            parts.append(note)
+        return " · ".join(parts) or None
+
+    @property
+    def busy_note(self) -> str | None:
+        """The line under the page title: what busy names except checks – a check
+        shows "Checking …" in the row of its device (a full check in the progress
+        line), not under the title."""
+        parts = []
         if self.installing:
             parts.append(f"Installations running: {len(self.installing)}")
         if self.reloading:

@@ -18,9 +18,10 @@ as the UI change). Read when you change the Backups tab, a backup dialog or the 
 - **Reasons:** tags Manual, Before update / Before downgrade (with "a → b"), Schedule (with
   its name), Before restore; "Imported" as a second tag. Gen 1 without readable actions:
   yellow tag "Actions not readable".
-- **Kept (F8):** lock icon button per backup: grey = "Keep – never remove this backup
-  automatically", primary colour = kept (lock + "Kept" after the date); a kept backup is
-  never removed automatically and does not count ("n of N + k kept").
+- **Kept (F8):** pin icon button per backup: grey = "Keep – never remove this backup
+  automatically", primary colour = kept (pin + "Kept" after the date); a kept backup is
+  never removed automatically and does not count ("n of N + k kept"). The pin replaced
+  the lock, which read as password or encryption (live test rc2, approved 2026-11-23).
 - **Retention (F7):** one counter for all reasons, setting "Keep backups per device".
 - **Removed devices:** a device removed from Home Assistant keeps its backups (tag
   "Removed", no new backup). Backups of a device that is no longer listed stay as a row

@@ -103,6 +103,10 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
 - Phones, title bar (H1): inside HA the app title is hidden; the pills "Last checked …"
   and "Every n days · HH:MM" stacked on the left (ellipsis if too long), "Check now"
   right, vertically centred, never wraps.
+- **Line under the header pills (live test rc2, approved 2026-11-23):** only for
+  installations, a device info reload, a restore and storage errors; never for a check
+  (a single check shows "Checking …" in its row, a full check its progress line) or a
+  schedule run.
 - **"Check now" in the Settings tab (2026-11-22):** hidden there (it belongs to the
   device data), its place is kept so the header does not move when the tab changes; all
   other tabs show it.
@@ -141,7 +145,7 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   `--tag-text`) and reaches at least 4.5:1 on cards and unread log rows in the light and
   dark fallback colours; the theme colour is used pure only for lines, fills and icons.
   Icons that are links or mark a chosen entry (link icons, tick of the chosen filter,
-  "Kept" lock, opened toolbar icon) use the link text colour.
+  "Kept" pin, opened toolbar icon) use the link text colour.
 - **CSS building blocks (3.11.0, `reports/optimierung-analyse` F1 a, approved 2026-11-23):**
   `ui-src/style.css` is one file in the order tokens, base, building blocks, page head
   and tabs, then one section per tab with its own phone block. A coloured state reads
