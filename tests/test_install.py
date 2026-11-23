@@ -389,22 +389,6 @@ async def test_only_get_counts_as_served(mgr, monkeypatch):
 # ---------------------------------------------------------------- No check after installations
 
 
-@pytest.fixture
-def updating(mgr, net, monkeypatch, quick_install):
-    """End-to-end installs against FakeNet: the update command "installs" the version
-    of the served store file on the fake device; short timings."""
-    result = {"accept": True}
-
-    async def trigger(_session, _gen, origin, url, _auth=None):
-        if result["accept"]:
-            device = net.by_origin(origin)
-            version = mgr.firmware[url.rsplit("/", 1)[-1]]["version"]
-            net.devices[device] = (*net.devices[device][:2], version, version)
-
-    monkeypatch.setattr(shelly, "trigger_update", trigger)
-    return result
-
-
 async def test_no_check_follows_an_installation(mgr, net, updating):
     """A confirmed installation (no intermediate version) is not followed by a check:
     no server request, no check log entry; the next version comes at the next check."""

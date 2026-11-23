@@ -33,6 +33,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+import data_paths
 from shelly import clip
 
 log = logging.getLogger("sfm.events")
@@ -192,12 +193,9 @@ class EventLog:
 
     def _compact(self) -> None:
         """Rewrite the file with the kept entries (temporary file, then rename)."""
-        temp = self.path.with_suffix(".tmp")
         try:
-            temp.write_text("".join(_line(e) for e in self.entries))
-            temp.replace(self.path)
+            data_paths.write_atomic(self.path, "".join(_line(e) for e in self.entries).encode(), durable=False)
         except OSError as err:
-            temp.unlink(missing_ok=True)
             log.warning("Log could not be written: %s", err)
             return
         self._lines = len(self.entries)

@@ -12,7 +12,6 @@ whole store, all in parts) is the next layer, manager_transfer.
 
 import asyncio
 import contextlib
-import hashlib
 import hmac
 import json
 import logging
@@ -226,7 +225,7 @@ class FirmwareStore(ManagerCore):
         if its content does not prove them (runs in a worker thread, see adopt_files)."""
         path = data_paths.FW_DIR / name
         try:
-            sha = self._sha256_of(path)
+            sha = shelly_cloud.sha256_of(path)
         except OSError:
             return None
         if sha != name.split(".", 1)[0] or self._by_sha(sha):
@@ -705,15 +704,6 @@ class FirmwareStore(ManagerCore):
                 found["version"] = clip(match.group(0), 64)
                 break
         return found
-
-    @staticmethod
-    def _sha256_of(path: Path) -> str:
-        """SHA-256 of a file (read in blocks; run in a worker thread)."""
-        digest = hashlib.sha256()
-        with path.open("rb") as handle:
-            while block := handle.read(1024 * 1024):
-                digest.update(block)
-        return digest.hexdigest()
 
     def _by_sha(self, sha: str) -> FirmwareMeta | None:
         """Store entry with this SHA-256 (any file extension), else None."""

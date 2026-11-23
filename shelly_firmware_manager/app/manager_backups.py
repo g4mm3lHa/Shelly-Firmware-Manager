@@ -47,8 +47,6 @@ IMPORT_TTL_S = 900  # a staged backup file that is not imported within 15 min is
 
 APP_USER = "App"  # user of what the app does by itself (retention), in the log
 
-TOKEN_RE = re.compile(r"^[0-9a-f]{32}$")  # token of a prepared download or a staged import
-
 # Why a device has no backup (shown in the card "No Backup"; see Backups._no_backup)
 NONE_REMOVED = "removed"  # removed from Home Assistant: not backed up any more
 NONE_PASSWORD = "password"  # noqa: S105 – a reason, not a password: protected, and its password is not stored

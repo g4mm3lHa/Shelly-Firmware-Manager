@@ -13,7 +13,7 @@ cannot know: responsibility, layering, invariants and pitfalls.
 | Module | Responsibility and pitfalls |
 |---|---|
 | `main.py` | start, servers, scheduler loops (`run_schedule`, `run_timetable`), clean stop. `VERSION` must equal `config.yaml` (`bump.py` sets both). |
-| `data_paths.py` | paths below `/data`; always read as `data_paths.NAME` (tests and the demo redirect them). |
+| `data_paths.py` | paths below `/data`; always read as `data_paths.NAME` (tests and the demo redirect them). `write_atomic`: the one way to replace a file there (temporary file, optional fsync and mode 0600, rename); only the state file has its own save (`state.bak`). |
 | `shelly.py` | all device access: errors (`ShellyError` and its kinds), text helpers for outside values, authentication (`DeviceAuth`), requests with redirect and size guards, settings read/write, OTA WebSocket. `shelly_net` and `shelly_cloud` build on it, never the other way round. |
 | `shelly_net.py` | device addresses: `resolve_device_origin` pins one checked IP; only `LAN_NETWORKS` (RFC 1918, `fc00::/7`), never extended; host names only looked up for display. |
 | `shelly_cloud.py` | manufacturer servers: offers (Gen2+ per firmware ID, Gen1 one list), changelog pages, downloads; shelly.cloud only, every redirect hop checked, size limits, SHA-256 of the URL enforced; firmware file name rules (`FW_NAME_RE`). |

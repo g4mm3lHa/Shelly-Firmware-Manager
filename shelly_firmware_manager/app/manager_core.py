@@ -72,10 +72,6 @@ STATUS_ERROR = "error"
 # not reachable: it sleeps between wake-ups, so this is no error
 STATUS_ASLEEP = "asleep"
 
-# Not in the device registry at its last check (state of versions before the "removed"
-# marker); shown as "Not checked" until the device is checked again
-STATUS_UNREGISTERED = "unregistered"
-
 # Gen1 device while Gen1 updates are disabled; also a Gen2+ device whose beta offer was
 # withdrawn at the start because beta firmware is switched off (until its next check)
 STATUS_SKIPPED = "skipped"
@@ -149,6 +145,13 @@ SUPERVISOR_TIMEOUT = aiohttp.ClientTimeout(total=15)
 # devices of all integrations in one message (aiohttp's default of 4 MiB is too small
 # for very large installations)
 REGISTRY_MAX = 32 * 1024 * 1024  # bytes
+# Readable name of a Core WebSocket list request in error texts (unknown ones: the request)
+HA_REQUEST_NAMES = {
+    "config/device_registry/list": "device registry",
+    "config/entity_registry/list": "entity registry",
+    "config_entries/get": "config entries",
+    "config_entries/flow/progress": "discovery flows",
+}
 
 # Pages of the Home Assistant frontend: the page of this app (its info card has the
 # "Changelog" link next to the version) and, if the slug is unknown, the list of apps
@@ -594,7 +597,8 @@ class ManagerCore:
             msg = await ws.receive(timeout=30)
             if msg.type is not aiohttp.WSMsgType.TEXT:
                 # e.g. closed by aiohttp because the message exceeds REGISTRY_MAX
-                raise ShellyError(f"Home Assistant did not answer the device registry request ({msg.type.name})")
+                name = HA_REQUEST_NAMES.get(request, request)
+                raise ShellyError(f"Home Assistant did not answer the {name} request ({msg.type.name})")
             try:
                 data = json.loads(msg.data)
             except ValueError:

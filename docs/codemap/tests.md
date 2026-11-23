@@ -31,7 +31,8 @@ Part of `docs/CODEMAP.md`; read when you change `tests/`, `qa/` or the check flo
 
 `conftest.py`: `net` (FakeNet: registry, devices A/B/C, offers, downloads; all `/data`
 paths in tmp via `data_paths`), `mgr`, `client` (UI test client with CSRF token),
-`quick_install` (short installation timings).
+`quick_install` (short installation timings), `updating` (the update command "installs" the served
+version on the fake device; `accept` = False ignores it).
 
 # UI checks (`qa/`, Playwright against `demo.py`)
 

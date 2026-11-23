@@ -148,15 +148,6 @@ def parse_version(text: object) -> tuple[int, int, int, int, int]:
     return int(major), int(minor), int(patch), rank, int(pre_num or 0)
 
 
-def is_prerelease(text: object) -> bool:
-    """True for a pre-release version (alpha, beta or release candidate, e.g.
-    '1.5.0-beta2'); False for a final version and for an unknown format."""
-    try:
-        return parse_version(text)[3] < 3
-    except ShellyError:
-        return False
-
-
 # --------------------------------------------------------------------------- Responses
 
 

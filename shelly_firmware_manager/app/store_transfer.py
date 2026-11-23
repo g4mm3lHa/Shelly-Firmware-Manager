@@ -145,15 +145,6 @@ def _seal(key: bytes, body: dict[str, Any]) -> str:
     return hmac.new(key, _canonical(body), hashlib.sha256).hexdigest()
 
 
-def _sha256_file(path: Path) -> str:
-    """SHA-256 of a file, read in chunks."""
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(READ_CHUNK):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def archive_path(meta: dict[str, Any], ext: str) -> str:
     """Readable path of a store entry inside the export (unique paths: see build)."""
     fw_type = PATH_PART_RE.sub("_", str(meta.get("type") or "unknown"))
@@ -212,7 +203,7 @@ def build_export(
     for name, meta in order:
         source = fw_dir / name
         try:
-            intact = source.is_file() and _sha256_file(source) == meta.get("sha256")
+            intact = source.is_file() and shelly_cloud.sha256_of(source) == meta.get("sha256")
         except OSError:
             intact = False
         if not intact:

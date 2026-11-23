@@ -232,7 +232,7 @@ class Transfers(FirmwareStore):
                 detected: dict[str, str | None] = (
                     await asyncio.to_thread(self._read_manifest, path) if ext == ".zip" else {}
                 )
-                sha = await asyncio.to_thread(self._sha256_of, path)
+                sha = await asyncio.to_thread(shelly_cloud.sha256_of, path)
             except BaseException:
                 path.unlink(missing_ok=True)
                 raise

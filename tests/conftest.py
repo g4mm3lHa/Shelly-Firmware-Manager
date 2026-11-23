@@ -229,6 +229,23 @@ def quick_install(monkeypatch):
 
 
 @pytest.fixture
+def updating(mgr, net, monkeypatch, quick_install):
+    """End-to-end installs against FakeNet: the update command "installs" the version
+    of the served store file on the fake device; short timings. The returned dict's
+    "accept" = False makes the device ignore the command."""
+    result = {"accept": True}
+
+    async def trigger(_session, _gen, origin, url, _auth=None):
+        if result["accept"]:
+            device = net.by_origin(origin)
+            version = mgr.firmware[url.rsplit("/", 1)[-1]]["version"]
+            net.devices[device] = (*net.devices[device][:2], version, version)
+
+    monkeypatch.setattr(shelly, "trigger_update", trigger)
+    return result
+
+
+@pytest.fixture
 async def mgr(net):
     """Manager with fake registry; notifications are recorded instead of sent."""
     m = manager.Manager(dict(OPTIONS), session=None, token="t")

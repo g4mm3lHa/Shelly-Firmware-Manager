@@ -29,6 +29,7 @@ from typing import Any
 import aiohttp
 from tls import CertificatePins
 
+import data_paths
 from shelly import ShellyError, clip, parse_version
 from shelly_cloud import fetch_cloud_text
 
@@ -278,12 +279,9 @@ class Changelogs:
             except Exception as err:  # noqa: BLE001 – never let the changelog break a check
                 log.warning("Changelog Gen%s not available: %s", gen, err)
         if changed:
-            temp = self.path.with_suffix(".tmp")
             try:
-                temp.write_text(json.dumps(self.data))
-                temp.replace(self.path)  # atomic: never a half-written file
+                data_paths.write_atomic(self.path, json.dumps(self.data).encode(), durable=False)
             except OSError as err:  # e.g. disk full: keep the old file, the check goes on
-                temp.unlink(missing_ok=True)
                 log.warning("Changelog not saved: %s", err)
 
     def version_entry(self, gen: int | None, version: object) -> dict[str, Any] | None:

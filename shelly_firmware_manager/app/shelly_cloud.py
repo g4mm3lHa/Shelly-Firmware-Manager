@@ -38,6 +38,7 @@ MIN_FW_SIZE = 1024  # anything smaller is certainly no firmware
 FW_EXTENSIONS = (".zip", ".bin", ".gbl")
 FW_NAME_RE = re.compile(r"^[0-9a-f]{64}\.(zip|bin|gbl)$")
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
+HASH_BLOCK = 1024 * 1024  # bytes read per step when a file is hashed
 CLOUD_TIMEOUT = aiohttp.ClientTimeout(total=30)
 DOWNLOAD_TIMEOUT = aiohttp.ClientTimeout(total=300, sock_read=60)
 MAX_CLOUD_JSON = 2 * 1024 * 1024  # upper limit for a version offer / firmware list
@@ -261,12 +262,18 @@ async def _store(
         temp.unlink(missing_ok=True)
 
 
+def sha256_of(path: Path) -> str:
+    """SHA-256 (hex) of a file, read in blocks of HASH_BLOCK. Blocks: run it in a worker
+    thread from the event loop. The one checksum function of the app for files."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while block := handle.read(HASH_BLOCK):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def file_sha256(target_dir: Path, name: str) -> str:
-    """Checksum of a stored file; rejects foreign file names."""
+    """Checksum of a stored firmware file; rejects foreign file names."""
     if not FW_NAME_RE.fullmatch(name or ""):
         raise ShellyError("Invalid firmware file name")
-    digest = hashlib.sha256()
-    with (target_dir / name).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(128 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    return sha256_of(target_dir / name)
