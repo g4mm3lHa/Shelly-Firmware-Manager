@@ -46,6 +46,7 @@ import re
 import secrets
 import time
 import zlib
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -464,6 +465,19 @@ class BackupStore:
             "size": sum(e["size"] for e in self.entries),
         }
 
+    def _store_file(self, clean: dict[str, Any], data: dict[str, Any], kept: bool, imported: bool) -> dict[str, Any]:
+        """Encrypt and write the file of one backup (clean: see clean_meta); returns its
+        index entry, not listed yet. Changes nothing of the store itself, so it may run
+        in a worker thread; BackupError if the file cannot be written."""
+        blob = seal(self._key(), clean, data)
+        if len(blob) > MAX_FILE:
+            raise BackupError("The settings of this device are too large for a backup")
+        try:
+            self._write(self._path(clean["id"]), blob)
+        except OSError as err:
+            raise BackupError(f"The backup could not be written: {err}") from None
+        return {**clean, "size": len(blob), "kept": kept, "imported": imported}
+
     def add(
         self, meta: dict[str, Any], data: dict[str, Any], kept: bool = False, imported: bool = False
     ) -> dict[str, Any]:
@@ -472,27 +486,48 @@ class BackupStore:
         clean = clean_meta(meta)
         if self.get(clean["id"]) is not None:
             raise BackupError("This backup is stored already")
-        blob = seal(self._key(), clean, data)
-        if len(blob) > MAX_FILE:
-            raise BackupError("The settings of this device are too large for a backup")
-        try:
-            self._write(self._path(clean["id"]), blob)
-        except OSError as err:
-            raise BackupError(f"The backup could not be written: {err}") from None
-        entry = {**clean, "size": len(blob), "kept": kept, "imported": imported}
+        entry = self._store_file(clean, data, kept, imported)
         self._insert(entry)
         self._save()
         return entry
 
-    def load(self, backup_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
-        """(meta, data) of a stored backup; BackupError if it is gone or unreadable."""
-        if self.get(backup_id) is None:
-            raise BackupError("Unknown backup")
+    def write_many(self, items: Sequence[tuple[dict[str, Any], dict[str, Any], bool]]) -> list[dict[str, Any]]:
+        """First half of storing many backups at once (store import): encrypt and write
+        the file of each (meta, data, kept), marked as imported. Blocking, for a worker
+        thread: the list is neither read nor changed here. A file that cannot be
+        written is skipped (logged). Returns the entries for list_many."""
+        written = []
+        for meta, data, kept in items:
+            try:
+                written.append(self._store_file(clean_meta(meta), data, kept, True))
+            except BackupError as err:
+                log.error("Imported backup %s not stored: %s", meta.get("id"), err)
+        return written
+
+    def list_many(self, entries: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Second half: list the entries of write_many and write the index once. An entry
+        whose ID is listed by now is skipped. Returns the listed entries."""
+        listed = [entry for entry in entries if self.get(entry["id"]) is None]
+        for entry in listed:
+            self._insert(entry)
+        if listed:
+            self._save()
+        return listed
+
+    def _open(self, backup_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        """(meta, data) of the file of a backup, without a look at the list (safe in a
+        worker thread); BackupError if it is gone or unreadable."""
         try:
             blob = self._path(backup_id).read_bytes()
         except OSError as err:
             raise BackupError(f"The backup file cannot be read: {err}") from None
         return open_sealed(self._key(), blob, "The backup cannot be read with the key of this app")
+
+    def load(self, backup_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        """(meta, data) of a stored backup; BackupError if it is gone or unreadable."""
+        if self.get(backup_id) is None:
+            raise BackupError("Unknown backup")
+        return self._open(backup_id)
 
     def delete(self, backup_id: str) -> dict[str, Any]:
         """Delete a backup and its file. Returns the removed entry."""
@@ -527,13 +562,13 @@ class BackupStore:
             self._save()
         return removed
 
-    def sealed_copy(self, backup_id: str, key: bytes, salt: bytes) -> bytes:
-        """A stored backup as file content sealed with a password key (download and
-        store export); the key of this app is not part of it."""
-        meta, data = self.load(backup_id)
-        entry = self.get(backup_id) or {}
+    def sealed_copy(self, entry: dict[str, Any], key: bytes, salt: bytes) -> bytes:
+        """A stored backup (its index entry, or a copy of it) as file content sealed with
+        a password key (download and store export); the key of this app is not part of
+        it. The list is not read here: safe in a worker thread."""
+        meta, data = self._open(entry["id"])
         # "kept" travels with the file (a store import takes it over); "imported" is set by the importing app
-        clean = {**clean_meta({**meta, "id": backup_id}), "exported": int(time.time()), "kept": bool(entry.get("kept"))}
+        clean = {**clean_meta({**meta, "id": entry["id"]}), "exported": int(time.time()), "kept": entry["kept"] is True}
         return seal(key, clean, data, password_header(salt))
 
     def known(self, meta: dict[str, Any]) -> bool:

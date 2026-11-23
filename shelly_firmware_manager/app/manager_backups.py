@@ -720,7 +720,7 @@ class Backups(DeviceSettings):
         salt = secrets.token_bytes(backup_store.SALT_BYTES)
         key = await asyncio.to_thread(backup_store.derive_key, password, salt)
         try:
-            blob = self.backups.sealed_copy(backup_id, key, salt)
+            blob = await asyncio.to_thread(self.backups.sealed_copy, dict(entry), key, salt)
         except BackupError as err:
             raise ShellyError(str(err)) from None
         known = self._device_by_mac(entry["mac"])

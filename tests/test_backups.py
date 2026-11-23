@@ -213,6 +213,21 @@ def test_store_keeps_lists_and_prunes(tmp_path):
         rebuilt.load("../../etc/passwd")
 
 
+def test_many_backups_are_listed_with_one_write_of_the_list(tmp_path):
+    """The store import writes the files first (worker thread), then lists all of them
+    and writes the index once; an ID that is listed by then is skipped."""
+    store = BackupStore(tmp_path / "b")
+    store.add({**META, "id": "f" * 16}, {"config": {}})
+    rev = store.rev
+    items = [({**META, "id": f"{n:016x}", "at": META["at"] + n}, {"config": {"n": n}}, n == 1) for n in range(3)]
+    written = store.write_many([*items, ({**META, "id": "f" * 16}, {"config": {}}, False)])
+    assert len(store.entries) == 1 and len(written) == 4
+    listed = store.list_many(written)
+    assert len(listed) == 3 and store.rev == rev + 1 and all(e["imported"] for e in listed)
+    assert [e["at"] - META["at"] for e in store.entries[:3]] == [2, 1, 0] and store.get(f"{1:016x}")["kept"]
+    assert BackupStore(tmp_path / "b").entries == store.entries
+
+
 def test_lost_key_is_reported_and_files_stay(tmp_path):
     store = BackupStore(tmp_path / "b")
     store.add(dict(META), {"config": {}})
@@ -282,7 +297,7 @@ def test_password_copy_opens_with_the_password_only(tmp_path):
     store.add(dict(META), {"config": {"a": 1}}, kept=True)
     salt = bytes(16)
     key = backup_store.derive_key("ABCD-EFGH", salt)
-    blob = store.sealed_copy(META["id"], key, salt)
+    blob = store.sealed_copy(store.get(META["id"]), key, salt)
     header, _ = backup_store.read_header(blob)
     assert backup_store.password_salt(header) == salt
     meta, data = backup_store.open_sealed(key, blob, "wrong")

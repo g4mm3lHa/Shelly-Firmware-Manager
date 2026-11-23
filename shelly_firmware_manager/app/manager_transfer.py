@@ -370,7 +370,8 @@ class Transfers(FirmwareStore):
             raise ShellyError("Not enough free disk space for the export")
         target = data_paths.FW_DIR / f"{EXPORT_PREFIX}{secrets.token_hex(8)}"
         snapshot = {n: dict(m) for n, m in self.firmware.items()}
-        backups, unreadable = self._export_backups(pending["key"], pending["salt"])
+        listed = [dict(e) for e in self.backups.entries]
+        backups, unreadable = await asyncio.to_thread(self._export_backups, listed, pending["key"], pending["salt"])
         try:
             counts = await asyncio.to_thread(
                 store_transfer.build_export, data_paths.FW_DIR, snapshot, pending["key"], pending["salt"], app_version,
@@ -389,15 +390,18 @@ class Transfers(FirmwareStore):
         self.events.add("export", severity="warning" if counts["damaged"] else None, user=user, **extra)
         return target, time.strftime("shelly-firmware-store-%Y-%m-%d.zip")
 
-    def _export_backups(self, key: bytes, salt: bytes) -> tuple[list[tuple[str, bytes]], int]:
-        """The stored backups of device settings as files of an export, each encrypted
-        with the key of the export password: ([(path, content)], number of backups
-        that could not be read and are left out)."""
+    def _export_backups(
+        self, entries: list[dict[str, Any]], key: bytes, salt: bytes
+    ) -> tuple[list[tuple[str, bytes]], int]:
+        """The stored backups of device settings (copies of their entries) as files of
+        an export, each encrypted with the key of the export password: ([(path,
+        content)], number of backups that could not be read and are left out). Runs in
+        a worker thread (reads and seals every file)."""
         files: list[tuple[str, bytes]] = []
         unreadable = 0
-        for entry in list(self.backups.entries):
+        for entry in entries:
             try:
-                content = self.backups.sealed_copy(entry["id"], key, salt)
+                content = self.backups.sealed_copy(entry, key, salt)
             except backup_store.BackupError as err:
                 log.warning("Backup %s left out of the export: %s", entry["id"], err)
                 unreadable += 1
@@ -406,27 +410,39 @@ class Transfers(FirmwareStore):
             files.append((path, content))
         return files, unreadable
 
-    def _import_backups(self, staged: dict[str, Any]) -> int:
-        """Store the backups of device settings of a checked import that are not
-        stored yet, encrypted with the key of this app and marked as imported; a
-        "Kept" mark comes with the backup. A file that cannot be read is skipped
-        (logged). Returns the number of stored backups."""
+    @staticmethod
+    def _read_backups(
+        staged: dict[str, Any], wanted: list[dict[str, Any]]
+    ) -> list[tuple[dict[str, Any], dict[str, Any], bool]]:
+        """The backups of a checked import, opened with the key of the export password:
+        [(meta, data, kept)]. A file that cannot be read is skipped (logged). Runs in a
+        worker thread (reads and decrypts every file)."""
         checked = staged["checked"]
-        stored = 0
-        for entry in checked["backups"]:
-            if self.backups.get(entry["id"]) is not None:
-                continue
+        opened = []
+        for entry in wanted:
             try:
                 content = store_transfer.read_backup(staged["path"], checked["prefix"], entry)
                 meta, data = backup_store.open_sealed(checked["key"], content, "not readable with the export password")
-                clean = backup_store.clean_imported(meta, data)
-                if self.backups.known(clean):
-                    continue
-                self.backups.add(clean, data, kept=meta.get("kept") is True, imported=True)
-                stored += 1
+                opened.append((backup_store.clean_imported(meta, data), data, meta.get("kept") is True))
             except (ValueError, OSError, KeyError, zipfile.BadZipFile) as err:
                 log.warning("Backup %s of the import skipped: %s", entry["path"], err)
-        return stored
+        return opened
+
+    async def _import_backups(self, staged: dict[str, Any]) -> int:
+        """Store the backups of device settings of a checked import that are not
+        stored yet, encrypted with the key of this app and marked as imported; a
+        "Kept" mark comes with the backup. Reading and writing the files run in a
+        worker thread, the index is written once. Returns the number of stored backups."""
+        wanted = [e for e in staged["checked"]["backups"] if self.backups.get(e["id"]) is None]
+        opened = await asyncio.to_thread(self._read_backups, staged, wanted)
+        new, seen = [], set()
+        for clean, data, kept in opened:
+            mark = (clean["mac"], clean["at"], clean["digest"])
+            if mark not in seen and not self.backups.known(clean):  # same device, time and content: stored already
+                seen.add(mark)
+                new.append((clean, data, kept))
+        written = await asyncio.to_thread(self.backups.write_many, new)
+        return len(self.backups.list_many(written))
 
     def _drop_import(self) -> None:
         """Forget the staged import and remove its temporary file."""
@@ -615,7 +631,7 @@ class Transfers(FirmwareStore):
                     if entry.get("intermediate"):
                         meta["intermediate"] = True
                     merged += 1
-                backups = self._import_backups(staged)
+                backups = await self._import_backups(staged)
                 self._drop_import()
                 if self.first_start_open:
                     self.first_start_open = False
