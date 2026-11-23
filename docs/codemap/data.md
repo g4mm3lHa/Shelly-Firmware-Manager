@@ -10,7 +10,7 @@ Part of `docs/CODEMAP.md`; read when you change stored fields or files below `/d
 | `firmware/` | `<sha256>.<zip\|bin\|gbl>`; temporary `.part-*` (downloads, staged uploads, staged store imports and exports; removed at start) |
 | `events.json` | activity log, one JSON object per line with `id` (3.0.0: one JSON array, converted once; IDs added once by 3.1.1) |
 | `credentials.json` | `{device id: {"gen": 1, "password"} \| {"gen": 2, "realm", "ha1"}}` |
-| `backups/` | backups of device settings (`backup_store`): `<id>.sfmb` (16 hex; encrypted with the key of the app), `index.json` (`{rev, entries: [{id, mac, gen, at, reason, note, device, model, type, fw, parts, digest, size, kept, imported}]}` – what the lists show, no settings; rebuilt from the files if lost), `key` (32 random bytes, 0600; never part of a download or an export; never overwritten: one of the wrong size is renamed to `key.damaged-<time>`) |
+| `backups/` | backups of device settings (`backup_store`): `<id>.sfmb` (16 hex; encrypted with the key of the app), `index.json` (`{backups: [{id, mac, gen, at, reason, note, device, model, type, fw, parts, digest, size, kept, imported}]}` – what the lists show, no settings; also the hidden rows of files that cannot be opened or read, so their marks survive; rebuilt from the files if lost), `key` (32 random bytes, 0600; never part of a download or an export; never overwritten: one of the wrong size is renamed to `key.damaged-<time>`) |
 | `changelog.json` | last fetched page per generation: `{"1"\|"2": {"fetched", "versions": {version: {"date", "entries"}}}}` |
 
 Device entry (`state.devices[<HA device id>]`): identity `name`, `shelly_name`,
@@ -48,7 +48,7 @@ Schedule entry (`state.schedules[]`, see `timetable.py`): `id` (12 hex), `name`,
 device IDs; empty only on a switched-off schedule whose devices were removed from the list), `anchor` (first day of "every n days"), `next` (epoch, None while off), `last`
 (`{at, severity, text}` with `counts` of a run – `done`, `total` (chosen devices incl. left out), `run` (acted on), `unreachable`, `refused`, `left`, `unchanged` (backup: settings as in the newest backup), `asleep` (backup: battery devices that did not answer) – or `reason` of a missed run).
 
-Backup (`backups/<id>.sfmb`, payload `{meta, data}`): `data` Gen2+ `{config, scripts: [{id, name, enable, code}],
+Backup (`backups/<id>.sfmb`, payload `{meta, data}`): `data` Gen2+ `{config, scripts: [{id, name, enable, running, code}],
 schedules, webhooks}`, Gen1 `{settings, actions}` (`actions` None: not readable, `parts.partial`), plus
 `protected` (password protection at the time of the backup; compared, never written). Never in it:
 passwords and keys, the key-value store, the Bluetooth proxy script of Home Assistant. A backup belongs
