@@ -253,8 +253,8 @@ function waitForRestart() {
 /** Block "Firmware store" of the card "Firmware & Storage" with the Export and Import
  *  buttons (full width of the card, between the options). */
 function storeBlock() {
-  const ex = el("button"); ex.append(icon("exportIcon"), " " + t("Export store")); ex.id = "store-export"; ex.onclick = exportDialog;
-  const im = el("button"); im.append(icon("importIcon"), " " + t("Import store")); im.id = "store-import"; im.onclick = importDialog;
+  const ex = el("button", null, "icon-text sm"); ex.append(icon("exportIcon"), " " + t("Export store")); ex.id = "store-export"; ex.onclick = exportDialog;
+  const im = el("button", null, "icon-text sm"); im.append(icon("importIcon"), " " + t("Import store")); im.id = "store-import"; im.onclick = importDialog;
   return box("div", "set-store", el("div", t("Firmware store"), "set-store-name"),
     el("p", t("Move the complete firmware store to another Home Assistant instance: export it as one ZIP file (sealed with a password) and import it there. The backups of the device settings are part of the export. Device passwords are not exported."), "hint"),
     box("div", "store-btns", ex, im));
@@ -276,7 +276,7 @@ function languageCard() {
 }
 /** Settings card that opens the dialog for passwords of several devices. */
 function passwordsCard() {
-  const pw = el("button"); pw.append(icon("lock"), " " + t("Device passwords")); pw.id = "set-passwords"; pw.onclick = bulkPasswords;
+  const pw = el("button", null, "icon-text sm"); pw.append(icon("lock"), " " + t("Device passwords")); pw.id = "set-passwords"; pw.onclick = bulkPasswords;
   return box("div", "card", box("div", "card-head", el("h2", t("Device Passwords"))), box("div", "card-body",
     el("p", t("Store the existing password or set a new one on several devices in one step (each device is set, verified and stored on its own)."), "hint"),
     box("div", "store-btns", pw)));

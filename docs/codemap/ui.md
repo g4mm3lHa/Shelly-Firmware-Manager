@@ -8,7 +8,9 @@ Single page, `textContent` only. Polls `api/state` (30 s idle, 3 s busy, paused 
 hidden, ETag). ES modules, bundled by `tools/build_ui.py` (esbuild, entry `main.js`)
 into the one classic script `app/static/app.js`; never edit `app/static/app.js|style.css`
 by hand. A module exports only what another module imports. `ui-src/style.css` starts with the
-design tokens (`:root`: font sizes, radii, lines, warning text, control height); new styles use them.
+design tokens (`:root`: font sizes, radii, lines, coloured text, control height, monospace font, shadows,
+layers, icon sizes, beta colour), then base, building blocks (tone system `--tone`, rows, tiles, dialog
+tables, `.icon-text`), page head and one section per tab (`docs/ui/common.md`); new styles use them.
 
 | Module | Content |
 |---|---|

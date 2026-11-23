@@ -231,7 +231,7 @@ def _battery(c):
     check(f"{case}: sleeping battery device – Asleep pill and dimmed IP", geo["pill"] == "Asleep" and geo["dim"], str(geo))
     pill = row("Doorbell").locator("td.c-status .pill")
     grey = pill.evaluate("""p => { const s = getComputedStyle(p);
-      return [s.getPropertyValue('--pill').trim(), s.getPropertyValue('--secondary-text-color').trim()]; }""")
+      return [s.getPropertyValue('--tone').trim(), s.getPropertyValue('--secondary-text-color').trim()]; }""")
     check(f"{case}: Asleep pill grey", grey[0] == grey[1] and grey[0] != "", str(grey))
     awake = row("Carport").evaluate("r => [!!r.querySelector('.battery'), r.querySelector('td.c-ip .num').classList.contains('dim')]")
     check(f"{case}: awake battery device – icon, IP not dimmed", awake == [True, False], str(awake))

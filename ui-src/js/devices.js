@@ -529,7 +529,7 @@ function deviceCard(title, rows, head, headExtra) {
     }
     tbody.append(tr);
   }
-  const table = el("table"); table.append(tableHead(), tbody);
+  const table = el("table", null, "dev-table"); table.append(tableHead(), tbody);
   card.append(h, table);
   return card;
 }

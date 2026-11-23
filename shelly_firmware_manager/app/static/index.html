@@ -40,14 +40,14 @@
 <div id="fw-filter"></div></div>
 <div class="tb-extra"><span class="meta" id="fw-summary"></span>
 <button class="icon" id="fw-info" aria-label="Storage" data-tip="Firmware is never deleted automatically – delete files here when they are no longer needed. Older versions allow a downgrade of Gen2+ devices (device menu “Downgrade” or the downgrade icon of a version) once “Allow downgrades” is switched on in Settings. Gen2+: the Shelly update server decides which version is next; a stored file of that version (download or upload, after a SHA-256 check) is used instead of a download. Gen1: the store comes first."></button>
-<button id="fw-upload" aria-label="Upload firmware"><span>Upload firmware</span></button></div>
+<button id="fw-upload" class="icon-text sm" aria-label="Upload firmware"><span>Upload firmware</span></button></div>
 </div>
 <div id="fw-cards"></div>
 </section>
 
 <section id="view-schedules" role="tabpanel" aria-labelledby="tab-schedules" hidden>
 <div class="toolbar"><div class="tb-main"><span class="meta" id="sch-summary">Times in the time zone of Home Assistant</span></div>
-<div class="tb-extra"><button id="sch-add"><span>Add schedule</span></button></div></div>
+<div class="tb-extra"><button id="sch-add" class="icon-text"><span>Add schedule</span></button></div></div>
 <div id="sch-cards"></div>
 </section>
 
@@ -55,7 +55,7 @@
 <div class="toolbar"><div class="tb-main"><input id="bk-search" type="search" placeholder="Search device" aria-label="Search device">
 <div id="bk-filter"></div>
 <span class="meta" id="bk-summary"></span></div>
-<div class="tb-extra"><button id="bk-now"><span>Back up now</span></button></div></div>
+<div class="tb-extra"><button id="bk-now" class="icon-text"><span>Back up now</span></button></div></div>
 <div id="bk-cards"></div>
 </section>
 
