@@ -11,13 +11,13 @@ any archive tool opens:
 
 The seal is an HMAC-SHA256 over the canonical JSON of the manifest (everything except
 the seal itself) with a key derived from the export password (scrypt, standard
-library). Every file is listed with its SHA-256 and size, so an import detects any
-change of a file or of an entry; without the password no import is possible. The
-password only seals – the firmware in the archive is not encrypted (it is public
-anyway). The backups of device settings are: each file is a backup encrypted with the
-key of the export password (format: backup_store), listed in the sealed manifest like
-a firmware file. A version of the app that knows no backups imports the firmware of
-such an export and ignores the rest.
+library; parameters and derivation: backup_store). Every file is listed with its
+SHA-256 and size, so an import detects any change of a file or of an entry; without
+the password no import is possible. The password only seals – the firmware in the
+archive is not encrypted (it is public anyway). The backups of device settings are:
+each file is a backup encrypted with the key of the export password (format:
+backup_store), listed in the sealed manifest like a firmware file. A version of the
+app that knows no backups imports the firmware of such an export and ignores the rest.
 
 An import reads only the files the sealed manifest names (never extracts by archive
 names), checks each against its SHA-256 and size and accepts the manifest at the top
@@ -78,14 +78,8 @@ ZIP64_LOCATOR = b"PK\x06\x07"  # signature that precedes the end record of a ZIP
 
 ZIP_END_SIZE = 22  # bytes of the end record without its comment (at most 65535 bytes)
 
-SCRYPT = {"n": 2**15, "r": 8, "p": 1}  # scrypt cost; only exactly these values are accepted
-
-SCRYPT_MAXMEM = 64 * 1024 * 1024  # bytes; memory limit of the key derivation
-
-SALT_BYTES = 16
-
 # Generated export password: 5 groups of 4 characters without easily confused ones
-# (no 0/O, 1/I/L); about 103 bit of entropy
+# (no 0/O, 1/I/L); 20 x log2(31), about 99 bit of entropy
 PASSWORD_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # noqa: S105 – character set, not a password
 
 TYPE_RE = re.compile(r"[A-Za-z0-9._-]{1,64}")  # firmware ID of an entry
@@ -128,11 +122,6 @@ def check_directory(path: Path) -> None:
     (directory_size,) = struct.unpack_from("<L", data, pos + 12)
     if directory_size > MAX_DIRECTORY:
         raise TransferError("The ZIP archive lists too many files")
-
-
-def derive_key(password: str, salt: bytes) -> bytes:
-    """Key of the seal: scrypt with the fixed cost SCRYPT (about 0.1 s)."""
-    return hashlib.scrypt(password.encode(), salt=salt, maxmem=SCRYPT_MAXMEM, dklen=32, **SCRYPT)
 
 
 def _canonical(body: dict[str, Any]) -> bytes:
@@ -221,7 +210,7 @@ def build_export(
         "format_version": FORMAT_VERSION,
         "app_version": app_version,
         "exported": int(time.time()),
-        "kdf": {"name": "scrypt", **SCRYPT, "salt": salt.hex()},
+        "kdf": backup_store.password_header(salt),
         "entries": entries,
     }
     listed = [
@@ -389,19 +378,11 @@ def read_export(path: Path, password: str) -> dict[str, Any]:
                 raise TransferError("No firmware store export of this app")
             if manifest.get("format_version") != FORMAT_VERSION:
                 raise TransferError("Export format not supported by this version of the app")
-            kdf, seal = manifest.get("kdf"), manifest.get("seal")
-            salt_hex = kdf.get("salt") if isinstance(kdf, dict) else None
-            if (
-                not isinstance(kdf, dict)
-                or kdf.get("name") != "scrypt"
-                or any(kdf.get(k) != v for k, v in SCRYPT.items())
-                or not isinstance(salt_hex, str)
-                or not re.fullmatch(r"[0-9a-f]{32}", salt_hex)
-                or not isinstance(seal, str)
-            ):
+            salt, seal = backup_store.kdf_salt(manifest.get("kdf")), manifest.get("seal")
+            if salt is None or not isinstance(seal, str):
                 raise TransferError("Damaged export: seal missing")
             body = {k: v for k, v in manifest.items() if k != "seal"}
-            key = derive_key(password, bytes.fromhex(salt_hex))
+            key = backup_store.derive_key(password, salt)
             if not shelly.same_secret(seal, _seal(key, body)):
                 raise TransferError("Wrong export password, or the file list was changed after the export")
             raw_entries = manifest.get("entries")

@@ -3,8 +3,8 @@ keep, delete, restore (preview, then the chosen parts), download as a file seale
 a new password, import of such a file.
 
 The settings inside a backup leave the app only as such an encrypted file and as the
-list of differences of the restore dialog (no passwords or keys: they are no part of a
-backup).
+list of differences of the restore dialog (no password fields: they are no part of a
+backup; a secret written into a script or a webhook or action URL is, see shelly_backup).
 """
 
 

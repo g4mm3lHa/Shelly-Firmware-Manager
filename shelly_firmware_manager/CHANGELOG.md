@@ -5,6 +5,26 @@
 Release candidate. Backups of the device settings: by hand, before every installation
 and on a schedule, with comparison and restore part by part.
 
+Changes in rc5
+
+Changed
+- Power-on action: the values the Shelly reports ("Restore last state", "Match input",
+  …) stay English in every language, as on the device.
+- Warning text a little darker for more contrast.
+- A dialog that holds a file, download or export is no longer cancelled by an outdated
+  tab; what it holds is removed exactly when its time is up.
+
+Fixed
+- Store import with many backups no longer blocks the app while they are stored.
+
+Security
+- Backups: a lost, damaged or replaced key is noticed at the start; backups it cannot
+  open are no longer listed, so a schedule stores a new one instead of "unchanged".
+- Backups: an existing key file is never overwritten (a damaged one is kept as
+  `key.damaged-<time>`; an unreadable one turns backups off until the next start).
+- Imported backups: the checksum is computed from the content and a time in the future
+  is refused, so an imported file cannot hide changes from a schedule.
+
 Changes in rc4
 
 Changed

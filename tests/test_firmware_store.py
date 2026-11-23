@@ -369,9 +369,9 @@ async def test_upload_token_expiry_and_cancel(mgr, net, monkeypatch):
     with pytest.raises(shelly.ShellyError):
         mgr.confirm_upload("0" * 32, "Plus1", "1.2.0")
     mgr.cancel_upload(staged["token"])
-    assert mgr._upload is None and not list(data_paths.FW_DIR.glob(manager_core.PART_PREFIX + "*"))
+    assert mgr._upload.payload is None and not list(data_paths.FW_DIR.glob(manager_core.PART_PREFIX + "*"))
     staged = await mgr.stage_upload(chunks(data), "fw.zip", len(data))
-    mgr._upload["created"] -= manager_transfer.UPLOAD_TTL_S + 1
+    mgr._upload._deadline -= manager_transfer.UPLOAD_TTL_S + 1
     with pytest.raises(shelly.ShellyError, match="upload the file again"):
         mgr.confirm_upload(staged["token"], "Plus1", "1.2.0")
 

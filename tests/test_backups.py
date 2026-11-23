@@ -6,6 +6,7 @@ No connection is opened: the Shellys are in-memory fakes (FakeShelly, FakeGen1).
 
 import asyncio
 import json
+import time
 
 import backup_store
 import manager_backups
@@ -152,6 +153,38 @@ def test_meta_is_reduced_to_known_fields():
             backup_store.clean_meta({**META, **bad})
 
 
+def test_imported_meta_gets_its_digest_from_the_content():
+    """A file from outside cannot claim "unchanged" (digest of its own) or stay the
+    newest backup for good (a time in the future)."""
+    data = {"config": {"switch:0": {"name": "x"}}}
+    past = {**META, "at": 1_700_000_000}
+    clean = backup_store.clean_imported(past, data)
+    assert clean["digest"] == shelly_backup.digest(2, data) != META["digest"]
+    with pytest.raises(BackupError, match="future"):
+        backup_store.clean_imported({**META, "at": int(time.time()) + 2 * backup_store.MAX_AHEAD_S}, data)
+    with pytest.raises(BackupError, match="incomplete"):
+        backup_store.clean_imported(past, {"scripts": ["not an object"]})
+
+
+async def test_import_checks_digest_and_time_of_the_file(backed):
+    """Both import ways use the digest of the content and refuse a future time."""
+    mgr = backed
+    salt = bytes(16)
+    key = backup_store.derive_key("ABCD-EFGH", salt)
+    data = {"config": {"switch:0": {"name": "x"}}}
+    forged = backup_store.seal(key, {**META, "at": 1_700_000_000}, data, backup_store.password_header(salt))
+    staged = await mgr.stage_backup_import(A, chunks(forged), len(forged))
+    await mgr.check_backup_import(staged["token"], "ABCD-EFGH")
+    entry = mgr.confirm_backup_import(staged["token"], "alice")
+    assert mgr.backups.get(entry["id"])["digest"] == shelly_backup.digest(2, data)
+    late = backup_store.seal(
+        key, {**META, "id": "e" * 16, "at": int(time.time()) + 3 * 86400}, data, backup_store.password_header(salt)
+    )
+    staged = await mgr.stage_backup_import(A, chunks(late), len(late))
+    with pytest.raises(BackupError, match="future"):
+        await mgr.check_backup_import(staged["token"], "ABCD-EFGH")
+
+
 def test_store_keeps_lists_and_prunes(tmp_path):
     """Files are private and encrypted; the newest N that are not kept stay; the list
     survives a restart and is built again from the files if it is lost."""
@@ -180,6 +213,21 @@ def test_store_keeps_lists_and_prunes(tmp_path):
         rebuilt.load("../../etc/passwd")
 
 
+def test_many_backups_are_listed_with_one_write_of_the_list(tmp_path):
+    """The store import writes the files first (worker thread), then lists all of them
+    and writes the index once; an ID that is listed by then is skipped."""
+    store = BackupStore(tmp_path / "b")
+    store.add({**META, "id": "f" * 16}, {"config": {}})
+    rev = store.rev
+    items = [({**META, "id": f"{n:016x}", "at": META["at"] + n}, {"config": {"n": n}}, n == 1) for n in range(3)]
+    written = store.write_many([*items, ({**META, "id": "f" * 16}, {"config": {}}, False)])
+    assert len(store.entries) == 1 and len(written) == 4
+    listed = store.list_many(written)
+    assert len(listed) == 3 and store.rev == rev + 1 and all(e["imported"] for e in listed)
+    assert [e["at"] - META["at"] for e in store.entries[:3]] == [2, 1, 0] and store.get(f"{1:016x}")["kept"]
+    assert BackupStore(tmp_path / "b").entries == store.entries
+
+
 def test_lost_key_is_reported_and_files_stay(tmp_path):
     store = BackupStore(tmp_path / "b")
     store.add(dict(META), {"config": {}})
@@ -190,18 +238,172 @@ def test_lost_key_is_reported_and_files_stay(tmp_path):
     assert (tmp_path / "b" / f"{META['id']}.sfmb").exists()
 
 
+def test_listed_backups_the_key_cannot_open_are_not_listed(tmp_path):
+    """A replaced key with the list intact: the warning names the file, it is not listed
+    and stays; a key file of the wrong size is kept under another name, never overwritten."""
+    folder = tmp_path / "b"
+    store = BackupStore(folder)
+    store.add(dict(META), {"config": {}}, kept=True)
+    (folder / "key").write_bytes(bytes(32))
+    replaced = BackupStore(folder)
+    assert replaced.entries == [] and "1 backup file(s) cannot be read" in replaced.warning
+    assert (folder / f"{META['id']}.sfmb").exists()
+    replaced.add({**META, "id": "f" * 16}, {"config": {}})  # the index keeps the row of the hidden one
+    original = store.key
+    (folder / "key").write_bytes(original[:31])
+    shortened = BackupStore(folder)
+    damaged = list(folder.glob("key.damaged-*"))
+    assert [p.read_bytes() for p in damaged] == [original[:31]] and len(shortened.key) == 32
+    assert shortened.entries == [] and "cannot be read" in shortened.warning
+    (folder / "key").write_bytes(original)  # the matching key is back: the file is listed again, still kept
+    back = BackupStore(folder)
+    assert [e["id"] for e in back.entries] == [META["id"]] and back.entries[0]["kept"]
+    assert "1 backup file(s)" in back.warning  # now the one stored with the other key
+    back.add({**META, "id": "f" * 16}, {"config": {}})  # imported again: a readable file replaces it
+    assert len(json.loads((folder / "index.json").read_text())["backups"]) == 2 and BackupStore(folder).warning is None
+
+
+def test_an_unreadable_key_turns_the_backups_off(tmp_path):
+    """A key file that cannot be read (here: a folder) is never replaced: no backup is
+    listed, stored or read until the next start, and the list stays as it is."""
+    folder = tmp_path / "b"
+    BackupStore(folder).add(dict(META), {"config": {}})
+    index = (folder / "index.json").read_bytes()
+    (folder / "key").rename(folder / "saved")
+    (folder / "key").mkdir()
+    off = BackupStore(folder)
+    assert off.key is None and off.entries == [] and off.warning == backup_store.KEY_UNREADABLE
+    with pytest.raises(BackupError, match="backups are off"):
+        off.add({**META, "id": "f" * 16}, {"config": {}})
+    with pytest.raises(BackupError):
+        off.load(META["id"])
+    assert (folder / "index.json").read_bytes() == index and (folder / "key").is_dir()
+    (folder / "key").rmdir()
+    (folder / "saved").rename(folder / "key")
+    assert [e["id"] for e in BackupStore(folder).entries] == [META["id"]]
+
+
+async def test_a_schedule_stores_again_when_the_newest_backup_cannot_be_read(backed, net):
+    """With the key replaced the newest backup is not listed, so a run that stores only
+    changes stores a new backup instead of comparing with one that cannot be restored."""
+    mgr = backed
+    first = await mgr.backup_now(A, "alice")
+    dev = mgr.devices[A]
+    assert await mgr._backup(A, dev, "schedule", only_changed=True) is None  # unchanged
+    (net.data / "backups" / "key").write_bytes(bytes(32))
+    mgr.backups = BackupStore(net.data / "backups")
+    assert mgr.backups_view()["warning"] and mgr.backups.get(first["id"]) is None
+    entry = await mgr._backup(A, dev, "schedule", only_changed=True)
+    assert entry is not None and mgr.backups.of("AABBCC00000A") == [entry]
+
+
 def test_password_copy_opens_with_the_password_only(tmp_path):
     store = BackupStore(tmp_path / "b")
     store.add(dict(META), {"config": {"a": 1}}, kept=True)
     salt = bytes(16)
     key = backup_store.derive_key("ABCD-EFGH", salt)
-    blob = store.sealed_copy(META["id"], key, salt)
+    blob = store.sealed_copy(store.get(META["id"]), key, salt)
     header, _ = backup_store.read_header(blob)
     assert backup_store.password_salt(header) == salt
     meta, data = backup_store.open_sealed(key, blob, "wrong")
     assert data == {"config": {"a": 1}} and meta["kept"] is True and meta["id"] == META["id"]
     with pytest.raises(BackupError, match="wrong"):
         backup_store.open_sealed(store.key, blob, "wrong")
+
+
+# ---------------------------------------------------------------- Fixed files of the format
+
+# Files written by an earlier version of the app (rc3/rc4 format "SFMB1", format_version 1).
+# They must stay readable: a change of the construction, the header or the key derivation
+# fails here. FORMAT_KEY is the key of a stored file, FORMAT_PASSWORD the password of the
+# downloaded file and of the store export that carries it.
+FORMAT_KEY = bytes(range(32))
+
+FORMAT_PASSWORD = "ABCD-EFGH-JKMN-PQRS-TUVW"
+
+FORMAT_META = {
+    "id": "0123456789abcdef", "mac": "AABBCC00000A", "gen": 2, "at": 1_800_000_000, "reason": "manual",
+    "parts": {"settings": True, "scripts": 0, "schedules": 0, "webhooks": 0}, "digest": "d" * 64,
+    "device": "Kitchen", "model": "SNSW-001X16EU", "type": None, "fw": "1.4.0", "note": None,
+}
+
+FORMAT_DATA = {"config": {"sys": {"device": {"name": "Kitchen"}}}}
+
+STORED_FILE = bytes.fromhex(
+    "53464d42310a000000697b22666f726d6174223a227368656c6c792d6669726d776172652d6d616e616765722f6261636b757022"
+    "2c22666f726d61745f76657273696f6e223a312c226e6f6e6365223a223364353933663430663939656466613862353237343938"
+    "386633396337663463227d9eeaec4be6f7a4b97dd48fc878da4b65cd514ea1a586e5f46bb53e48fcaba50e1ce1a2e672f56a8dad"
+    "475558cd375449813da4e7b89a83d56dd7525e79ba5da7c3a12d849d4ac3c2497bc0d8743c01836f22dfb7202755413a6695a248"
+    "7335fe74e8bcfc46c67b6e9897a84a5dab95830be1825267bd63a95f2ae5e9edaeeab727a03262a166d5bb69d51b05b71d4cec8b"
+    "0b6f4c7ddf7c20a42fb8b82ce8e46326819529688a9036cc063af76870faf74d18e5a6f39381d82abbd1abf19fe448952e73cd76"
+    "3705afa6add46333bc7d66f41f1a7cfbd70d4e8f554d8654021e5245e57b79937f0f6c16ffd4041c4de4f41470fd3d162519f976"
+    "f37e75ad41217d"
+)
+
+DOWNLOADED_FILE = bytes.fromhex(
+    "53464d42310a000000c17b22666f726d6174223a227368656c6c792d6669726d776172652d6d616e616765722f6261636b757022"
+    "2c22666f726d61745f76657273696f6e223a312c226e6f6e6365223a223364343130613732393633363864393534663564643730"
+    "643939356165623739222c226b6466223a7b226e616d65223a22736372797074222c226e223a33323736382c2272223a382c2270"
+    "223a312c2273616c74223a223030313132323333343435353636373738383939616162626363646465656666227d7d2f32387d58"
+    "6993884b65b01ce1f914bca7fbe2b6451d526002529f5327fa3300248e9d6186fbb0b6c8eceacacbd6c54eaf08454f4229009545"
+    "16d589379442d49b74f741c747bba4187bf3994d87955221b4d6292a0f0b80b06905655d6d2b9a413fa05525fcde82f1e81f1c5a"
+    "40aae35f15f203d8fd11c1a9b6a9283fda02bc89222f62ac45c506920707536b3faab93df3ef1d3685e6577fd37bbf67fad2c8f6"
+    "39d91c6ddbbccc064d8b00cc545d615c1a903afc1752cecdf9084c252684c9ecd3435e7be276c2431b440aea5d9ac886c67143f3"
+    "028c565ab8ef7361fd2477cdd475807e72285f87f0d21745aacfe8f2aeb1c3e4672853ab1f1c1fc792a28ef991c64453c2bfe36e"
+    "179bacde93"
+)
+
+EXPORT_FILE = bytes.fromhex(
+    "504b03041400000000006481775d06f995fdff010000ff0100000d0000006d616e69666573742e6a736f6e7b0a2022666f726d61"
+    "74223a20227368656c6c792d6669726d776172652d6d616e616765722f73746f72652d6578706f7274222c0a2022666f726d6174"
+    "5f76657273696f6e223a20312c0a20226170705f76657273696f6e223a2022332e31312e30222c0a20226578706f72746564223a"
+    "20313739353435303236392c0a20226b6466223a207b0a2020226e616d65223a2022736372797074222c0a2020226e223a203332"
+    "3736382c0a20202272223a20382c0a20202270223a20312c0a20202273616c74223a202230303131323233333434353536363737"
+    "38383939616162626363646465656666220a207d2c0a2022656e7472696573223a205b5d2c0a20226261636b757073223a205b0a"
+    "20207b0a2020202270617468223a20224261636b7570732f4141424243433030303030412f303132333435363738396162636465"
+    "662e73666d62222c0a20202022736861323536223a20223966353432653764626132613134636435613437396161363464356663"
+    "3361616230373964643265626137636235363234623230316338343365653961653536222c0a2020202273697a65223a20343733"
+    "0a20207d0a205d2c0a20227365616c223a2022353735303332366232326463663038383931663066323863386565313465616535"
+    "35303735373961623538633061636537633336346331656165633733343164220a7d504b03041400000000006481775dc277f34c"
+    "6d0000006d0000000e00000053484132353653554d532e7478743966353432653764626132613134636435613437396161363464"
+    "356663336161623037396464326562613763623536323462323031633834336565396165353620204261636b7570732f41414242"
+    "43433030303030412f303132333435363738396162636465662e73666d620a504b03041400000000006481775dc06a73c1d90100"
+    "00d90100002a0000004261636b7570732f4141424243433030303030412f303132333435363738396162636465662e73666d6253"
+    "464d42310a000000c17b22666f726d6174223a227368656c6c792d6669726d776172652d6d616e616765722f6261636b7570222c"
+    "22666f726d61745f76657273696f6e223a312c226e6f6e6365223a22336434313061373239363336386439353466356464373064"
+    "3939356165623739222c226b6466223a7b226e616d65223a22736372797074222c226e223a33323736382c2272223a382c227022"
+    "3a312c2273616c74223a223030313132323333343435353636373738383939616162626363646465656666227d7d2f32387d5869"
+    "93884b65b01ce1f914bca7fbe2b6451d526002529f5327fa3300248e9d6186fbb0b6c8eceacacbd6c54eaf08454f422900954516"
+    "d589379442d49b74f741c747bba4187bf3994d87955221b4d6292a0f0b80b06905655d6d2b9a413fa05525fcde82f1e81f1c5a40"
+    "aae35f15f203d8fd11c1a9b6a9283fda02bc89222f62ac45c506920707536b3faab93df3ef1d3685e6577fd37bbf67fad2c8f639"
+    "d91c6ddbbccc064d8b00cc545d615c1a903afc1752cecdf9084c252684c9ecd3435e7be276c2431b440aea5d9ac886c67143f302"
+    "8c565ab8ef7361fd2477cdd475807e72285f87f0d21745aacfe8f2aeb1c3e4672853ab1f1c1fc792a28ef991c64453c2bfe36e17"
+    "9bacde93504b010214031400000000006481775d06f995fdff010000ff0100000d00000000000000000000008001000000006d61"
+    "6e69666573742e6a736f6e504b010214031400000000006481775dc277f34c6d0000006d0000000e000000000000000000000080"
+    "012a02000053484132353653554d532e747874504b010214031400000000006481775dc06a73c1d9010000d90100002a00000000"
+    "000000000000008001c30200004261636b7570732f4141424243433030303030412f303132333435363738396162636465662e73"
+    "666d62504b05060000000003000300cf000000e40400000000"
+)
+
+
+def test_files_of_earlier_versions_stay_readable(tmp_path):
+    """A stored file opens with the key of the app, a downloaded file and a store export
+    with their password – byte for byte as an earlier version wrote them."""
+    assert backup_store.open_sealed(FORMAT_KEY, STORED_FILE, "wrong") == (FORMAT_META, FORMAT_DATA)
+    header, _offset = backup_store.read_header(DOWNLOADED_FILE)
+    salt = backup_store.password_salt(header)
+    key = backup_store.derive_key(FORMAT_PASSWORD, salt)
+    meta, data = backup_store.open_sealed(key, DOWNLOADED_FILE, "wrong")
+    assert meta == {**FORMAT_META, "kept": True, "exported": 1_800_000_100} and data == FORMAT_DATA
+    path = tmp_path / "export.zip"
+    path.write_bytes(EXPORT_FILE)
+    checked = store_transfer.read_export(path, FORMAT_PASSWORD)
+    assert checked["entries"] == [] and checked["key"] == key
+    assert [b["id"] for b in checked["backups"]] == [FORMAT_META["id"]]
+    content = store_transfer.read_backup(path, checked["prefix"], checked["backups"][0])
+    assert content == DOWNLOADED_FILE
+    with pytest.raises(store_transfer.TransferError, match="Wrong export password"):
+        store_transfer.read_export(path, "ABCD-EFGH-JKMN-PQRS-TUVX")
 
 
 # ---------------------------------------------------------------- Device side, Gen2+ (shelly_backup)
@@ -746,6 +948,8 @@ async def test_download_and_import_roundtrip(backed, net, shellys):
     backup = await mgr.backup_now(A, "alice")
     prepared = await mgr.prepare_backup_download(backup["id"], "alice")
     assert prepared["filename"].startswith("backup-plus1-") and prepared["filename"].endswith(".sfmb")
+    with pytest.raises(ShellyError, match="expired"):
+        mgr.take_backup_download("0" * 32)  # an outdated tab: refused, the download stays
     content, filename = mgr.take_backup_download(prepared["token"])
     assert filename == prepared["filename"] and b"auto-light" not in content
     assert backup_events(mgr, "downloaded")[-1]["user"] == "alice"
@@ -759,6 +963,8 @@ async def test_download_and_import_roundtrip(backed, net, shellys):
     with pytest.raises(BackupError, match="not downloaded with a password"):
         await mgr.stage_backup_import(A, chunks(stored_file), len(stored_file))
     staged = await mgr.stage_backup_import(A, chunks(content), len(content))
+    with pytest.raises(ShellyError, match="no longer available"):
+        await mgr.check_backup_import("0" * 32, prepared["password"])  # refused, the file stays
     with pytest.raises(BackupError, match="Wrong password"):
         await mgr.check_backup_import(staged["token"], "AAAA-BBBB-CCCC-DDDD-EEEE")
     checked = await mgr.check_backup_import(staged["token"], prepared["password"].lower())

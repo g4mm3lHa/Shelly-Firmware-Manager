@@ -506,8 +506,9 @@ If Home Assistant uses a Shelly as Bluetooth proxy, it turns Bluetooth on again 
 A backup stores the settings of one Shelly in the app: Gen2+ the configuration of all
 components, the scripts with their code, the schedules and the webhooks; Gen1 the
 settings and the actions. Passwords are never part of a backup – a Shelly does not give
-out its Wi-Fi, device or MQTT password. Nothing is changed on a device while it is backed
-up.
+out its Wi-Fi, device or MQTT password. Scripts, webhooks and actions are saved as they
+are: a token or password written into a script or a URL is part of the backup
+(encrypted). Nothing is changed on a device while it is backed up.
 
 A backup is made
 
@@ -555,6 +556,9 @@ imported. **Import backup** in the **Backups** dialog of a device takes such a f
 its password; the file must come from this device. An imported backup is marked
 **Imported** and **Kept**; restoring it is a separate step. All backups are also part of
 the store export (see [Moving the firmware store](#moving-the-firmware-store)).
+
+Stored backups are encrypted with a key of this app. Key and backups are part of every
+Home Assistant backup of this app, which Home Assistant protects with its own encryption.
 
 ### Logs
 
@@ -729,7 +733,9 @@ Gen2+ firmware is downloaded over HTTPS only.
 | … not applied (result of a restore) | The device refused a value or does not know the setting (other firmware). The result names each one; set it in the Shelly's own web interface if needed. The state before is stored as backup **Before restore** |
 | The device did not answer again after the restore | Usually restored network settings that no longer fit. Check the device in your network; if it stays away, reset it at the device and set it up again |
 | Wrong password, or the file was changed since the download | The password does not belong to this backup file, or the file is damaged. Use the password shown at the download of exactly this file |
-| n backup file(s) cannot be read with the key of this app and are not listed | The key file of the app was lost or replaced (e.g. app data restored only in part). The files stay in the app data; with the matching key file they are listed again |
+| Damaged backup file: its time lies in the future (Import backup) | The file names a time more than one day after now: the clock of the system that made it was wrong, or the file was built by hand. It is not imported; a store import skips such a backup and names it in the app log |
+| n backup file(s) cannot be read with the key of this app and are not listed | The key file of the app was lost, damaged or replaced (e.g. app data restored only in part). The files stay in the app data; with the matching key file they are listed again. A key file of the wrong size is kept as `key.damaged-<time>` |
+| The key of the backups cannot be read – backups are off until the app is restarted | The disk reported an error while the key file was read. Nothing was changed; restart the app. If it stays, check the storage of Home Assistant |
 | A backup run is in progress / A backup is being restored | Wait for the end (bar in the **Backups** tab), then try again |
 | Storage error: The state file was unreadable – the backup of the previous save was loaded | The app's state file was damaged (e.g. by a power failure) and the copy of the save before was used. Check the devices again; the message disappears with the next restart |
 | Storage error: The state file was unreadable and no backup could be loaded | The device list starts empty and is filled by the next check. The firmware files stay on disk; at the start the app reads back those whose content names firmware ID and version, the others are listed as **Unknown Files** in the Firmware tab (see [Firmware](#firmware)) |

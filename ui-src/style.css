@@ -16,7 +16,7 @@
    theme's divider colour) and strong (at least 3:1 against the card in light and dark
    themes: fields, tiles, outlined tile buttons). Warning text: one colour for every
    warning text, tag and pill – the warning colour turned towards orange (30 % error
-   colour), then mixed 55 % towards the text colour: at least 5:1 on light cards and
+   colour), then mixed 50 % towards the text colour: at least 5:1 on light cards and
    unread log rows and clearly apart from the green success text. Coloured
    text is mixed towards the text colour in the same way, so that it reaches 4.5:1 also
    on an unread log row: link text (links, new version, active tab, chosen entry, icons
@@ -30,7 +30,7 @@
 :root{--fs-tag:11px;--fs-small:12px;--fs-text:14px;--fs-title:15px;
   --radius-s:8px;--radius-m:12px;--radius-btn:var(--ha-button-border-radius,18px);
   --line:var(--divider-color);--line-strong:color-mix(in srgb,var(--primary-text-color) 50%,var(--card-background-color));
-  --warn-text:color-mix(in srgb,color-mix(in srgb,var(--warning-color) 70%,var(--error-color)) 55%,var(--primary-text-color));--control-h:33px;
+  --warn-text:color-mix(in srgb,color-mix(in srgb,var(--warning-color) 70%,var(--error-color)) 50%,var(--primary-text-color));--control-h:33px;
   --link-text:color-mix(in srgb,var(--primary-color) 60%,var(--primary-text-color));--error-text:color-mix(in srgb,var(--error-color) 70%,var(--primary-text-color));
   --tag-text:color-mix(in srgb,var(--secondary-text-color) 70%,var(--primary-text-color));
   --success-text:color-mix(in srgb,var(--success-color) 60%,var(--primary-text-color));

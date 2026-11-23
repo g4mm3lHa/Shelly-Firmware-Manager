@@ -10,7 +10,7 @@ Part of `docs/CODEMAP.md`; read when you change stored fields or files below `/d
 | `firmware/` | `<sha256>.<zip\|bin\|gbl>`; temporary `.part-*` (downloads, staged uploads, staged store imports and exports; removed at start) |
 | `events.json` | activity log, one JSON object per line with `id` (3.0.0: one JSON array, converted once; IDs added once by 3.1.1) |
 | `credentials.json` | `{device id: {"gen": 1, "password"} \| {"gen": 2, "realm", "ha1"}}` |
-| `backups/` | backups of device settings (`backup_store`): `<id>.sfmb` (16 hex; encrypted with the key of the app), `index.json` (`{rev, entries: [{id, mac, gen, at, reason, note, device, model, type, fw, parts, digest, size, kept, imported}]}` – what the lists show, no settings; rebuilt from the files if lost), `key` (32 random bytes, 0600; never part of a download or an export) |
+| `backups/` | backups of device settings (`backup_store`): `<id>.sfmb` (16 hex; encrypted with the key of the app), `index.json` (`{rev, entries: [{id, mac, gen, at, reason, note, device, model, type, fw, parts, digest, size, kept, imported}]}` – what the lists show, no settings; rebuilt from the files if lost), `key` (32 random bytes, 0600; never part of a download or an export; never overwritten: one of the wrong size is renamed to `key.damaged-<time>`) |
 | `changelog.json` | last fetched page per generation: `{"1"\|"2": {"fetched", "versions": {version: {"date", "entries"}}}}` |
 
 Device entry (`state.devices[<HA device id>]`): identity `name`, `shelly_name`,
@@ -29,7 +29,7 @@ check or single check of the device), `install_failed` (failed installation, not
 provided for a retry, same lifetime as `updated`), `store_fallback` (Gen2+: server not reachable,
 newer stored version offered for a manual installation; cleared by the next check of the device),
 `step_target` (Gen2+: provided version is an intermediate version; newest version or ""), `beta` (provided version is a beta of the update server), `planned` ("Install at": `{at, by, on, sha256, version, target, beta, restart, fallback_ack}`, see `manager_schedules`), `offer_date` (build date of the provided version, ISO date), `hold` (`{version, built, until}` while option `offer_after_days` holds a new version back; the device stays up to date), `hold_released` (version "Offer update now" released for this device), `backup_failed` (`{at, reason: password|asleep|unreachable|failed, message}` after a failed backup, until the next successful one). Memory only: `Manager.activity`, `progress`,
-`installing`, `reloading`, `device_checks`, `downloads`, `_provisions` / `_provision_waiters` / `_fetching`, `_upload`, `_scan_user` / `_check_users` / `_verifying` /
+`installing`, `reloading`, `device_checks`, `downloads`, `_provisions` / `_provision_waiters` / `_fetching`, `_upload` / `_import` / `_export` / `_backup_download` / `_backup_import` (`Pending`), `_scan_user` / `_check_users` / `_verifying` /
 `_fresh` (running checks only).
 
 Firmware entry (`state.firmware[<file name>]`): `type`, `gen`, `version`, `sha256`,

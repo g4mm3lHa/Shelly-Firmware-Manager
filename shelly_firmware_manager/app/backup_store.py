@@ -5,6 +5,12 @@ key of this app, 32 random bytes, created at the first start; file mode 0600). A
 belongs to a device by its MAC address, so it survives a new device ID in Home
 Assistant and moves with a store export.
 
+An existing key file is never overwritten: one of the wrong size is renamed to
+`key.damaged-<time>` before a new key is created, and one that cannot be read leaves the
+backups off until the next start. At every start the tag of every file is checked
+against the key, so a file the key cannot open is never listed (a schedule would
+otherwise compare with a backup that cannot be restored).
+
 File format (all backups, also downloaded and exported ones):
 
     "SFMB1\\n" | header length (4 bytes, big endian) | header (JSON) | ciphertext | tag
@@ -16,9 +22,16 @@ random nonce of the header); the tag is an HMAC-SHA256 over everything before it
 downloaded or exported backup uses a key derived from its password instead (scrypt,
 parameters and salt in the header) – the key of this app never leaves /data.
 
+The key derivation (SCRYPT, SALT_BYTES, derive_key, kdf_salt) is shared with the store
+export (store_transfer): the key of an export password seals its manifest (HMAC over
+JSON, which starts with "{") and is the key of the backup files inside it (HMAC over
+"enc"/"mac" plus nonce). The two inputs can never be equal; a future format version
+would derive one named key per purpose.
+
 A file is only decrypted after its tag was verified; the unpacked size is limited.
 The index holds no settings, only what the lists show; a lost or damaged index is
-built again from the files.
+built again from the files. Backups that come from outside (import of a file or of a
+store export) get their digest computed from their content (see clean_imported).
 
 No device or network access here (see shelly_backup and manager_backups). Scrypt blocks
 for a moment: callers derive password keys in a worker thread.
@@ -33,10 +46,12 @@ import re
 import secrets
 import time
 import zlib
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 import data_paths
+import shelly_backup
 from shelly import clip, parse_json
 
 log = logging.getLogger("sfm.backups")
@@ -53,6 +68,8 @@ INDEX = "index.json"
 
 KEY_FILE = "key"
 
+KEY_DAMAGED = KEY_FILE + ".damaged-"  # prefix of a key file of the wrong size, kept for a manual repair
+
 KEY_BYTES = 32
 
 NONCE_BYTES = 16
@@ -65,6 +82,8 @@ MAX_FILE = 4 * 1024 * 1024  # bytes; largest backup file read or accepted
 
 MAX_PAYLOAD = 16 * 1024 * 1024  # bytes; largest unpacked payload
 
+MAX_AHEAD_S = 86400  # seconds; an imported backup may be dated at most this far after now (clocks differ)
+
 ID_RE = re.compile(r"^[0-9a-f]{16}$")  # ID of a backup (also checked for IDs from the URL)
 
 MAC_RE = re.compile(r"^[0-9A-F]{12}$")  # MAC address as a backup names its device
@@ -73,11 +92,20 @@ MAC_RE = re.compile(r"^[0-9A-F]{12}$")  # MAC address as a backup names its devi
 # schedule, or before another backup was restored
 REASONS = ("manual", "update", "downgrade", "schedule", "restore")
 
-SCRYPT = {"n": 2**15, "r": 8, "p": 1}  # scrypt cost of a password key; only exactly these values are accepted
+# scrypt cost of a password key (backup files and store exports); only exactly these values are accepted
+SCRYPT = {"n": 2**15, "r": 8, "p": 1}
 
 SCRYPT_MAXMEM = 64 * 1024 * 1024  # bytes; memory limit of the key derivation
 
-SALT_BYTES = 16
+SALT_BYTES = 16  # random salt of a password key
+
+SALT_RE = re.compile(rf"[0-9a-f]{{{SALT_BYTES * 2}}}")  # salt as the header of a file names it
+
+# Warning of the tab, and the error of every backup, while the key file cannot be read
+KEY_UNREADABLE = (
+    "The key of the backups cannot be read – backups are off until the app is restarted. "
+    "Nothing was changed in the app data."
+)
 
 # Fields of an index entry (the meta data of the file plus size and the two markers)
 ENTRY_TEXT = {"device": 64, "model": 64, "type": 64, "fw": 64, "note": 160}
@@ -94,13 +122,23 @@ def normalize_mac(value: object) -> str | None:
 
 
 def derive_key(password: str, salt: bytes) -> bytes:
-    """Key of a downloaded or exported backup: scrypt with the fixed cost SCRYPT (about 0.1 s)."""
+    """Key of a password (downloaded or exported backup, store export): scrypt with the
+    fixed cost SCRYPT (about 0.1 s)."""
     return hashlib.scrypt(password.encode(), salt=salt, maxmem=SCRYPT_MAXMEM, dklen=KEY_BYTES, **SCRYPT)
 
 
 def password_header(salt: bytes) -> dict[str, Any]:
-    """Header field of a file sealed with a password key."""
+    """Field "kdf" of a file sealed with a password key (backup header, export manifest)."""
     return {"name": "scrypt", **SCRYPT, "salt": salt.hex()}
+
+
+def kdf_salt(kdf: object) -> bytes | None:
+    """Salt of a field "kdf" as password_header writes it; None if it is no such field
+    or names other parameters (a weaker cost is never accepted)."""
+    if not isinstance(kdf, dict) or kdf.get("name") != "scrypt" or any(kdf.get(k) != v for k, v in SCRYPT.items()):
+        return None
+    salt = kdf.get("salt")
+    return bytes.fromhex(salt) if isinstance(salt, str) and SALT_RE.fullmatch(salt) else None
 
 
 def _subkeys(key: bytes, nonce: bytes) -> tuple[bytes, bytes]:
@@ -159,31 +197,31 @@ def read_header(blob: bytes) -> tuple[dict[str, Any], int]:
 def password_salt(header: dict[str, Any]) -> bytes:
     """Salt of a file sealed with a password; BackupError if the file was not sealed
     with one (a stored file of an app) or names other parameters."""
-    kdf = header.get("kdf")
-    salt = kdf.get("salt") if isinstance(kdf, dict) else None
-    if (
-        not isinstance(kdf, dict)
-        or kdf.get("name") != "scrypt"
-        or any(kdf.get(k) != v for k, v in SCRYPT.items())
-        or not isinstance(salt, str)
-        or not re.fullmatch(rf"[0-9a-f]{{{SALT_BYTES * 2}}}", salt)
-    ):
+    salt = kdf_salt(header.get("kdf"))
+    if salt is None:
         raise BackupError("This file was not downloaded with a password – it cannot be imported")
-    return bytes.fromhex(salt)
+    return salt
+
+
+def _verified(key: bytes, blob: bytes, wrong_key: str) -> tuple[bytes, bytes, int]:
+    """(encryption key, nonce, offset of the ciphertext) of a backup file whose tag fits
+    key; BackupError with the text wrong_key if it does not (wrong key or changed file).
+    Nothing is decrypted here."""
+    header, offset = read_header(blob)
+    nonce = bytes.fromhex(header["nonce"])
+    enc_key, mac_key = _subkeys(key, nonce)
+    if not hmac.compare_digest(hmac.new(mac_key, blob[:-TAG_BYTES], hashlib.sha256).digest(), blob[-TAG_BYTES:]):
+        raise BackupError(wrong_key)
+    return enc_key, nonce, offset
 
 
 def open_sealed(key: bytes, blob: bytes, wrong_key: str) -> tuple[dict[str, Any], dict[str, Any]]:
     """(meta, data) of a backup file after its tag was verified with key; BackupError
     with the text wrong_key if the tag does not fit (wrong key or changed file)."""
-    header, offset = read_header(blob)
-    nonce = bytes.fromhex(header["nonce"])
-    enc_key, mac_key = _subkeys(key, nonce)
-    body, tag = blob[:-TAG_BYTES], blob[-TAG_BYTES:]
-    if not hmac.compare_digest(hmac.new(mac_key, body, hashlib.sha256).digest(), tag):
-        raise BackupError(wrong_key)
+    enc_key, nonce, offset = _verified(key, blob, wrong_key)
     unpacker = zlib.decompressobj()
     try:
-        raw = unpacker.decompress(_crypt(enc_key, nonce, body[offset:]), MAX_PAYLOAD + 1)
+        raw = unpacker.decompress(_crypt(enc_key, nonce, blob[offset:-TAG_BYTES]), MAX_PAYLOAD + 1)
     except zlib.error:
         raise BackupError("Damaged backup file: content unreadable") from None
     if len(raw) > MAX_PAYLOAD or unpacker.unconsumed_tail:
@@ -233,6 +271,21 @@ def clean_meta(meta: dict[str, Any]) -> dict[str, Any]:
     return clean
 
 
+def clean_imported(meta: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+    """clean_meta for a backup from outside (an imported file or store export): the
+    digest is computed from the content, never taken from the file (a wrong one would
+    let a schedule take changed settings for unchanged), and a time more than
+    MAX_AHEAD_S after now is refused (it would stay the newest backup for good)."""
+    clean = clean_meta(meta)
+    if clean["at"] > time.time() + MAX_AHEAD_S:
+        raise BackupError("Damaged backup file: its time lies in the future")
+    try:
+        clean["digest"] = shelly_backup.digest(clean["gen"], data)
+    except (TypeError, ValueError, KeyError, AttributeError):
+        raise BackupError("Damaged backup file: content incomplete") from None
+    return clean
+
+
 class BackupStore:
     """The stored backups: files, key and index. Entries are plain JSON objects
     {"id", "mac", "gen", "at", "reason", "note", "device", "model", "type", "fw",
@@ -246,30 +299,61 @@ class BackupStore:
         # Set if the files could not be read with the key of this app (key lost): shown in the tab
         self.warning: str | None = None
         self.rev = 0  # grows with every change of the list (the UI reloads the tab)
+        # Index rows of files the key cannot open: not listed, but kept in the index, so
+        # with the matching key file they come back with their marks (a "Kept" backup
+        # must not become one the retention removes)
+        self._hidden: list[dict[str, Any]] = []
         folder.mkdir(parents=True, exist_ok=True)
         for path in folder.glob(".part-*"):  # left behind by a crash while a file was written
             path.unlink(missing_ok=True)
-        self.key = self._load_key()
-        self._load()
+        self.key = self._load_key()  # None: the key file cannot be read, backups are off (warning set)
+        if self.key is not None:
+            self._load()
 
     # ------------------------------------------------------------------------------------------ Storage
 
-    def _load_key(self) -> bytes:
-        """The key of this app; created (and synced to the disk) if there is none."""
+    def _load_key(self) -> bytes | None:
+        """The key of this app; created (and synced to the disk) if there is none.
+
+        An existing key file is never overwritten: one of the wrong size is renamed to
+        KEY_DAMAGED<time> first. If the file cannot be read (any error but a missing
+        file, e.g. a short read error of the disk) no new key is made: returns None and
+        sets the warning, the backups stay off until the next start."""
         path = self.folder / KEY_FILE
         try:
             key = path.read_bytes()
-            if len(key) == KEY_BYTES:
-                return key
-            log.error("Backup key has the wrong size – stored backups cannot be read, a new key is used")
         except FileNotFoundError:
             if any(self.folder.glob("*" + EXTENSION)):
                 log.error("Backup key missing – stored backups cannot be read, a new key is used")
         except OSError as err:
-            log.error("Backup key unreadable (%s) – a new key is used", err)
+            log.error("Backup key unreadable (%s) – backups are off until the next start", err)
+            self.warning = KEY_UNREADABLE
+            return None
+        else:
+            if len(key) == KEY_BYTES:
+                return key
+            damaged = path.with_name(KEY_DAMAGED + time.strftime("%Y%m%d-%H%M%S"))
+            if damaged.exists():
+                damaged = damaged.with_name(f"{damaged.name}-{secrets.token_hex(3)}")
+            try:
+                path.rename(damaged)
+            except OSError as err:
+                log.error("Backup key has the wrong size and cannot be renamed (%s) – backups are off", err)
+                self.warning = KEY_UNREADABLE
+                return None
+            log.error(
+                "Backup key has the wrong size – kept as %s, stored backups cannot be read, a new key is used",
+                damaged.name,
+            )
         key = secrets.token_bytes(KEY_BYTES)
         self._write(path, key)
         return key
+
+    def _key(self) -> bytes:
+        """The key of this app; BackupError while it cannot be read (backups are off)."""
+        if self.key is None:
+            raise BackupError(KEY_UNREADABLE)
+        return self.key
 
     @staticmethod
     def _write(path: Path, content: bytes) -> None:
@@ -286,7 +370,9 @@ class BackupStore:
 
     def _load(self) -> None:
         """Read the index; entries without a file are dropped, files without an entry
-        (or all files, if the index is unreadable) are read again."""
+        (or all files, if the index is unreadable) are read again. The tag of every
+        listed file is checked against the key (nothing is decrypted): a file it does
+        not fit is not listed, counted in the warning and keeps its row (_hidden)."""
         listed: dict[str, dict[str, Any]] = {}
         try:
             stored = json.loads((self.folder / INDEX).read_text())
@@ -306,14 +392,25 @@ class BackupStore:
         kept: list[dict[str, Any]] = []
         found: list[dict[str, Any]] = []
         unreadable = 0
+        key = self._key()
+        wrong_key = "not readable with the key of this app"
         for backup_id, path in files.items():
             row = listed.get(backup_id)
             try:
+                blob = path.read_bytes()
                 if row is None:
-                    meta, _data = open_sealed(self.key, path.read_bytes(), "not readable with the key of this app")
+                    meta, _data = open_sealed(key, blob, wrong_key)
                     row = {**clean_meta({**meta, "id": backup_id}), "kept": False, "imported": False}
                     log.warning("Backup %s was not listed – read again from its file", backup_id)
-                (found if backup_id not in listed else kept).append(self._entry({**row, "size": path.stat().st_size}))
+                    found.append(self._entry({**row, "size": len(blob)}))
+                    continue
+                entry = self._entry({**row, "size": len(blob)})
+                try:
+                    _verified(key, blob, wrong_key)
+                except BackupError:
+                    self._hidden.append(entry)
+                    raise
+                kept.append(entry)
             except (OSError, BackupError) as err:
                 unreadable += 1
                 log.error("Backup file %s unreadable: %s", path.name, err)
@@ -329,12 +426,14 @@ class BackupStore:
         self.entries = sorted(kept, key=lambda e: -e["at"])
         for entry in found:
             self._insert(entry)
-        if [e["id"] for e in self.entries] != list(listed):  # files were added or are gone
+        if [e["id"] for e in self.entries + self._hidden] != list(listed):  # files were added or are gone
             self._save()
 
     def _insert(self, entry: dict[str, Any]) -> None:
         """Put an entry at its place in the list: newest first, and before the
-        entries of the same second (the one stored last is the newest)."""
+        entries of the same second (the one stored last is the newest). A hidden row
+        of the same ID goes: its file was just replaced by a readable one (import)."""
+        self._hidden = [row for row in self._hidden if row["id"] != entry["id"]]
         place = next((i for i, e in enumerate(self.entries) if e["at"] <= entry["at"]), len(self.entries))
         self.entries.insert(place, entry)
 
@@ -355,7 +454,8 @@ class BackupStore:
         and are read again at the next start)."""
         self.rev += 1
         try:
-            self._write(self.folder / INDEX, json.dumps({"backups": self.entries}, separators=(",", ":")).encode())
+            rows = self.entries + self._hidden
+            self._write(self.folder / INDEX, json.dumps({"backups": rows}, separators=(",", ":")).encode())
         except OSError as err:
             log.error("Backup list could not be written: %s", err)
 
@@ -378,6 +478,19 @@ class BackupStore:
             "size": sum(e["size"] for e in self.entries),
         }
 
+    def _store_file(self, clean: dict[str, Any], data: dict[str, Any], kept: bool, imported: bool) -> dict[str, Any]:
+        """Encrypt and write the file of one backup (clean: see clean_meta); returns its
+        index entry, not listed yet. Changes nothing of the store itself, so it may run
+        in a worker thread; BackupError if the file cannot be written."""
+        blob = seal(self._key(), clean, data)
+        if len(blob) > MAX_FILE:
+            raise BackupError("The settings of this device are too large for a backup")
+        try:
+            self._write(self._path(clean["id"]), blob)
+        except OSError as err:
+            raise BackupError(f"The backup could not be written: {err}") from None
+        return {**clean, "size": len(blob), "kept": kept, "imported": imported}
+
     def add(
         self, meta: dict[str, Any], data: dict[str, Any], kept: bool = False, imported: bool = False
     ) -> dict[str, Any]:
@@ -386,27 +499,48 @@ class BackupStore:
         clean = clean_meta(meta)
         if self.get(clean["id"]) is not None:
             raise BackupError("This backup is stored already")
-        blob = seal(self.key, clean, data)
-        if len(blob) > MAX_FILE:
-            raise BackupError("The settings of this device are too large for a backup")
-        try:
-            self._write(self._path(clean["id"]), blob)
-        except OSError as err:
-            raise BackupError(f"The backup could not be written: {err}") from None
-        entry = {**clean, "size": len(blob), "kept": kept, "imported": imported}
+        entry = self._store_file(clean, data, kept, imported)
         self._insert(entry)
         self._save()
         return entry
+
+    def write_many(self, items: Sequence[tuple[dict[str, Any], dict[str, Any], bool]]) -> list[dict[str, Any]]:
+        """First half of storing many backups at once (store import): encrypt and write
+        the file of each (meta, data, kept), marked as imported. Blocking, for a worker
+        thread: the list is neither read nor changed here. A file that cannot be
+        written is skipped (logged). Returns the entries for list_many."""
+        written = []
+        for meta, data, kept in items:
+            try:
+                written.append(self._store_file(clean_meta(meta), data, kept, True))
+            except BackupError as err:
+                log.error("Imported backup %s not stored: %s", meta.get("id"), err)
+        return written
+
+    def list_many(self, entries: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Second half: list the entries of write_many and write the index once. An entry
+        whose ID is listed by now is skipped. Returns the listed entries."""
+        listed = [entry for entry in entries if self.get(entry["id"]) is None]
+        for entry in listed:
+            self._insert(entry)
+        if listed:
+            self._save()
+        return listed
+
+    def _open(self, backup_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        """(meta, data) of the file of a backup, without a look at the list (safe in a
+        worker thread); BackupError if it is gone or unreadable."""
+        try:
+            blob = self._path(backup_id).read_bytes()
+        except OSError as err:
+            raise BackupError(f"The backup file cannot be read: {err}") from None
+        return open_sealed(self._key(), blob, "The backup cannot be read with the key of this app")
 
     def load(self, backup_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
         """(meta, data) of a stored backup; BackupError if it is gone or unreadable."""
         if self.get(backup_id) is None:
             raise BackupError("Unknown backup")
-        try:
-            blob = self._path(backup_id).read_bytes()
-        except OSError as err:
-            raise BackupError(f"The backup file cannot be read: {err}") from None
-        return open_sealed(self.key, blob, "The backup cannot be read with the key of this app")
+        return self._open(backup_id)
 
     def delete(self, backup_id: str) -> dict[str, Any]:
         """Delete a backup and its file. Returns the removed entry."""
@@ -441,13 +575,13 @@ class BackupStore:
             self._save()
         return removed
 
-    def sealed_copy(self, backup_id: str, key: bytes, salt: bytes) -> bytes:
-        """A stored backup as file content sealed with a password key (download and
-        store export); the key of this app is not part of it."""
-        meta, data = self.load(backup_id)
-        entry = self.get(backup_id) or {}
+    def sealed_copy(self, entry: dict[str, Any], key: bytes, salt: bytes) -> bytes:
+        """A stored backup (its index entry, or a copy of it) as file content sealed with
+        a password key (download and store export); the key of this app is not part of
+        it. The list is not read here: safe in a worker thread."""
+        meta, data = self._open(entry["id"])
         # "kept" travels with the file (a store import takes it over); "imported" is set by the importing app
-        clean = {**clean_meta({**meta, "id": backup_id}), "exported": int(time.time()), "kept": bool(entry.get("kept"))}
+        clean = {**clean_meta({**meta, "id": entry["id"]}), "exported": int(time.time()), "kept": entry["kept"] is True}
         return seal(key, clean, data, password_header(salt))
 
     def known(self, meta: dict[str, Any]) -> bool:
