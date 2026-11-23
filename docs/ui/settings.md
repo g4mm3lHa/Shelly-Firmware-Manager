@@ -21,10 +21,9 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
   the Save area: hint "What changed in each version: open the app page in Home
   Assistant and choose “Changelog” next to the version." – the link opens the info
   page of the app in the whole window (`/config/app/<slug>/info`, slug from the
-  Supervisor; the list of apps until it is known). The Configuration tab of the app page holds
-  only the hint field "settings" (name "All settings: open the app → tab “Settings”",
-  help text that this page has no further options; no effect – HA shows no links there,
-  3.11.1, approved 2026-11-23); all options are in the Settings tab.
+  Supervisor; the list of apps until it is known). The Configuration tab of the app
+  page has the same names, help texts and order as the Settings tab, without the
+  changelog hint (HA does not show it there, 2026-11-19).
 
 ## Firmware store and device passwords (approved 2026-11-19, 3.4.0)
 - **Entry points (8a B, 7a B; places changed in 3.5.0):** Settings tab: block

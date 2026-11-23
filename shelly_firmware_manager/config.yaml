@@ -16,9 +16,8 @@ image: ghcr.io/g4mm3lha/{arch}-shelly-firmware-manager
 homeassistant: "2026.10.0"
 
 # Core API proxy (device registry, notifications). Of the Supervisor API only
-# /addons/self/info (slug for the link to the app page; options of older versions, taken
-# over once), /addons/self/options (emptied after that take-over) and /addons/self/restart
-# are used (no hassio_api, no host access).
+# /addons/self/info (slug for the link to the app page), /addons/self/options and
+# /addons/self/restart are used (no hassio_api, no host access).
 homeassistant_api: true
 
 # Management UI via Ingress only (HA login, admins only).
@@ -33,14 +32,59 @@ ports_description:
   8098/tcp: Firmware downloads for the Shellys (read-only)
 
 # No "map": no access to the Home Assistant configuration folder.
-# Firmware, state, settings, passwords, logs and the backups of device settings live in
-# the app's private /data. /addons/self/info, /addons/self/options and
-# /addons/self/restart are open to every app, so no "hassio_api" permission is needed.
+# Firmware, state, passwords, logs and the backups of device settings live in the app's
+# private /data.
+# Settings tab: /addons/self/info, /addons/self/options + /addons/self/restart are open
+# to every app,
+# so no "hassio_api" permission is needed.
 
-# All settings are in the Settings tab of the app (stored in /data/settings.json). The
-# Configuration tab of the app page shows only this field: its name and help text point to
-# the Settings tab (HA shows no links or plain text there); its value has no effect.
 options:
-  settings: ""
+  # Same order as the Settings tab (cards Checks, Download Server, Firmware & Storage,
+  # Backups, Logs, Advanced); the Configuration tab of the app page shows the options in the
+  # order of "schema".
+  # Automatic check every N days at HH:MM (time zone of Home Assistant)
+  check_interval_days: 7
+  check_time: "02:45"
+  offer_after_days: 0
+  # download_base_url has no default: LAN IP of Home Assistant + port 8098,
+  # e.g. http://<HA-IP>:8098 – installations are refused until it is set
+  restrict_downloads_to_devices: true
+  gen1_updates_enabled: true
+  # allow_downgrade has no default: downgrades stay off until enabled
+  # beta_firmware has no default: beta versions are offered only once enabled
+  keep_installed: true
+  import_max_mb: 100
+  # Backups of the device settings: one before every installation, newest N kept per device
+  backup_before_install: true
+  backup_keep: 10
+  log_entry_limit: 1000
+  log_retention_days: 90
+  max_parallel_installs: 5
+  resolve_host_names: false
+  # Default pins for the Shelly servers with the in-house Allterco CA (see DOCS.md, Certificate pinning)
+  pinned_certificates:
+    - host: updates.shelly.cloud
+      sha256: "6B:B3:78:67:78:EB:2A:7E:E1:D5:D2:75:CE:CC:01:D5:3D:DC:17:45:E8:00:2A:94:00:46:8F:F5:77:EF:EA:C0"
+    - host: fwcdn.shelly.cloud
+      sha256: "BA:A5:BA:08:4E:6B:B4:03:2E:AE:16:C0:79:75:9B:BD:D1:40:54:F7:A4:ED:82:A0:32:CE:1C:10:28:2D:1B:A4"
 schema:
-  settings: "str?"
+  check_interval_days: "int(1,30)"
+  check_time: "match(^([01]\\d|2[0-3]):[0-5]\\d$)"
+  offer_after_days: "int(0,60)"
+  download_base_url: "url?"
+  restrict_downloads_to_devices: bool
+  gen1_updates_enabled: bool
+  allow_downgrade: "bool?"
+  beta_firmware: "bool?"
+  keep_installed: bool
+  import_max_mb: "int(1,2048)"
+  backup_before_install: bool
+  backup_keep: "int(1,50)"
+  log_entry_limit: "int(100,3000)"
+  log_retention_days: "int(1,365)"
+  max_parallel_installs: "int(1,20)"
+  resolve_host_names: bool
+  # Certificate pinning for Shelly servers with an in-house CA (O=Allterco)
+  pinned_certificates:
+    - host: "match(^([a-z0-9-]+\\.)*shelly\\.cloud$)"
+      sha256: "match(^[0-9A-Fa-f: ]{64,95}$)"

@@ -11,9 +11,6 @@ app's own options and restart. The Shellys themselves stay FakeNet."""
 import json
 
 import aiohttp
-import app_options
-import data_paths
-import main
 import manager
 import manager_core
 import pytest
@@ -43,11 +40,6 @@ class FakeSupervisor:
         self.auth_reply = {"type": "auth_ok", "ha_version": "2026.11.1"}
         self.tokens, self.requests, self.posts = [], [], []
         self.post_status, self.post_answer = 200, {"result": "ok", "data": {}}
-        self.info_status, self.info, self.info_requests = 200, {"result": "ok", "data": {"options": {}}}, 0
-
-    async def app_info(self, _request):
-        self.info_requests += 1
-        return web.json_response(self.info, status=self.info_status)
 
     async def websocket(self, request):
         ws = web.WebSocketResponse()
@@ -87,7 +79,6 @@ class FakeSupervisor:
     async def __aenter__(self):
         app = web.Application()
         app.router.add_get("/core/websocket", self.websocket)
-        app.router.add_get("/addons/self/info", self.app_info)
         app.router.add_post("/{tail:.*}", self.post)
         self.server = TestServer(app, host="127.0.0.1")
         await self.server.start_server()
@@ -226,19 +217,19 @@ async def test_notification(ha):
     assert await m.notify("Title", "Text", "sfm_x") is False
 
 
-async def test_options_are_stored_by_the_app_and_restart_through_the_supervisor(ha):
-    """Saving options writes the complete new set to settings.json (nothing goes to the
-    Supervisor); a write error is a clear error and logged as failed; restart asks the
-    Supervisor and an unreachable Supervisor is a clear error."""
+async def test_options_and_restart_through_the_supervisor(ha):
+    """Saving options sends the complete new options; a refusal carries the
+    Supervisor's message and is logged as failed; restart asks the Supervisor and an
+    unreachable Supervisor is a clear error."""
     m, sup = ha
     assert await m.save_options({"log_entry_limit": 500}, user="Admin") == ["log_entry_limit"]
-    assert sup.posts == []
-    assert json.loads(data_paths.SETTINGS_FILE.read_text()) == m.options and m.options["log_entry_limit"] == 500
+    path, header, body = sup.posts[-1]
+    assert (path, header) == ("/addons/self/options", f"Bearer {TOKEN}")
+    assert body == {"options": m.options} and m.options["log_entry_limit"] == 500
     assert {k: v for k, v in m.options.items() if k in OPTIONS and k != "log_entry_limit"} == {
         k: v for k, v in OPTIONS.items() if k != "log_entry_limit"}
-    data_paths.SETTINGS_FILE.unlink()
-    data_paths.SETTINGS_FILE.mkdir()   # cannot be replaced by a file
-    with pytest.raises(shelly.ShellyError, match="Settings could not be stored"):
+    sup.post_status, sup.post_answer = 400, {"result": "error", "message": "Invalid option 'x'"}
+    with pytest.raises(shelly.ShellyError, match="Supervisor rejected the request: Invalid option 'x'"):
         await m.save_options({"log_entry_limit": 600}, user="Admin")
     assert [e for e in m.events.entries if e["kind"] == "options"][-1]["ok"] is False
     assert m.options["log_entry_limit"] == 500
@@ -248,43 +239,3 @@ async def test_options_are_stored_by_the_app_and_restart_through_the_supervisor(
     await sup.server.close()
     with pytest.raises(shelly.ShellyError, match="Supervisor not reachable"):
         await m.restart_app()
-
-
-async def test_settings_are_taken_over_once_from_the_supervisor(net, monkeypatch, tmp_path):
-    """First start with settings.json missing: the options the Supervisor still keeps from
-    older versions are validated (invalid and unknown ones dropped), stored, and the
-    Supervisor's copy is emptied; later starts read only the file."""
-    options_file = tmp_path / "options.json"
-    options_file.write_text(json.dumps({"settings": ""}))
-    monkeypatch.setattr(main, "OPTIONS_FILE", options_file)
-    async with FakeSupervisor() as sup, aiohttp.ClientSession() as session:
-        monkeypatch.setattr(manager_core, "SUPERVISOR", sup.url)
-        kept = {**OPTIONS, "log_entry_limit": 500, "check_time": "25:00", "gen1_allowed_types": ["SHSW-1"],
-                "download_base_url": "http://203.0.113.10:8098", "settings": "typed"}
-        sup.info = {"result": "ok", "data": {"slug": "x", "options": kept}}
-        options = await main.load_settings(session, TOKEN)
-        assert options["log_entry_limit"] == 500 and options["check_time"] == "02:45"
-        assert options["download_base_url"] == "http://203.0.113.10:8098"   # kept; the app shows its notice
-        assert "gen1_allowed_types" not in options and "settings" not in options
-        assert options["pinned_certificates"] == app_options.DEFAULTS["pinned_certificates"]
-        assert json.loads(data_paths.SETTINGS_FILE.read_text()) == options
-        assert sup.posts == [("/addons/self/options", f"Bearer {TOKEN}", {"options": {}})]
-        assert await main.load_settings(session, TOKEN) == options
-        assert sup.info_requests == 1 and len(sup.posts) == 1
-
-
-async def test_settings_take_over_waits_for_the_supervisor(net, monkeypatch, tmp_path):
-    """Supervisor not readable: the defaults apply and nothing is stored or emptied, so
-    the next start tries again; a damaged settings file is kept aside."""
-    options_file = tmp_path / "options.json"
-    options_file.write_text(json.dumps({"settings": ""}))
-    monkeypatch.setattr(main, "OPTIONS_FILE", options_file)
-    async with FakeSupervisor() as sup, aiohttp.ClientSession() as session:
-        monkeypatch.setattr(manager_core, "SUPERVISOR", sup.url)
-        sup.info_status = 500
-        assert await main.load_settings(session, TOKEN) == app_options.with_defaults({})
-        assert not data_paths.SETTINGS_FILE.exists() and sup.posts == []
-        data_paths.SETTINGS_FILE.write_text("[1")
-        sup.info_status, sup.info = 200, {"result": "ok", "data": {"options": {"backup_keep": 20}}}
-        assert (await main.load_settings(session, TOKEN))["backup_keep"] == 20
-        assert data_paths.SETTINGS_FILE.with_suffix(".damaged").read_text() == "[1"

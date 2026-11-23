@@ -15,8 +15,6 @@ from pathlib import Path
 from typing import Any
 
 import aiohttp
-import app_options
-import manager_core
 import schedule
 from aiohttp import web
 from download_server import build_download_app
@@ -58,64 +56,10 @@ async def start_site(app: web.Application, port: int) -> web.AppRunner:
 
 
 def load_options() -> dict[str, Any]:
-    """Options written by the Supervisor (validated against config.yaml); since the
-    Settings tab stores the options itself, only the hint field of the Configuration tab."""
+    """Options written by the Supervisor (validated against config.yaml)."""
     options = json.loads(OPTIONS_FILE.read_text())
     if not isinstance(options, dict):
         raise SystemExit(f"{OPTIONS_FILE} does not contain a JSON object")
-    return options
-
-
-async def supervisor_options(session: aiohttp.ClientSession, token: str) -> dict[str, Any] | None:
-    """Options the Supervisor keeps for this app (/addons/self/info), also those no longer
-    in config.yaml; None if they cannot be read (logged)."""
-    try:
-        async with session.get(
-            f"{manager_core.SUPERVISOR}/addons/self/info",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=manager_core.SUPERVISOR_TIMEOUT,
-        ) as resp:
-            resp.raise_for_status()
-            options = ((await resp.json(content_type=None)).get("data") or {}).get("options")
-    except (TimeoutError, aiohttp.ClientError, ValueError, AttributeError) as err:
-        log.warning("App options not readable from the Supervisor: %s", err or type(err).__name__)
-        return None
-    return options if isinstance(options, dict) else None
-
-
-async def load_settings(session: aiohttp.ClientSession, token: str) -> dict[str, Any]:
-    """The app options: settings.json, else taken over once from the options the Supervisor
-    keeps for this app (older versions stored them in the Configuration tab of the app page).
-
-    After the take-over the Supervisor's copy is emptied, so the Configuration tab shows only
-    its hint. If the Supervisor cannot be read, the defaults apply and nothing is stored, so
-    the next start tries again; a save in the Settings tab meanwhile stores the shown values."""
-    stored = app_options.read_settings()
-    if stored is not None:
-        return stored
-    kept = await supervisor_options(session, token)
-    if kept is None:
-        log.warning("Settings not taken over from the app configuration yet – defaults apply until the next start")
-        return app_options.with_defaults(load_options())
-    options, dropped = app_options.take_over({**load_options(), **kept})
-    try:
-        app_options.write_settings(options)
-    except OSError as err:
-        log.error("Settings could not be stored (%s) – the next start tries again", err)
-        return options
-    log.info("Settings taken over from the app configuration of Home Assistant (now in the Settings tab only)")
-    if dropped:
-        log.warning("Invalid values left out, defaults apply: %s", ", ".join(dropped))
-    try:
-        async with session.post(
-            f"{manager_core.SUPERVISOR}/addons/self/options",
-            headers={"Authorization": f"Bearer {token}"},
-            json={"options": {}},
-            timeout=manager_core.SUPERVISOR_TIMEOUT,
-        ) as resp:
-            resp.raise_for_status()
-    except (TimeoutError, aiohttp.ClientError) as err:
-        log.warning("Former options could not be removed from the app configuration: %s", err or type(err).__name__)
     return options
 
 
@@ -124,13 +68,15 @@ async def main() -> None:
     token = os.environ.get("SUPERVISOR_TOKEN")
     if not token:
         raise SystemExit("SUPERVISOR_TOKEN missing – homeassistant_api must be enabled")
+    options = load_options()
+
+    # Certificate pins for Shelly servers with an in-house CA (see tls.py)
+    try:
+        pins = CertificatePins(options.get("pinned_certificates", []))
+    except ValueError as err:
+        raise SystemExit(f"Configuration error: {err}") from None
+
     async with aiohttp.ClientSession(headers={"User-Agent": USER_AGENT}, trust_env=False) as session:
-        options = await load_settings(session, token)
-        # Certificate pins for Shelly servers with an in-house CA (see tls.py)
-        try:
-            pins = CertificatePins(options.get("pinned_certificates", []))
-        except ValueError as err:
-            raise SystemExit(f"Configuration error: {err}") from None
         mgr = Manager(options, session, token, pins)
         # Firmware files the store does not list (lost or older state): read back
         # from the disk before the UI lists the store (see FirmwareStore.adopt_files)

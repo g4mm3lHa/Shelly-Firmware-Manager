@@ -80,10 +80,9 @@ Only original Shelly firmware is supported; see [Known limitations](#known-limit
 
 ## Configuration
 
-All options are in the app's **Settings** tab; the app stores them itself. Saving restarts
-the app. The **Configuration** tab of the app page in Home Assistant only points to the
-**Settings** tab: Home Assistant shows no links there, and the one field you see has no
-effect. Its **Network** section still sets the host port of the download server.
+All options can be changed in the app's **Settings** tab (or the Configuration tab of
+the app page – same names, help texts and order, in English or German like Home
+Assistant). Saving restarts the app.
 
 | Option | Default | Allowed | Meaning |
 |---|---|---|---|
@@ -899,9 +898,8 @@ supervised systems with systemd-resolved). On a system without it, the DNS of Ho
 Assistant may pass the lookup on to your configured DNS servers.
 
 The app stores in its private data (`/data` of the app, part of a Home Assistant
-backup of the app): the settings, the device list and state, the firmware files, the
-activity log, the device passwords you store, and the [backups](#backups) of your device
-settings. A backup
+backup of the app): the device list and state, the firmware files, the activity log, the
+device passwords you store, and the [backups](#backups) of your device settings. A backup
 holds the configuration a Shelly reports – including Wi-Fi names, addresses of servers,
 scripts and webhook addresses, which can contain tokens – but no passwords. Nothing of it
 is sent anywhere; a backup leaves the app only as a file you download or as part of a
@@ -945,12 +943,6 @@ server interfaces are not officially guaranteed.
 
 What changes when you update from an older version:
 
-- **From 3.11.0 or older:** the options move from the **Configuration** tab of the app
-  page into the app. At the first start the app takes over the values saved there, stores
-  them itself and empties the **Configuration** tab. A value that is no longer valid gets
-  its default; the app log names it. If Home Assistant cannot be asked, the app starts
-  with the defaults and tries again at the next start. Going back to an older version of
-  the app afterwards starts it with the default options.
 - **From 3.8.0 or older:** these versions stored imported files as downloads, and a
   Gen1 file cannot be checked against Shelly. At the first start all stored Gen1 files
   are therefore marked as imported; a Gen1 update provided from them, also one whose

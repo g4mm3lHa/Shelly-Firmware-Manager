@@ -29,7 +29,7 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 data = Path(tempfile.mkdtemp())
 for name, value in {"STATE_FILE": data / "state.json", "FW_DIR": data / "fw", "CREDENTIALS_FILE": data / "c.json",
                     "CHANGELOG_FILE": data / "cl.json", "EVENTS_FILE": data / "ev.json",
-                    "BACKUP_DIR": data / "backups", "SETTINGS_FILE": data / "settings.json"}.items():
+                    "BACKUP_DIR": data / "backups"}.items():
     setattr(data_paths, name, value)
 
 opts = {"check_interval_days": 7, "check_time": "02:45", "download_base_url": "http://192.168.1.2:8098", "restrict_downloads_to_devices": True,

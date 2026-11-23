@@ -1,10 +1,67 @@
-# Konfiguration der App-Seite auf Deutsch: nur das Hinweisfeld "settings" (config.yaml);
-# alle Optionen stehen im Tab „Einstellungen“ der App.
+# Names and help texts of the Configuration tab of the app page in German: the same as
+# the German Settings tab (ui-src/js/i18n-de.js), in the order of en.yaml.
 configuration:
-  settings:
-    name: "Alle Einstellungen: App öffnen → Tab „Einstellungen“"
+  check_interval_days:
+    name: Prüfen alle (Tage)
+    description: 1–30 Tage
+  check_time:
+    name: Prüfzeit
+    description: Ortszeit von Home Assistant
+  offer_after_days:
+    name: Updates erst anbieten nach (Tagen)
     description: >-
-      Diese Seite hat keine weiteren Optionen. Öffne die App über „Shelly Firmware“ in der Seitenleiste und wähle den Tab „Einstellungen“. Eingaben in diesem Feld haben keine Wirkung.
+      Hält eine neue Firmware-Version zurück, bis sie so viele Tage alt ist (Alter ab Build-Datum); 0 = sofort anbieten. 0–60, Standard 0
+  download_base_url:
+    name: Download-Basis-URL für die Shellys
+    description: >-
+      LAN-IP-Adresse von Home Assistant + Host-Port 8098, z. B. http://192.168.1.20:8098 (kein Hostname; IP-Adressen nur aus privaten Netzen). Nötig für Installationen
+  restrict_downloads_to_devices:
+    name: Downloads nur an bekannte Shellys ausliefern
+    description: Ausschalten, wenn Downloads von 172.30.x.x abgelehnt werden
+  gen1_updates_enabled:
+    name: Gen1-Updates aktivieren
+    description: Gen1-Firmware gibt es nur über unverschlüsseltes HTTP ohne Prüfsumme
+  allow_downgrade:
+    name: Downgrades erlauben
+    description: >-
+      Installieren einer älteren gespeicherten Firmware auf Gen2+-Geräten (Gerätemenü und Tab „Firmware“); standardmäßig aus
+  beta_firmware:
+    name: Beta-Firmware anbieten
+    description: >-
+      Bietet auch Beta-Versionen des Shelly-Update-Servers an – nur Gen2+, Gen1-Geräte erhalten keine Beta-Versionen. Sie sind mit „Beta“ markiert, stehen unter „Beta-Updates“ und werden erst nach deiner Freigabe und einer zusätzlichen Bestätigung installiert; die Angebotsverzögerung gilt für sie nicht. Standardmäßig aus
+  keep_installed:
+    name: Installierte Versionen aufbewahren
+    description: >-
+      Speichert auch die Firmware, die ein Gerät bereits nutzt, solange Shelly sie noch anbietet (nur Gen2+), damit nach einem missglückten Update ein Downgrade möglich bleibt; standardmäßig an
+  import_max_mb:
+    name: Max. Importgröße (MB)
+    description: >-
+      Größte Datei, die „Ablage importieren“ annimmt (Einstellungen → Firmware & Speicher); 1–2048, Standard 100
+  backup_before_install:
+    name: Vor jeder Installation sichern
+    description: >-
+      Speichert die Einstellungen eines Geräts, direkt bevor ein Update oder Downgrade darauf installiert wird; standardmäßig an
+  backup_keep:
+    name: Backups je Gerät aufbewahren
+    description: >-
+      Die neuesten Backups jedes Geräts bleiben erhalten, ältere werden automatisch entfernt; ein als „Behalten“ markiertes Backup bleibt. 1–50, Standard 10
+  log_entry_limit:
+    name: Max. Log-Größe (Einträge)
+    description: 100–3000
+  log_retention_days:
+    name: Log-Aufbewahrung (Tage)
+    description: 1–365
+  max_parallel_installs:
+    name: Max. parallele Installationen
+    description: 1–20; weitere Freigaben warten
+  resolve_host_names:
+    name: Hostnamen auflösen
+    description: >-
+      Löst bei jeder Prüfung den Hostnamen jedes Geräts auf (<Geräte-ID>.local) und zeigt die Spalte „Hostname“; standardmäßig aus
+  pinned_certificates:
+    name: Angeheftete Zertifikate
+    description: >-
+      Host unterhalb von shelly.cloud + SHA-256-Fingerabdruck; mehrere Einträge je Host erlaubt
 network:
   8098/tcp: Firmware-Downloads für die Shellys
 
