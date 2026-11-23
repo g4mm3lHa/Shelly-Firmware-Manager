@@ -40,14 +40,14 @@ both servers in parallel (cancels checks/installations, saves the state), exit 0
 - `shelly.py`: device and manufacturer access, SSRF/size guards → `test_check.py`, `test_device_settings.py`, `test_device_transport.py`
 - `store_transfer.py`: export/import archive (pure functions) → `test_store_transfer.py`
 - `backup_store.py`: encrypted backup files and their list (no device access) → `test_backups.py`
-- `shelly_backup.py`: read, compare and restore the settings of one device → `test_backups.py`
+- `shelly_backup.py`: read, compare and restore the settings of one device → `test_backups.py`, `test_device_transport.py`
 - `schedule.py`: schedule, DST → `test_schedule.py`
 - `timetable.py`: schedules and "Install at": validation, next run (pure functions) → `test_timetable.py`
 - `app_options.py`: option validation → `test_options.py`
 - `events.py`: activity log → `test_state.py`
 - `credentials.py`: per-device passwords → `test_state.py`
-- `changelog.py`: changelog pages → `test_changelog.py`
-- `tls.py`: certificate pinning → `test_security.py`
+- `changelog.py`: changelog pages → `test_changelog.py`, `test_changelog_pages.py`
+- `tls.py`: certificate pinning → `test_security.py`, `test_tls.py`
 - `data_paths.py`: paths below `/data` (read as `data_paths.NAME`)
 
 ## UI (`ui-src/js/*.js`, `ui-src/style.css`; built into `app/static/` – never read the build)

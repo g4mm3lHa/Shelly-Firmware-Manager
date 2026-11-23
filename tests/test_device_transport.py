@@ -4,18 +4,22 @@ The other test modules replace the device requests (conftest.FakeNet); here the
 public device functions of shelly.py talk to a local aiohttp server that plays the
 Shelly: password challenge and its single answer (Gen2+ Digest SHA-256 checked by
 the server, Gen1 Basic), no downgrade of the authentication, no redirects, the
-size limit of an answer and the translation of HTTP and RPC errors."""
+size limit of an answer and the translation of HTTP and RPC errors. Last part: the
+Gen1 write-back of a backup restore over the same requests."""
 
 import base64
 import hashlib
+import inspect
 import json
 import re
 
 import aiohttp
 import pytest
 import shelly
+import shelly_backup
 from aiohttp import web
 from aiohttp.test_utils import TestServer
+from fake_shelly import FakeGen1
 
 REALM = "shellyplus1-a8032ab12345"  # Gen2+ device ID, also the Digest realm
 PASSWORD = "pw-1"
@@ -34,7 +38,8 @@ class FakeDevice:
     """A Shelly on a local test server.
 
     routes: path -> answer (a dict becomes JSON, a web.Response is sent as it is, a
-    callable gets the request and its JSON body). Every request is recorded as
+    callable gets the request and its JSON body and may be a coroutine; "*" answers
+    every other path). Every request is recorded as
     (method, path with query, Authorization header, JSON body). With a password
     every path but /shelly asks for it like the real devices: Gen2+ with a Digest
     challenge (a new nonce each time, SHA-256), Gen1 with Basic; the server checks
@@ -81,9 +86,11 @@ class FakeDevice:
         self.requests.append((request.method, request.path_qs, header, body))
         if self.password is not None and request.path != "/shelly" and not self.authorized(request, header):
             return self.ask_password()
-        answer = self.routes.get(request.path)
+        answer = self.routes.get(request.path, self.routes.get("*"))
         if callable(answer):
             answer = answer(request, body)
+        if inspect.isawaitable(answer):
+            answer = await answer
         if answer is None:
             return web.Response(status=404, text="Not Found")
         return answer if isinstance(answer, web.StreamResponse) else web.json_response(answer)
@@ -332,3 +339,86 @@ async def test_network_error_of_a_password_change_carries_no_secret(session):
             await shelly.set_protection(session, 1, dev.origin, None, shelly.DeviceAuth(gen=1, password="Secret-77"))
     assert "Secret-77" not in str(err.value) and "login" not in str(err.value)
     assert dev.requests[0][1].endswith("password=Secret-77")  # the device got it, the message does not
+
+
+# ---------------------------------------------------------------- Backups: Gen1 write-back over HTTP
+
+
+def gen1_http(device, refuse_writes=False):
+    """Route of every path: the in-memory FakeGen1 behind real HTTP (query pairs in
+    their order, repeated names kept); a refused value is HTTP 400, a missing
+    endpoint 404. refuse_writes: every request with parameters is answered 401 –
+    the password works for reading only."""
+    async def answer(request, _body):
+        pairs = list(request.query.items())
+        if refuse_writes and pairs:
+            return web.Response(status=401, headers={"WWW-Authenticate": 'Basic realm="shelly1"'})
+        try:
+            return await device.get(request.path, pairs)
+        except shelly.UnsupportedError:
+            return web.Response(status=404, text="Not Found")
+        except shelly.ShellyError:
+            return web.Response(status=400, text="Bad request")
+    return answer
+
+
+async def test_gen1_restore_over_http(session):
+    """A Gen1 backup read and written back with the password over HTTP: endpoint by
+    endpoint, lists as comma text, the action addresses as repeated urls[]."""
+    device = FakeGen1()
+    async with FakeDevice(gen=1, password=PASSWORD, routes={"*": gen1_http(device)}) as dev:
+        target = shelly_backup.Target(session, 1, dev.origin, shelly.DeviceAuth(gen=1, password=PASSWORD))
+        backup = await shelly_backup.read(target)
+        device.settings["relays"][0].update(default_state="on", schedule_rules=[])
+        device.settings["led_status_disable"] = True
+        device.actions["out_on_url"][0] = {"index": 0, "urls": ["http://192.168.1.2/on"], "enabled": True}
+        backup["actions"]["out_on_url"][0] = {"index": 0, "urls": ["http://192.168.1.3/a", "http://192.168.1.3/b"],
+                                              "enabled": True}
+        dev.requests.clear()
+        result = await shelly_backup.restore(target, backup, ["settings", "actions"], lambda _s: None)
+    assert [p["open"] for p in result["parts"]] == [[], []] and result["confirmed"] is True
+    assert device.settings["relays"][0]["schedule_rules"] == ["0700-0123456-on"]
+    assert device.actions["out_on_url"][0]["urls"] == ["http://192.168.1.3/a", "http://192.168.1.3/b"]
+    written = [path for _m, path, header, _b in dev.requests if header and "?" in path]
+    assert "/settings/relay/0?default_state=off&schedule_rules=0700-0123456-on" in written
+    assert "/settings?led_status_disable=false" in written
+    assert ("/settings/actions?index=0&name=out_on_url&enabled=true"
+            "&urls%5B%5D=http://192.168.1.3/a&urls%5B%5D=http://192.168.1.3/b") in written
+
+
+async def test_gen1_refused_values_are_written_one_by_one(session):
+    """An endpoint that refuses its values is written again value by value: the
+    others are applied, the refused ones are named with the device's answer, a
+    value without a query form is never sent."""
+    device = FakeGen1()
+    device.settings.update(bad=1, grid=[[1, 2]])
+    device.settings["relays"][0]["bad"] = 1
+    async with FakeDevice(gen=1, routes={"*": gen1_http(device)}) as dev:
+        target = shelly_backup.Target(session, 1, dev.origin, None)
+        backup = await shelly_backup.read(target)
+        device.settings.update(bad=2, grid=[[3]], led_status_disable=True)
+        device.settings["relays"][0]["bad"] = 2
+        dev.requests.clear()
+        result = await shelly_backup.restore(target, backup, ["settings"], lambda _s: None)
+    errors = {o["key"]: o["error"] for o in result["parts"][0]["open"]}
+    assert errors == {"bad": "Shelly rejected the request (HTTP 400)",
+                      "relays.0 · bad": "Shelly rejected the request (HTTP 400)",
+                      "grid": "This value cannot be written to a Gen1 device"}
+    assert device.settings["led_status_disable"] is False
+    written = [path for _m, path, _h, _b in dev.requests if "?" in path]
+    assert written == ["/settings?led_status_disable=false&bad=1", "/settings?led_status_disable=false",
+                       "/settings?bad=1", "/settings/relay/0?bad=1"]
+
+
+async def test_gen1_restore_stops_when_the_password_is_refused(session):
+    """A password refused while writing ends the restore at once (no value by value)."""
+    device = FakeGen1()
+    routes = {"*": gen1_http(device, refuse_writes=True)}
+    async with FakeDevice(gen=1, password=PASSWORD, routes=routes) as dev:
+        target = shelly_backup.Target(session, 1, dev.origin, shelly.DeviceAuth(gen=1, password=PASSWORD))
+        backup = await shelly_backup.read(target)
+        device.settings["led_status_disable"] = True
+        device.settings["relays"][0]["default_state"] = "on"
+        with pytest.raises(shelly.AuthError, match="rejected the password"):
+            await shelly_backup.restore(target, backup, ["settings"], lambda _s: None)
+    assert len([path for _m, path, _h, _b in dev.requests if "?" in path]) == 2  # one write and its retry
