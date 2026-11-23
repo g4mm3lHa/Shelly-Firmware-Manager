@@ -4,7 +4,8 @@
 // The server runs the schedules (manager_schedules); times are local times of Home
 // Assistant, shown as the server formats them.
 import {
-  $, api, box, cell, checkbox, closeModal, confirmDialog, deviceChoice, el, icon, iconButton, input, message, modal, radio, section, t, toast, ui,
+  $, api, box, cell, checkbox, closeModal, confirmDialog, deviceChoice, el, formError, icon, iconButton, input, message, modal, radio, section, t,
+  toast, ui,
 } from "./core.js";
 import {cancelPlan} from "./install.js";
 
@@ -179,7 +180,7 @@ export function openSchedule(s) {
     onLabel,
   ];
   // An error (e.g. no name) is shown in the dialog, which stays open with all entries
-  const error = el("p", null, "bad"); error.hidden = true; error.setAttribute("role", "alert"); content.push(error);
+  const error = formError(); content.push(error.line);
   const title = edit ? t("Edit schedule") : t("Add schedule");
   modal(title, content, [{text: t("Cancel")}, {text: t("Save"), kind: "primary", action: async () => {
     const kind = [dailyR, weekdaysR, everyR].findIndex(r => r.checked);
@@ -191,10 +192,7 @@ export function openSchedule(s) {
       pause: action.value === "restart" || Number.isInteger(seconds) ? seconds : PAUSE_DEFAULT,
       devices: choice.all.checked ? "all" : choice.ticked().map(d => d.id)};
     try { await saveSchedule(edit ? s.id : null, body); closeModal(); }
-    catch (e) {
-      for (const b of $("dlg-btns").children) b.disabled = false;
-      error.textContent = e.message; error.hidden = false; error.scrollIntoView({block: "nearest"});
-    }
+    catch (e) { error.show(e.message); }
   }}], "schedules");
   name.focus();
 }

@@ -9,6 +9,9 @@ Changes in rc3
 
 Changed
 - Keyboard: a dialog starts on its first control again (the close icon), as before rc2.
+- Input errors stay in the dialog with everything entered: device and bulk passwords,
+  upload, store and backup import, NTP server and power-on action. A refused file or
+  password shows the form again with the file and the password kept.
 
 Changes in rc2
 

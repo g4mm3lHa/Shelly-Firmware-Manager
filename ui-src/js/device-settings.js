@@ -1,7 +1,7 @@
 // Dialogs for the settings of a single Shelly: name, NTP, power-on action, eco mode, switches,
 // websocket debug log, password, restart; passwords of several devices in one step.
 import {
-  api, box, checkbox, closeModal, confirmDialog, devUrl, el, field, gateButton, icon, input, message, messageBody,
+  api, box, checkbox, closeModal, confirmDialog, devUrl, el, field, formError, gateButton, icon, input, message, messageBody,
   modal, radio, section, t, tn, ui, valueList, webUrl,
 } from "./core.js";
 
@@ -39,8 +39,9 @@ async function withLive(d, title, next) {
   try { next(await api(`${devUrl(d)}/settings/refresh`, {})); }
   catch (e) { message(title, e.message, "error"); }
 }
-/** Send changes; quiet = close the dialog on success unless a restart is required. */
-async function saveSettings(d, title, changes, quiet) {
+/** Send changes; quiet = close the dialog on success unless a restart is required.
+ *  error: the formError of the form the changes come from (the error stays there). */
+async function saveSettings(d, title, changes, quiet, error) {
   try {
     const r = await api(`${devUrl(d)}/settings`, changes);
     if (r.verified === false) {   // written, but the read-back failed: state unknown
@@ -51,18 +52,18 @@ async function saveSettings(d, title, changes, quiet) {
     }
     if (quiet && !r.restart_required) { closeModal(); return; }
     message(title, r.restart_required ? t("Saved. The Shelly reports that a restart is required to apply the change.") : t("Saved and read back from the Shelly."), "success");
-  } catch (e) { message(title, e.message, "error"); }
+  } catch (e) { if (error) error.show(e.message); else message(title, e.message, "error"); }
 }
 /** Edit the Shelly name (with old -> new confirmation) or the NTP server. */
 export function editValue(d, key) {
   const {label, prop} = FIELDS[key], title = `${label} – ${d.name}`;
   withLive(d, title, live => {
     const value = input("text", {value: live[prop] || "", maxLength: key === "name" ? 64 : 260});
-    const old = live[prop] || "";
-    modal(title, [field(label, value)], [{text: t("Cancel")}, {text: key === "name" ? t("Continue") : t("Save"), kind: "primary", action: () => {
+    const old = live[prop] || "", error = formError();
+    modal(title, [field(label, value), error.line], [{text: t("Cancel")}, {text: key === "name" ? t("Continue") : t("Save"), kind: "primary", action: () => {
       const typed = value.value.trim();
       if (typed === old) { message(title, t("Nothing changed.")); return; }
-      if (key !== "name") { saveSettings(d, title, {[key]: typed}, true); return; }
+      if (key !== "name") { saveSettings(d, title, {[key]: typed}, true, error); return; }
       modal(title, [el("p", t("Write this change to {name}?", {name: d.name})), valueList([[t("Current"), old || "–"], [t("New"), typed || "–"]])],
         [{text: t("Cancel")}, {text: t("Apply"), kind: "danger", action: () => saveSettings(d, title, {name: typed}, false)}]);
     }}]);
@@ -83,11 +84,11 @@ export function editAop(d) {
       selects.push([o, sel]);
       table.append(box("tr", null, el("td", o.name === o.key ? o.key : `${o.name} (${o.key})`), box("td", null, sel)));
     }
-    const strip = featureStrip("aop", t("Power-on action"), aopTone(live.outputs), aopSummary(live.outputs));
-    modal(title, [strip, table], [{text: t("Cancel")}, {text: t("Save"), kind: "primary", action: () => {
+    const strip = featureStrip("aop", t("Power-on action"), aopTone(live.outputs), aopSummary(live.outputs)), error = formError();
+    modal(title, [strip, table, error.line], [{text: t("Cancel")}, {text: t("Save"), kind: "primary", action: () => {
       const changed = selects.filter(([o, sel]) => sel.value !== o.aop);
       if (!changed.length) { message(title, t("Nothing changed.")); return; }
-      saveSettings(d, title, {aop: Object.fromEntries(changed.map(([o, sel]) => [o.key, sel.value]))}, true);
+      saveSettings(d, title, {aop: Object.fromEntries(changed.map(([o, sel]) => [o.key, sel.value]))}, true, error);
     }}]);
   });
 }
@@ -219,15 +220,16 @@ export function editPassword(d) {
   // Colours of the lock icon: green = protected and stored, yellow = protected without
   // stored password, grey = not protected
   const tone = d.auth_enabled === true ? (d.password_set ? "good" : "warn") : d.auth_enabled === false ? "off" : "unknown";
+  const error = formError();
   modal(title, [
     featureStrip("lock", t("Password protection"), tone, d.auth_enabled === true ? t("Protected") : d.auth_enabled === false ? t("Not protected") : t("Unknown")),
     valueList([[t("Stored in this app"), d.password_set ? t("yes") : t("no")]]),   // the protection state is in the strip
     radios, hint, pwField, pw2Field, storage,
-    el("div", PASSWORD_WARNING, "warnbox")],
+    el("div", PASSWORD_WARNING, "warnbox"), error.line],
   [{text: t("Cancel")}, {text: t("Continue"), kind: "primary", action: () => {
     const mode = radios.querySelector("input:checked").value, m = PASSWORD_MODES[mode], password = pw.value;
-    if (m.input && !password) { message(title, t("No password entered."), "error"); return; }
-    if (m.repeat && password !== pw2.value) { message(title, t("The passwords do not match."), "error"); return; }
+    if (m.input && !password) { error.show(t("No password entered.")); return; }
+    if (m.repeat && password !== pw2.value) { error.show(t("The passwords do not match.")); return; }
     passwordConfirm(d, title, mode, m.input ? password : null, (mode !== "enable" && mode !== "change") || keep.checked);
   }}]);
   update();
@@ -306,15 +308,16 @@ export function bulkPasswords() {
     modes.append(row);
   });
   keep.onchange = update;
+  const error = formError();
   modal(BULK_TITLE, [section(t("Action"), modes), section(t("Devices"), devices.length ? list : el("p", t("No devices yet – they are found by the check."), "hint")),
     section(t("Password (every selected device gets it)"), box("div", null, field(t("Password (user “admin”)"), pw), pw2Field)),
-    keepLabel, storage, el("div", PASSWORD_WARNING, "warnbox")],
+    keepLabel, storage, el("div", PASSWORD_WARNING, "warnbox"), error.line],
   [{text: t("Cancel")}, {text: t("Continue"), kind: "primary", action: () => {
     const m = mode(), set = m === "set", picked = chosen(), password = pw.value;
-    if (!picked.length) { message(BULK_TITLE, t("No device selected."), "error", "lock"); return; }
-    if (!password) { message(BULK_TITLE, t("No password entered."), "error", "lock"); return; }
-    if (set && password !== pw2.value) { message(BULK_TITLE, t("The passwords do not match."), "error", "lock"); return; }
-    if (password.length > 50 && picked.some(d => d.gen === 1)) { message(BULK_TITLE, t("Gen1 devices accept 1–50 characters – choose a shorter password or leave the Gen1 devices out."), "error", "lock"); return; }
+    if (!picked.length) { error.show(t("No device selected.")); return; }
+    if (!password) { error.show(t("No password entered.")); return; }
+    if (set && password !== pw2.value) { error.show(t("The passwords do not match.")); return; }
+    if (password.length > 50 && picked.some(d => d.gen === 1)) { error.show(t("Gen1 devices accept 1–50 characters – choose a shorter password or leave the Gen1 devices out.")); return; }
     bulkConfirm(m, picked, password, !set || keep.checked);
   }}], "lock");
   fill();

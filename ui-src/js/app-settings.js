@@ -2,7 +2,7 @@
 // the firmware store block (export / import) in the card "Firmware & Storage" and the
 // card "Device Passwords" (several devices).
 import {
-  $, ackGate, api, attachTip, box, checkbox, closeModal, el, field, filePassword, fmt, fmtSize, guarded, icon, iconButton, input,
+  $, ackGate, api, attachTip, box, checkbox, closeModal, el, field, filePassword, fmt, fmtSize, formError, guarded, icon, iconButton, input,
   mb, message, messageBody, modal, passwordCopy, section, startDownload, t, tn, ui, uploadFile, valueList,
 } from "./core.js";
 import {autoLanguage, languageChoice, LANGUAGES, setLanguage} from "./i18n.js";
@@ -312,25 +312,27 @@ async function exportDialog() {
   ackGate(ack);
 }
 /** Import step 1: export file and its password; the file is uploaded and checked
- *  completely (seal, every file) before anything is stored. */
+ *  completely (seal, every file) before anything is stored. A refused file brings back
+ *  this step with the file, the password and the error. */
 export function importDialog() {
   const max = (ui.state && ui.state.import_max_mb) || 100;
-  const file = input("file", {accept: ".zip,application/zip"}), pw = filePassword(t("XXXX-XXXX-XXXX-XXXX-XXXX"));
-  modal(IMPORT_TITLE, [
+  const file = input("file", {accept: ".zip,application/zip"}), pw = filePassword(t("XXXX-XXXX-XXXX-XXXX-XXXX")), error = formError();
+  const content = [
     el("p", t("Choose a file created by “Export store” of this app and enter its export password. The file is checked completely before anything is stored."), "hint"),
     field(t("Export file (.zip, max. {max} MB – see “Max. import size”)", {max}), file),
     field(t("Export password"), pw),
-    el("div", IMPORT_OWN, "warnbox")],
-  [{text: t("Cancel")}, {text: t("Check file"), kind: "primary", action: async () => {
+    el("div", IMPORT_OWN, "warnbox"), error.line];
+  const form = () => modal(IMPORT_TITLE, content, [{text: t("Cancel")}, {text: t("Check file"), kind: "primary", action: async () => {
     const f = file.files[0];
-    if (!f) { message(IMPORT_TITLE, t("No file chosen."), "error", "importIcon"); return; }
-    if (f.size > max * 1048576) { message(IMPORT_TITLE, t("The file is larger than the maximum import size ({max} MB). Raise “Max. import size” in the settings first.", {max}), "error", "importIcon"); return; }
-    if (!pw.value.trim()) { message(IMPORT_TITLE, t("Enter the export password."), "error", "importIcon"); return; }
-    await checkImport(f, pw.value);
+    if (!f) { error.show(t("No file chosen.")); return; }
+    if (f.size > max * 1048576) { error.show(t("The file is larger than the maximum import size ({max} MB). Raise “Max. import size” in the settings first.", {max})); return; }
+    if (!pw.value.trim()) { error.show(t("Enter the export password.")); return; }
+    await checkImport(f, pw.value, text => { form(); error.show(text); });
   }}], "importIcon");
+  form();
 }
-/** Upload and check; shows the summary or the error (the staged file is discarded). */
-async function checkImport(f, password) {
+/** Upload and check; shows the summary, or refused(error) (the staged file is discarded). */
+async function checkImport(f, password, refused) {
   const status = el("p", t("Uploading {name} ({size}) …", {name: f.name, size: mb(f.size)}), "hint");
   modal(IMPORT_TITLE, [status], [], "importIcon");
   let token = null;
@@ -341,7 +343,7 @@ async function checkImport(f, password) {
     importSummary(token, f.name, await api("api/firmware/import/check", {token, password}));
   } catch (e) {
     if (token) api("api/firmware/import/cancel", {token}).catch(() => {});
-    message(IMPORT_TITLE, e.message, "error", "importIcon");
+    refused(e.message);
   }
 }
 const IMPORT_GROUPS = [["new", t("new – will be stored as “Imported”"), "p-uptodate"], ["same", t("already stored – data added if missing"), ""],

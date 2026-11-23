@@ -5,7 +5,7 @@
 // (backup run of several devices, restore).
 import {
   $, ackGate, api, box, cell, checkbox, checkLine, closeModal, confirmDialog, devUrl, deviceChoice, el, filePassword, filterControl,
-  fmt, fmtSize, gateButton, guarded, icon, iconButton, input, matches, message, messageBody, modal, modalOpen, modelGen,
+  fmt, fmtSize, formError, gateButton, guarded, icon, iconButton, input, matches, message, messageBody, modal, modalOpen, modelGen,
   passwordCopy, searchText, searchTool, section, setTip, startDownload, t, tn, toast, ui, uploadFile, valueList,
 } from "./core.js";
 import {render} from "./main.js";
@@ -271,25 +271,29 @@ async function openDownload(d, b, back) {
  *  device d. The file is uploaded and checked before anything is stored. */
 function openImport(d, back) {
   const title = t("Import backup");
-  const file = input("file", {accept: ".sfmb,application/octet-stream"}), pw = filePassword(t("Password of the file"));
+  const file = input("file", {accept: ".sfmb,application/octet-stream"}), pw = filePassword(t("Password of the file")), error = formError();
   file.setAttribute("aria-label", t("Backup file")); pw.setAttribute("aria-label", t("Password of the file"));
-  modal(title, [deviceHead(d), section(t("File"), box("div", "bk-form", file, pw)),
-    el("p", t("Imports a backup file that was downloaded from this app. It must come from this device (MAC address and model are checked) and needs the password shown at the download."), "hint")],
-  [{text: t("Cancel"), action: back}, {text: t("Check file"), kind: "primary", action: async () => {
-    const f = file.files[0];
-    modal(title, [el("p", t("Checking {name} …", {name: f.name}), "hint")], [], "upload");
-    let token = null;
-    try {
-      token = (await uploadFile(f, `${devUrl(d)}/backups/import`)).token;
-      importSummary(d, f.name, token, await api("api/backups/import/check", {token, password: pw.value}), back);
-    } catch (e) {
-      // Refused (wrong password, no backup file): back to the choice of file and password
-      if (token) api("api/backups/import/cancel", {token}).catch(() => {});
-      modal(title, [messageBody(e.message, "error")], [{text: t("Back"), action: () => openImport(d, back)}], "upload");
-    }
-  }}], "upload");
-  // "Check file" needs both a file and its password
-  gateButton(() => file.files.length && pw.value.trim(), file, pw);
+  const content = [deviceHead(d), section(t("File"), box("div", "bk-form", file, pw)),
+    el("p", t("Imports a backup file that was downloaded from this app. It must come from this device (MAC address and model are checked) and needs the password shown at the download."), "hint"),
+    error.line];
+  const form = () => {
+    modal(title, content, [{text: t("Cancel"), action: back}, {text: t("Check file"), kind: "primary", action: async () => {
+      const f = file.files[0];
+      modal(title, [el("p", t("Checking {name} …", {name: f.name}), "hint")], [], "upload");
+      let token = null;
+      try {
+        token = (await uploadFile(f, `${devUrl(d)}/backups/import`)).token;
+        importSummary(d, f.name, token, await api("api/backups/import/check", {token, password: pw.value}), back);
+      } catch (e) {
+        // Refused (wrong password, no backup file): back to this step with file, password and the error
+        if (token) api("api/backups/import/cancel", {token}).catch(() => {});
+        form(); error.show(e.message);
+      }
+    }}], "upload");
+    // "Check file" needs both a file and its password
+    gateButton(() => file.files.length && pw.value.trim(), file, pw);
+  };
+  form();
 }
 /** Import step 2: result of the check; nothing is stored before "Import backup". A
  *  file of another device or a backup that is stored already cannot be imported. */

@@ -26,6 +26,13 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   error dialog keeps the title (and icon) of the dialog it comes from (e.g. "Install
   update?", "Delete firmware?", "Save settings?"); errors without a dialog keep their
   short title ("Check", "Ignore", "Settings").
+- **Input errors (3.11.0, `reports/optimierung-analyse` F3 a, approved 2026-11-23):** an
+  error about the entries of a form step stays in that step, below its content (red text,
+  announced), and every entry stays as typed or chosen: a check before sending (no file,
+  no password, passwords differ, no device) and a refusal of the sent entries (upload,
+  store import, backup import, schedule, upload values, NTP server, power-on action).
+  An upload or import that was refused shows the step again with the chosen file and
+  the password. Errors after a confirmation step keep the error dialog of rule (c).
 - **Tables in dialogs (2026-11-22, F1, U7):** plain tables, left-aligned, on every width
   (not the Devices table or phone tile layout). Phones: "Install n updates?" shows two-line
   entries (name; below it IP · installed → target · source, mockup `M9`); desktop keeps

@@ -564,6 +564,19 @@ export const ackGate = ack => gateButton(() => ack.checked, ack);
 export async function guarded(title, titleIcon, action) {
   try { await action(); } catch (e) { message(title, e.message, "error", titleIcon); }
 }
+/** Error line of a form step: an error about the entries stays in the dialog with all
+ *  entries kept (class "bad", announced). Put line at the end of the content; show(text)
+ *  shows the error and enables the buttons again (the focus stays in the dialog). */
+export function formError() {
+  const line = el("p", null, "bad"); line.hidden = true; line.setAttribute("role", "alert");
+  const show = text => {
+    const buttons = [...$("dlg-btns").children];
+    for (const b of buttons) b.disabled = false;
+    if (!dlg.contains(document.activeElement) && buttons.length) buttons[buttons.length - 1].focus({preventScroll: true});
+    line.textContent = text; line.hidden = false; line.scrollIntoView({block: "nearest"});
+  };
+  return {line, show};
+}
 /** Confirmation dialog: content, "Cancel" (back: its action, else it closes) and the
  *  button that runs action() – red unless kind says otherwise; an error keeps the title
  *  and the icon. ack: a checkbox that enables the button. */

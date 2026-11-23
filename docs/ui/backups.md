@@ -32,9 +32,9 @@ as the UI change). Read when you change the Backups tab, a backup dialog or the 
 - **Import:** button "Import backup" in the device's "Backups" dialog. Step 1: file +
   password, blue "Check file" (enabled with both). Step 2: success icon, value list, check
   list (Seal intact, Same device, Not stored yet – all three green), blue "Import
-  backup". A refused file
-  (wrong password, another device, stored already) shows the reason; "Back" returns to
-  step 1. Imported backups are marked "Imported" and "Kept"; nothing is changed on the
+  backup". A file the check refuses (wrong password, no backup file) brings back step 1
+  with the file, the password and the reason (`common.md`, input errors); a file of
+  another device or one stored already shows the reason in step 2 ("Close"). Imported backups are marked "Imported" and "Kept"; nothing is changed on the
   device.
 - **Back up now (F14):** tab button opens the dialog "Back up now" (All Shellys / Selected
   devices, hint text, blue "Back up n devices"). While it runs: progress line with bar and

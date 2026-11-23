@@ -1,7 +1,7 @@
 // Firmware tab: stored files, changelog, Install button per device, delete and upload.
 import {
   $, api, attachTip, box, checkbox, closeModal, collator, confirmDialog, copyText, el, field, filterControl, fmt, fmtSize, guarded,
-  icon, iconButton, input, keptDetails, loadLocal, matches, mb, message, modal, radio, saveLocal, searchText, searchTool, section,
+  formError, icon, iconButton, input, keptDetails, loadLocal, matches, mb, message, modal, radio, saveLocal, searchText, searchTool, section,
   setTip, shaRow, sortControl, t, tn, toast, ui, uploadFile, valueList,
 } from "./core.js";
 import {installable, installBlocker} from "./devices.js";
@@ -243,21 +243,25 @@ function deleteFirmware(f) {
  *  step 1 choose and transfer, step 2 confirm
  *  firmware ID and version (pre-filled from the file where possible), optional SHA-256. */
 function openUpload() {
-  const title = t("Upload firmware"), chooser = input("file", {accept: ".zip,.bin,.gbl"});
-  modal(title, [field(t("Firmware file (.zip, .bin or .gbl, max. 64 MB)"), chooser),
+  const title = t("Upload firmware"), chooser = input("file", {accept: ".zip,.bin,.gbl"}), error = formError();
+  const content = [field(t("Firmware file (.zip, .bin or .gbl, max. 64 MB)"), chooser),
     el("p", (ui.state?.beta_firmware ? t("Only for Gen2+ devices known to this app, stable versions and beta versions (“Offer beta firmware” is on).")
       : t("Only for Gen2+ devices known to this app and stable versions.")) + " " +
       t("An uploaded version is used when the Shelly update server offers exactly this version, or for a manual installation while the server cannot be reached; an older one allows a downgrade. Use files from a source you trust."), "hint"),
-    el("div", UPLOAD_HINT, "warnbox")],
-  [{text: t("Cancel")}, {text: t("Upload"), kind: "primary", action: async () => {
+    el("div", UPLOAD_HINT, "warnbox"), error.line];
+  // A refused file brings back this step with the chosen file and the error
+  const form = () => modal(title, content, [{text: t("Cancel")}, {text: t("Upload"), kind: "primary", action: async () => {
     const file = chooser.files && chooser.files[0];
-    if (!file) { message(title, t("No file selected."), "error", "upload"); return; }
-    if (file.size > 64 * 1048576) { message(title, t("Firmware larger than 64 MB."), "error", "upload"); return; }
+    if (!file) { error.show(t("No file selected.")); return; }
+    if (file.size > 64 * 1048576) { error.show(t("Firmware larger than 64 MB.")); return; }
     const status = el("p", t("Uploading {name} …", {name: file.name}), "hint");
     modal(title, [status], [], "upload");
     const progress = (sent, total) => { status.textContent = `${t("Uploading {name} …", {name: file.name})} ${Math.floor(sent * 100 / total)} %`; };
-    await guarded(title, "upload", async () => uploadConfirm(await uploadFile(file, undefined, progress)));
+    let r;
+    try { r = await uploadFile(file, undefined, progress); } catch (e) { form(); error.show(e.message); return; }
+    uploadConfirm(r);
   }}], "upload");
+  form();
 }
 function uploadConfirm(r) {
   const title = t("Upload firmware");
@@ -274,17 +278,13 @@ function uploadConfirm(r) {
   const content = [valueList([[t("File"), r.filename], [t("Size"), mb(r.size)], shaRow(r.sha256)]), el("p", detected, "hint"),
     field(t("Firmware ID"), type), field(beta ? t("Version (X.Y.Z or X.Y.Z-betaN)") : t("Version (stable, X.Y.Z)"), version), field(t("Expected SHA-256"), sha)];
   if (r.duplicate) content.push(el("div", t("This file is already stored as {name}.", {name: r.duplicate}), "warnbox"));
-  const error = el("p", null, "bad"); error.hidden = true; error.setAttribute("role", "alert"); content.push(error);
+  const error = formError(); content.push(error.line);
   const cancel = () => api("api/firmware/upload/cancel", {token: r.token}).catch(() => {}).then(closeModal);
   modal(title, content, [{text: t("Cancel"), action: cancel}, {text: t("Store"), kind: "primary", action: async () => {
     try {
       const res = await api("api/firmware/upload/confirm", {token: r.token, type: type.value, version: version.value.trim(), sha256: sha.value.trim()});
       toast(t("{firmware} stored", {firmware: `${res.type} ${res.version}`})); closeModal();
-    } catch (e) {
-      // The upload stays staged: show the error and let the user correct the values
-      for (const b of $("dlg-btns").children) b.disabled = false;
-      error.textContent = e.message; error.hidden = false;
-    }
+    } catch (e) { error.show(e.message); }   // the upload stays staged: the user corrects the values
   }}], "upload");
 }
 $("fw-upload").prepend(icon("upload"));   // same icon as the upload dialog title, before the text (aria-hidden)
