@@ -32,7 +32,7 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
 - **Export (8b B):** dialog with value list (files with downloaded/uploaded, size, file
   name), the generated password in a read-only field with copy icon (shown only here;
   if the browser refuses copying, the field's text is selected),
-  hint that it seals and is stored nowhere, checkbox "I have saved the password";
+  yellow box that it seals and is stored nowhere (live test rc5), checkbox "I have saved the password";
   "Export" is enabled only after it and starts the browser download. A prepared export
   that is older than its download period is refused in the dialog ("Export expired –
   please start it again.", 2026-11-21); too little free disk space is reported when the
