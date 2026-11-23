@@ -5,8 +5,9 @@ Usage (repository root, Docker running): tools/dev/image_test.py <image>
 
 The backend tests run on the development machine: another C library, the pure Python
 fallbacks of the packages, no image. This test starts the image itself the way the
-Supervisor does – /data with an options.json holding the defaults of config.yaml and a
-SUPERVISOR_TOKEN – but without Home Assistant, and checks what only the image shows:
+Supervisor does – /data (a volume of the container) with an options.json holding the
+defaults of config.yaml and a SUPERVISOR_TOKEN – but without Home Assistant, and checks
+what only the image shows:
 
 - the app starts and reports "ready", both servers answer, nothing is logged as an error
 - the C extensions of the bundled packages are loaded (wheels fit the image)
@@ -113,12 +114,16 @@ def main() -> int:
         if not ok:
             failed.append(name)
 
-    with tempfile.TemporaryDirectory() as data:
-        Path(data).chmod(0o755)
-        (Path(data) / "options.json").write_text(json.dumps(default_options()))
-        docker("rm", "-f", NAME, check=False)
-        docker("run", "-d", "--name", NAME, "-e", "SUPERVISOR_TOKEN=image-test", "-v", f"{data}:/data", image)
+    with tempfile.TemporaryDirectory() as folder:
+        options = Path(folder) / "options.json"
+        options.write_text(json.dumps(default_options()))
+        docker("rm", "-f", "-v", NAME, check=False)
+        # /data is a volume of the container, filled before the start: what the app writes
+        # there (as root) never reaches a folder of this machine and goes with the container
+        docker("create", "--name", NAME, "-e", "SUPERVISOR_TOKEN=image-test", "-v", "/data", image)
         try:
+            docker("cp", str(options), f"{NAME}:/data/options.json")
+            docker("start", NAME)
             deadline = time.monotonic() + START_TIMEOUT_S
             while time.monotonic() < deadline and " ready " not in logs():
                 if docker("inspect", "-f", "{{.State.Running}}", NAME).stdout.strip() != "true":
@@ -143,7 +148,7 @@ def main() -> int:
             if failed:
                 print("---- log of the container ----\n" + log)
         finally:
-            docker("rm", "-f", NAME, check=False)
+            docker("rm", "-f", "-v", NAME, check=False)
     print("image test passed" if not failed else f"image test FAILED: {', '.join(failed)}")
     return 1 if failed else 0
 
