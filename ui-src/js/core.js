@@ -411,14 +411,17 @@ export function keepFocus(root, draw) {
 
 // ---------------------------------------------------------------- Dialog
 // One dialog for everything: title + close, content, buttons bottom right.
-// buttons: [{text, kind: "primary"|"danger"|"", action}] – a button without
-// action closes the dialog; actions decide themselves (close or new content).
+// buttons: [{text, kind: "primary"|"danger"|"", action, cancel}] – a button without
+// action closes the dialog; actions decide themselves (close or new content). The X and
+// the Escape key run the action of the button marked cancel (e.g. discard a staged file,
+// return to the list), otherwise they close the dialog.
 // Keyboard and screen readers: the dialog is named by its title; a new dialog starts with
 // the focus on its first control (the close icon; a dialog may then focus a field of its
 // own), a step that removed the focused control puts it there too, so the focus never
 // falls back to the page behind it. Closing returns the focus to where it was.
 const dlg = $("dlg");
 let opener = null;   // where the focus was when the dialog opened: {root, mark} (see keepFocus)
+let dismiss = null;  // action of the cancel button of the shown step (X and Escape), null: close
 /** Open (or replace the content of) the dialog. titleIcon: optional icon name before
  *  the title; its colour comes from the class ti-<name> (style.css). */
 export function modal(title, content, buttons = [{text: t("Close")}], titleIcon) {
@@ -426,6 +429,7 @@ export function modal(title, content, buttons = [{text: t("Close")}], titleIcon)
   head.replaceChildren(el("span", title));
   if (titleIcon) { const i = icon(titleIcon); i.classList.add("ti", "ti-" + titleIcon); head.prepend(i); }
   $("dlg-body").replaceChildren(...content);
+  dismiss = (buttons.find(b => b.cancel) || {}).action || null;
   $("dlg-btns").replaceChildren(...buttons.map(({text, kind, action}) => {
     const b = el("button", text, kind || "");
     b.onclick = async () => {
@@ -467,7 +471,15 @@ dlg.addEventListener("close", () => {
   const node = focusTarget(from.root, from.mark); if (node) node.focus({preventScroll: true});
 });
 $("dlg-x").append(icon("close"));
-$("dlg-x").onclick = closeModal;
+/** X and Escape: the action of the cancel button, else close. */
+async function dismissDialog() {
+  const run = dismiss;
+  if (!run) { closeModal(); return; }
+  for (const x of $("dlg-btns").children) x.disabled = true;
+  await run();
+}
+$("dlg-x").onclick = dismissDialog;
+dlg.addEventListener("cancel", e => { if (dismiss) { e.preventDefault(); dismissDialog(); } });
 // Icon of a message kind; "info" (neutral notes such as "Nothing changed.") has none
 const MESSAGE_ICONS = {success: "check", warning: "alert", error: "close"};
 /** Message dialog. kind: "info" (default, no icon), "success", "warning" or "error" –
@@ -581,7 +593,7 @@ export function formError() {
  *  button that runs action() – red unless kind says otherwise; an error keeps the title
  *  and the icon. ack: a checkbox that enables the button. */
 export function confirmDialog({title, icon: titleIcon, content, button, kind = "danger", action, back, cancel = t("Cancel"), ack}) {
-  modal(title, content, [{text: cancel, action: back}, {text: button, kind, action: () => guarded(title, titleIcon, action)}], titleIcon);
+  modal(title, content, [{text: cancel, cancel: true, action: back}, {text: button, kind, action: () => guarded(title, titleIcon, action)}], titleIcon);
   if (ack) ackGate(ack);
 }
 // Lines of a check list: state class and icon (null: no icon)

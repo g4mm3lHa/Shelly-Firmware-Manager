@@ -9,7 +9,7 @@ import {
   aopLabel, aopSummary, aopTone, editAop, editCloud, editDebug, editEco, editPassword, editSwitch, editValue, featureStrip,
   restartDevice,
 } from "./device-settings.js";
-import {load, queued, render} from "./main.js";
+import {load, render} from "./main.js";
 import {openDeviceBackups, reasonLabel} from "./backups.js";
 
 // ---------------------------------------------------------------- Devices
@@ -525,7 +525,6 @@ function deviceCard(title, rows, head, headExtra) {
     if (d.ignored) tr.className = "ignored";
     for (const key of columnKeys()) {
       const c = el("td", null, `c-${key}${colClass(key)}`);
-      if (COLUMNS[key].label) c.dataset.label = COLUMNS[key].label;
       c.append(...COLUMNS[key].cell(d)); tr.append(c);
     }
     tbody.append(tr);

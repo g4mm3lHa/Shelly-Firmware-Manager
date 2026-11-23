@@ -280,7 +280,7 @@ function uploadConfirm(r) {
   if (r.duplicate) content.push(el("div", t("This file is already stored as {name}.", {name: r.duplicate}), "warnbox"));
   const error = formError(); content.push(error.line);
   const cancel = () => api("api/firmware/upload/cancel", {token: r.token}).catch(() => {}).then(closeModal);
-  modal(title, content, [{text: t("Cancel"), action: cancel}, {text: t("Store"), kind: "primary", action: async () => {
+  modal(title, content, [{text: t("Cancel"), cancel: true, action: cancel}, {text: t("Store"), kind: "primary", action: async () => {
     try {
       const res = await api("api/firmware/upload/confirm", {token: r.token, type: type.value, version: version.value.trim(), sha256: sha.value.trim()});
       toast(t("{firmware} stored", {firmware: `${res.type} ${res.version}`})); closeModal();

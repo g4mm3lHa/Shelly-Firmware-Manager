@@ -50,7 +50,7 @@ export function t(text, vars) {
 }
 /** Translate the static page (index.html): text nodes and the attributes placeholder,
  *  aria-label and data-tip whose whole text is a known English text. */
-export function translatePage(root = document.body) {
+function translatePage(root = document.body) {
   if (!dict) return;
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {

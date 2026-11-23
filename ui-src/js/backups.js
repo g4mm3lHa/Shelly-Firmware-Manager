@@ -4,7 +4,7 @@
 // writes (manager_backups); the page shows its lists and the state of its two jobs
 // (backup run of several devices, restore).
 import {
-  $, ackGate, api, box, cell, checkbox, checkLine, closeModal, confirmDialog, devUrl, deviceChoice, el, filePassword, filterControl,
+  $, ackGate, api, box, cell, checkbox, checkLine, closeModal, collator, confirmDialog, devUrl, deviceChoice, el, filePassword, filterControl,
   fmt, fmtSize, formError, gateButton, guarded, icon, iconButton, input, matches, message, messageBody, modal, modalOpen, modelGen,
   passwordCopy, searchText, searchTool, section, setTip, startDownload, t, tn, toast, ui, uploadFile, valueList,
 } from "./core.js";
@@ -52,7 +52,7 @@ function storedText(list, keep) {
 
 // ---------------------------------------------------------------- Data
 /** Fetch the lists of the tab again and render. */
-export async function reloadBackups() {
+async function reloadBackups() {
   ui.backups = await api("api/backups");
   render(true);
 }
@@ -258,12 +258,12 @@ async function openDownload(d, b, back) {
       el("p", t("The file is sealed with this password. It is shown only here and stored nowhere – without it the file cannot be imported again."), "hint")),
     box("div", "warnbox", el("span", t("Scripts and webhook addresses in a backup can contain secrets (tokens, keys). Keep the file and the password apart."))),
     savedLabel],
-  [{text: t("Cancel"), action: back}, {text: t("Download"), kind: "primary", action: () => {
+  [{text: t("Cancel"), cancel: true, action: back}, {text: t("Download"), kind: "primary", action: () => {
     // The server refuses an expired download; a download through a link cannot show that
     // answer, so the dialog checks the time itself
     if (Date.now() - prepared > x.expires_in * 1000) { message(title, t("Download expired – please start it again."), "error", "download"); return; }
     startDownload(`api/backups/download/${encodeURIComponent(x.token)}`, x.filename);
-    modal(title, [messageBody(t("Your browser downloads {file} in a moment.", {file: x.filename}), "success")], [{text: t("Close"), action: back}], "download");
+    modal(title, [messageBody(t("Your browser downloads {file} in a moment.", {file: x.filename}), "success")], [{text: t("Close"), cancel: true, action: back}], "download");
   }}], "download");
   ackGate(saved);
 }
@@ -277,7 +277,7 @@ function openImport(d, back) {
     el("p", t("Imports a backup file that was downloaded from this app. It must come from this device (MAC address and model are checked) and needs the password shown at the download."), "hint"),
     error.line];
   const form = () => {
-    modal(title, content, [{text: t("Cancel"), action: back}, {text: t("Check file"), kind: "primary", action: async () => {
+    modal(title, content, [{text: t("Cancel"), cancel: true, action: back}, {text: t("Check file"), kind: "primary", action: async () => {
       const f = file.files[0];
       modal(title, [el("p", t("Checking {name} …", {name: f.name}), "hint")], [], "upload");
       let token = null;
@@ -316,9 +316,9 @@ function importSummary(d, name, token, r, back) {
     section(t("Check"), checks),
     possible ? el("p", t("An imported backup is marked “Imported” and “Kept”, so the limit of {n} does not remove it at once. Nothing is changed on the device – restore it from the list.",
       {n: (ui.backups && ui.backups.keep) || (ui.state && ui.state.backup_keep) || 10}), "hint") : null].filter(Boolean),
-  possible ? [{text: t("Cancel"), action: cancel}, {text: t("Import backup"), kind: "primary", action: () => guarded(title, "upload", async () => {
+  possible ? [{text: t("Cancel"), cancel: true, action: cancel}, {text: t("Import backup"), kind: "primary", action: () => guarded(title, "upload", async () => {
     await api("api/backups/import/confirm", {token}); toast(t("Backup imported")); await back();
-  })}] : [{text: t("Close"), action: cancel}], "upload");
+  })}] : [{text: t("Close"), cancel: true, action: cancel}], "upload");
 }
 /** Delete one backup after a confirmation. */
 function deleteBackup(d, b, back) {
@@ -339,8 +339,8 @@ async function backupOne(d, back) {
     const b = (await api(`${devUrl(d)}/backup`, {})).backup;
     const gap = b.parts && b.parts.partial;
     modal(title, [messageBody(t("Backup of {name} stored ({details}).", {name: d.name, details: storedLine(b)}) +
-      (gap ? " " + t("The actions could not be read on this device.") : ""), gap ? "warning" : "success")], [{text: t("Close"), action: back}], "backup");
-  } catch (e) { modal(title, [messageBody(`${d.name}: ${e.message}`, "error")], [{text: t("Close"), action: back}], "backup"); }
+      (gap ? " " + t("The actions could not be read on this device.") : ""), gap ? "warning" : "success")], [{text: t("Close"), cancel: true, action: back}], "backup");
+  } catch (e) { modal(title, [messageBody(`${d.name}: ${e.message}`, "error")], [{text: t("Close"), cancel: true, action: back}], "backup"); }
 }
 /** Dialog "Back up now" of the tab: all Shellys or chosen ones. A running or finished
  *  run (its result was not looked at yet) is shown instead. */
@@ -348,7 +348,7 @@ function openBackupNow() {
   const s = ui.state;
   if (s && s.backup_job) { openRun(); return; }
   const title = t("Back up now");
-  const devs = ((s && s.devices) || []).filter(d => !d.removed).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  const devs = ((s && s.devices) || []).filter(d => !d.removed).sort((a, b) => collator.compare(String(a.name), String(b.name)));
   const pick = deviceChoice("bk-dev", devs, [el("span", t("All Shellys ({n})", {n: devs.length}))], "all",
     d => [d.ignored ? el("span", t("Ignored"), "tag warn") : null, d.battery ? el("span", t("Battery"), "tag") : null].filter(Boolean));
   const modes = box("div", "modes", ...pick.nodes);
@@ -387,7 +387,7 @@ function openRun() {
   follow(head, s => {
     const job = s.backup_job;
     if (!job) { closeModal(); return true; }
-    const results = [...job.results].sort((a, b) => String(a.device).localeCompare(String(b.device)));
+    const results = [...job.results].sort((a, b) => collator.compare(String(a.device), String(b.device)));
     list.replaceChildren(...results.map(runLine));
     list.parentNode.hidden = !results.length;
     if (!job.finished) {
@@ -398,7 +398,7 @@ function openRun() {
     const stored = results.filter(r => r.result === "stored").length;
     const text = job.total === 1 ? t("{n} of 1 device backed up.", {n: stored}) : t("{n} of {total} devices backed up.", {n: stored, total: job.total});
     modal(title, [messageBody(text, stored === job.total ? "success" : stored ? "warning" : "error"), section(t("Result"), list)],
-      [{text: t("Close"), action: async () => { await api("api/backups/run/clear", {}).catch(() => {}); await toTab(); }}], "backup");
+      [{text: t("Close"), cancel: true, action: async () => { await api("api/backups/run/clear", {}).catch(() => {}); await toTab(); }}], "backup");
     return true;
   });
 }
@@ -456,11 +456,11 @@ function partBlock(p, gen, checked) {
 }
 /** Dialog "Restore backup?" – step 1: the device is read and compared with the backup;
  *  the parts to restore are chosen. Nothing is changed. */
-export async function openRestore(d, b, back) {
+async function openRestore(d, b, back) {
   const title = t("Restore backup?");
-  modal(title, [deviceHead(d), box("ul", "prechk", checkLine("run", t("Device reachable"), t("Reading the current settings for the comparison …")))], [{text: t("Cancel"), action: back}], "backup");
+  modal(title, [deviceHead(d), box("ul", "prechk", checkLine("run", t("Device reachable"), t("Reading the current settings for the comparison …")))], [{text: t("Cancel"), cancel: true, action: back}], "backup");
   let r;
-  try { r = await api(`api/backups/${b.id}/preview`, {}); } catch (e) { modal(title, [messageBody(e.message, "error")], [{text: t("Close"), action: back}], "backup"); return; }
+  try { r = await api(`api/backups/${b.id}/preview`, {}); } catch (e) { modal(title, [messageBody(e.message, "error")], [{text: t("Close"), cancel: true, action: back}], "backup"); return; }
   const now = r.device.version, gen = r.device.gen;
   const info = section(t("Backup"), valueList([[t("Device"), `${d.name} · ${modelGen(d)}`], [t("Backup"), backupText(b)],
     [t("Firmware"), !b.fw ? null : !now || b.fw === now ? t("{version} (as now)", {version: b.fw}) : t("{version} at the backup · {now} now", {version: b.fw, now})]]));
@@ -469,13 +469,13 @@ export async function openRestore(d, b, back) {
     const o = r.other;
     checks.append(checkLine("err", t("Another device"), t("This backup was made on another device (MAC {mac}, model {model}); the device now has MAC {own}. A backup can only be restored to the device it was made on.",
       {mac: o.backup_mac || "–", model: o.backup_model || "–", own: o.device_mac || "–"})));
-    modal(title, [info, section(t("Check"), checks)], [{text: t("Close"), action: back}], "backup");
+    modal(title, [info, section(t("Check"), checks)], [{text: t("Close"), cancel: true, action: back}], "backup");
     return;
   }
   if (!r.reachable) {
     checks.append(checkLine("err", t("Device not reachable"), r.error || ""));
     modal(title, [info, section(t("Check"), checks), el("p", t("The current settings are needed for the comparison – nothing can be restored while the device does not answer."), "hint")],
-      [{text: t("Close"), action: back}], "backup");
+      [{text: t("Close"), cancel: true, action: back}], "backup");
     return;
   }
   checks.append(checkLine("ok", t("Same device"), t("MAC address and model match the backup.")));
@@ -497,7 +497,7 @@ export async function openRestore(d, b, back) {
       el("p", t("Left as they are unless ticked. Passwords (Wi-Fi, device, MQTT) are never part of a backup – a Shelly does not give them out; they stay unchanged on the device."), "hint"))];
   const all = [...blocks, network];
   const next = () => restoreConfirm(d, b, all.filter(x => x.input.checked), all, gen, back, () => { modal(title, content, buttons, "backup"); sync(); });
-  const buttons = [{text: t("Cancel"), action: back}, {text: t("Continue"), kind: "primary", action: next}];
+  const buttons = [{text: t("Cancel"), cancel: true, action: back}, {text: t("Continue"), kind: "primary", action: next}];
   const sync = () => {
     danger.hidden = !network.input.checked;
     gateButton(() => all.some(x => x.input.checked));
@@ -531,7 +531,7 @@ function restoreConfirm(d, b, chosen, all, gen, back, previous) {
     try {
       await api(`api/backups/${b.id}/restore`, {parts: [...picked], confirm: true, network_acknowledged: net && sure.checked});
       openRestoreProgress(back);
-    } catch (e) { modal(title, [messageBody(e.message, "error")], [{text: t("Close"), action: back}], "backup"); }
+    } catch (e) { modal(title, [messageBody(e.message, "error")], [{text: t("Close"), cancel: true, action: back}], "backup"); }
   }}], "backup");
   gateButton(() => !net || sure.checked, sure);
 }
@@ -539,7 +539,7 @@ function restoreConfirm(d, b, chosen, all, gen, back, previous) {
 const stepName = (step, gen) => ({backup: t("Backup “Before restore”"), restart: t("Restart"), verify: t("Reading the settings again")})[step] || partName(step, gen);
 /** Progress of the running restore (one line per step: done, running, waiting), then
  *  its result. Also shows the last result again while it was not closed. */
-export function openRestoreProgress(back) {
+function openRestoreProgress(back) {
   const title = t("Restore backup?");
   const list = el("ul", null, "prechk"), name = el("div", "", "name");
   const head = box("div", "bk-dhead", box("div", null, name, el("div", t("Restoring – do not switch the device off."), "sub")));
@@ -563,7 +563,7 @@ function restoreResult(job, s, back) {
   const done = async () => { await api("api/backups/restore/clear", {}).catch(() => {}); await back(); };
   const safety = job.safety ? el("p", t("The state before the restore is stored as backup “Before restore” ({time}).", {time: fmt(job.safety)}), "hint") : null;
   if (job.error || !job.result) {
-    modal(title, [messageBody(`${job.name}: ${job.error || t("The restore ended without a result.")}`, "error"), safety].filter(Boolean), [{text: t("Close"), action: done}], "backup");
+    modal(title, [messageBody(`${job.name}: ${job.error || t("The restore ended without a result.")}`, "error"), safety].filter(Boolean), [{text: t("Close"), cancel: true, action: done}], "backup");
     return;
   }
   const r = job.result, gen = (s.devices.find(x => x.id === job.device) || {}).gen;
@@ -586,7 +586,7 @@ function restoreResult(job, s, back) {
     : attention ? tn(attention, "{name}: backup of {time} restored – {n} point needs attention.", "{name}: backup of {time} restored – {n} points need attention.", {name: job.name, time: when})
       : t("{name}: backup of {time} restored.", {name: job.name, time: when});
   modal(title, [messageBody(text, !r.confirmed ? "error" : attention ? "warning" : "success"), section(t("Result"), list), safety].filter(Boolean),
-    [{text: t("Close"), action: done}], "backup");
+    [{text: t("Close"), cancel: true, action: done}], "backup");
 }
 
 searchTool($("bk-search"));

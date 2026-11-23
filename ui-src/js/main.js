@@ -164,7 +164,7 @@ let timer = 0, inflight = false;
 // lasts longer is shown.
 const AUTH_RETRY_MS = [1000, 3000, 8000, 15000];
 let authRetry = 0;
-export let queued = false;   // read by devices.js
+let queued = false;   // a refresh asked for while one runs: true (forced) or "again"
 const POLL_IDLE_MS = 30000, POLL_BUSY_MS = 3000;
 // A schedule run or scheduled installation starts at its time: the page refreshes this
 // long after it, so the Devices, Schedules and Logs tabs show it at once

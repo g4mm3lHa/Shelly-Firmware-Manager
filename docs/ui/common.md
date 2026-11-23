@@ -47,7 +47,9 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   with the focus on its first control (the close icon) unless it focuses a field itself
   (`reports/3.11.0/FRAGEN_rc2.md` 1 b, approved 2026-11-23); a step that removes the
   focused control moves the focus there too; closing returns it to the control that
-  opened the dialog. Escape closes the row menu and returns the focus to its ⋮ button.
+  opened the dialog. The X and Escape do what "Cancel" / "Close" of the step does
+  (discard a staged upload or import, return to the list of the device's backups).
+  Escape closes the row menu and returns the focus to its ⋮ button.
   Column heads sort with Enter and Space and carry `aria-sort`; the tabs carry
   `aria-selected` and name their panel. Error and warning messages in dialogs are
   announced (`role="alert"`), successes as status. No arrow keys in menus and tabs.

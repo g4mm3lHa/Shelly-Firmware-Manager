@@ -12,6 +12,10 @@ Changed
 - Input errors stay in the dialog with everything entered: device and bulk passwords,
   upload, store and backup import, NTP server and power-on action. A refused file or
   password shows the form again with the file and the password kept.
+- The X and Escape do what "Cancel" or "Close" does: a staged upload or import is
+  discarded, the backup dialogs return to the device's list.
+- Lists in dialogs (Back up now, bulk passwords, schedule devices, run results) sort
+  names like the tables ("Shelly 2" before "Shelly 10").
 
 Changes in rc2
 

@@ -370,7 +370,7 @@ function importSummary(token, name, r) {
     section(t("Result"), box("div", "imp-groups", ...groups)),
     el("p", IMPORT_MARK, "hint"),
     ackLabel],
-  [{text: t("Cancel"), action: cancel}, {text: label, kind: "primary", action: () => guarded(IMPORT_TITLE, "importIcon", async () => {
+  [{text: t("Cancel"), cancel: true, action: cancel}, {text: label, kind: "primary", action: () => guarded(IMPORT_TITLE, "importIcon", async () => {
     const c = await api("api/firmware/import/confirm", {token, acknowledged: ack.checked});
     const parts = [tn(c.stored, "1 new file stored as “Imported”", "{n} new files stored as “Imported”")];
     if (c.updated) parts.push(tn(c.updated, "data added to 1 stored file", "data added to {n} stored files"));

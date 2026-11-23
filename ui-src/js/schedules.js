@@ -4,7 +4,7 @@
 // The server runs the schedules (manager_schedules); times are local times of Home
 // Assistant, shown as the server formats them.
 import {
-  $, api, box, cell, checkbox, closeModal, confirmDialog, deviceChoice, el, formError, icon, iconButton, input, message, modal, radio, section, t,
+  $, api, box, cell, checkbox, closeModal, collator, confirmDialog, deviceChoice, el, formError, icon, iconButton, input, message, modal, radio, section, t,
   toast, ui,
 } from "./core.js";
 import {cancelPlan} from "./install.js";
@@ -122,7 +122,7 @@ export function renderSchedules() {
 /** Save a schedule (new: no id). */
 const saveSchedule = (id, body) => api(id ? `api/schedules/${encodeURIComponent(id)}` : "api/schedules", body);
 /** Dialog "Add schedule" / "Edit schedule". */
-export function openSchedule(s) {
+function openSchedule(s) {
   const edit = !!s;
   s = s || {on: true, name: "", action: "restart", repeat: {kind: "daily"}, time: "03:00", devices: "all", pause: PAUSE_DEFAULT};
   const name = input("text", {value: s.name, maxLength: NAME_MAX, placeholder: t("e.g. Weekly restart")});
@@ -145,7 +145,7 @@ export function openSchedule(s) {
   const [everyR, every] = radio("sch-rep", [el("span", t("Every")), " ", n, " ", el("span", t("days"))], s.repeat.kind === "every");
   // Devices: all or a list (removed devices cannot be chosen)
   const chosen = new Set(Array.isArray(s.devices) ? s.devices : []);
-  const devices = ui.state.devices.filter(d => !d.removed || chosen.has(d.id)).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  const devices = ui.state.devices.filter(d => !d.removed || chosen.has(d.id)).sort((a, b) => collator.compare(String(a.name), String(b.name)));
   const tagsOf = d => [d.ignored ? el("span", t("Ignored"), "tag warn") : null, d.battery ? el("span", t("Battery"), "tag") : null,
     d.removed ? el("span", t("Removed"), "tag warn") : null,
     isBle(action.value) && (d.gen === 1 || d.ble === "unsupported") ? el("span", t("No Bluetooth"), "tag") : null,

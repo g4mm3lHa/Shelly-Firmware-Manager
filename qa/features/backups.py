@@ -267,8 +267,9 @@ def _download_import(c):
       return !!file && file.files.length === 1 && !!pw && pw.value === 'wrong-password'; }""")
     check(f"{case}: import – wrong password refused, the error stays in the step with file and password",
           "Wrong password" in d["body"] and kept and d["buttons"] == [["Cancel", False], ["Check file", False]], d["body"][:120])
-    f.locator("#dlg-btns button", has_text="Cancel").click()
-    f.wait_for_selector("#dlg-btns button:text-is('Import backup')")
+    page.keyboard.press("Escape")   # Escape does what "Cancel" does: back to the device's backups
+    check(f"{case}: import – Escape returns to the device's backups", wait_until(
+        lambda: f.locator("#dlg[open] #dlg-btns button:text-is('Import backup')").count() == 1), dialog(f)["title"])
     import_file(password)
     d = dialog(f)
     check(f"{case}: import – check list and Import backup", "can be imported" in d["body"] and "Seal intact" in d["body"]

@@ -1,7 +1,7 @@
 // Dialogs for the settings of a single Shelly: name, NTP, power-on action, eco mode, switches,
 // websocket debug log, password, restart; passwords of several devices in one step.
 import {
-  api, box, checkbox, closeModal, confirmDialog, devUrl, el, field, formError, gateButton, icon, input, message, messageBody,
+  api, box, checkbox, closeModal, collator, confirmDialog, devUrl, el, field, formError, gateButton, icon, input, message, messageBody,
   modal, radio, section, t, tn, ui, valueList, webUrl,
 } from "./core.js";
 
@@ -267,7 +267,7 @@ function bulkStep(d, mode) {
 }
 /** First step: action, devices, password (+ repeat), storage choice. */
 export function bulkPasswords() {
-  const devices = [...((ui.state && ui.state.devices) || [])].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  const devices = [...((ui.state && ui.state.devices) || [])].sort((a, b) => collator.compare(a.name || "", b.name || ""));
   const modes = el("div", null, "modes"), list = el("div", null, "bulk-list"), storage = el("div");
   const [pw, pw2] = [0, 0].map(() => input("password", {autocomplete: "new-password", maxLength: 128}));
   const pw2Field = field(t("Repeat password"), pw2);
