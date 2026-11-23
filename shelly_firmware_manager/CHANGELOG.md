@@ -2,16 +2,8 @@
 
 ## 3.11.1
 
-Release candidate. Stronger downgrade warning with a risk tick, and no downgrade
+Released 2026-11-23. Stronger downgrade warning with a risk tick, and no downgrade
 entries while downgrades are off.
-
-Changes in rc2
-
-Fixed
-- The image of rc1 was built from an earlier state with an unfinished settings change;
-  rc2 holds exactly the changes listed under rc1.
-
-Changes in rc1
 
 Changed
 - Downgrade: red warning "Downgrade at your own risk" (can brick the Shelly) in every
