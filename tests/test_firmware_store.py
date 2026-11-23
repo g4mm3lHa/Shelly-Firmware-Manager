@@ -14,6 +14,7 @@ import manager_core
 import manager_store
 import pytest
 import shelly
+import shelly_cloud
 from conftest import OPTIONS, A, B, C
 from helpers import chunks, firmware_zip, store
 from shelly import ShellyError
@@ -350,7 +351,7 @@ async def test_upload_checks_extension_size_and_zip_format(mgr, net):
     with pytest.raises(ValueError, match="small"):
         await mgr.stage_upload(chunks(b"x" * 10), "fw.bin", 10)
     with pytest.raises(ValueError, match="64 MB"):
-        await mgr.stage_upload(chunks(b""), "fw.bin", shelly.MAX_FW_SIZE + 1)
+        await mgr.stage_upload(chunks(b""), "fw.bin", shelly_cloud.MAX_FW_SIZE + 1)
     with pytest.raises(ValueError, match="ZIP"):
         await mgr.stage_upload(chunks(b"x" * 5000), "fw.zip", 5000)
     with pytest.raises(ValueError, match="larger than announced"):

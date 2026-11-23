@@ -14,7 +14,9 @@ cannot know: responsibility, layering, invariants and pitfalls.
 |---|---|
 | `main.py` | start, servers, scheduler loops (`run_schedule`, `run_timetable`), clean stop. `VERSION` must equal `config.yaml` (`bump.py` sets both). |
 | `data_paths.py` | paths below `/data`; always read as `data_paths.NAME` (tests and the demo redirect them). |
-| `shelly.py` | all device and manufacturer access: auth, SSRF/redirect/size guards, offers, downloads, settings read/write. Addresses only from `LAN_NETWORKS` (RFC 1918, `fc00::/7`), never extended. |
+| `shelly.py` | all device access: errors (`ShellyError` and its kinds), text helpers for outside values, authentication (`DeviceAuth`), requests with redirect and size guards, settings read/write, OTA WebSocket. `shelly_net` and `shelly_cloud` build on it, never the other way round. |
+| `shelly_net.py` | device addresses: `resolve_device_origin` pins one checked IP; only `LAN_NETWORKS` (RFC 1918, `fc00::/7`), never extended; host names only looked up for display. |
+| `shelly_cloud.py` | manufacturer servers: offers (Gen2+ per firmware ID, Gen1 one list), changelog pages, downloads; shelly.cloud only, every redirect hop checked, size limits, SHA-256 of the URL enforced; firmware file name rules (`FW_NAME_RE`). |
 | `web_ui.py` | Ingress UI and JSON API in `build_ui_app` (handlers inside); middleware for CSRF, JSON depth/size, security headers, unexpected error → 500 without details. "(beta)" mark only on pre-release versions. |
 | `download_server.py` | GET/HEAD `<sha256>.<ext>` for the Shellys, only during an active update, by default only to the target IP. |
 | `schedule.py` | the automatic check: every N days at HH:MM, HA time zone, DST, catch-up. |
@@ -48,4 +50,4 @@ outside uses `manager.Manager` only. Constants live where they are used; tests p
 ## Pitfalls
 - State fields not listed in `public_state` never reach the UI; stored fields are described in `data.md`.
 - A new check or install path must respect the slot rules of layer 1.
-- Anything new that reads a file or URL from outside needs a size limit and goes through the guards of `shelly.py`.
+- Anything new that reads a file or URL from outside needs a size limit and goes through the guards of `shelly.py` (devices, addresses from `shelly_net.py`) or `shelly_cloud.py` (manufacturer).

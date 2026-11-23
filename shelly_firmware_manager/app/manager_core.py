@@ -164,7 +164,7 @@ ACTIVITY_DOWNLOADING = "downloading"  # firmware for this device is being downlo
 
 ACTIVITY_RELOADING = "reloading"  # Reload Device Info is reading the device
 
-PART_PREFIX = ".part-"  # temporary download files (see shelly._store)
+PART_PREFIX = ".part-"  # temporary download files (see shelly_cloud._store)
 
 # ASCII punctuation: escaped with a backslash in texts of the Home Assistant notification,
 # which renders Markdown (links, images, emphasis, HTML, autolinks); shown unchanged

@@ -5,11 +5,11 @@ class only.
 """
 
 import logging
+import shelly_net
 import time
 from typing import Any
 
 import schedule
-import shelly
 from backup_store import normalize_mac
 
 from manager_core import BATTERY_FROM_DEVICE, DOWNLOAD_BASE_MESSAGES, section_of
@@ -101,7 +101,7 @@ class Manager(Schedules):
                     # Running downgrade: its target version (the offer of the last check stays offer_version)
                     "target": dev.get("pending_version") if dev.get("downgrade") else None,
                     "password_set": self.credentials.has_device_password(key),  # flag only
-                    "ip": shelly.origin_ip(origin) if origin else None,
+                    "ip": shelly_net.origin_ip(origin) if origin else None,
                     "web_url": f"{origin}/" if origin else None,
                     "planned": self.planned_view(dev),  # scheduled installation ("Install at")
                     # Stored backups of the settings: {"count", "kept", "last", "reason", "size"} or None

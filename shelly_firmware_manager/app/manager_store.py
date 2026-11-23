@@ -34,6 +34,7 @@ from typing import Any
 import backup_store
 import data_paths
 import shelly
+import shelly_cloud
 import store_transfer
 from changelog import marked
 from shelly import ShellyError, clip
@@ -175,7 +176,7 @@ class FirmwareStore(ManagerCore):
         other names are left alone – the app never wrote them under such a name."""
         unknown: dict[str, int] = {}
         for path in data_paths.FW_DIR.iterdir():
-            if path.name in self.firmware or not shelly.FW_NAME_RE.fullmatch(path.name):
+            if path.name in self.firmware or not shelly_cloud.FW_NAME_RE.fullmatch(path.name):
                 continue
             with contextlib.suppress(OSError):
                 if path.is_file() and not path.is_symlink():
@@ -285,7 +286,7 @@ class FirmwareStore(ManagerCore):
     def _file_matches(name: str, sha: object) -> bool:
         """True if the stored file exists and has this SHA-256 (runs in a worker thread)."""
         try:
-            return shelly.file_sha256(data_paths.FW_DIR, name) == sha
+            return shelly_cloud.file_sha256(data_paths.FW_DIR, name) == sha
         except (OSError, ShellyError):
             return False
 
@@ -874,11 +875,11 @@ class FirmwareStore(ManagerCore):
         manifest. Replaces an earlier staged upload. Returns {"transfer", "received"}
         while parts are missing, then the data for the confirmation form (no path)."""
         ext = Path(str(filename or "")).suffix.lower()
-        if ext not in shelly.FW_EXTENSIONS:
+        if ext not in shelly_cloud.FW_EXTENSIONS:
             raise ValueError("Only .zip, .bin or .gbl firmware files can be uploaded")
-        if not isinstance(total, int) or isinstance(total, bool) or total < shelly.MIN_FW_SIZE:
+        if not isinstance(total, int) or isinstance(total, bool) or total < shelly_cloud.MIN_FW_SIZE:
             raise ValueError("Firmware file implausibly small")
-        if total > shelly.MAX_FW_SIZE:
+        if total > shelly_cloud.MAX_FW_SIZE:
             raise ValueError("Firmware larger than 64 MB")
         if not isinstance(length, int) or not isinstance(offset, int) or isinstance(offset, bool):
             raise ValueError("Invalid part of the file transfer")

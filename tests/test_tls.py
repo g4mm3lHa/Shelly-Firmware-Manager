@@ -15,6 +15,7 @@ import subprocess
 import aiohttp
 import pytest
 import shelly
+import shelly_cloud
 import tls
 from aiohttp import web
 from aiohttp.abc import AbstractResolver
@@ -85,8 +86,8 @@ async def test_pinned_certificate_is_accepted(https, certificate, session):
     several entries of the host."""
     url = f"https://updates.shelly.cloud:{https}/changelog"
     fingerprint = certificate[2]
-    assert await shelly.fetch_cloud_text(session, url, pins(fingerprint), 1024) == "changelog"
-    assert await shelly.fetch_cloud_text(session, url, pins(OTHER, fingerprint), 1024) == "changelog"
+    assert await shelly_cloud.fetch_cloud_text(session, url, pins(fingerprint), 1024) == "changelog"
+    assert await shelly_cloud.fetch_cloud_text(session, url, pins(OTHER, fingerprint), 1024) == "changelog"
 
 
 async def test_other_certificate_is_refused_with_its_fingerprint(https, certificate, session):
@@ -94,7 +95,7 @@ async def test_other_certificate_is_refused_with_its_fingerprint(https, certific
     message names the presented one."""
     url = f"https://updates.shelly.cloud:{https}/changelog"
     with pytest.raises(shelly.ShellyError, match="matches NONE of the stored fingerprints") as err:
-        await shelly.fetch_cloud_text(session, url, pins(OTHER), 1024)
+        await shelly_cloud.fetch_cloud_text(session, url, pins(OTHER), 1024)
     assert f"Presented: {certificate[2]}." in str(err.value)
 
 

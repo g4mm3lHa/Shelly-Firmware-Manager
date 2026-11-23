@@ -48,7 +48,8 @@ from events import ENTRY_ID_RE, user_from
 from manager import Manager
 from manager_core import DOWNLOAD_BASE_MESSAGES
 from manager_store import PART_MAX, TRANSFER_ID_RE
-from shelly import FW_NAME_RE, MAX_FW_SIZE, ShellyError, parse_json, same_secret
+from shelly import ShellyError, parse_json, same_secret
+from shelly_cloud import FW_NAME_RE, MAX_FW_SIZE
 from timetable import ID_RE as SCHEDULE_ID_RE
 
 log = logging.getLogger("sfm.ui")

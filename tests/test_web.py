@@ -9,6 +9,7 @@ import re
 
 import data_paths
 import shelly
+import shelly_cloud
 import web_ui
 from aiohttp.test_utils import TestClient, TestServer
 from conftest import A, B, C
@@ -272,7 +273,7 @@ async def test_http_upload_guards(client, mgr, net):
     # Announced size above 64 MiB: refused before the body is read (last – the
     # server closes the connection)
     r = await client.post("/api/firmware/upload", data=data,
-                          headers={**binary(client), "Content-Length": str(shelly.MAX_FW_SIZE + 1)})
+                          headers={**binary(client), "Content-Length": str(shelly_cloud.MAX_FW_SIZE + 1)})
     assert r.status == 413
 
 

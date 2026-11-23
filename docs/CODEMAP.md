@@ -37,7 +37,9 @@ both servers in parallel (cancels checks/installations, saves the state), exit 0
 - `manager.py` (8): `Manager`, `public_state` → `test_web.py`
 - `web_ui.py`: Ingress UI + JSON API, CSRF/size middleware → `test_web.py`, `test_security.py`
 - `download_server.py`: LAN download server for the Shellys → `test_security.py`
-- `shelly.py`: device and manufacturer access, SSRF/size guards → `test_check.py`, `test_device_settings.py`, `test_device_transport.py`
+- `shelly.py`: device access: errors and text helpers, authentication, requests, settings, OTA WebSocket → `test_device_settings.py`, `test_device_transport.py`, `test_guards.py`
+- `shelly_net.py`: device addresses: private networks only, origin pinning, host names → `test_guards.py`, `test_check.py`
+- `shelly_cloud.py`: manufacturer servers: offers, changelog pages, firmware downloads → `test_check.py`, `test_guards.py`, `test_tls.py`
 - `store_transfer.py`: export/import archive (pure functions) → `test_store_transfer.py`
 - `backup_store.py`: encrypted backup files and their list (no device access) → `test_backups.py`
 - `shelly_backup.py`: read, compare and restore the settings of one device → `test_backups.py`, `test_device_transport.py`

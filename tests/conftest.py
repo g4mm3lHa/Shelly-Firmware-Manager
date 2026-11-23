@@ -18,6 +18,8 @@ import data_paths
 import manager
 import manager_installs
 import shelly
+import shelly_cloud
+import shelly_net
 import web_ui
 from aiohttp.test_utils import TestClient, TestServer
 
@@ -204,13 +206,13 @@ def net(monkeypatch, tmp_path):
         async def __aenter__(self):
             raise OSError("no device WebSocket in tests")
 
-    monkeypatch.setattr(shelly, "resolve_device_origin", resolve)
+    monkeypatch.setattr(shelly_net, "resolve_device_origin", resolve)
     monkeypatch.setattr(shelly, "device_info", device_info)
     monkeypatch.setattr(shelly, "read_settings", read_settings)
-    monkeypatch.setattr(shelly, "fetch_offer", fetch_offer)
-    monkeypatch.setattr(shelly, "download_firmware", download_firmware)
+    monkeypatch.setattr(shelly_cloud, "fetch_offer", fetch_offer)
+    monkeypatch.setattr(shelly_cloud, "download_firmware", download_firmware)
     monkeypatch.setattr(shelly, "OtaChannel", NoWebSocket)
-    monkeypatch.setattr(shelly, "host_resolves", host_resolves)
+    monkeypatch.setattr(shelly_net, "host_resolves", host_resolves)
     fake.refresh = refresh
     fake.data = data
     return fake

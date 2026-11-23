@@ -29,7 +29,8 @@ from typing import Any
 import aiohttp
 from tls import CertificatePins
 
-from shelly import ShellyError, clip, fetch_cloud_text, parse_version
+from shelly import ShellyError, clip, parse_version
+from shelly_cloud import fetch_cloud_text
 
 log = logging.getLogger("sfm.changelog")
 

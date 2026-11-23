@@ -18,6 +18,8 @@ from typing import Any
 import aiohttp
 import data_paths
 import shelly
+import shelly_cloud
+import shelly_net
 from shelly import DeviceAuth, ShellyError, error_text
 
 from manager_checks import Checks
@@ -280,7 +282,7 @@ class Installs(Checks):
         """Actual installation: optional restart, pre-check, update command, wait for
         the target version. Returns (confirmed, diagnosis or None)."""
         # 1. The approval is valid only for exactly this file and this device state
-        if await asyncio.to_thread(shelly.file_sha256, data_paths.FW_DIR, dev["file"]) != sha:
+        if await asyncio.to_thread(shelly_cloud.file_sha256, data_paths.FW_DIR, dev["file"]) != sha:
             raise ShellyError("Firmware file was modified")
         auth = self._auth(device_id, dev)
         if restart_first:
@@ -571,7 +573,7 @@ class Installs(Checks):
         if not owners:
             return False  # unknown file: record nothing
         allowed = not self.restrict_downloads or any(
-            shelly.origin_ip(d.get("origin", "")) == client_ip for d in owners
+            shelly_net.origin_ip(d.get("origin", "")) == client_ip for d in owners
         )
         record = self.downloads.setdefault(name, {"served": {}, "rejected": set()})
         if not allowed and len(record["rejected"]) < 8:  # limited in case someone floods requests
@@ -592,7 +594,7 @@ class Installs(Checks):
         """Forget earlier downloads of this device only (installation start)."""
         record = self.downloads.get(str(dev.get("file")))
         if record is not None:
-            record["served"].pop(shelly.origin_ip(dev.get("origin", "")), None)
+            record["served"].pop(shelly_net.origin_ip(dev.get("origin", "")), None)
 
     def _downloaded(self, dev: Device) -> bool:
         """True if this device has started downloading its file. A request from an
@@ -600,9 +602,9 @@ class Installs(Checks):
         restrict_downloads_to_devices) cannot be attributed and counts for every
         device of that file."""
         served = (self.downloads.get(str(dev.get("file"))) or {}).get("served") or {}
-        if served.get(shelly.origin_ip(dev.get("origin", ""))):
+        if served.get(shelly_net.origin_ip(dev.get("origin", ""))):
             return True
-        known = {shelly.origin_ip(d["origin"]) for d in self.devices.values() if d.get("origin")}
+        known = {shelly_net.origin_ip(d["origin"]) for d in self.devices.values() if d.get("origin")}
         return any(count and address not in known for address, count in served.items())
 
     def _install_diagnosis(self, dev: Device) -> str:
@@ -618,7 +620,7 @@ class Installs(Checks):
             ips = ", ".join(sorted(record["rejected"]))
             return (
                 f"Download rejected: request came from {ips}, not from the device IP "
-                f"{shelly.origin_ip(dev['origin'])}. Disable the option "
+                f"{shelly_net.origin_ip(dev['origin'])}. Disable the option "
                 "restrict_downloads_to_devices"
             )
         return (

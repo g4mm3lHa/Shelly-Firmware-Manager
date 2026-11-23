@@ -43,6 +43,7 @@ from typing import Any
 
 import backup_store
 import shelly
+import shelly_cloud
 from changelog import MAX_TEXT
 from shelly import clip
 
@@ -315,12 +316,16 @@ def _clean_entry(raw: object) -> dict[str, Any]:
         or path.startswith("/")
         or "\\" in path
         or any(part in ("", ".", "..") for part in path.split("/"))
-        or ext not in shelly.FW_EXTENSIONS
+        or ext not in shelly_cloud.FW_EXTENSIONS
     ):
         raise TransferError("Damaged manifest: invalid file path")
     if not isinstance(sha, str) or not SHA_RE.fullmatch(sha):
         raise TransferError("Damaged manifest: invalid SHA-256")
-    if not isinstance(size, int) or isinstance(size, bool) or not shelly.MIN_FW_SIZE <= size <= shelly.MAX_FW_SIZE:
+    if (
+        not isinstance(size, int)
+        or isinstance(size, bool)
+        or not shelly_cloud.MIN_FW_SIZE <= size <= shelly_cloud.MAX_FW_SIZE
+    ):
         raise TransferError("Damaged manifest: invalid file size")
     fw_type, gen, version = raw.get("type"), raw.get("gen"), raw.get("version")
     if not isinstance(fw_type, str) or not TYPE_RE.fullmatch(fw_type):

@@ -13,6 +13,8 @@ import manager_checks
 import manager_core
 import pytest
 import shelly
+import shelly_cloud
+import shelly_net
 from conftest import A, B, C, vendor_content
 from helpers import make_manager, store
 from shelly import ShellyError
@@ -369,7 +371,7 @@ async def test_failed_shared_download_fails_all_waiting_checks(mgr, net, monkeyp
         await gate.wait()
         raise ShellyError("Download failed")
 
-    monkeypatch.setattr(shelly, "download_firmware", failing)
+    monkeypatch.setattr(shelly_cloud, "download_firmware", failing)
     mgr.reserve_check("device", A)
     first = asyncio.create_task(mgr.check_device(A))
     await asyncio.sleep(0.05)
@@ -394,7 +396,7 @@ async def test_cancelled_check_cancels_shared_offer_task(mgr, net, monkeypatch):
     async def slow_offer(*_args, **_kwargs):
         await gate.wait()
 
-    monkeypatch.setattr(shelly, "fetch_offer", slow_offer)
+    monkeypatch.setattr(shelly_cloud, "fetch_offer", slow_offer)
     task = asyncio.create_task(mgr.scan())
     await asyncio.sleep(0.05)
     current = asyncio.current_task()
@@ -596,13 +598,13 @@ async def test_installed_version_is_sent_and_intermediate_versions_are_marked(mg
     """The next step of the server for the installed version is provided; below the
     newest version it is marked as intermediate version (target: the newest)."""
     sent = []
-    fake = shelly.fetch_offer
+    fake = shelly_cloud.fetch_offer
 
     async def recording(session, fw_type, pins=None, version=None, beta=False):
         sent.append((fw_type, version))
         return await fake(session, fw_type, pins, version)
 
-    monkeypatch.setattr(shelly, "fetch_offer", recording)
+    monkeypatch.setattr(shelly_cloud, "fetch_offer", recording)
     net.steps = {"1.4.0": "1.5.0"}
     net.offer_version = "1.7.0"
     await mgr.scan()
@@ -633,13 +635,13 @@ async def test_file_provided_as_intermediate_version_keeps_a_store_marker(mgr, n
 
 
 async def test_several_steps_without_newer_version_are_an_intermediate_version(mgr, net, monkeypatch):
-    fake = shelly.fetch_offer
+    fake = shelly_cloud.fetch_offer
 
     async def steps(session, fw_type, pins=None, version=None, beta=False):
         offer = await fake(session, fw_type, pins, version)
         return {**offer, "steps": "2"} if version == "1.4.0" else offer
 
-    monkeypatch.setattr(shelly, "fetch_offer", steps)
+    monkeypatch.setattr(shelly_cloud, "fetch_offer", steps)
     mgr.devices[A] = {"name": "Kitchen"}
     await mgr.check_device(A)
     assert mgr.devices[A]["step_target"] == "" and "intermediate version;" in mgr.devices[A]["message"]
@@ -690,13 +692,13 @@ async def test_stored_file_is_verified_once_per_check(mgr, net, monkeypatch):
         net.devices[f"{i:031x}e"] = (f"Dev {i}", f"192.168.1.{50 + i}", "1.4.0", "1.5.0")
     net.offer_version = "1.6.0"
     store(mgr, "Plus1", "1.6.0", content=vendor_content("1.6.0"))
-    original, hashed = shelly.file_sha256, []
+    original, hashed = shelly_cloud.file_sha256, []
 
     def counting(target_dir, name):
         hashed.append(name)
         return original(target_dir, name)
 
-    monkeypatch.setattr(shelly, "file_sha256", counting)
+    monkeypatch.setattr(shelly_cloud, "file_sha256", counting)
     await mgr.scan()
     assert len(hashed) == 1 and net.downloads == 0
     assert all(d["pending_version"] == "1.6.0" for d in mgr.devices.values())
@@ -725,14 +727,14 @@ async def test_reference_request_detects_a_server_that_ignores_the_version(mgr, 
 
 
 async def test_reference_request_failure_is_no_finding(mgr, net, monkeypatch):
-    fake = shelly.fetch_offer
+    fake = shelly_cloud.fetch_offer
 
     async def failing_reference(session, fw_type, pins=None, version=None, beta=False):
         if version == "1.0.7":
             raise ShellyError("502, 'Bad Gateway'")
         return await fake(session, fw_type, pins, version)
 
-    monkeypatch.setattr(shelly, "fetch_offer", failing_reference)
+    monkeypatch.setattr(shelly_cloud, "fetch_offer", failing_reference)
     await mgr.scan()
     entry = [e for e in mgr.events.entries if e["kind"] == "check"][-1]
     assert all(f["device"] != "Shelly update server" for f in entry["findings"])
@@ -755,7 +757,7 @@ def gen1_net(net, monkeypatch, types):
                 "SHSW-25": {"version": "20230913-112003/v1.14.0-gcb84623", "url": "http://fw.example/SHSW-25.zip"}}
 
     monkeypatch.setattr(shelly, "device_info", device_info)
-    monkeypatch.setattr(shelly, "fetch_gen1_offers", fetch_gen1_offers)
+    monkeypatch.setattr(shelly_cloud, "fetch_gen1_offers", fetch_gen1_offers)
     return calls
 
 
@@ -808,7 +810,7 @@ async def test_gen1_imported_file_is_a_store_fallback_while_the_list_is_unreacha
     async def unreachable(_session, _pins=None):
         raise ShellyError("502, 'Bad Gateway'")
 
-    monkeypatch.setattr(shelly, "fetch_gen1_offers", unreachable)
+    monkeypatch.setattr(shelly_cloud, "fetch_gen1_offers", unreachable)
     m = make_manager(net)
     m._registry = lambda: asyncio.sleep(0, net.registry())
     m.devices[A] = {"name": "Hall"}
@@ -889,7 +891,7 @@ def fake_cloud(monkeypatch, pages):
         async def __aexit__(self, *_exc):
             return None
 
-    monkeypatch.setattr(shelly, "_CloudRequest", Request)
+    monkeypatch.setattr(shelly_cloud, "_CloudRequest", Request)
     return seen
 
 
@@ -901,12 +903,12 @@ async def test_cloud_json_and_text_share_redirect_and_limit_checks(monkeypatch):
         "https://shelly-api-docs.shelly.cloud/x": (301, {"Location": "https://evil.example/x"}, b""),
         "https://shelly-api-docs.shelly.cloud/big": (200, {}, b"x" * 3000),
     })
-    assert await shelly._cloud_json(None, "https://updates.shelly.cloud/a", None) == {"stable": 1}
+    assert await shelly_cloud._cloud_json(None, "https://updates.shelly.cloud/a", None) == {"stable": 1}
     assert seen == ["https://updates.shelly.cloud/a", "https://updates.shelly.cloud/b"]
     with pytest.raises(shelly.ShellyError, match="not allowed"):
-        await shelly.fetch_cloud_text(None, "https://shelly-api-docs.shelly.cloud/x", None, 1024)
+        await shelly_cloud.fetch_cloud_text(None, "https://shelly-api-docs.shelly.cloud/x", None, 1024)
     with pytest.raises(shelly.ShellyError, match="larger"):
-        await shelly.fetch_cloud_text(None, "https://shelly-api-docs.shelly.cloud/big", None, 1024)
+        await shelly_cloud.fetch_cloud_text(None, "https://shelly-api-docs.shelly.cloud/big", None, 1024)
 
 
 async def test_offer_with_invalid_step_count_is_a_readable_error(monkeypatch):
@@ -916,20 +918,20 @@ async def test_offer_with_invalid_step_count_is_a_readable_error(monkeypatch):
         "https://updates.shelly.cloud/update/Plus1": (200, {}, b'{"stable": {"url": "u", "version": "1.5.0", "nsteps": "x"}}'),
     })
     with pytest.raises(ShellyError, match="nsteps"):
-        await shelly.fetch_offer(None, "Plus1")
+        await shelly_cloud.fetch_offer(None, "Plus1")
 
 
 async def test_gen1_list_is_one_document_for_all_types(monkeypatch):
     """The Gen1 list is fetched once; the offer of a type is read from it."""
     seen = fake_cloud(monkeypatch, {"https://api.shelly.cloud/files/firmware": (200, {}, (
         b'{"isok": true, "data": {"SHSW-1": {"url": "http://x/SHSW-1.zip", "version": "v1.14.0"}, "SHEM": {"version": "v1"}}}'))})
-    offers = await shelly.fetch_gen1_offers(None)
+    offers = await shelly_cloud.fetch_gen1_offers(None)
     assert seen == ["https://api.shelly.cloud/files/firmware"]
-    assert shelly.gen1_offer(offers, "SHSW-1") == {"version": "v1.14.0", "url": "http://x/SHSW-1.zip"}
-    assert shelly.gen1_offer(offers, "SHEM") is None and shelly.gen1_offer(offers, "unknown") is None
+    assert shelly_cloud.gen1_offer(offers, "SHSW-1") == {"version": "v1.14.0", "url": "http://x/SHSW-1.zip"}
+    assert shelly_cloud.gen1_offer(offers, "SHEM") is None and shelly_cloud.gen1_offer(offers, "unknown") is None
     fake_cloud(monkeypatch, {"https://api.shelly.cloud/files/firmware": (200, {}, b'{"isok": false}')})
     with pytest.raises(ShellyError, match="reports an error"):
-        await shelly.fetch_gen1_offers(None)
+        await shelly_cloud.fetch_gen1_offers(None)
 
 
 def test_error_text_drops_the_field_labels_and_keeps_the_values():
@@ -946,7 +948,7 @@ async def test_check_error_message_uses_the_readable_text(mgr, net, monkeypatch)
     async def failing(*_args, **_kwargs):
         raise ShellyError("408, message='Request Timeout', url='https://updates.shelly.cloud/update/Plus1'")
 
-    monkeypatch.setattr(shelly, "fetch_offer", failing)
+    monkeypatch.setattr(shelly_cloud, "fetch_offer", failing)
     await mgr.scan()
     assert mgr.devices[A]["message"] == "408, 'Request Timeout', 'https://updates.shelly.cloud/update/Plus1'"
 
@@ -956,20 +958,20 @@ async def test_offer_request_sends_only_app_and_version(monkeypatch):
     without version no header (newest version). nsteps is returned as steps."""
     body = b'{"stable": {"url": "u", "version": "1.3.3", "nsteps": 2, "build_id": "20240625-123456/1.3.3-gabc"}}'
     fake_cloud(monkeypatch, {"https://updates.shelly.cloud/update/Plus1": (200, {}, body)})
-    headers = shelly._CloudRequest.headers_seen
+    headers = shelly_cloud._CloudRequest.headers_seen
     headers.clear()
     expected = {"version": "1.3.3", "url": "u", "steps": "2", "build": "20240625-123456/1.3.3-gabc"}
-    assert await shelly.fetch_offer(None, "Plus1", None, "1.0.7") == expected
-    assert await shelly.fetch_offer(None, "Plus1") == expected
+    assert await shelly_cloud.fetch_offer(None, "Plus1", None, "1.0.7") == expected
+    assert await shelly_cloud.fetch_offer(None, "Plus1") == expected
     assert headers == [{"Shelly-Info": '{"app":"Plus1","ver":"1.0.7"}'}, None]
 
 
 def test_sha256_named_by_the_firmware_url():
     sha = "ddd5a7b49ff3e65240d1264eb531f82da2aa86d3d05d045c5226a81e7ea2e43d"
-    assert shelly.url_sha256(f"https://fwcdn.shelly.cloud/gen2-ntest/Plus1/{sha}") == sha
-    assert shelly.url_sha256(f"https://fwcdn.shelly.cloud/x/{sha.upper()}") == sha
-    assert shelly.url_sha256("https://fw.example/Plus1.zip") is None
-    assert shelly.url_sha256(f"https://fwcdn.shelly.cloud/{sha}/Plus1.zip") is None
+    assert shelly_cloud.url_sha256(f"https://fwcdn.shelly.cloud/gen2-ntest/Plus1/{sha}") == sha
+    assert shelly_cloud.url_sha256(f"https://fwcdn.shelly.cloud/x/{sha.upper()}") == sha
+    assert shelly_cloud.url_sha256("https://fw.example/Plus1.zip") is None
+    assert shelly_cloud.url_sha256(f"https://fwcdn.shelly.cloud/{sha}/Plus1.zip") is None
 
 
 async def test_download_must_match_the_sha256_of_its_url(monkeypatch, tmp_path):
@@ -983,10 +985,10 @@ async def test_download_must_match_the_sha256_of_its_url(monkeypatch, tmp_path):
         f"https://fwcdn.shelly.cloud/Plus1/{good}": (200, {}, data),
         f"https://fwcdn.shelly.cloud/Plus1/{bad}": (200, {}, data),
     })
-    name, sha, size, https = await shelly.download_firmware(None, f"https://fwcdn.shelly.cloud/Plus1/{good}", tmp_path)
+    name, sha, size, https = await shelly_cloud.download_firmware(None, f"https://fwcdn.shelly.cloud/Plus1/{good}", tmp_path)
     assert sha == good and size == 5000 and https and (tmp_path / name).is_file()
     with pytest.raises(ShellyError, match="does not match the SHA-256"):
-        await shelly.download_firmware(None, f"https://fwcdn.shelly.cloud/Plus1/{bad}", tmp_path)
+        await shelly_cloud.download_firmware(None, f"https://fwcdn.shelly.cloud/Plus1/{bad}", tmp_path)
     assert sorted(p.name for p in tmp_path.iterdir()) == [name]  # nothing else stored, no temp file
 
 
@@ -1192,7 +1194,7 @@ async def test_host_names_off_by_default(mgr, net, monkeypatch):
         looked_up.append(host)
         return True
 
-    monkeypatch.setattr(shelly, "host_resolves", lookup)
+    monkeypatch.setattr(shelly_net, "host_resolves", lookup)
     assert mgr.public_state()["host_names"] is False
     await mgr.scan()
     assert looked_up == [] and all("host_name" not in d for d in mgr.devices.values())
@@ -1246,21 +1248,21 @@ async def test_hint_of_home_assistant_ends_with_its_sensor(mgr, net):
 async def test_registry_entry_without_usable_address(mgr, net, monkeypatch):
     """No usable address in the registry: address_issue with the reason, section
     Attention; a later usable address clears it. The host name of the entry is kept."""
-    resolve = shelly.resolve_device_origin
+    resolve = shelly_net.resolve_device_origin
 
     async def failing(url):
         if "192.168.1.12" in str(url):
-            raise shelly.AddressError(shelly.ADDRESS_UNRESOLVED, "Host name garage.local could not be resolved")
+            raise shelly_net.AddressError(shelly_net.ADDRESS_UNRESOLVED, "Host name garage.local could not be resolved")
         return await resolve(url)
 
-    monkeypatch.setattr(shelly, "resolve_device_origin", failing)
+    monkeypatch.setattr(shelly_net, "resolve_device_origin", failing)
     net.extra_registry.clear()
     await mgr.scan()
     dev = mgr.devices[C]
     assert dev["address_issue"] == {"reason": "unresolved", "message": "Host name garage.local could not be resolved"}
     assert dev["status"] == manager_core.STATUS_ERROR and manager_core.section_of(dev) == manager_core.SECTION_ATTENTION
     assert dev.get("host_name") is None  # the registry entry names an IP address
-    monkeypatch.setattr(shelly, "resolve_device_origin", resolve)
+    monkeypatch.setattr(shelly_net, "resolve_device_origin", resolve)
     await mgr.scan()
     assert "address_issue" not in dev
 
@@ -1307,7 +1309,7 @@ async def test_keep_installed_without_sha_in_the_url_keeps_a_stored_download(mgr
     not loaded again at every check."""
     net.devices = {B: net.devices[B]}
     mgr.keep_installed = True
-    fetch = shelly.fetch_offer
+    fetch = shelly_cloud.fetch_offer
 
     async def without_sha(*args, **kwargs):
         offer = await fetch(*args, **kwargs)
@@ -1315,7 +1317,7 @@ async def test_keep_installed_without_sha_in_the_url_keeps_a_stored_download(mgr
             offer["url"] = offer["url"].rsplit("/", 1)[0] + "/Plus1.zip"
         return offer
 
-    monkeypatch.setattr(shelly, "fetch_offer", without_sha)
+    monkeypatch.setattr(shelly_cloud, "fetch_offer", without_sha)
     await mgr.scan()
     assert net.downloads == 1 and len(mgr.firmware) == 1
     await mgr.scan()
@@ -1330,7 +1332,7 @@ async def test_keep_installed_failure_does_not_change_the_check(mgr, net, monkey
     async def broken(*_args, **_kwargs):
         raise ShellyError("Download failed")
 
-    monkeypatch.setattr(shelly, "download_firmware", broken)
+    monkeypatch.setattr(shelly_cloud, "download_firmware", broken)
     await mgr.scan()
     assert mgr.devices[B]["status"] == manager_core.STATUS_CURRENT and not mgr.firmware
     assert mgr.public_state()["devices"][0]["way_back"] == {"version": "1.5.0", "stored": False}
