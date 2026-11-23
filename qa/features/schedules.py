@@ -18,7 +18,7 @@ def _schedules_tab(c):
     heads = f.locator("#view-schedules .card-head h2")
     heads.first.wait_for()
     titles = heads.all_inner_texts()
-    check(f"{case}: Schedules tab – both cards", len(titles) == 2 and titles[0].endswith("· 2") and titles[1].endswith("· 1"),
+    check(f"{case}: Schedules tab – both cards", len(titles) == 2 and titles[0].endswith("· 3") and titles[1].endswith("· 1"),
           str(titles))
     check(f"{case}: no overflow (schedules)", f.evaluate(OVERFLOW_JS) <= 0)
     page.screenshot(path=c.out / f"{case}-schedules.png", full_page=not c.embedded)

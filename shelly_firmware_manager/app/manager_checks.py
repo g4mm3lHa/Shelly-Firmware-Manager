@@ -1,4 +1,4 @@
-"""Manager, layer 4 of 7: checks – which firmware is installed, which one is provided.
+"""Manager, layer 5 of 8: checks – which firmware is installed, which one is provided.
 
 Within a check up to CHECK_PARALLEL devices are queried at the same time; offers and
 firmware downloads are shared (single flight), so parallelism never duplicates a
@@ -61,8 +61,9 @@ from manager_core import (
     markdown_text,
     severity_of,
     unexpected_text,
+    unreachable,
 )
-from manager_devices import DeviceSettings
+from manager_backups import Backups
 
 log = logging.getLogger("sfm.manager")
 
@@ -213,12 +214,6 @@ def other_shellys(registry: list[dict[str, Any]], macs: Iterable[object] = ()) -
     return found[:OTHER_MAX]
 
 
-def _unreachable(err: BaseException) -> bool:
-    """True if the device did not answer at all (timeout, connection failure) – not
-    for an answer the device gave, e.g. a refused password."""
-    return isinstance(err, (TimeoutError, aiohttp.ClientConnectionError, OSError))
-
-
 # Shared manufacturer requests of one check (single flight): ("step", firmware ID,
 # installed version) -> next step for this version, ("newest", firmware ID) -> newest
 # version, GEN1_OFFERS -> firmware list of all Gen1 types
@@ -283,7 +278,7 @@ SCHEDULE_USER = "Schedule"
 CHECK_PARALLEL = 4
 
 
-class Checks(DeviceSettings):
+class Checks(Backups):
     """Full check and single-device check."""
 
     # ------------------------------------------ Full check, single-device check
@@ -677,7 +672,9 @@ class Checks(DeviceSettings):
         last_check = last attempt, last_success = last successful check; a failed
         attempt keeps the last known firmware so it is never shown as freshly checked.
         A known battery device (marker battery) that did not answer is STATUS_ASLEEP
-        instead of STATUS_ERROR. A registry entry without a usable address sets
+        instead of STATUS_ERROR (a warning); any other device that did not answer is
+        an error – it should be reachable (an ignored device is not contacted by the
+        full check at all). A registry entry without a usable address sets
         address_issue ({"reason", "message"}, see shelly.AddressError)."""
         try:
             await self._scan_device(device_id, dev, configuration_url, offers)
@@ -686,10 +683,11 @@ class Checks(DeviceSettings):
             text = error_text(err, 500) or type(err).__name__
             if isinstance(err, AddressError):
                 dev["address_issue"] = {"reason": err.reason, "message": text}
-            if dev.get("battery") is True and _unreachable(err):
+            if dev.get("battery") is True and unreachable(err):
                 dev.update(status=STATUS_ASLEEP, message=ASLEEP_MESSAGE.format(error=text), error_level="warning")
             else:
-                dev.update(status=STATUS_ERROR, message=text, error_level=severity_of(err))
+                level = "error" if unreachable(err) else severity_of(err)
+                dev.update(status=STATUS_ERROR, message=text, error_level=level)
             return False
         except Exception as err:
             # Anything else (e.g. an answer of an unexpected shape) stays an error of

@@ -9,7 +9,10 @@ as the UI change). Read when you change the Firmware tab.
   download and delete icon on one line, on phones in the head of the version tile;
   changelog icon shows the changelog stored with the file (no request).
 - Version labels 12 px after the version, centred (`.fw-ver` flex): "Latest",
-  "Uploaded", "Intermediate" (sentence case, 2026-11-22); label
+  "Uploaded", "Intermediate" (sentence case, 2026-11-22). Phones (3.11.0): the labels stay
+  together in one line (`.fw-tags`) – beside the version, which gets the whole width left
+  of the icons, or together below it if they do not fit there; a version without devices
+  shows no dashed line and no "–" below the checksum. Label
   "Intermediate" outlined yellow ("Uploaded" stays filled) with a tooltip without action
   ("Intermediate version: required step before newer firmware can be installed
   safely"); phones: date right-aligned in the size line.

@@ -33,7 +33,7 @@ import re
 import secrets
 import socket
 import unicodedata
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
@@ -386,12 +386,16 @@ class DeviceAuth:
         }
 
 
+# Query of a device request: parameters by name, or pairs where a name repeats (Gen1 "urls[]")
+Query = Mapping[str, str] | Sequence[tuple[str, str]]
+
+
 async def _call(
     session: aiohttp.ClientSession,
     origin: str,
     path: str,
     auth: DeviceAuth | None,
-    params: dict[str, str] | None = None,
+    params: Query | None = None,
     body: dict[str, Any] | None = None,
 ) -> tuple[int, Any]:
     """One request to a device; answers an authentication challenge once.
@@ -439,7 +443,7 @@ async def _device_json(
     origin: str,
     path: str,
     auth: DeviceAuth | None = None,
-    params: dict[str, str] | None = None,
+    params: Query | None = None,
 ) -> dict[str, Any]:
     """GET on the device; HTTP errors and invalid JSON become a ShellyError."""
     status, data = await _call(session, origin, path, auth, params=params)
@@ -473,6 +477,11 @@ async def _rpc(
         raise ShellyError("Invalid response from the device")
     answer = result.get("result")
     return answer if isinstance(answer, dict) else {}
+
+
+# Device requests for shelly_backup (the same limits and error handling as everything here)
+device_get = _device_json
+device_rpc = _rpc
 
 
 async def device_info(

@@ -1,5 +1,5 @@
-"""Manager, layer 6 of 7: the Schedules tab – schedules (restart, cloud and Bluetooth
-on/off at a clock time) and scheduled installations ("Install at" of the installation
+"""Manager, layer 7 of 8: the Schedules tab – schedules (restart, cloud and Bluetooth
+on/off or a backup at a clock time) and scheduled installations ("Install at" of the installation
 dialog).
 
 Both are started by the loop run_timetable in main.py (start_due). Rules and the next
@@ -30,7 +30,9 @@ ignored and battery devices, devices that are installing, being checked or were
 never checked, devices without the switch (Bluetooth: Gen1 too). One log entry per
 run; its counts relate to all chosen devices, left-out ones included ("2 of 3
 restarted · 1 left out"). A Home Assistant notification once per run if a device was
-not reached or refused the action. A missed run is only logged; a run cut off by the
+not reached or refused the action. A backup run stores only devices whose settings
+changed since their newest backup and tries battery devices too – one that is asleep is
+left out, not failed ("3 stored · 17 unchanged · 1 not backed up"). A missed run is only logged; a run cut off by the
 app stop is logged as interrupted.
 
 A device removed from the list ("Remove from list") is struck from the schedules that
@@ -47,6 +49,7 @@ import aiohttp
 import timetable
 from shelly import UNSUPPORTED, ShellyError, error_text, plain
 
+from manager_backups import BACKUP_PARALLEL, RESULT_STORED
 from manager_core import (
     PENDING, Device, STATUS_INSTALLING, STATUS_SKIPPED, markdown_text, unexpected_text,
 )
@@ -76,6 +79,7 @@ class Schedules(Installs):
         super().__init__(*args, **kwargs)
         self._timetable_tasks: set[asyncio.Task[Any]] = set()
         self._running_id: str | None = None  # ID of the schedule whose run is going on
+        self._backup_slots = asyncio.Semaphore(BACKUP_PARALLEL)  # devices a backup run reads at the same time
         # device ID -> its scheduled installation that is due and being carried out or
         # waiting for running work (the plan stays on the device until it starts)
         self._plans_due: dict[str, dict[str, Any]] = {}
@@ -529,6 +533,10 @@ class Schedules(Installs):
             return "single-device checks are running"
         if self.reloading:
             return "device info is being reloaded"
+        if self.restoring:
+            return "a backup is being restored"
+        if self.backup_job is not None and not self.backup_job["finished"]:
+            return "a backup run is in progress"
         if self._import_storing:
             return "a store import is running"
         return None
@@ -611,12 +619,14 @@ class Schedules(Installs):
                 reason = "removed from Home Assistant"
             elif dev.get("ignored"):
                 reason = "ignored"
-            elif dev.get("battery"):
-                reason = "battery device"
+            elif dev.get("battery") and action != "backup":
+                reason = "battery device"  # a backup run tries it: it may be awake
             elif device_id in self.installing or dev.get("status") == STATUS_INSTALLING:
                 reason = "installation running"
             elif device_id in self.device_checks or device_id in self.reloading:
                 reason = "being checked"
+            elif device_id in self.restoring:
+                reason = "backup being restored"
             elif not dev.get("origin") or not dev.get("gen"):
                 reason = "never checked"
             elif setting == "ble" and dev.get("gen") == 1:
@@ -630,11 +640,20 @@ class Schedules(Installs):
                 targets.append(device_id)
         return targets, left
 
-    async def _act(self, device_id: str, action: str, user: str) -> dict[str, str]:
+    async def _act(self, device_id: str, action: str, user: str, schedule_name: str | None = None) -> dict[str, str]:
         """The action of a schedule on one device: {"device", "result", "detail"}
-        with result ok / unreachable / refused."""
+        with result ok / unreachable / refused. Backup: also unchanged (the device
+        reports the settings of its newest backup: nothing is stored) and asleep (a
+        battery device that did not answer)."""
         dev = self.devices.get(device_id) or {}
         name = str(dev.get("name") or "?")
+        if action == "backup":
+            async with self._backup_slots:
+                outcome = await self._backup_result(
+                    device_id, "schedule", schedule_name, user, only_changed=True, log_entry=False
+                )
+            result = "ok" if outcome["result"] == RESULT_STORED else str(outcome["result"])
+            return {"device": name, "result": result, "detail": str(outcome.get("detail") or outcome["result"])}
         try:
             if action == "restart":
                 await self.restart_device(device_id)
@@ -681,10 +700,16 @@ class Schedules(Installs):
                         await asyncio.sleep(int(item["pause"]))
                     results.append(await self._act(device_id, action, user))
             else:
-                results = list(await asyncio.gather(*(self._act(d, action, user) for d in targets)))
+                name = str(item.get("name") or "")
+                results = list(await asyncio.gather(*(self._act(d, action, user, name) for d in targets)))
+            if action == "backup":
+                # A sleeping battery device is left out, not failed: it is backed up when a run reaches it awake
+                asleep = [r for r in results if r["result"] == "asleep"]
+                left += [{"device": r["device"], "reason": "battery device asleep"} for r in asleep]
+                results = [r for r in results if r["result"] != "asleep"]
             chosen = len(targets) + len(left)
             self._record_run(item, trigger, user, results, left, time.monotonic() - started, chosen)
-            failed = [r for r in results if r["result"] != "ok"]
+            failed = [r for r in results if r["result"] not in ("ok", "unchanged")]
             if failed:
                 names = ", ".join(markdown_text(r["device"], 120) for r in failed[:20])
                 more = f" and {len(failed) - 20} more" if len(failed) > 20 else ""
@@ -719,20 +744,26 @@ class Schedules(Installs):
         run (results holds the devices done until then)."""
         action = str(item["action"])
         done = sum(1 for r in results if r["result"] == "ok")
+        unchanged = sum(1 for r in results if r["result"] == "unchanged")
         unreachable = sum(1 for r in results if r["result"] == "unreachable")
         refused = sum(1 for r in results if r["result"] == "refused")
         verb = "restarted" if action == "restart" else "switched"
-        parts = [f"{done} of {chosen} {verb}"] if results or chosen > len(left) else ["No device to run on"]
-        if unreachable:
-            parts.append(f"{unreachable} not reachable")
-        if refused:
-            parts.append(f"{refused} refused")
+        if not results and chosen <= len(left):
+            parts = ["No device to run on"]
+        elif action == "backup":
+            parts = [f"{done} stored", f"{unchanged} unchanged", f"{unreachable + refused} not backed up"]
+        else:
+            parts = [f"{done} of {chosen} {verb}"]
+            if unreachable:
+                parts.append(f"{unreachable} not reachable")
+            if refused:
+                parts.append(f"{refused} refused")
         if left:
             parts.append(f"{len(left)} left out")
         if interrupted:
             parts.append("interrupted – the app stopped")
         text = " · ".join(parts)
-        severity = "success" if results and done == len(results) and not interrupted else "warning"
+        severity = "success" if results and done + unchanged == len(results) and not interrupted else "warning"
         self.events.add(
             "schedule",
             severity=severity,
@@ -758,6 +789,7 @@ class Schedules(Installs):
                 "done": done,
                 "total": chosen,  # chosen devices, left-out ones included
                 "run": len(results),  # devices the action ran on
+                "unchanged": unchanged,  # backup: devices whose settings did not change
                 "unreachable": unreachable,
                 "refused": refused,
                 "left": len(left),

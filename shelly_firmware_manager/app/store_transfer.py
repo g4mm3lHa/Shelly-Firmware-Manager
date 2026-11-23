@@ -7,12 +7,17 @@ any archive tool opens:
     SHA256SUMS.txt       "<sha256>  <path>" per file, for a check without this app
     Gen2+/<type>/<type>-<version>[-upload|-import].<ext>
     Gen1/<type>/<type>-v<x.y.z>[-upload|-import].<ext>
+    Backups/<MAC>/<id>.sfmb   backups of device settings (manifest "backups")
 
 The seal is an HMAC-SHA256 over the canonical JSON of the manifest (everything except
 the seal itself) with a key derived from the export password (scrypt, standard
 library). Every file is listed with its SHA-256 and size, so an import detects any
 change of a file or of an entry; without the password no import is possible. The
-password only seals – the archive is not encrypted (firmware is public anyway).
+password only seals – the firmware in the archive is not encrypted (it is public
+anyway). The backups of device settings are: each file is a backup encrypted with the
+key of the export password (format: backup_store), listed in the sealed manifest like
+a firmware file. A version of the app that knows no backups imports the firmware of
+such an export and ignores the rest.
 
 An import reads only the files the sealed manifest names (never extracts by archive
 names), checks each against its SHA-256 and size and accepts the manifest at the top
@@ -32,9 +37,11 @@ import secrets
 import struct
 import time
 import zipfile
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+import backup_store
 import shelly
 from changelog import MAX_TEXT
 from shelly import clip
@@ -54,6 +61,11 @@ SOURCES = ("download", "upload", "import")
 MAX_MANIFEST = 8 * 1024 * 1024  # bytes; upper limit for the manifest of an import
 
 MAX_ENTRIES = 5000  # upper limit for the entries of one export
+
+BACKUP_FOLDER = "Backups"  # folder of the backups of device settings inside an export
+
+# Path of a backup inside an export: Backups/<MAC>/<ID>.sfmb
+BACKUP_PATH_RE = re.compile(r"Backups/[0-9A-F]{12}/([0-9a-f]{16})\.sfmb")
 
 # Upper limit for the central directory (the list of entries) of a ZIP that is opened:
 # far above an export with MAX_ENTRIES entries, far below what could exhaust memory
@@ -176,13 +188,21 @@ def _export_entry(meta: dict[str, Any], path: str) -> dict[str, Any]:
 
 
 def build_export(
-    fw_dir: Path, firmware: dict[str, dict[str, Any]], key: bytes, salt: bytes, app_version: str, target: Path
+    fw_dir: Path,
+    firmware: dict[str, dict[str, Any]],
+    key: bytes,
+    salt: bytes,
+    app_version: str,
+    target: Path,
+    backups: Sequence[tuple[str, bytes]] = (),
 ) -> dict[str, int]:
     """Write the export of the store entries (file name -> metadata) to target.
 
     Every file is checked against its SHA-256 first: a damaged or missing file is
-    left out (counted as "damaged"), never sealed. Returns the counts
-    {"files", "downloads", "uploads", "imports", "size", "damaged"}."""
+    left out (counted as "damaged"), never sealed. backups: (path, content) of the
+    backups of device settings, each encrypted with key already (see
+    backup_store.BackupStore.sealed_copy). Returns the counts {"files", "downloads",
+    "uploads", "imports", "size", "damaged", "backups"}."""
     entries: list[dict[str, Any]] = []
     sources: list[Path] = []
     used: set[str] = set()
@@ -212,13 +232,20 @@ def build_export(
         "kdf": {"name": "scrypt", **SCRYPT, "salt": salt.hex()},
         "entries": entries,
     }
+    listed = [
+        {"path": path, "sha256": hashlib.sha256(content).hexdigest(), "size": len(content)} for path, content in backups
+    ]
+    if listed:
+        body["backups"] = listed
     manifest = {**body, "seal": _seal(key, body)}
-    sums = "".join(f"{e['sha256']}  {e['path']}\n" for e in entries)
+    sums = "".join(f"{e['sha256']}  {e['path']}\n" for e in (*entries, *listed))
     with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_STORED) as archive:
         archive.writestr(MANIFEST, json.dumps(manifest, indent=1, ensure_ascii=False))
         archive.writestr(SUMS, sums)
         for entry, source in zip(entries, sources, strict=True):
             archive.write(source, entry["path"])
+        for path, content in backups:
+            archive.writestr(path, content)
     counted = [e["source"] for e in entries]
     return {
         "files": len(entries),
@@ -227,6 +254,7 @@ def build_export(
         "imports": counted.count("import"),
         "size": sum(int(e["size"] or 0) for e in entries),
         "damaged": damaged,
+        "backups": len(listed),
     }
 
 
@@ -330,11 +358,29 @@ def _clean_entry(raw: object) -> dict[str, Any]:
     return entry
 
 
+def _clean_backup(raw: object) -> dict[str, Any]:
+    """Validate the manifest entry of one backup of device settings; returns
+    {"path", "id", "sha256", "size"} or raises TransferError."""
+    if not isinstance(raw, dict):
+        raise TransferError("Damaged manifest: entry is not an object")
+    path, sha, size = raw.get("path"), raw.get("sha256"), raw.get("size")
+    match = BACKUP_PATH_RE.fullmatch(path) if isinstance(path, str) else None
+    if match is None:
+        raise TransferError("Damaged manifest: invalid file path")
+    if not isinstance(sha, str) or not SHA_RE.fullmatch(sha):
+        raise TransferError("Damaged manifest: invalid SHA-256")
+    if not isinstance(size, int) or isinstance(size, bool) or not 0 < size <= backup_store.MAX_FILE:
+        raise TransferError("Damaged manifest: invalid file size")
+    return {"path": path, "id": match.group(1), "sha256": sha, "size": size}
+
+
 def read_export(path: Path, password: str) -> dict[str, Any]:
     """Check an export completely: manifest format, seal (password), every entry and
     every file (size and SHA-256). Raises TransferError with a message for the user.
 
-    Returns {"exported", "app_version", "prefix", "entries": [cleaned entries]}."""
+    Returns {"exported", "app_version", "prefix", "entries": [cleaned entries],
+    "backups": [cleaned entries of the backups], "key"}: key is the key of the export
+    password, which decrypts the backups at the confirmation (kept in memory only)."""
     try:
         check_directory(path)
         with zipfile.ZipFile(path) as archive:
@@ -359,7 +405,8 @@ def read_export(path: Path, password: str) -> dict[str, Any]:
             ):
                 raise TransferError("Damaged export: seal missing")
             body = {k: v for k, v in manifest.items() if k != "seal"}
-            if not shelly.same_secret(seal, _seal(derive_key(password, bytes.fromhex(salt_hex)), body)):
+            key = derive_key(password, bytes.fromhex(salt_hex))
+            if not shelly.same_secret(seal, _seal(key, body)):
                 raise TransferError("Wrong export password, or the file list was changed after the export")
             raw_entries = manifest.get("entries")
             if not isinstance(raw_entries, list) or len(raw_entries) > MAX_ENTRIES:
@@ -367,7 +414,13 @@ def read_export(path: Path, password: str) -> dict[str, Any]:
             entries = [_clean_entry(raw) for raw in raw_entries]
             if len({e["sha256"] for e in entries}) != len(entries) or len({e["path"] for e in entries}) != len(entries):
                 raise TransferError("Damaged manifest: a file is listed twice")
-            for entry in entries:
+            raw_backups = manifest.get("backups", [])
+            if not isinstance(raw_backups, list) or len(raw_backups) > MAX_ENTRIES:
+                raise TransferError("Damaged manifest: list of backups invalid")
+            backups = [_clean_backup(raw) for raw in raw_backups]
+            if len({b["id"] for b in backups}) != len(backups):
+                raise TransferError("Damaged manifest: a file is listed twice")
+            for entry in (*entries, *backups):
                 _check_member(archive, prefix + entry["path"], entry)
     except TransferError:
         raise
@@ -379,6 +432,8 @@ def read_export(path: Path, password: str) -> dict[str, Any]:
         "app_version": clip(manifest.get("app_version"), 32),
         "prefix": prefix,
         "entries": entries,
+        "backups": backups,
+        "key": key,
     }
 
 
@@ -415,3 +470,13 @@ def extract_entry(path: Path, prefix: str, entry: dict[str, Any], target: Path) 
     if size != entry["size"] or not hmac.compare_digest(digest.hexdigest(), entry["sha256"]):
         target.unlink(missing_ok=True)
         raise TransferError(f"File changed since the check: {entry['path']}")
+
+
+def read_backup(path: Path, prefix: str, entry: dict[str, Any]) -> bytes:
+    """Content of the file of a checked backup entry, verifying size and SHA-256
+    again (the staged export could change between check and confirmation)."""
+    with zipfile.ZipFile(path) as archive, archive.open(prefix + entry["path"]) as src:
+        content = src.read(entry["size"] + 1)
+    if len(content) != entry["size"] or not hmac.compare_digest(hashlib.sha256(content).hexdigest(), entry["sha256"]):
+        raise TransferError(f"File changed since the check: {entry['path']}")
+    return content

@@ -37,6 +37,14 @@ configuration:
     name: Max. import size (MB)
     description: >-
       Largest file accepted by “Import store” (Settings → Firmware & Storage); 1–2048, default 100
+  backup_before_install:
+    name: Back up before every installation
+    description: >-
+      Stores the settings of a device right before an update or downgrade is installed on it; on by default
+  backup_keep:
+    name: Keep backups per device
+    description: >-
+      The newest backups of each device are kept, older ones are removed automatically; a backup marked “Kept” stays. 1–50, default 10
   log_entry_limit:
     name: Max. log size (entries)
     description: 100–3000

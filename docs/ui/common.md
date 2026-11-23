@@ -27,7 +27,8 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   values.
 - **Row menu (⋮), five groups with separators:** 1 Check for updates, Install update,
   Offer update now (only while an update is on hold), Downgrade (hint below it) | 2 Device details, Reload device info ("Not available" hint
-  below it), Open web UI | 3 NTP server, Power-on action, Eco mode, Device password |
+  below it), Open web UI | 3 NTP server, Power-on action, Eco mode, Device password,
+  Backups (3.11.0) |
   4 Ignore / Resume device (removed devices: Remove from list) | 5 Restart (red). Phones:
   every entry incl. "Open web UI" 44 px high.
 - **Message dialogs (2026-11-19, variant B):** large round icon (40 px circle, 24 px
@@ -119,19 +120,25 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
 - Device names: "Home Assistant device name: …" / "Shelly device name: …".
 
 ## Tabs, start of an installation, language (3.10.0, mockups `3.10.0`, approved 2026-11-22)
-- **Tabs (F8, F9, F11):** Devices, Firmware, Schedules, Logs, Settings; "Schedules" with the
-  calendar-clock icon. Phones: only the active tab shows its name, the others only their
-  icon (variant B). The device action icon for the Shelly's own schedules is
-  named "Device schedules".
+- **Tabs (F8, F9, F11; 3.11.0 F1):** Devices, Firmware, Schedules, Backups, Logs, Settings;
+  "Schedules" with the calendar-clock icon, "Backups" with the backup-restore icon.
+  Phones: only the active tab shows its name, the others only their icon (variant B; icon
+  tabs 44 px wide, so that six tabs and the longest label fit 360 px in both languages).
+  The device action icon for the Shelly's own schedules is named "Device schedules".
+- **Page behind a dialog (3.11.0, approved 2026-11-22):** while a dialog is open the page
+  behind it does not scroll (the dialog scrolls inside); a click outside does not close
+  a dialog.
 - **Installation dialog, section "Start" (F1, F2, F6):** radios "Now" / "Install
   at" with date and time (once, at most 7 days ahead, time zone of Home Assistant); with
   "Install at" the red button reads "Approve & schedule", the title stays "Install
   update?", the hint under the fields names the conditions (F3) and where to cancel. A
   beta needs its tick also when scheduling. The section stands above the changelog
   (live test rc1, approved 2026-11-22).
-- **Logs tab, unread entries (live test rc1, approved 2026-11-22):** a small yellow round "!" after the
-  tab name (phones: after the icon) while the log holds entries newer than the newest one
-  this browser has shown in the Logs tab; opening the tab clears it.
+- **Logs tab, unread entries (live test rc1, approved 2026-11-22; 3.11.0):** a small yellow
+  round "!" after the tab name (phones: after the icon) while the log holds an error entry
+  newer than the newest entry this browser has shown in the Logs tab – warnings and
+  successes never set it; opening the tab clears it. The entries that were unread at that
+  moment are lightly highlighted (primary colour, 8 %) until the tab is left.
 - **Language (F20–F25):** card "Display" at the end of the Settings tab with "Language":
   "Same as Home Assistant" (default, fallback English), English, Deutsch; applies at once,
   per browser, not part of "Save settings". German uses "du" (without address where

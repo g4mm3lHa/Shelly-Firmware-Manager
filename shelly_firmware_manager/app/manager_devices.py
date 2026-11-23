@@ -1,4 +1,4 @@
-"""Manager, layer 3 of 7: reading and changing a single Shelly – identity, settings,
+"""Manager, layer 3 of 8: reading and changing a single Shelly – identity, settings,
 feature states, restart and the device password. The device password can also be
 stored or set on several devices in one step (set_passwords): each device is still
 set, verified, stored and logged on its own.
@@ -83,6 +83,8 @@ class DeviceSettings(FirmwareStore):
             raise ShellyError("Device is being checked – please try again afterwards")
         if device_id in self.reloading:
             raise ShellyError("Device info is being reloaded – please try again in a moment")
+        if device_id in self.restoring:
+            raise ShellyError("A backup is being restored – please try again afterwards")
         if not dev.get("origin") or not dev.get("gen"):
             raise ShellyError("Device has not been checked successfully yet")
         return dev
@@ -170,9 +172,9 @@ class DeviceSettings(FirmwareStore):
             raise ValueError("Only devices removed from Home Assistant can be removed from the list")
         if confirm is not True:
             raise ValueError("Removal not confirmed")
-        busy = device_id in self.installing or dev.get("status") == STATUS_INSTALLING
+        busy = device_id in self.installing or dev.get("status") == STATUS_INSTALLING or device_id in self.restoring
         if busy or device_id in self.device_checks or device_id in self.reloading or self.checking:
-            raise ShellyError("Device is being checked or installed – please try again afterwards")
+            raise ShellyError("Device is being checked, installed or restored – please try again afterwards")
         name = str(dev.get("name") or device_id)
         self.credentials.remove(device_id)  # a write error raises ShellyError: the device stays listed
         self.devices.pop(device_id)

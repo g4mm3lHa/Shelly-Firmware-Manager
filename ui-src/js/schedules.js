@@ -1,12 +1,14 @@
-// Tab "Schedules": the schedules (restart, cloud or Bluetooth on/off at fixed times on
-// several Shellys) and the approved installations waiting for their time ("Install at").
+// Tab "Schedules": the schedules (restart, cloud or Bluetooth on/off, backup of the
+// settings at fixed times on several Shellys) and the approved installations waiting for
+// their time ("Install at").
 // The server runs the schedules (manager_schedules); times are local times of Home
 // Assistant, shown as the server formats them.
 import {$, api, box, closeModal, el, icon, iconButton, message, modal, section, t, toast, ui} from "./core.js";
 import {cancelPlan} from "./install.js";
 
-const ACTIONS = {restart: t("Restart"), cloud_on: t("Cloud on"), cloud_off: t("Cloud off"), ble_on: t("Bluetooth on"), ble_off: t("Bluetooth off")};
-const ACTION_ICONS = {restart: "restart", cloud_on: "cloud", cloud_off: "cloud", ble_on: "ble", ble_off: "ble"};
+const ACTIONS = {restart: t("Restart"), cloud_on: t("Cloud on"), cloud_off: t("Cloud off"), ble_on: t("Bluetooth on"), ble_off: t("Bluetooth off"),
+  backup: t("Backup")};
+const ACTION_ICONS = {restart: "restart", cloud_on: "cloud", cloud_off: "cloud", ble_on: "ble", ble_off: "ble", backup: "backup"};
 const DAYS = [t("Mon"), t("Tue"), t("Wed"), t("Thu"), t("Fri"), t("Sat"), t("Sun")];
 const PAUSE_DEFAULT = 3, PAUSE_MAX = 600, EVERY_MAX = 365, NAME_MAX = 64;
 const SEVERITY = {success: [t("Success"), "sev-success"], warning: [t("Warning"), "sev-warning"], missed: [t("Missed"), "sev-warning"]};
@@ -29,9 +31,17 @@ function lastText(last) {
   if (last.severity === "missed") return last.reason ? t("Missed – {reason}", {reason: last.reason}) : last.text;
   const c = last.counts;
   if (!c) return last.text || "";
-  const restart = last.action === "restart";
+  const restart = last.action === "restart", ran = (c.run ?? c.total) || c.interrupted;
+  // Backup: a device whose settings did not change since its newest backup gets no new one
+  if (last.action === "backup") {
+    const parts = [ran ? t("{done} stored · {unchanged} unchanged · {failed} not backed up", {done: c.done, unchanged: c.unchanged || 0,
+      failed: (c.unreachable || 0) + (c.refused || 0)}) : t("No device to run on")];
+    if (c.left) parts.push(t("{n} left out", {n: c.left}));
+    if (c.interrupted) parts.push(t("interrupted – the app stopped"));
+    return parts.join(" · ");
+  }
   // "n of m": m = all chosen devices, left-out ones included ("run": devices acted on)
-  const parts = [(c.run ?? c.total) || c.interrupted ? t(restart ? "{done} of {total} restarted" : "{done} of {total} switched", {done: c.done, total: c.total}) : t("No device to run on")];
+  const parts = [ran ? t(restart ? "{done} of {total} restarted" : "{done} of {total} switched", {done: c.done, total: c.total}) : t("No device to run on")];
   if (c.unreachable) parts.push(t("{n} not reachable", {n: c.unreachable}));
   if (c.refused) parts.push(t("{n} refused", {n: c.refused}));
   if (c.left) parts.push(t("{n} left out", {n: c.left}));
@@ -88,12 +98,12 @@ export function renderSchedules() {
   const cards = [];
   if (!list.length && !planned.length) {
     cards.push(box("div", "card", box("div", "card-head", el("h2", t("Schedules · {n}", {n: 0}))),
-      el("div", t("No schedules yet – “Add schedule” restarts Shellys or switches their cloud or Bluetooth at fixed times. Updates are scheduled in the installation dialog (“Install at”)."), "empty")));
+      el("div", t("No schedules yet – “Add schedule” restarts Shellys, switches their cloud or Bluetooth or backs up their settings at fixed times. Updates are scheduled in the installation dialog (“Install at”)."), "empty")));
   } else {
     cards.push(box("div", "card schedules", box("div", "card-head", el("h2", t("Schedules · {n}", {n: list.length}))),
       ...(list.length ? [head("", [[t("On"), "sch-on"], [t("Name"), "sch-name"], [t("Action"), "sch-action"], [t("Repeat"), "sch-when"], [t("Devices"), "sch-dev"],
         [t("Next run"), "sch-next"], [t("Last run"), "sch-last"], ["", "sch-btns"]]), ...list.map(scheduleRow)]
-        : [el("div", t("No schedules yet – “Add schedule” restarts Shellys or switches their cloud or Bluetooth at fixed times."), "empty")])));
+        : [el("div", t("No schedules yet – “Add schedule” restarts Shellys, switches their cloud or Bluetooth or backs up their settings at fixed times."), "empty")])));
     cards.push(box("div", "card schedules", box("div", "card-head", el("h2", t("Scheduled Installations · {n}", {n: planned.length})),
       el("span", t("Approved in the installation dialog with “Install at”"), "sub")),
       ...(planned.length ? [head("sch-inst", [[t("Device"), "sch-name"], [t("Version"), "sch-ver"], [t("Install at"), "sch-next"], [t("Approved"), "sch-last"], ["", "sch-btns"]]),
@@ -162,7 +172,8 @@ export function openSchedule(s) {
     proxyBox.hidden = !proxies.length;
     leftHint.textContent = (isBle(kind) ? t("Not included in a run: ignored and removed devices, battery devices (usually asleep), devices without a Bluetooth switch (Gen1).")
       : isCloud(kind) ? t("Not included in a run: ignored and removed devices, battery devices (usually asleep), devices without a cloud switch.")
-        : t("Not included in a run: ignored and removed devices, battery devices (usually asleep).")) + " " +
+        : kind === "backup" ? t("Not included in a run: ignored and removed devices, battery devices that are asleep. A device whose settings did not change since its last backup gets no new one.")
+          : t("Not included in a run: ignored and removed devices, battery devices (usually asleep).")) + " " +
       t("Every run is written to the log; Home Assistant notifies only about errors. A run the app misses is skipped.");
   };
   for (const node of [action, daily, weekdays, every, all, some, list]) node.addEventListener("change", sync);

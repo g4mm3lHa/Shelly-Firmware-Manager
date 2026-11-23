@@ -2,7 +2,7 @@
 
 Part of `docs/CODEMAP.md`; read when you change routes in `web_ui.py`.
 
-**HTTP API (`web_ui.py`, Ingress only; writes need `X-CSRF-Token` + JSON ≤ 32 KB; binary bodies only on `BINARY_ROUTES`; every answer – also refusals of the middleware and the 500 for an unexpected error – carries `SECURITY_HEADERS`)**
+**HTTP API (`web_ui.py`, Ingress only; writes need `X-CSRF-Token` + JSON ≤ 32 KB; binary bodies only on `BINARY_ROUTES` (upload, store import, backup import); every answer – also refusals of the middleware and the 500 for an unexpected error – carries `SECURITY_HEADERS`)**
 
 | Route | Handler → Manager |
 |---|---|
@@ -37,6 +37,15 @@ Part of `docs/CODEMAP.md`; read when you change routes in `web_ui.py`.
 | `POST /api/firmware/upload/confirm` · `/cancel` | `confirm_upload` · `cancel_upload` |
 | `GET /api/firmware/{name}/download` | file response |
 | `POST /api/firmware/{name}/delete` | `delete_firmware` (`confirm` + `acknowledged`; also an unknown file of the folder) |
+| `GET /api/backups` | `backups_view` (`{rev, keep, totals, warning, devices, orphans}`) |
+| `POST /api/devices/{id}/backup` | `backup_now` (one device, answer: the new backup) |
+| `POST /api/backups/run` · `/run/clear` | `reserve_backup_run` (`devices`: "all" or IDs) + `run_backups` in the background · `clear_backup_run` |
+| `POST /api/backups/{bid}/keep` · `/delete` | `keep_backup` (`kept`) · `delete_backup` (`confirm`) |
+| `POST /api/backups/{bid}/preview` | `preview_restore` (reads the device, changes nothing) |
+| `POST /api/backups/{bid}/restore` · `/api/backups/restore/clear` | `reserve_restore` (`parts`, `confirm`, `network_acknowledged`) + `run_restore` in the background (progress in the state field `restore`) · `clear_restore` |
+| `POST /api/backups/{bid}/download` · `GET /api/backups/download/{token}` | `prepare_backup_download` (generated password returned once, token, `expires_in`) · `take_backup_download` (single use) |
+| `POST /api/devices/{id}/backups/import` | `stage_backup_import` (octet-stream, ≤ `backup_store.MAX_FILE`) |
+| `POST /api/backups/import/check` · `/confirm` · `/cancel` | `check_backup_import` (`token`, `password`) · `confirm_backup_import` · `cancel_backup_import` |
 | `GET /api/logs` | `events.list` |
 | `POST /api/logs/{id}/delete` · `/api/logs/clear` | `events.remove` · `events.clear` (`confirm`) |
 | `GET` · `POST /api/settings` | `options_view` (+ `installed_versions`) · `save_options` + restart |

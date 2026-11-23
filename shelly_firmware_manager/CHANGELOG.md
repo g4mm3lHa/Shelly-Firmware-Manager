@@ -1,5 +1,49 @@
 # Changelog
 
+## 3.11.0
+
+Release candidate. Backups of the device settings: by hand, before every installation
+and on a schedule, with comparison and restore part by part.
+
+Changes in rc1
+
+Added
+- Backups tab: settings of every Shelly stored in the app – Gen2+ configuration,
+  scripts, schedules, webhooks; Gen1 settings and actions. Never the passwords.
+- Back up now for all, chosen or one device (Backups tab, row menu and device details);
+  the card "No Backup" names the devices without one and why.
+- Backup before every update and downgrade (Settings, on by default); if it fails,
+  nothing is installed. Also for installations scheduled with "Install at".
+- Schedule action "Backup": a run stores a backup only for devices whose settings
+  changed since their newest backup; battery devices are backed up while awake.
+- Restore: device and backup are compared, parts are chosen (settings, scripts,
+  schedules, webhooks, actions); only to the device of the backup, read again after.
+- Restore makes a chosen part equal to the backup (what exists only on the device is
+  removed); network settings only with an extra confirmation; a backup is stored first.
+- Keep backups per device (Settings, default 10, 1–50): older ones are removed; a
+  backup marked "Kept" stays and does not count.
+- Download of one backup as a file sealed with a password shown once; import for the
+  same device (MAC address and model checked), marked "Imported" and "Kept".
+- Store export and import also carry the backups, encrypted with the export password.
+- Logs: kind "Backup" with filter (stored, failed, restored, deleted, downloaded,
+  imported); entries unread at the opening of the tab are lightly highlighted.
+
+Changed
+- Logs tab: the yellow "!" only marks unread error entries, no longer warnings and
+  successes.
+- Check: a device that does not answer and is neither a battery device nor ignored now
+  counts as an error (log, notification, device list), no longer as a warning.
+- Tabs on phones: six tabs; the icon tabs are narrower so that all fit 360 px.
+
+Fixed
+- Firmware tab (phone): the labels of a version stay in one line beside the version; no
+  empty line with a dash for a version without devices.
+- Dialogs: the page behind an open dialog no longer scrolls.
+
+Security
+- Backups are stored encrypted (key in the app data, file mode 0600); downloaded and
+  exported backups are encrypted with their password, which is stored nowhere.
+
 ## 3.10.0
 
 Released 2026-11-22. Updates can be installed at a chosen time, beta firmware can be

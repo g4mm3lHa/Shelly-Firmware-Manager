@@ -76,7 +76,12 @@ const UNKNOWN_SIGNAL = "unknown";
 async function readSignals(devs) {
   return Promise.all(devs.map(d => api(`${devUrl(d)}/signal`).then(r => r.rssi ?? null).catch(() => UNKNOWN_SIGNAL)));
 }
-/** Section "Before installing": way back and Wi-Fi signal; for several devices only
+/** Line "Backup" of the check list (option "Back up before every installation"): the
+ *  settings are backed up right before the installation; nothing is installed if that
+ *  fails. [] while the option is off. */
+const backupCheck = one => ui.state && ui.state.backup_before_install ? [checkLine(true, t("Backup"),
+  one ? t("The settings of the device are backed up right before the installation.") : t("The settings of every device are backed up right before its installation."))] : [];
+/** Section "Before installing": way back, backup and Wi-Fi signal; for several devices only
  *  the findings per device (or one line "every device" without findings). The signal is
  *  read when the dialog opens ("Reading …"); devices on the cable have no signal line, a
  *  value that could not be read is shown as "unknown" (yellow, a finding). */
@@ -100,7 +105,7 @@ function beforeInstalling(devs) {
       : [checkLine(true, t("Wi-Fi signal"), t("Good or fair on every device."))];
   };
   const block = section(t("Before installing"), list);
-  const fill = values => { list.replaceChildren(...back(), ...signal(values)); block.hidden = !list.children.length; };
+  const fill = values => { list.replaceChildren(...back(), ...backupCheck(one), ...signal(values)); block.hidden = !list.children.length; };
   fill(null);
   readSignals(devs).then(fill);
   return block;
@@ -275,6 +280,8 @@ function downgradeInstall(d, v) {
   const content = [deviceSection(d), section(t("Firmware"), valueList([[t("Firmware ID"), d.type],
     [t("Version (older)"), versionStep(d.version, v.version), "ver"], [t("Size"), mb(v.size || 0)], [t("Source"), fwSource(v), "src"], shaRow(v.sha256)])),
   el("div", DOWNGRADE_WARNING, "warnbox")];
+  const checks = backupCheck(true);
+  if (checks.length) content.splice(2, 0, section(t("Before installing"), box("ul", "prechk", ...checks)));
   if (v.source === "upload") content.push(el("div", UPLOAD_HINT, "warnbox"));
   if (v.source === "import") content.push(el("div", IMPORT_WARNING, "warnbox"));
   content.push(el("p", t("The device restarts during the installation."), "hint"));

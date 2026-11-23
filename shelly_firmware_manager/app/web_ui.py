@@ -6,19 +6,24 @@ Protection layers:
    panel (panel_admin) are available to administrators only.
 2. Every write request – and every request that contacts a Shelly – needs a CSRF
    token (only visible in the delivered page) and Content-Type JSON. The only
-   exceptions to JSON are the firmware upload and the store import: Content-Type
-   application/octet-stream, streamed to disk with their own limits (upload 64 MiB,
-   import: option import_max_mb), sent in parts of at most 8 MiB because Home
-   Assistant Ingress refuses larger bodies; the 32 KB body limit stays for every
+   exceptions to JSON are the firmware upload, the store import and the import of a
+   backup file: Content-Type application/octet-stream with their own limits (upload
+   64 MiB, import: option import_max_mb, both streamed to disk and sent in parts of
+   at most 8 MiB because Home Assistant Ingress refuses larger bodies; backup file:
+   4 MiB, kept in memory until it is imported); the 32 KB body limit stays for every
    other request.
 3. Strict Content Security Policy; the frontend uses textContent only.
 4. Secrets are write-only: no endpoint ever returns a stored password or hash. The
-   only password in an answer is a newly generated export password, returned once
-   by /api/firmware/export and kept nowhere.
+   only passwords in an answer are newly generated ones, returned once and kept
+   nowhere: the export password (/api/firmware/export) and the password of a
+   downloaded backup (/api/backups/{bid}/download). The settings inside a backup
+   leave the app only as such an encrypted file – and as the list of differences of
+   the restore dialog, which holds no passwords or keys (they are no part of a backup).
 5. Device-side password changes, deleting stored firmware and downgrades need
    explicit confirmation flags (confirm + acknowledged), a beta installation (also a
-   scheduled one) the flag beta_acknowledged; deleting log entries or a schedule,
-   "Run now" and cancelling a scheduled installation the flag confirm – checked on
+   scheduled one) the flag beta_acknowledged; deleting log entries, a schedule or a
+   backup, "Run now", cancelling a scheduled installation and restoring a backup the
+   flag confirm, restoring network settings also network_acknowledged – checked on
    the server (never inferred from the UI alone).
 """
 
@@ -37,6 +42,7 @@ import aiohttp
 import data_paths
 from aiohttp import web
 from aiohttp.typedefs import Handler
+from backup_store import ID_RE as BACKUP_ID_RE
 from download_server import strip_server_header
 from events import ENTRY_ID_RE, user_from
 from manager import Manager
@@ -55,8 +61,9 @@ DEVICE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 RESTART_DELAY_S = 1  # let the answer reach the browser before the app restarts
 UPLOAD_ROUTE = "firmware-upload"  # routes that take a binary body: firmware upload …
-IMPORT_ROUTE = "store_import"  # … and store import
-BINARY_ROUTES = (UPLOAD_ROUTE, IMPORT_ROUTE)
+IMPORT_ROUTE = "store_import"  # … store import …
+BACKUP_IMPORT_ROUTE = "backup_import"  # … and the import of a backup file
+BINARY_ROUTES = (UPLOAD_ROUTE, IMPORT_ROUTE, BACKUP_IMPORT_ROUTE)
 EXPORT_TOKEN_RE = re.compile(r"^[0-9a-f]{32}$")
 UPLOAD_TYPE = "application/octet-stream"
 UPLOAD_CHUNK = 128 * 1024
@@ -686,6 +693,156 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
         mgr.cancel_upload((await json_body(request)).get("token"))
         return web.json_response({"ok": True})
 
+    # ---------------------------------------------------------------- Backups of device settings
+
+    def backup_id_from(request: web.Request) -> str:
+        """Validated ID of a stored backup from the URL; unknown IDs -> 404."""
+        backup_id = request.match_info["bid"]
+        if not BACKUP_ID_RE.fullmatch(backup_id) or mgr.backups.get(backup_id) is None:
+            raise web.HTTPNotFound(text="Unknown backup")
+        return backup_id
+
+    async def backups_list(_request: web.Request) -> web.StreamResponse:
+        """Every device with its stored backups (Backups tab, "Backups" dialog of a
+        device) – the lists only, never the settings inside a backup."""
+        return web.json_response(mgr.backups_view())
+
+    async def backup_device(request: web.Request) -> web.StreamResponse:
+        """"Back up now" for one device: reads its settings and stores them."""
+        device_id = device_id_from(request)
+        await json_body(request)
+        return web.json_response({"backup": await guarded(mgr.backup_now(device_id, user_from(request.headers)))})
+
+    async def backups_run(request: web.Request) -> web.StreamResponse:
+        """"Back up now" for several devices ({"devices": "all" or [IDs]}): runs in
+        the background, progress and result per device are part of the state."""
+        devices = (await json_body(request)).get("devices")
+        try:
+            ids = mgr.reserve_backup_run(devices)  # synchronous: a second request gets 409
+        except ValueError as err:
+            raise web.HTTPBadRequest(text=str(err)) from None
+        except ShellyError as err:
+            raise web.HTTPConflict(text=str(err)) from None
+        background(mgr.run_backups(ids, user_from(request.headers)))
+        return web.json_response({"started": True, "total": len(ids)})
+
+    async def backups_run_clear(request: web.Request) -> web.StreamResponse:
+        """The dialog showed the result of the finished run."""
+        await json_body(request)
+        mgr.clear_backup_run()
+        return web.json_response({"ok": True})
+
+    async def backup_keep(request: web.Request) -> web.StreamResponse:
+        """Mark a backup as kept or take the mark off ({"kept": true/false})."""
+        backup_id = backup_id_from(request)
+        try:
+            entry = mgr.keep_backup(backup_id, (await json_body(request)).get("kept"))
+        except ValueError as err:
+            raise web.HTTPBadRequest(text=str(err)) from None
+        return web.json_response({"backup": entry})
+
+    async def backup_delete(request: web.Request) -> web.StreamResponse:
+        """Delete one backup. Needs {"confirm": true}."""
+        backup_id = backup_id_from(request)
+        try:
+            mgr.delete_backup(backup_id, (await json_body(request)).get("confirm"), user_from(request.headers))
+        except ValueError as err:
+            raise web.HTTPBadRequest(text=str(err)) from None
+        except ShellyError as err:
+            raise web.HTTPConflict(text=str(err)) from None
+        return web.json_response({"deleted": True})
+
+    async def backup_preview(request: web.Request) -> web.StreamResponse:
+        """Step 1 of a restore: read the device and list what restoring would change."""
+        backup_id = backup_id_from(request)
+        await json_body(request)
+        return web.json_response(await guarded(mgr.preview_restore(backup_id)))
+
+    async def backup_restore(request: web.Request) -> web.StreamResponse:
+        """Step 2: restore the chosen parts in the background ({"parts": [...],
+        "confirm": true, and "network_acknowledged": true for the network settings});
+        progress and result are part of the state."""
+        backup_id = backup_id_from(request)
+        body = await json_body(request)
+        if body.get("confirm") is not True:
+            raise web.HTTPBadRequest(text="Confirmation incomplete")
+        try:
+            mgr.reserve_restore(
+                backup_id, body.get("parts"), body.get("network_acknowledged"), user_from(request.headers)
+            )  # synchronous: a second request gets 409
+        except ValueError as err:
+            raise web.HTTPBadRequest(text=str(err)) from None
+        except ShellyError as err:
+            raise web.HTTPConflict(text=str(err)) from None
+        background(mgr.run_restore())
+        return web.json_response({"started": True})
+
+    async def restore_clear(request: web.Request) -> web.StreamResponse:
+        """The dialog showed the result of the finished restore."""
+        await json_body(request)
+        mgr.clear_restore()
+        return web.json_response({"ok": True})
+
+    async def backup_download(request: web.Request) -> web.StreamResponse:
+        """Step 1 of a download: generate the password of the file (returned once)
+        and a single-use token for the download."""
+        backup_id = backup_id_from(request)
+        await json_body(request)
+        return web.json_response(
+            await guarded(mgr.prepare_backup_download(backup_id, user_from(request.headers)))
+        )
+
+    async def backup_download_file(request: web.Request) -> web.StreamResponse:
+        """Step 2: the backup as a file encrypted with the password of step 1 (token
+        from step 1, single use)."""
+        token = request.match_info["token"]
+        if not EXPORT_TOKEN_RE.fullmatch(token):
+            raise web.HTTPNotFound(text="Unknown download")
+        try:
+            content, filename = mgr.take_backup_download(token)
+        except ShellyError as err:
+            raise web.HTTPConflict(text=str(err)) from None
+        return web.Response(
+            body=content,
+            headers={
+                "Content-Type": "application/octet-stream",
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
+
+    async def backup_import(request: web.Request) -> web.StreamResponse:
+        """Step 1 of the import of a backup file for a device: the raw file as body
+        (at most 4 MiB, kept in memory until it is imported or dropped)."""
+        device_id = device_id_from(request)
+        return web.json_response(
+            await guarded(
+                mgr.stage_backup_import(
+                    device_id, request.content.iter_chunked(UPLOAD_CHUNK), request.content_length
+                )
+            )
+        )
+
+    async def backup_import_check(request: web.Request) -> web.StreamResponse:
+        """Step 2: open the staged file with its password and check it; returns the summary."""
+        body = await json_body(request)
+        return web.json_response(await guarded(mgr.check_backup_import(body.get("token"), body.get("password"))))
+
+    async def backup_import_confirm(request: web.Request) -> web.StreamResponse:
+        """Step 3: store the checked file as a backup of its device."""
+        body = await json_body(request)
+        try:
+            entry = mgr.confirm_backup_import(body.get("token"), user_from(request.headers))
+        except ValueError as err:
+            raise web.HTTPBadRequest(text=str(err)) from None
+        except ShellyError as err:
+            raise web.HTTPConflict(text=str(err)) from None
+        return web.json_response({"backup": entry})
+
+    async def backup_import_cancel(request: web.Request) -> web.StreamResponse:
+        """Discard the staged backup file."""
+        mgr.cancel_backup_import((await json_body(request)).get("token"))
+        return web.json_response({"ok": True})
+
     # ---------------------------------------------------------------- Logs & app settings
 
     async def logs(_request: web.Request) -> web.StreamResponse:
@@ -785,6 +942,21 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
     app.router.add_get("/api/firmware/{name}/changelog", firmware_changelog)
     app.router.add_get("/api/firmware/{name}/download", firmware_download)
     app.router.add_post("/api/firmware/{name}/delete", firmware_delete)
+    app.router.add_get("/api/backups", backups_list)
+    app.router.add_post("/api/backups/run", backups_run)
+    app.router.add_post("/api/backups/run/clear", backups_run_clear)
+    app.router.add_post("/api/backups/restore/clear", restore_clear)
+    app.router.add_get("/api/backups/download/{token}", backup_download_file)
+    app.router.add_post("/api/backups/import/check", backup_import_check)
+    app.router.add_post("/api/backups/import/confirm", backup_import_confirm)
+    app.router.add_post("/api/backups/import/cancel", backup_import_cancel)
+    app.router.add_post("/api/backups/{bid}/keep", backup_keep)
+    app.router.add_post("/api/backups/{bid}/delete", backup_delete)
+    app.router.add_post("/api/backups/{bid}/preview", backup_preview)
+    app.router.add_post("/api/backups/{bid}/restore", backup_restore)
+    app.router.add_post("/api/backups/{bid}/download", backup_download)
+    app.router.add_post("/api/devices/{id}/backup", backup_device)
+    app.router.add_post("/api/devices/{id}/backups/import", backup_import, name=BACKUP_IMPORT_ROUTE)
     app.router.add_get("/api/logs", logs)
     app.router.add_post("/api/logs/clear", logs_clear)
     app.router.add_post("/api/logs/{id}/delete", log_delete)

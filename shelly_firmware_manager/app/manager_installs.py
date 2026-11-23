@@ -1,4 +1,4 @@
-"""Manager, layer 5 of 7: installations and downgrades, and what the download server
+"""Manager, layer 6 of 8: installations and downgrades, and what the download server
 needs to serve the files.
 
 Installations are always started manually and bound to the SHA-256 of the provided
@@ -107,8 +107,10 @@ class Installs(Checks):
 
         Several installations run in parallel, at most max_parallel_installs at a
         time; others wait for a free slot. Nothing starts during the full check or
-        while the device itself is checked, and each device is in progress at most
-        once; other devices may be checked meanwhile. approved_by is only written to the log.
+        while the device itself is checked or restored, and each device is in progress
+        at most once; other devices may be checked meanwhile. approved_by is only
+        written to the log. With the option backup_before_install the settings of the
+        device are backed up first; if that fails, nothing is installed.
 
         downgrade (Gen2+ only): install the stored older version with this
         SHA-256 instead of the provided update. The confirmation flags are checked by
@@ -119,6 +121,7 @@ class Installs(Checks):
             or self.download_base_issue
             or device_id in self.installing
             or device_id in self.reloading
+            or device_id in self.restoring
             or device_id in self.device_checks
         ):
             return False
@@ -161,6 +164,8 @@ class Installs(Checks):
         entry: dict[str, Any] | None = None  # log context, set once the installation actually starts
         try:
             async with self.install_slots:
+                # Option "Back up before every installation": no backup, no installation
+                await self.backup_before_installation(device_id, dev, approved_by)
                 dev["message"] = "Downgrade started" if downgrade else "Installation started"
                 entry = {
                     "device": dev.get("name"),

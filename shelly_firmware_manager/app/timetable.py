@@ -14,8 +14,10 @@ A schedule does one action on a set of Shellys at a local clock time of Home Ass
   after the schedule was saved with this repeat and time.
 - devices: "all" (every listed Shelly, new ones included) or a list of HA device IDs.
 - next: epoch of the next run (None while the schedule is off); last: result of the
-  last run {"at", "severity", "text"} with "counts" {done, total, unreachable, refused,
-  left} of a run, or severity "missed" with the "reason" for a run the app missed.
+  last run {"at", "severity", "text"} with "counts" {done, total, unchanged, unreachable,
+  refused, left} of a run, or severity "missed" with the "reason" for a run the app missed.
+- action "backup" stores the settings of each device as a backup – only of devices whose
+  settings changed since their newest backup (counts "unchanged" otherwise).
 
 DST as for the check schedule: a clock time inside a spring-forward gap runs at the first
 valid instant after the gap, a repeated autumn time at its first occurrence.
@@ -36,6 +38,7 @@ ACTIONS = {
     "cloud_off": "Cloud off",
     "ble_on": "Bluetooth on",
     "ble_off": "Bluetooth off",
+    "backup": "Backup",
 }
 # Device setting written by the cloud and Bluetooth actions: action -> (setting, value)
 SETTING_ACTIONS = {

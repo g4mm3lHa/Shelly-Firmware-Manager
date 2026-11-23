@@ -9,6 +9,7 @@ import {
   restartDevice,
 } from "./device-settings.js";
 import {load, queued, render} from "./main.js";
+import {openDeviceBackups, reasonLabel} from "./backups.js";
 
 // ---------------------------------------------------------------- Devices
 // Never checked (status of older versions "unregistered") and Gen1 devices skipped while
@@ -121,8 +122,16 @@ function statusText(d) {
     d.planned ? t("Install at {time}", {time: d.planned.at_text}) : null,
     t("Last check: {time}", {time: fmt(d.last_check)}), lastSuccess(d) && t("Last successful check: {time}", {time: lastSuccess(d)})].filter(Boolean).join("\n");
 }
+/** Section "Backups" of the device details: the newest backup, how many are stored
+ *  ("n of N", the kept ones do not count) and the button to the device's backups. */
+function backupsSection(d) {
+  const b = d.backups, show = el("button", t("Show backups"), "small"); show.onclick = () => openDeviceBackups(d.id);
+  return section(t("Backups"), valueList([[t("Last backup"), b ? `${fmt(b.last)} · ${reasonLabel(b.reason)}` : t("none")],
+    [t("Stored"), b ? t("{n} of {keep}", {n: b.count - b.kept, keep: ui.state.backup_keep}) + (b.kept ? " " + t("+ {n} kept", {n: b.kept}) : "") : null]]),
+  box("div", "bk-more", show));
+}
 /** "Device details" popup: message left, status right on one line, then the sections
- *  Firmware, Device (model, generation, firmware ID, NTP) and History. */
+ *  Firmware, Device (model, generation, firmware ID, NTP), History and Backups. */
 function showStatus(d) {
   const key = shownStatus(d), bad = ["error", "unconfirmed"].includes(d.status);
   const head = box("div", "dstatus", el("p", d.message || "", "dmsg" + (bad ? " bad" : "")),
@@ -138,7 +147,8 @@ function showStatus(d) {
       [t("Source"), provided ? OFFER_SOURCES[d.offer_source] : null]])),
     section(t("Device"), valueList([[t("Model"), [d.model, d.gen ? `Gen ${d.gen}` : null].filter(Boolean).join(" · ")], [t("Firmware ID"), d.type], ["NTP", d.ntp]])),
     section(t("History"), valueList([[t("Last check"), fmt(d.last_check)], [t("Last success"), fmt(d.last_success)],
-      [t("Last update"), d.last_update ? fmt(d.last_update) : "–"]]))],
+      [t("Last update"), d.last_update ? fmt(d.last_update) : "–"]])),
+    backupsSection(d)],
     // Ready (and installable): red button right of Close opens the existing install dialog
     installable(d, ui.state) ? [{text: t("Close")}, {text: t("Install update"), kind: "danger", action: () => openInstall([d])}] : undefined);
 }
@@ -700,6 +710,7 @@ function openRowMenu(d, anchor) {
   add(t("Power-on action"), () => editAop(d), can && !!(d.outputs && d.outputs.length));
   add(t("Eco mode"), () => editEco(d), can && typeof d.eco === "boolean");
   add(d.password_set ? t("Device password (stored)") : t("Device password"), () => editPassword(d), !!d.ip && !!d.gen);
+  add(t("Backups"), () => openDeviceBackups(d.id), true);
   // Group 4: ignore – a device removed from Home Assistant cannot be ignored, it can be
   // removed from the list instead
   items.push(el("hr"));

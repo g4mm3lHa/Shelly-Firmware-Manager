@@ -20,6 +20,7 @@ Assistant). Version history: `CHANGELOG.md` (Changelog tab).
   - [Downgrade (Gen2+)](#downgrade-gen2)
   - [Firmware](#firmware)
   - [Schedules](#schedules)
+  - [Backups](#backups)
   - [Logs](#logs)
   - [Settings](#settings)
 - [Device passwords](#device-passwords)
@@ -95,6 +96,8 @@ Assistant). Saving restarts the app.
 | Offer beta firmware | off | on / off | Gen2+: also offers the beta versions of the Shelly update server; each needs an extra confirmation (see [Beta firmware](#beta-firmware)) |
 | Keep installed versions | on | on / off | Gen2+: also stores the firmware a device already runs while Shelly still offers it, so a downgrade stays possible after a bad update (see [Keep installed versions](#keep-installed-versions)) |
 | Max. import size (MB) | 100 | 1–2048 | Largest file accepted by **Import store** |
+| Back up before every installation | on | on / off | Stores the settings of a device before every update and downgrade; if the backup fails, nothing is installed (see [Backups](#backups)) |
+| Keep backups per device | 10 | 1–50 | The newest backups of each device are kept, older ones are removed automatically; a backup marked “Kept” stays |
 | Max. log size (entries) | 1000 | 100–3000 | Size limit of the activity log |
 | Log retention (days) | 90 | 1–365 | Age limit of the activity log |
 | Max. parallel installations | 5 | 1–20 | How many installations (and password changes) run at the same time; further approvals wait |
@@ -471,7 +474,7 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
 ### Schedules
 
 A schedule does one action on several Shellys at a fixed time: **Restart**, **Cloud on**,
-**Cloud off**, **Bluetooth on** or **Bluetooth off**. **Add schedule** asks for a name, the
+**Cloud off**, **Bluetooth on**, **Bluetooth off** or **Backup** (see [Backups](#backups)). **Add schedule** asks for a name, the
 action, the time (time zone of Home Assistant) and the repeat: **Daily**, **On weekdays**
 or **Every** n days. Devices are **All Shellys** (new ones are included automatically) or
 a list you tick. A restart runs device by device with a pause (default 3 seconds, 0 = all
@@ -498,22 +501,71 @@ the run, otherwise it is skipped and logged.
 If Home Assistant uses a Shelly as Bluetooth proxy, it turns Bluetooth on again after
 **Bluetooth off**; the dialog warns about it.
 
+### Backups
+
+A backup stores the settings of one Shelly in the app: Gen2+ the configuration of all
+components, the scripts with their code, the schedules and the webhooks; Gen1 the
+settings and the actions. Passwords are never part of a backup – a Shelly does not give
+out its Wi-Fi, device or MQTT password. Nothing is changed on a device while it is backed
+up.
+
+A backup is made
+
+- by hand: **Back up now** in the **Backups** tab (all Shellys or a selection), or for one
+  device in its row there or in its **Backups** dialog (row menu and device details of the
+  **Devices** tab);
+- before every update and downgrade while **Back up before every installation** is on –
+  if this backup fails, nothing is installed and the reason is shown;
+- by a schedule with the action **Backup**. A run stores a backup only for devices whose
+  settings changed since their newest backup ("3 stored · 17 unchanged · 2 not backed
+  up"); battery devices are backed up when a run finds them awake;
+- before a restore (reason **Before restore**), so a restore can be taken back.
+
+The tab lists every device with its newest backup; the chevron opens all its backups with
+date, reason, firmware, contents and size. The card **No Backup** names the devices
+without one and why (no backup yet, password not stored, asleep, not reachable). Per
+device the newest **Keep backups per device** backups stay, older ones are removed
+automatically. The lock marks a backup as **Kept**: it is never removed automatically and
+does not count. The bin deletes a backup after a confirmation. A device removed from Home
+Assistant keeps its backups but gets no new ones.
+
+**Restore** reads the device and compares it with the backup. You choose the parts
+(device settings, scripts, schedules, webhooks; Gen1: settings, actions); **Show
+differences** lists what would change, with the names the Shelly uses. A chosen part is
+made equal to the backup: what exists only on the device (a newer script, schedule or
+webhook) is removed. **Wi-Fi and network settings** are a part of their own, not ticked
+by default, and need an extra confirmation – wrong network settings can make a device
+unreachable. A backup can only be restored to the device it was made on (MAC address and
+model); a different firmware version is allowed, settings it does not know are skipped
+and named. Afterwards the app reads the device again and shows per part what was applied;
+the device restarts if a setting needs it.
+
+The download icon saves one backup as a file (`.sfmb`). The app generates a password,
+shows it once and seals the file with it – without the password the file cannot be
+imported. **Import backup** in the **Backups** dialog of a device takes such a file and
+its password; the file must come from this device. An imported backup is marked
+**Imported** and **Kept**; restoring it is a separate step. All backups are also part of
+the store export (see [Moving the firmware store](#moving-the-firmware-store)).
+
 ### Logs
 
 The activity log records checks, downloads, uploads, installations and downgrades,
 deleted firmware, setting and password changes on devices, store exports and imports,
 firmware files read back from the disk, devices removed from the list, held-back updates
-offered now, scheduled installations, schedule runs (with the devices left out) and
+offered now, scheduled installations, schedule runs (with the devices left out), backups
+(stored, failed, restored, deleted, downloaded, imported) and
 changes of schedules and app settings – each with time, user and result (success, warning, error). A download names
 the user of the check that fetched it; scheduled checks and their downloads name
 "Schedule". A full check also counts the ignored devices ("2 ignored") and names them
 in its details in the normal text colour – they are not contacted and never make the
 entry a warning or error. Removed devices are counted too ("1 removed"); each one is a
-warning if it still answers at its last address and an error if not. Filters and a device search help to find entries. Passwords never appear in the log. Consecutive
+warning if it still answers at its last address and an error if not. A device that does not
+answer is an error; a battery device that is asleep is a warning. Filters and a device search help to find entries. Passwords never appear in the log. Consecutive
 entries of the same device are marked by a bar at the side.
 
-The tab updates itself when a new entry is written. A yellow "!" on the tab marks entries
-written since you last opened it in this browser.
+The tab updates itself when a new entry is written. A yellow "!" on the tab marks error
+entries written since you last opened it in this browser; when you open the tab, the
+entries that are new since then are lightly highlighted.
 
 The bin icon deletes a single entry, **Delete all logs** the whole log (each after a
 confirmation). After clearing, one entry remains that names who cleared the log.
@@ -521,7 +573,7 @@ confirmation). After clearing, one entry remains that names who cleared the log.
 ### Settings
 
 First the card **Device Passwords**, then all options from [Configuration](#configuration) in the cards **Checks**, **Download
-Server**, **Firmware & Storage**, **Logs** and **Advanced**, with one Save button. The
+Server**, **Firmware & Storage**, **Backups**, **Logs** and **Advanced**, with one Save button. The
 i-icon next to a setting shows its help (on touch devices with a tap). While you type, a
 hint warns if the download base URL is a host name or not in your local network; while
 installations are disabled because of it, a notice above the tabs explains why. The card
@@ -572,7 +624,9 @@ unprotected through your network.
 ## Moving the firmware store
 
 To move to another Home Assistant instance (or keep a copy), export the whole firmware
-store in the Settings tab → **Firmware & Storage** → **Export store**:
+store in the Settings tab → **Firmware & Storage** → **Export store**. The export also
+holds the [backups](#backups) of your device settings, encrypted with the export
+password; an import adds the ones that are not stored yet (marked **Imported**):
 
 - The app generates an **export password** and shows it once (copy icon; if the browser
   does not allow copying, the password is selected for copying by hand). Save it –
@@ -659,6 +713,15 @@ Gen2+ firmware is downloaded over HTTPS only.
 | Not possible now – … (Run now) | A check, an installation or another schedule runs. Try again when it has finished |
 | Schedule “…” is running – please try again afterwards | **Check now** and installations wait for the end of a schedule run. Try again when the run has finished (Logs tab) |
 | Schedule run: … not reachable / refused (notification) | Some devices did not answer or refused the change. The log entry of the run names them; check those devices |
+| Backup before the installation failed – nothing was installed: … | The device could not be backed up (not reachable, password missing). Solve the reason named after the colon and install again, or switch **Back up before every installation** off in the Settings tab |
+| No Backup: Protected, and its password is not stored in this app | Store the device password in the row menu → **Device password**; then **Back up now** |
+| Another device (Restore backup? / Import backup) | The backup was made on another device (MAC address or model differ). A backup can only be restored or imported for the device it was made on |
+| Device not reachable (Restore backup?) | The comparison needs the device. Check that it is on and reachable, then open **Restore** again |
+| … not applied (result of a restore) | The device refused a value or does not know the setting (other firmware). The result names each one; set it in the Shelly's own web interface if needed. The state before is stored as backup **Before restore** |
+| The device did not answer again after the restore | Usually restored network settings that no longer fit. Check the device in your network; if it stays away, reset it at the device and set it up again |
+| Wrong password, or the file was changed since the download | The password does not belong to this backup file, or the file is damaged. Use the password shown at the download of exactly this file |
+| n backup file(s) cannot be read with the key of this app and are not listed | The key file of the app was lost or replaced (e.g. app data restored only in part). The files stay in the app data; with the matching key file they are listed again |
+| A backup run is in progress / A backup is being restored | Wait for the end (bar in the **Backups** tab), then try again |
 | Storage error: The state file was unreadable – the backup of the previous save was loaded | The app's state file was damaged (e.g. by a power failure) and the copy of the save before was used. Check the devices again; the message disappears with the next restart |
 | Storage error: The state file was unreadable and no backup could be loaded | The device list starts empty and is filled by the next check. The firmware files stay on disk; at the start the app reads back those whose content names firmware ID and version, the others are listed as **Unknown Files** in the Firmware tab (see [Firmware](#firmware)) |
 
@@ -748,7 +811,14 @@ in the firmware store and **Allow downgrades** is switched on (see
 - Only devices with their own address in a private network (see
   [Download base URL](#download-base-url)) are contacted. Devices connected through
   another Shelly (e.g. Bluetooth devices behind a gateway) are not listed on purpose.
-- Battery devices can only be checked and updated while they are awake.
+- Battery devices can only be checked, updated and backed up while they are awake.
+- Backups: passwords (Wi-Fi, device, MQTT) are never part of a backup, because a Shelly
+  does not give them out – after a reset they must be entered again. Also not part: the
+  key-value store, virtual components, the device profile (Gen2+) and the mode (Gen1) –
+  a difference there is named, not restored – and the script Home Assistant maintains for
+  its Bluetooth proxy. A backup can only be restored to the device it was made on. A
+  re-created script, schedule or webhook can get another ID on the device. Gen1: actions
+  are part of a backup only where the device lets them be read.
 - Keep installed versions: the installed version can be stored only while Shelly still
   offers it, so a device that already has an open update has no way back stored.
 - Offer delay: the age counts from the build date, which can lie a few days before Shelly
@@ -800,6 +870,14 @@ Names ending in `.local` are answered by mDNS in your network (Home Assistant OS
 supervised systems with systemd-resolved). On a system without it, the DNS of Home
 Assistant may pass the lookup on to your configured DNS servers.
 
+The app stores in its private data (`/data` of the app, part of a Home Assistant
+backup of the app): the device list and state, the firmware files, the activity log, the
+device passwords you store, and the [backups](#backups) of your device settings. A backup
+holds the configuration a Shelly reports – including Wi-Fi names, addresses of servers,
+scripts and webhook addresses, which can contain tokens – but no passwords. Nothing of it
+is sent anywhere; a backup leaves the app only as a file you download or as part of a
+store export.
+
 The user interface loads nothing from the internet. No telemetry.
 
 Home Assistant itself downloads the app image from `ghcr.io` when you install or update
@@ -813,6 +891,13 @@ the app. The app does not connect there and nothing about your system is sent.
   firmware and password changes need a second confirmation.
 - A store import is refused if the seal or any file does not match; the export
   password is shown once and stored nowhere.
+- Backups of device settings are stored encrypted with a key that is created at the
+  first start and stays in the app data (file mode 0600); the key and the backups lie in
+  the same app data, so this protects single files, not a copy of the whole app data. A
+  downloaded backup and the backups in a store export are encrypted with the password
+  shown at the download or export instead; that password is stored nowhere. A file is
+  only opened if its seal matches. Restoring needs a confirmation, network settings a
+  second one; passwords are never read, stored or restored.
 - The download server (port 8098) only serves files of a running installation, by
   default only to the device being updated. It has no login, because Shellys cannot
   authenticate.

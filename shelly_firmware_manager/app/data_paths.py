@@ -12,3 +12,4 @@ FW_DIR = DATA_DIR / "firmware"
 CREDENTIALS_FILE = DATA_DIR / "credentials.json"
 CHANGELOG_FILE = DATA_DIR / "changelog.json"
 EVENTS_FILE = DATA_DIR / "events.json"
+BACKUP_DIR = DATA_DIR / "backups"  # backups of device settings (see backup_store)
