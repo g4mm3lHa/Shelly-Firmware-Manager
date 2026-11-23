@@ -29,19 +29,21 @@ function devicesText(s) {
   if (!ids.length) return t("No device");   // all its devices were removed from the list: switched off, choose again
   return shown.join(", ") + (ids.length > 3 ? " " + t("and {n} more", {n: ids.length - 3}) : "");
 }
-/** Short result of the last run, from its counts (English text of the server otherwise). */
-function lastText(last) {
-  if (last.severity === "missed") return last.reason ? t("Missed – {reason}", {reason: last.reason}) : last.text;
+/** Short result of the last run as its parts ("2 stored", "1 left out"), from its counts
+ *  (English text of the server otherwise). */
+function lastParts(last) {
+  if (last.severity === "missed") return [last.reason ? t("Missed – {reason}", {reason: last.reason}) : last.text];
   const c = last.counts;
-  if (!c) return last.text || "";
+  if (!c) return [last.text || ""];
   const restart = last.action === "restart", ran = (c.run ?? c.total) || c.interrupted;
   // Backup: a device whose settings did not change since its newest backup gets no new one
   if (last.action === "backup") {
-    const parts = [ran ? t("{done} stored · {unchanged} unchanged · {failed} not backed up", {done: c.done, unchanged: c.unchanged || 0,
-      failed: (c.unreachable || 0) + (c.refused || 0)}) : t("No device to run on")];
+    const failed = (c.unreachable || 0) + (c.refused || 0);
+    const parts = ran ? [t("{n} stored", {n: c.done}), t("{n} unchanged", {n: c.unchanged || 0}),
+      c.asleep ? t("{n} asleep", {n: c.asleep}) : null, t("{n} not backed up", {n: failed})].filter(Boolean) : [t("No device to run on")];
     if (c.left) parts.push(t("{n} left out", {n: c.left}));
     if (c.interrupted) parts.push(t("interrupted – the app stopped"));
-    return parts.join(" · ");
+    return parts;
   }
   // "n of m": m = all chosen devices, left-out ones included ("run": devices acted on)
   const parts = [ran ? t(restart ? "{done} of {total} restarted" : "{done} of {total} switched", {done: c.done, total: c.total}) : t("No device to run on")];
@@ -49,7 +51,12 @@ function lastText(last) {
   if (c.refused) parts.push(t("{n} refused", {n: c.refused}));
   if (c.left) parts.push(t("{n} left out", {n: c.left}));
   if (c.interrupted) parts.push(t("interrupted – the app stopped"));
-  return parts.join(" · ");
+  return parts;
+}
+/** Result line of the last run: a long one wraps only between its parts, never inside one. */
+function lastLine(last) {
+  const parts = lastParts(last);
+  return parts.length < 2 ? el("div", parts[0], "sub") : box("div", "sub", ...parts.flatMap((p, i) => [i ? " · " : null, el("span", p, "nowrap")]));
 }
 /** Cell of a row; on phones a labelled line of the tile (data-label). */
 const schCell = (label, cls, ...nodes) => cell("sch-c " + cls, label, ...nodes);
@@ -67,7 +74,7 @@ function scheduleRow(s) {
   const act = box("span", "sch-act", icon(ACTION_ICONS[s.action] || "schedules"), el("span", ACTIONS[s.action] || s.action));
   const last = s.running ? [el("span", t("Running …"), "sub")]
     : s.last ? [el("span", s.last.at_text, "nowrap"), el("span", (SEVERITY[s.last.severity] || SEVERITY.warning)[0], "tag " + (SEVERITY[s.last.severity] || SEVERITY.warning)[1]),
-      el("div", lastText({...s.last, action: s.action}), "sub")]
+      lastLine({...s.last, action: s.action})]
     : [el("span", t("never"), "sub")];
   const pause = s.action === "restart" ? el("div", s.pause ? t("{n} s between devices", {n: s.pause}) : t("All at once"), "sub") : null;
   const left = s.left_out ? el("div", t("{n} left out at the moment", {n: s.left_out}), "sub") : null;

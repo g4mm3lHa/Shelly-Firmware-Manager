@@ -75,7 +75,7 @@ export function editAop(d) {
   const title = `${t("Power-on action")} – ${d.name}`;
   withLive(d, title, live => {
     if (!live.outputs.length) { message(title, t("This device has no outputs with a power-on action.")); return; }
-    const table = el("table"), h = el("tr"), selects = [];
+    const table = el("table", null, "aop-table"), h = el("tr"), selects = [];
     for (const c of [t("Output"), t("Action on power on")]) h.append(el("th", c));
     table.append(box("thead", null, h));
     for (const o of live.outputs) {

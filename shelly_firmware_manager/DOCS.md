@@ -518,8 +518,9 @@ A backup is made
 - before every update and downgrade while **Back up before every installation** is on –
   if this backup fails, nothing is installed and the reason is shown;
 - by a schedule with the action **Backup**. A run stores a backup only for devices whose
-  settings changed since their newest backup ("3 stored · 17 unchanged · 2 not backed
-  up"); battery devices are backed up when a run finds them awake;
+  settings changed since their newest backup ("3 stored · 17 unchanged · 1 asleep · 2 not
+  backed up"). "Unchanged" means the settings are the same as in the newest backup, so no
+  copy is stored again; battery devices are backed up when a run finds them awake;
 - before a restore (reason **Before restore**), so a restore can be taken back.
 
 A device that should answer and does not (or whose last check failed with an error) is an

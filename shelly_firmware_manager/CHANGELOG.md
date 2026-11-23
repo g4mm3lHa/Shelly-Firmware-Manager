@@ -5,6 +5,21 @@
 Release candidate. Backups of the device settings: by hand, before every installation
 and on a schedule, with comparison and restore part by part.
 
+Changes in rc4
+
+Changed
+- Warning text has one colour everywhere (logs, tags, pills, hints): a darker orange
+  that reads well in the light theme and stands apart from green.
+- Schedule "Backup": the devices of a run are coloured like in "Back up now"; an
+  unchanged device reads "unchanged – same as the last backup".
+- Schedule "Backup": a battery device that is asleep counts as "asleep", no longer as
+  "left out", so "left out" matches the Schedules tab.
+- Schedules tab: the result of the last run wraps only between its parts.
+
+Fixed
+- Phones: the select of the power-on action stays inside the dialog and shortens its
+  text with "…".
+
 Changes in rc3
 
 Changed

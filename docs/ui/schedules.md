@@ -37,7 +37,12 @@ as the UI change). Read when you change the Schedules tab or the schedule dialog
 - **Action "Backup" (3.11.0, F9, approved 2026-11-22):** sixth action with the backup
   icon, no pause. A run stores a backup only for devices whose settings changed since
   their newest backup: "n stored · n unchanged · n not backed up" (plus "n left out").
-  Battery devices are tried and count as left out while asleep. A device that should
+  Battery devices are tried; one that is asleep is counted on its own ("n asleep", as in
+  "Back up now") and does not change the outcome, so "left out" matches "n left out at
+  the moment" under Devices (live test rc3, 2026-11-23). Log lines of a run are coloured
+  like "Back up now": stored and unchanged ("unchanged – same as the last backup") green,
+  asleep yellow, not backed up yellow or red; left-out devices in the normal text colour.
+  The result under "Last run" wraps only between its parts. A device that should
   answer and does not (or whose last check failed with an error) makes the run an Error
   (live test rc2, approved 2026-11-23). Logs: kind "Backup" and
   filter "Backups" (stored, failed, restored, deleted, downloaded, imported, removed by
