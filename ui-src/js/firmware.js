@@ -182,8 +182,10 @@ function firmwareRow(f, latest, older) {
   // the width does not allow that (phones) – never one beside and one below
   const labels = [latest ? el("span", t("Latest"), "tag primary") : null, isBeta(f.version) ? el("span", t("Beta"), "tag beta") : null,
     inst, uploaded, step].filter(Boolean);
-  return box("div", "fw-row", box("div", "fw-ver", el("span", f.version, "name"), labels.length ? box("span", "fw-tags", ...labels) : null),
+  const row = box("div", "fw-row", box("div", "fw-ver", el("span", f.version, "name"), labels.length ? box("span", "fw-tags", ...labels) : null),
     size, date, sha, devices, box("div", "actions", older ? downgradeButton(f) : null, log, dl, del));
+  row.dataset.key = f.name;   // the keyboard focus stays in this row when the list is redrawn
+  return row;
 }
 // ---------------------------------------------------------------- Downgrade from the Firmware tab
 const STABLE = /^\d{1,4}\.\d{1,4}\.\d{1,4}$/;   // downgrades only to stable versions

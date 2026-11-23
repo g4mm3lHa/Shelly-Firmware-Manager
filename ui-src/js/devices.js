@@ -479,14 +479,18 @@ function sortRows(rows) {
     return sign * c || collator.compare(a.name || "", b.name || "");
   });
 }
-/** Table header: click on a sortable column sorts, a second click reverses. */
-/** Data columns are draggable (mouse) and movable with Alt+ArrowLeft/Right (keyboard). */
+/** Table header: a click, Enter or the space bar on a sortable column sorts, a second
+ *  time reverses (aria-sort names the order). Data columns are draggable (mouse) and
+ *  movable with Alt+ArrowLeft/Right (keyboard). */
 function tableHead() {
   const tr = el("tr");
   for (const key of columnKeys()) {
     const col = COLUMNS[key], th = el("th", col.label, `c-${key}${colClass(key)}`);
     const [sKey, dir] = prefs.devices.sort;
-    if (col.sort) { th.classList.add("sortable"); if (sKey === key) th.dataset.dir = dir; }
+    if (col.sort) {
+      th.classList.add("sortable");
+      if (sKey === key) { th.dataset.dir = dir; th.setAttribute("aria-sort", dir === "desc" ? "descending" : "ascending"); }
+    }
     if (!col.fixed) {
       th.tabIndex = 0; th.draggable = true; setTip(th, col.sort ? t("Click to sort · drag or Alt+Arrow to move") : t("Drag or Alt+Arrow to move"));
       th.ondragstart = e => { e.dataTransfer.setData("text/plain", key); e.dataTransfer.effectAllowed = "move"; };
@@ -502,7 +506,7 @@ function tableHead() {
           e.preventDefault();
           moveColumn(key, prefs.devices.order.indexOf(key) + (e.key === "ArrowLeft" ? -1 : 1));
           const moved = document.querySelector(`#dev-cards th.c-${key}`); if (moved) moved.focus();
-        } else if (e.key === "Enter" && col.sort) th.onclick();
+        } else if ((e.key === "Enter" || e.key === " ") && col.sort) { e.preventDefault(); th.onclick(); }
       };
     }
     if (col.sort) th.onclick = () => setSort([key, sKey === key && dir === "asc" ? "desc" : "asc"]);
@@ -516,7 +520,7 @@ function deviceCard(title, rows, head, headExtra) {
   h.append(...(head || []), el("h2", `${title} · ${rows.length}`), el("span", null, "spacer"), ...(headExtra || []));
   const tbody = el("tbody");
   for (const d of sortRows(rows)) {
-    const tr = el("tr");
+    const tr = el("tr"); tr.dataset.key = d.id;
     if (d.ignored) tr.className = "ignored";
     for (const key of columnKeys()) {
       const c = el("td", null, `c-${key}${colClass(key)}`);
@@ -670,12 +674,15 @@ searchTool($("dev-search"));
 
 // ---------------------------------------------------------------- Row menu ⋮
 const rowmenu = $("rowmenu");
-/** Open the action menu of a device next to its ⋮ button. */
+let menuOwner = null;   // label of the ⋮ button the open menu belongs to
+/** Open the action menu of a device next to its ⋮ button. Choosing an entry and the
+ *  Escape key return the keyboard focus to that button. */
 function openRowMenu(d, anchor) {
   const can = editable(d), items = [];
+  menuOwner = anchor.getAttribute("aria-label");
   const add = (text, fn, enabled = can, cls = "") => {
     const b = el("button", text, cls); b.role = "menuitem"; b.disabled = !enabled;
-    b.onclick = () => { closeRowMenu(); fn(); }; items.push(b);
+    b.onclick = () => { closeRowMenu(true); fn(); }; items.push(b);
   };
   // The full check blocks everything; otherwise only work on this device itself
   const s = ui.state || {}, running = d.installing || d.status === "installing";
@@ -762,8 +769,14 @@ function forgetDevice(d) {
     } catch (e) { message(title, e.message, "error", "delete"); }
   }}], "delete");
 }
-/** Close the row menu. */
-export function closeRowMenu() { rowmenu.hidden = true; }
+/** Close the row menu. refocus: the keyboard focus returns to the ⋮ button it was
+ *  opened from (the list may have been redrawn since: found by its label). */
+export function closeRowMenu(refocus) {
+  if (rowmenu.hidden) return;
+  rowmenu.hidden = true;
+  const button = refocus && [...document.querySelectorAll("#dev-cards td.c-menu button")].find(b => b.getAttribute("aria-label") === menuOwner);
+  if (button) button.focus({preventScroll: true});
+}
 document.addEventListener("click", e => { if (!rowmenu.hidden && !rowmenu.contains(e.target) && !e.target.closest("td.c-menu")) closeRowMenu(); });
-document.addEventListener("keydown", e => { if (e.key === "Escape") { closeRowMenu(); hideTip(); } });
+document.addEventListener("keydown", e => { if (e.key === "Escape") { closeRowMenu(true); hideTip(); } });
 addEventListener("scroll", closeRowMenu, true);

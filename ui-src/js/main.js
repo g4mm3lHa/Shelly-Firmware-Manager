@@ -1,5 +1,5 @@
 // Entry module: rendering, tabs and polling. Importing it loads all other modules.
-import {$, api, attachTip, box, closeModal, el, fmt, getState, hideTip, loadLocal, message, modal, saveLocal, setTip, t, ui} from "./core.js";
+import {$, api, attachTip, box, closeModal, el, fmt, getState, hideTip, keepFocus, loadLocal, message, modal, saveLocal, setTip, t, ui} from "./core.js";
 import {lang} from "./i18n.js";
 import {buildChooser, closeRowMenu, loadPrefs, renderDevices, syncChooser} from "./devices.js";
 import {renderFirmware} from "./firmware.js";
@@ -11,7 +11,8 @@ import {renderBackups} from "./backups.js";
 import "./device-settings.js";
 
 // ---------------------------------------------------------------- Rendering, tabs & polling
-/** Render the active view; unchanged data is not re-rendered unless forced. */
+/** Render the active view; unchanged data is not re-rendered unless forced. The keyboard
+ *  focus stays on the control it was on (keepFocus). */
 export function render(force) {
   const s = ui.state;
   if (!s) return;
@@ -31,13 +32,15 @@ export function render(force) {
     ui.view === "firmware" ? ui.firmware : ui.view === "logs" ? [ui.logs, ui.logsUnreadFrom] : ui.view === "backups" ? ui.backups : null]);
   if (!force && key === ui.rendered) return;
   ui.rendered = key; hideTip();
-  if (ui.view === "devices") renderDevices();
-  else if (ui.view === "firmware") renderFirmware();
-  else if (ui.view === "logs") renderLogs();
-  else if (ui.view === "schedules") renderSchedules();
-  else if (ui.view === "backups") renderBackups();
+  keepFocus($("view-" + ui.view), () => {
+    if (ui.view === "devices") renderDevices();
+    else if (ui.view === "firmware") renderFirmware();
+    else if (ui.view === "logs") renderLogs();
+    else if (ui.view === "schedules") renderSchedules();
+    else if (ui.view === "backups") renderBackups();
+  });
 }
-/** Logs tab: a yellow "!" while the log holds an error entry newer than the newest entry
+/** Logs tab: a red "!" while the log holds an error entry newer than the newest entry
  *  this browser has shown in the Logs tab (per browser; on the first visit nothing counts
  *  as unread; warnings and successes never set it). Opening the Logs tab marks
  *  everything as read; the entries that were unread at that moment stay lightly

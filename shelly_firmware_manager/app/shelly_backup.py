@@ -53,6 +53,11 @@ SECRET_KEYS = frozenset({"pass", "password", "key", "ha1", "pin_code"})
 # Gen2+ components of the part "network"
 GEN2_NETWORK = frozenset({"wifi", "eth"})
 
+# Names (SSID) of the Wi-Fi networks a device connects to. A restore that writes another
+# name cannot write its password (no part of a backup): the dialog warns about it.
+GEN2_WIFI_NAMES = frozenset({("wifi", "sta", "ssid"), ("wifi", "sta1", "ssid")})
+GEN1_WIFI_NAMES = frozenset({("wifi_sta", "ssid"), ("wifi_sta1", "ssid")})
+
 # Gen2+ values that are no settings: never compared and never written
 GEN2_IGNORED = frozenset({("sys", "cfg_rev"), ("sys", "device", "mac"), ("sys", "device", "fw_id")})
 
@@ -119,7 +124,7 @@ RESTART_WAIT_S = 120  # longest wait for a restarted device
 Row = dict[str, Any]
 
 # What a row of differences shows (the rest of a row is the instruction for writing it)
-ROW_FIELDS = ("key", "state", "device", "backup", "device_lines", "backup_lines", "autostart")
+ROW_FIELDS = ("key", "state", "device", "backup", "device_lines", "backup_lines", "autostart", "wifi_name")
 
 
 @dataclass(frozen=True)
@@ -366,6 +371,7 @@ def _setting_rows(gen: int, backup: Any, device: Any) -> dict[str, dict[str, lis
         part: {"rows": [], "skipped": []} for part in (PART_SETTINGS, PART_NETWORK)
     }
     network, fixed = (GEN2_NETWORK, GEN2_FIXED) if gen >= 2 else (GEN1_NETWORK, GEN1_FIXED)
+    wifi_names = GEN2_WIFI_NAMES if gen >= 2 else GEN1_WIFI_NAMES
     for path, wanted in _leaves(backup, gen < 2):
         if gen >= 2 and (
             len(path) < 2 or path in GEN2_IGNORED or path[0].startswith("script:") or path[-1] in ("id", "is_open")
@@ -380,9 +386,11 @@ def _setting_rows(gen: int, backup: Any, device: Any) -> dict[str, dict[str, lis
             if path in fixed:
                 part["skipped"].append({"key": key, "reason": "fixed"})
             else:
-                part["rows"].append(
-                    {"key": key, "device": _show(current), "backup": _show(wanted), "path": path, "value": wanted}
-                )
+                shown = {"device": _show(current), "backup": _show(wanted)}
+                row: Row = {"key": key, **shown, "path": path, "value": wanted}
+                if path in wifi_names and isinstance(wanted, str) and wanted:
+                    row["wifi_name"] = True  # the backup names another Wi-Fi network
+                part["rows"].append(row)
     return parts
 
 

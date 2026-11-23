@@ -1,10 +1,12 @@
 """Feature suite backups: Backups tab, the "Backups" dialog of a device, restore
 (differences, network tick, progress, result), download and import of one backup,
 "Back up now", the entry points in the other tabs, the unread mark of the Logs tab, the
-page behind an open dialog and the six tabs in both languages (demo "features" on 8808,
+page behind an open dialog, the keyboard focus (redraw, row menu, dialog, sorting), the
+contrast of coloured text and the six tabs in both languages (demo "features" on 8808,
 used by this suite only: its cases store, delete and restore backups)."""
 
 import json
+import re
 from types import SimpleNamespace
 
 from features.base import BACKUPS, FULL, OVERFLOW_JS, check, dialog, menu_items, open_page, refresh_state, wait_until
@@ -19,6 +21,25 @@ CELLS_OVERLAP_JS = """() => [...document.querySelectorAll('#bk-cards .bk-row:not
   return cells.some((cell, i) => { const next = cells[i + 1], last = cell.lastElementChild;
     return next && last && cell.getBoundingClientRect().top === next.getBoundingClientRect().top
       && last.getBoundingClientRect().right > next.getBoundingClientRect().left + 1; }); })"""
+
+# The focused node as "TAG|label" (accessible name, else its text)
+ACTIVE_JS = """() => { const a = document.activeElement;
+  return a ? a.tagName + '|' + (a.getAttribute('aria-label') || a.textContent.trim().slice(0, 60)) : ''; }"""
+# True if the border of the first node matching the selector has the strong line colour
+STRONG_BORDER_JS = """sel => { const probe = document.createElement('div'); probe.style.border = '1px solid var(--line-strong)';
+  document.body.append(probe); const want = getComputedStyle(probe).borderTopColor; probe.remove();
+  return getComputedStyle(document.querySelector(sel)).borderTopColor === want; }"""
+# Contrast (WCAG) of the text of the first node matching each selector against the
+# background behind it (the nearest opaque one), read from the rendered pixels' colours
+CONTRAST_JS = """sels => { const cv = document.createElement('canvas').getContext('2d', {willReadFrequently: true});
+  const rgba = c => { cv.clearRect(0, 0, 1, 1); cv.fillStyle = c; cv.fillRect(0, 0, 1, 1); return [...cv.getImageData(0, 0, 1, 1).data]; };
+  const lum = c => { const [r, g, b] = c.map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  return sels.map(sel => { const n = document.querySelector(sel); if (!n) return [sel, null];
+    let bg = [255, 255, 255, 255];
+    for (let p = n; p; p = p.parentElement) { const c = rgba(getComputedStyle(p).backgroundColor); if (c[3] === 255) { bg = c; break; } }
+    const a = lum(rgba(getComputedStyle(n).color)), b = lum(bg);
+    return [sel, Math.round((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) * 100) / 100]; }); }"""
 
 
 def _open_tab(c):
@@ -51,6 +72,8 @@ def _tab(c):
           and labels[1].startswith("Download") and "Kept" in labels[2] and labels[3].startswith("Delete"), str(labels))
     check(f"{case}: kept backup marked", row.locator(".bk-pin").count() == 1, row.inner_text()[:120])
     check(f"{case}: no overflow (backups)", f.evaluate(OVERFLOW_JS) <= 0)
+    if c.width <= 700:
+        check(f"{case}: phone tiles of the devices with the strong line", f.evaluate(STRONG_BORDER_JS, "#bk-cards .bk-row:not(.bk-head)"))
     c.page.screenshot(path=c.out / f"{case}-backups.png", full_page=not c.embedded)
     removed = f.locator("#bk-cards .bk-row", has_text="Old plug").first
     check(f"{case}: backups of a device that is no longer listed stay, no new backup",
@@ -154,6 +177,9 @@ def _restore(c):
     hidden = danger.is_hidden()
     f.locator("#dlg .bk-part input").nth(4).check()
     check(f"{case}: restore – red box with the network settings", hidden and danger.is_visible())
+    text = danger.inner_text()
+    check(f"{case}: restore – red box names the other Wi-Fi and the password that is not restored",
+          "another Wi-Fi (SSID): “Home” instead of “Home-IoT”" in text and "password is not part of the backup" in text, text[-300:])
     f.evaluate("() => document.querySelectorAll('#dlg details').forEach(d => { d.open = true; })")
     fits = f.evaluate("""() => { const b = document.getElementById('dlg-body');
       return b.scrollWidth <= b.clientWidth && [...b.querySelectorAll('table.bk-diff th')].every(h => h.scrollWidth <= h.clientWidth); }""")
@@ -247,6 +273,8 @@ def _download_import(c):
     d = dialog(f)
     check(f"{case}: import – check list and Import backup", "can be imported" in d["body"] and "Seal intact" in d["body"]
           and "Same device" in d["body"] and "Not stored yet" in d["body"] and d["buttons"][-1] == ["Import backup", False], d["body"][:300])
+    check(f"{case}: import – “Not stored yet” is a green line",
+          f.locator("#dlg .prechk > li.ok", has_text="Not stored yet").count() == 1)
     page.screenshot(path=c.out / f"{case}-backup-import.png")
     f.locator("#dlg-btns button", has_text="Import backup").click()
     f.wait_for_selector("#dlg .bk-list")
@@ -302,6 +330,10 @@ def _logs(c):
     page.route("**/api/state", state)
     refresh_state(page, f)
     check(f"{case}: Logs – mark for an unread error entry", mark.is_visible() and mark.inner_text().startswith("!"), mark.inner_text())
+    red = f.evaluate("""() => { const probe = document.createElement('div'); probe.style.background = 'var(--error-color)';
+      document.body.append(probe); const want = getComputedStyle(probe).backgroundColor; probe.remove();
+      return getComputedStyle(document.querySelector('#tab-logs .tab-unread')).backgroundColor === want; }""")
+    check(f"{case}: Logs – the mark is red", red)
     page.screenshot(path=c.out / f"{case}-logs-mark.png")
     page.unroute("**/api/state")
     f.locator("#tab-logs").click()
@@ -314,6 +346,16 @@ def _logs(c):
     page.screenshot(path=c.out / f"{case}-logs-unread.png")
     kinds = f.evaluate("() => [...document.querySelectorAll('#view-logs .filter-item')].map(b => b.firstChild.textContent)")
     check(f"{case}: Logs – filter Backups", "Backups" in kinds, str(kinds))
+    # "Back up now" for all Shellys (run before): one entry for the run, its devices below it
+    entries = f.locator("#log-list .log, #log-list .log-m")
+    run = entries.filter(has_text="Backup run").first
+    line = run.locator("summary").first.inner_text()
+    found = re.search(r"Backup run · manual · (\d+) devices · \d+ s · \d+ stored", line)
+    devices = run.locator("li").count()
+    check(f"{case}: Logs – one entry for a run of “Back up now”, one line per device", bool(found) and devices == int(found[1]),
+          f"{line} / {devices}")
+    single = entries.filter(has_text="backup stored · manual").count()
+    check(f"{case}: Logs – no entry per device of the run", single <= 2, str(single))
     f.locator("#tab-devices").click()
     f.locator("#tab-logs").click()
     f.wait_for_selector("#log-list .log, #log-list .log-m")
@@ -328,6 +370,8 @@ def _other_tabs(c):
     card.wait_for()
     text = card.inner_text()
     check(f"{case}: schedule Backup – stored, unchanged, not backed up", "3 stored · 17 unchanged · 2 not backed up" in text, text[:200])
+    if c.width <= 700:
+        check(f"{case}: phone tiles of the schedules with the strong line", f.evaluate(STRONG_BORDER_JS, "#view-schedules .sch-row:not(.sch-head)"))
     f.locator("#tab-settings").click()
     f.wait_for_selector("#view-settings .card")
     card = f.locator("#view-settings .card", has=f.locator(".card-head h2", has_text="Backups")).first
@@ -335,6 +379,65 @@ def _other_tabs(c):
     check(f"{case}: settings – card Backups with both options and the storage note", "Back up before every installation" in text
           and "Keep backups per device" in text and "encrypted" in text, text[:300])
     check(f"{case}: no overflow (settings)", f.evaluate(OVERFLOW_JS) <= 0)
+
+
+def _keyboard(c):
+    """Keyboard: the focus survives a redraw, the row menu and a dialog give it back, a
+    dialog is named by its title and keeps the focus inside at a new step, the space bar
+    sorts, the tabs name the chosen one."""
+    case, f, page = c.case, c.f, c.page
+    f.locator("#tab-devices").click()
+    f.wait_for_selector("#dev-cards table")
+    tabs = f.evaluate("() => [...document.querySelectorAll('[role=tab]')].map(t => [t.getAttribute('aria-selected'), t.getAttribute('aria-controls')])")
+    check(f"{case}: keyboard – tabs name the chosen one and their views",
+          tabs == [[str(tab == "devices").lower(), f"view-{tab}"] for tab in TABS], str(tabs))
+    button = f.locator("#dev-cards td.c-menu button[aria-label='Actions for Kitchen light']")
+    button.focus()
+    own = f.evaluate(ACTIVE_JS)
+    f.evaluate("() => document.getElementById('dev-search').dispatchEvent(new Event('input'))")  # redraws the list
+    check(f"{case}: keyboard – focus stays on its control when the list is redrawn", f.evaluate(ACTIVE_JS) == own
+          and f.evaluate("() => document.activeElement.isConnected"), f.evaluate(ACTIVE_JS))
+    page.keyboard.press("Enter")
+    f.wait_for_selector("#rowmenu:not([hidden])")
+    inside = f.evaluate("() => document.getElementById('rowmenu').contains(document.activeElement)")
+    page.keyboard.press("Escape")
+    check(f"{case}: keyboard – Escape closes the row menu and returns the focus", inside and f.locator("#rowmenu").is_hidden()
+          and f.evaluate(ACTIVE_JS) == own, f.evaluate(ACTIVE_JS))
+    page.keyboard.press("Enter")
+    f.locator("#rowmenu button", has_text="Device password").click()
+    f.wait_for_selector("#dlg[open]")
+    named = f.evaluate("() => document.getElementById(document.getElementById('dlg').getAttribute('aria-labelledby')).textContent")
+    check(f"{case}: keyboard – dialog named by its title, focus on the title", "Device password" in named
+          and f.evaluate("() => document.activeElement.id") == "dlg-title", named)
+    f.locator("#dlg-btns button").last.click()  # next step without a password: the error replaces the content
+    f.wait_for_selector("#dlg [role=alert]")
+    check(f"{case}: keyboard – a new step keeps the focus in the dialog, the error is announced",
+          f.evaluate("() => document.getElementById('dlg').contains(document.activeElement)")
+          and "No password entered." in f.locator("#dlg [role=alert]").inner_text(), f.evaluate(ACTIVE_JS))
+    page.keyboard.press("Escape")
+    wait_until(lambda: f.evaluate(ACTIVE_JS) == own)
+    check(f"{case}: keyboard – closing the dialog returns the focus", f.evaluate(ACTIVE_JS) == own, f.evaluate(ACTIVE_JS))
+    head = f.locator("#dev-cards th.c-device").first
+    head.focus()
+    page.keyboard.press("Space")
+    order = f.evaluate("() => { const a = document.activeElement; return [a.tagName, a.getAttribute('aria-sort')]; }")
+    page.keyboard.press("Space")
+    again = f.evaluate("() => { const a = document.activeElement; return [a.tagName, a.getAttribute('aria-sort')]; }")
+    check(f"{case}: keyboard – the space bar sorts, the head keeps the focus and names the order",
+          order == ["TH", "descending"] and again == ["TH", "ascending"], f"{order} {again}")
+
+
+def _contrast(c):
+    """Coloured text is mixed towards the text colour: at least 4.5:1 for the active tab,
+    links, a new version, error text and grey tags (the fallback colours of the app)."""
+    case, f = c.case, c.f
+    f.locator("#tab-devices").click()
+    f.wait_for_selector("#dev-cards table")
+    values = f.evaluate(CONTRAST_JS, [".tab.active", "#dev-cards td a", "#dev-cards .newver", "#dev-cards .tag:not([class*=' '])"])
+    f.locator("#tab-logs").click()
+    f.wait_for_selector("#log-list .log, #log-list .log-m")
+    values += f.evaluate(CONTRAST_JS, ["#log-list .bad"])
+    check(f"{case}: contrast of coloured text at least 4.5:1", all(value is not None and value >= 4.5 for _sel, value in values), str(values))
 
 
 def _languages(browser, out, width, scheme, embedded):
@@ -383,6 +486,10 @@ def backups(browser, out):
         _entry_points(c)
         _page_behind_dialog(c)
         _other_tabs(c)
+        if not embedded:
+            _contrast(c)  # the colours of the app itself, not those of a theme
+        if width > 700:
+            _keyboard(c)
         if number == len(cases) - 1:
             _restore(c)
             _download_import(c)

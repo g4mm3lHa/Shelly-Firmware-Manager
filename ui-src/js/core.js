@@ -376,11 +376,49 @@ addEventListener("scroll", () => { if (isTap()) hideTip(); }, true);
 $("fw-info").append(icon("info"));
 attachTip($("fw-info"), () => $("fw-info").dataset.tip);
 
+// ---------------------------------------------------------------- Keyboard focus
+// The lists are redrawn as a whole. The node that had the keyboard focus is replaced by
+// a new one then, so the focus is put on the node that took its place: found by its row
+// (data-key of the row), its tag and its label.
+/** What a control is recognised by after a redraw: its accessible name, else its text. */
+const focusLabel = node => node.getAttribute("aria-label") ?? node.textContent.trim().slice(0, 80);
+/** Where a node stands below root: its row (nearest data-key), tag, label and place
+ *  among the nodes of that tag and label in the row (without a row: in root). */
+function focusMark(root, node) {
+  const row = node.closest("[data-key]"), scope = row && root.contains(row) ? row : root, label = focusLabel(node);
+  const same = [...scope.querySelectorAll(node.tagName)].filter(n => focusLabel(n) === label);
+  return {key: scope === root ? null : row.dataset.key, tag: node.tagName, label, nth: same.indexOf(node)};
+}
+/** The node standing where the marked one stood (null: its row or the node is gone). */
+function focusTarget(root, mark) {
+  const scope = mark.key == null ? root : [...root.querySelectorAll("[data-key]")].find(n => n.dataset.key === mark.key);
+  if (!scope) return null;
+  const same = [...scope.querySelectorAll(mark.tag)].filter(n => focusLabel(n) === mark.label);
+  return same[mark.nth] || same[0] || null;
+}
+/** Redraw something below root with draw() and keep the keyboard focus where it was.
+ *  A tooltip that was not shown before does not appear by the returning focus. */
+export function keepFocus(root, draw) {
+  const active = document.activeElement;
+  const mark = active && active !== root && root.contains(active) ? focusMark(root, active) : null, tipShown = tipOwner === active;
+  draw();
+  if (!mark || root.contains(document.activeElement)) return;   // nothing to keep, or the redraw set the focus itself
+  const node = focusTarget(root, mark);
+  if (!node) return;
+  node.focus({preventScroll: true});
+  if (!tipShown) hideTip();
+}
+
 // ---------------------------------------------------------------- Dialog
 // One dialog for everything: title + close, content, buttons bottom right.
 // buttons: [{text, kind: "primary"|"danger"|"", action}] – a button without
 // action closes the dialog; actions decide themselves (close or new content).
+// Keyboard and screen readers: the dialog is named by its title; a new dialog and every
+// new step start with the focus on the title (a dialog may then focus a field of its
+// own), so the focus never falls back to the page behind it. Closing returns the focus
+// to where it was.
 const dlg = $("dlg");
+let opener = null;   // where the focus was when the dialog opened: {root, mark} (see keepFocus)
 /** Open (or replace the content of) the dialog. titleIcon: optional icon name before
  *  the title; its colour comes from the class ti-<name> (style.css). */
 export function modal(title, content, buttons = [{text: t("Close")}], titleIcon) {
@@ -397,7 +435,14 @@ export function modal(title, content, buttons = [{text: t("Close")}], titleIcon)
     };
     return b;
   }));
-  if (!dlg.open) { lockPage(true); dlg.showModal(); }
+  const opening = !dlg.open;
+  if (opening) {
+    const active = document.activeElement, root = active && active.closest("section");
+    opener = root ? {root, mark: focusMark(root, active)} : null;
+    lockPage(true); dlg.showModal();
+  }
+  // A step replaced the button that had the focus: the focus stays inside the dialog
+  if (opening || !dlg.contains(document.activeElement)) head.focus({preventScroll: true});
 }
 /** Close the dialog and refresh. */
 export function closeModal() { if (dlg.open) dlg.close(); load(); }
@@ -410,8 +455,15 @@ function lockPage(on) {
   document.body.style.paddingRight = on ? `${Math.max(0, innerWidth - root.clientWidth)}px` : "";
   root.classList.toggle("dlg-open", on);
 }
-// Every way of closing ends the lock: a button, the X and the Escape key
-dlg.addEventListener("close", () => lockPage(false));
+// Every way of closing ends the lock: a button, the X and the Escape key. The browser
+// returns the focus to the node that had it; if the list was redrawn meanwhile, the node
+// in its place gets it.
+dlg.addEventListener("close", () => {
+  lockPage(false);
+  const from = opener; opener = null;
+  if (!from || (document.activeElement && document.activeElement !== document.body)) return;
+  const node = focusTarget(from.root, from.mark); if (node) node.focus({preventScroll: true});
+});
 $("dlg-x").append(icon("close"));
 $("dlg-x").onclick = closeModal;
 // Icon of a message kind; "info" (neutral notes such as "Nothing changed.") has none
@@ -421,10 +473,14 @@ const MESSAGE_ICONS = {success: "check", warning: "alert", error: "close"};
 export function message(title, text, kind = "info", titleIcon) {
   modal(title, [messageBody(text, kind)], undefined, titleIcon);
 }
-/** Content of a message dialog (for dialogs that add more below it). */
+/** Content of a message dialog (for dialogs that add more below it). Screen readers
+ *  announce it: an error or warning at once (alert), a success when idle (status). */
 export function messageBody(text, kind = "info") {
   const name = MESSAGE_ICONS[kind];
-  return name ? box("div", `msg msg-${kind}`, box("span", "msg-icon", icon(name)), el("p", text)) : el("p", text, "hint");
+  if (!name) return el("p", text, "hint");
+  const node = box("div", `msg msg-${kind}`, box("span", "msg-icon", icon(name)), el("p", text));
+  node.setAttribute("role", kind === "success" ? "status" : "alert");
+  return node;
 }
 // Short, non-blocking feedback (e.g. Reload Device Info – no popup)
 let toastTimer = 0;

@@ -6,7 +6,8 @@ Only `shelly_firmware_manager/` is built into the image; nothing here is shipped
 |---|---|
 | `check.sh [tests\|ui\|full\|build]` | all checks in the efficient order: ruff → mypy (if installed; required for a release) → build check → version match (config.yaml = main.py) → pytest → UI (`ui`: quick, `full`: final gate); `build` rebuilds `app/static` first |
 | `run.sh <cmd>` | runs a command with the pinned dependencies from the bundled wheels (extracted once to `.devdeps/`, pure-Python mode, no install) |
-| `asyncio_shim.py` | stand-in for pytest-asyncio's auto mode where it is not installed (`-p asyncio_shim`, used by `check.sh` automatically) |
+| `asyncio_shim.py` | stand-in for pytest-asyncio's auto mode where it is not installed (`-p asyncio_shim`, used by `check.sh` automatically; the CI workflow installs the real pytest-asyncio) |
+| `image_test.py <image>` | start test of a built image (needs Docker): starts it like the Supervisor without Home Assistant and checks start, both servers, C extensions, precompiled bytecode, no pip, clean stop, no error in the log; the Images workflow runs it between build and push |
 | `mockup.py new\|sheet` | UI mockups in one command: `new DIR` makes a scratch copy of HEAD; after changing `ui-src` there, `sheet OUT.png LABEL=DIR [...] [--shot NAME=STEPS]` builds every copy, captures 1440 / 412 / 360 embedded and writes one labelled contact sheet (only look at that sheet) |
 | `symbols.py [module] [-g text] [-c]` | lists classes, functions and constants of the backend modules with line number and first docstring line, read from the source (always current; replaces name lists in the code map) |
 | `bump.py X.Y.Z[-rcN]` | sets the version in `config.yaml` and `app/main.py`; for a release candidate it also puts an empty block "Changes in rcN" on top of the changelog section of the version (texts are written by hand) |

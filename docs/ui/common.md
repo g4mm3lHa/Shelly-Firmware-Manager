@@ -25,6 +25,15 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   status pill right, sections Firmware, Device (Model with "Gen n", Firmware ID, NTP;
   empty rows hidden) and History. The phone list ("Details" in the tile) shows the same
   values.
+- **Keyboard (3.11.0, `reports/optimierung-analyse` F5 a, approved 2026-11-23):** a redraw
+  of a tab keeps the keyboard focus on the same control (rows and tiles are matched by
+  their `data-key`, the control by its label). A dialog is named by its title and starts
+  with the focus on the title unless it focuses a field itself; a step that removes the
+  focused control moves the focus to the title; closing returns it to the control that
+  opened the dialog. Escape closes the row menu and returns the focus to its ⋮ button.
+  Column heads sort with Enter and Space and carry `aria-sort`; the tabs carry
+  `aria-selected` and name their panel. Error and warning messages in dialogs are
+  announced (`role="alert"`), successes as status. No arrow keys in menus and tabs.
 - **Row menu (⋮), five groups with separators:** 1 Check for updates, Install update,
   Offer update now (only while an update is on hold), Downgrade (hint below it) | 2 Device details, Reload device info ("Not available" hint
   below it), Open web UI | 3 NTP server, Power-on action, Eco mode, Device password,
@@ -89,7 +98,8 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
 - **Icons in buttons (T8):** before the text ("Upload firmware", "Export store", "Import
   store", "Device passwords").
 - **Controls:** fields and selects with the strong line colour on every width (at least
-  3:1, mockup `M6`); buttons, cards and checkboxes keep the fine line. Heights (U10): desktop
+  3:1, mockup `M6`); buttons, cards and checkboxes keep the fine line; phone tiles of
+  all tabs (Devices, Logs, Schedules, Backups) carry the strong line. Heights (U10): desktop
   33 px for text buttons (also "Check now" and dialog buttons), fields, selects and the
   time field (mockup `M8`; icons, pills, "Install" and tabs unchanged); phones 44 px for
   all of them and the file chooser. Checkboxes and radios in the theme's primary colour;
@@ -106,6 +116,13 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   lines (fine = theme divider, strong = at least 3:1), one warning text colour (warning
   mixed half towards the text colour, also for tags, "Unsaved changes" and the header
   status), control height (33 / 44 px). New styles use these tokens.
+- **Contrast of coloured text (3.11.0, mockups `3.11.0-kontrast` variant A, approved
+  2026-11-23):** coloured text (links, new version, active tab, chosen entry, error text,
+  grey tags) is mixed towards the text colour (`--link-text`, `--error-text`,
+  `--tag-text`) and reaches at least 4.5:1 on cards and unread log rows in the light and
+  dark fallback colours; the theme colour is used pure only for lines, fills and icons.
+  Icons that are links or mark a chosen entry (link icons, tick of the chosen filter,
+  "Kept" lock, opened toolbar icon) use the link text colour.
 
 ## Tooltips
 - **One tooltip (2026-11-22, U4):** every tooltip is the app's own dark tooltip, none
@@ -134,8 +151,9 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   update?", the hint under the fields names the conditions (F3) and where to cancel. A
   beta needs its tick also when scheduling. The section stands above the changelog
   (live test rc1, approved 2026-11-22).
-- **Logs tab, unread entries (live test rc1, approved 2026-11-22; 3.11.0):** a small yellow
-  round "!" after the tab name (phones: after the icon) while the log holds an error entry
+- **Logs tab, unread entries (live test rc1, approved 2026-11-22; 3.11.0, red: F10 b,
+  approved 2026-11-23):** a small red round "!" (white sign) after the tab name (phones:
+  after the icon) while the log holds an error entry
   newer than the newest entry this browser has shown in the Logs tab – warnings and
   successes never set it; opening the tab clears it. The entries that were unread at that
   moment are lightly highlighted (primary colour, 8 %) until the tab is left.

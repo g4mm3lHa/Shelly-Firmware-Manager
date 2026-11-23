@@ -99,7 +99,7 @@ function backupRow(d, b, back) {
       catch (e) { toast(e.message, true); }
     }, "bk-keep" + (b.kept ? " on" : ""));
   keep.setAttribute("aria-pressed", String(!!b.kept));
-  return box("div", "bk-item",
+  const row = box("div", "bk-item",
     cell("", "bk-date", el("span", when, "nowrap"), b.kept ? box("span", "bk-pin", icon("lock"), el("span", t("Kept"))) : null),
     cell(t("Reason"), "bk-reason", reasonTag(b)),
     cell(t("Firmware"), "bk-fw", el("span", b.fw || "–", "nowrap")),
@@ -109,6 +109,8 @@ function backupRow(d, b, back) {
       iconButton("download", t("Download the backup of {time}", {time: when}), () => openDownload(d, b, back)),
       keep,
       iconButton("delete", t("Delete the backup of {time}", {time: when}), () => deleteBackup(d, b, back), "red")));
+  row.dataset.key = b.id;   // the keyboard focus stays in this row when the list is redrawn
+  return row;
 }
 const listHead = () => box("div", "bk-item bk-head", ...[[t("Date"), "bk-date"], [t("Reason"), "bk-reason"], [t("Firmware"), "bk-fw"],
   [t("Contents"), "bk-parts"], [t("Size"), "bk-size"], ["", "bk-btns"]].map(([text, c]) => el("div", text, "bk-c " + c)));
@@ -155,6 +157,7 @@ function deviceRow(d, keep) {
     cell(t("Stored"), "bk-count", el("span", storedText(list, keep))),
     cell(t("Size"), "bk-size", el("span", sizeText(total), "nowrap")),
     cell("", "bk-btns", now));
+  row.dataset.key = key;
   return open ? [row, box("div", "bk-list", listHead(), ...list.map(b => backupRow(d, b, toTab)))] : [row];
 }
 /** Row of a device without a backup: the reason and "Back up now". */
@@ -164,10 +167,12 @@ function noneRow(d) {
   now.disabled = !!blocker; if (blocker) setTip(now, blocker);
   now.setAttribute("aria-label", t("Back up {name} now", {name: d.name}));
   now.onclick = () => backupOne(d, toTab);
-  return box("div", "bk-row bk-none",
+  const row = box("div", "bk-row bk-none",
     cell("", "bk-name", el("div", d.name, "name"), el("div", modelText(d), "sub")),
     cell("", "bk-why-none", box("span", "bk-warn", icon("warn")), el("span", noneText(d.none))),
     cell("", "bk-btns", now));
+  row.dataset.key = keyOf(d);
+  return row;
 }
 const rowHead = labels => box("div", "bk-row bk-head", ...labels.map(([text, c]) => el("div", text, "bk-c " + c)));
 const bkFilter = filterControl([["all", t("All")], ["with", t("With backup")], ["none", t("No backup")], ["old", t("Older than 30 days")]],
@@ -316,7 +321,7 @@ function importSummary(d, name, token, r, back) {
   else {
     checks.append(checkLine(true, t("Same device"), t("MAC address and model match this device.")));
     checks.append(r.known ? checkLine(false, t("Already stored"), t("This backup is in the list already – there is nothing to import."))
-      : checkLine(null, t("Not stored yet"), t("This backup is no longer in the app – it is added to the list with its original date.")));
+      : checkLine(true, t("Not stored yet"), t("This backup is no longer in the app – it is added to the list with its original date.")));
   }
   const possible = !o && !r.known;
   modal(title, [messageBody(possible ? t("{file} can be imported.", {file: name}) : t("{file} cannot be imported.", {file: name}), possible ? "success" : "error"),
@@ -509,7 +514,10 @@ export async function openRestore(d, b, back) {
   const first = blocks.find(x => x.rows.length); if (first) first.node.querySelector("details").open = true;
   const protection = r.protection ? box("div", "bk-part same", box("label", "check bk-part-head", (() => { const c = el("input"); c.type = "checkbox"; c.disabled = true; return c; })(),
     el("span", t("Password protection"), "bk-part-title"), el("span", r.protection === "same" ? t("identical") : t("differs – not restored"), "sub"))) : null;
-  const danger = box("div", "warnbox danger", el("span", t("Wrong network settings can make the device unreachable – then only a reset at the device helps. Restore them only if the backup's network still exists.")));
+  // The backup names another Wi-Fi than the device uses now: its password cannot be restored
+  const wifiNames = network.rows.filter(row => row.wifi_name).map(row => el("p", t("The backup names another Wi-Fi (SSID): “{backup}” instead of “{device}”. The Wi-Fi password is not part of the backup and stays as it is on the device – it can only connect to “{backup}” with the password it has stored now. If that does not fit, the device becomes unreachable.",
+    {backup: row.backup, device: row.device}), "bk-wifi-name"));
+  const danger = box("div", "warnbox danger", el("span", t("Wrong network settings can make the device unreachable – then only a reset at the device helps. Restore them only if the backup's network still exists.")), ...wifiNames);
   const content = [info, section(t("Check"), checks),
     section(t("What to restore"), box("div", "bk-parts-list", ...blocks.map(x => x.node))),
     section(t("Network and access"), box("div", "bk-parts-list", network.node, protection), danger,

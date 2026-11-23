@@ -31,6 +31,7 @@ import shelly_backup
 import store_transfer
 import timetable
 from backup_store import BackupError, normalize_mac
+from events import worst
 from shelly import AuthError, ShellyError, clip, error_text
 
 from manager_core import Device, STATUS_INSTALLING, severity_of, unexpected_text, unreachable
@@ -79,6 +80,16 @@ def _file_name(dev: Device, entry: dict[str, Any], day: str) -> str:
     """Name of a downloaded backup file: backup-<Shelly name>-<date>.sfmb."""
     name = re.sub(r"[^A-Za-z0-9._-]+", "_", str(dev.get("shelly_name") or dev.get("name") or entry["mac"]))
     return f"backup-{name.strip('_')[:48] or entry['mac']}-{day}{backup_store.EXTENSION}"
+
+
+class _UnexpectedAnswer(ShellyError):
+    """A device answered in a shape no code path expects (logged with its traceback):
+    an error in the log, not a warning."""
+
+
+def _failure_severity(err: BaseException) -> str:
+    """Log severity of a backup that was not stored."""
+    return "error" if isinstance(err, _UnexpectedAnswer) else severity_of(err)
 
 
 class Backups(DeviceSettings):
@@ -136,9 +147,9 @@ class Backups(DeviceSettings):
         marked as kept stay). Returns the entry of the new backup – None if
         only_changed is set and the device reports the same settings as in its newest
         backup. A failure is noted on the device (backup_failed), logged (unless
-        log_entry is False: the run of a schedule writes one entry for all its
-        devices) and raised. No guard here: the callers decide whether the device may
-        be read now."""
+        log_entry is False: a run over several devices writes one entry for all of
+        them) and raised. No guard here: the callers decide whether the device may be
+        read now."""
         name = dev.get("name")
         try:
             meta, data = await self._read_backup(device_id, dev)
@@ -157,7 +168,7 @@ class Backups(DeviceSettings):
             log.exception("%s: unexpected error while backing up the settings", name)
             text = unexpected_text(err)
             self._backup_failed(dev, reason, note, user, err, text, "error", log_entry)
-            raise ShellyError(text) from None
+            raise _UnexpectedAnswer(text) from None
         dev.pop("backup_failed", None)
         log.info("%s: settings backed up (%s, %d bytes) by %s", name, reason, entry["size"], user)
         if log_entry:
@@ -236,11 +247,12 @@ class Backups(DeviceSettings):
         log_entry: bool = True,
     ) -> dict[str, Any]:
         """The backup of one device of a run ("Back up now" for several devices,
-        schedule), which never fails as a whole: {"id", "device", "result", "detail",
-        "size", "parts", "last"} with result RESULT_*; detail is the error of a backup
-        that was not stored, last the time of the newest backup the device keeps."""
+        schedule), which never fails as a whole: {"id", "device", "result", "severity",
+        "detail", "size", "parts", "last"} with result RESULT_*; severity is the one
+        of the device in the log entry of the run, detail the error of a backup that
+        was not stored, last the time of the newest backup the device keeps."""
         dev = self.devices.get(device_id) or {}
-        result: dict[str, Any] = {"id": device_id, "device": str(dev.get("name") or "?")}
+        result: dict[str, Any] = {"id": device_id, "device": str(dev.get("name") or "?"), "severity": "success"}
         try:
             if device_id in self.installing or dev.get("status") == STATUS_INSTALLING:
                 raise ShellyError("Installation in progress")
@@ -260,7 +272,7 @@ class Backups(DeviceSettings):
                 result["result"] = RESULT_ASLEEP if dev.get("battery") is True else RESULT_UNREACHABLE
             else:
                 result["result"] = RESULT_REFUSED
-            result["detail"] = _failure_text(err)
+            result.update(severity=_failure_severity(err), detail=_failure_text(err))
             newest = next(iter(self.backups.of(dev.get("mac"))), None)
             if newest is not None:
                 result["last"] = newest["at"]
@@ -297,23 +309,65 @@ class Backups(DeviceSettings):
 
     async def run_backups(self, ids: list[str], user: str = "unknown") -> None:
         """Back up the devices of a reserved run, BACKUP_PARALLEL at a time; the
-        result per device is collected in backup_job for the dialog."""
+        result per device is collected in backup_job for the dialog. The run writes
+        one log entry that names every device – also when the app stops during it."""
         job = self.backup_job
         if job is None:
             return
         slots = asyncio.Semaphore(BACKUP_PARALLEL)
+        started = time.monotonic()
+        interrupted = False
 
         async def one(device_id: str) -> None:
             """One device of the run."""
             async with slots:
-                result = await self._backup_result(device_id, "manual", None, user)
+                result = await self._backup_result(device_id, "manual", None, user, log_entry=False)
             job["results"].append(result)
             job["done"] += 1
 
         try:
             await asyncio.gather(*(one(device_id) for device_id in ids))
+        except asyncio.CancelledError:
+            interrupted = True
+            raise
         finally:
             job["finished"] = True
+            self._log_backup_run(job["results"], len(ids), user, time.monotonic() - started, interrupted)
+
+    def _log_backup_run(
+        self, results: list[dict[str, Any]], chosen: int, user: str, duration: float, interrupted: bool
+    ) -> None:
+        """The log entry of a run of "Back up now" over several devices: the counts
+        and one finding per device ({"device", "result", "severity", "detail", "size",
+        "parts"}), sorted by name. Its severity is the highest of its devices; a run
+        the app stopped is at least a warning."""
+        stored = sum(1 for r in results if r["result"] == RESULT_STORED)
+        asleep = sum(1 for r in results if r["result"] == RESULT_ASLEEP)
+        failed = len(results) - stored - asleep
+        parts = [f"{stored} stored"]
+        if asleep:
+            parts.append(f"{asleep} asleep")
+        if failed:
+            parts.append(f"{failed} not backed up")
+        if interrupted:
+            parts.append("interrupted – the app stopped")
+        text = " · ".join(parts)
+        fields = ("device", "result", "severity", "detail", "size", "parts")
+        findings = [{f: r[f] for f in fields if r.get(f) is not None} for r in results]
+        findings.sort(key=lambda f: str(f["device"]).casefold())
+        self.events.add(
+            "backup",
+            severity=worst("warning" if interrupted else "success", *(str(r["severity"]) for r in results)),
+            event="run",
+            devices=chosen,
+            stored=stored,
+            duration=round(duration),
+            result=text,
+            findings=findings or None,
+            interrupted=True if interrupted else None,
+            user=user,
+        )
+        log.info("Backup run of %d device(s) by %s: %s", chosen, user, text)
 
     def clear_backup_run(self) -> None:
         """The dialog showed the result of the finished run: forget it."""

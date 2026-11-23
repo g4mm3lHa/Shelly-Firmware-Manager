@@ -5,6 +5,26 @@
 Release candidate. Backups of the device settings: by hand, before every installation
 and on a schedule, with comparison and restore part by part.
 
+Changes in rc2
+
+Added
+- Keyboard: the focus stays on its control when the page redraws; a dialog starts on its
+  title and returns the focus to the control that opened it when it closes.
+- Keyboard: Escape closes the row menu and returns to its button; the column heads of
+  the Devices table also sort with the space bar; messages in dialogs are announced.
+
+Changed
+- Restore: the red network warning says so when the backup names another Wi-Fi (SSID)
+  than the device; the Wi-Fi password is not part of a backup and stays as it is.
+- Logs: "Back up now" for several devices writes one entry per run; it opens to the
+  result of each device.
+- Logs tab: the "!" for unread errors is red. Import backup: "Not stored yet" is green.
+- Contrast: coloured text (links, new version, active tab, error text, grey tags) is
+  mixed towards the text colour and reaches at least 4.5:1 in light and dark.
+- Phones: the tiles of the Schedules and Backups tabs have the strong border of the
+  Devices and Logs tiles.
+- The app starts faster: the Python modules are compiled when the image is built.
+
 Changes in rc1
 
 Added
