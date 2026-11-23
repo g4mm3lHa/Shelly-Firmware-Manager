@@ -36,11 +36,11 @@ Rules of the project:
 | `shelly_firmware_manager/` | Only what Home Assistant needs: app definition, `README.md`/`DOCS.md`/`CHANGELOG.md` for the app store, Dockerfile, AppArmor profile, pinned wheels, `app/` with the Python sources and the built UI |
 | `ui-src/` | UI sources (ES modules in `js/`, `style.css`) |
 | `tests/` | Backend tests by area; all network access is mocked |
-| `qa/` | UI checks (Playwright), demo servers with fake data, screenshots of the current version, test report of the current release |
+| `qa/` | UI checks (Playwright), demo servers with fake data, test report of the current release |
 | `tools/` | `build_ui.py` and the development helpers in `dev/` |
 | `docs/` | Code map (`CODEMAP.md`, `codemap/`), approved UI details (`UI_DECISIONS.md` and `ui/`), images of the README (`images/`) |
 
-Start with `docs/CODEMAP.md`: it maps modules, stored data, API routes and tests.
+Start with `docs/CODEMAP.md`: it maps modules, stored data, API routes and tests; `python3 tools/dev/symbols.py` lists the current classes, functions and constants with line numbers.
 `docs/UI_DECISIONS.md` and its parts in `docs/ui/` list UI details that were decided on
 purpose – please do not change them without an issue.
 
