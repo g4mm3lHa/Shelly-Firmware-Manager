@@ -85,7 +85,7 @@ const backupRunLine = e => `Backup run · manual · ${plural(e.devices ?? 0, "de
 const backupRunFindings = e => box("ul", null, ...(e.findings || []).map(f => el("li",
   f.result === "stored" ? `${f.device}: stored · ${fmtSize(f.size)} · ${backupParts(f.parts)}`
     : `${f.device}: not backed up – ${f.result === "asleep" ? "battery device asleep" : f.detail || f.result}`,
-  f.severity === "error" ? "bad" : f.severity === "warning" ? "warnc" : "okc")));
+  SEVERITY_COLOURS[f.severity] || "okc")));
 /** Lines below a backup entry: the error, and for a restore what was not applied. */
 const backupDetails = e => [
   e.event === "restored" && e.confirmed === false ? el("div", "The device could not be read again – nothing is confirmed", "bad") : null,
@@ -100,8 +100,21 @@ function scheduleLine(e) {
   if (e.event === "created") parts.push(e.action, e.repeat, e.devices);
   return parts.filter(Boolean).join(" · ");
 }
-/** Devices of a schedule run, each coloured by its result, then the devices left out. */
-const runFindings = e => box("ul", null, ...(e.findings || []).map(f => el("li", `${f.device}: ${f.detail}`, RUN_RESULTS[f.result] || "neutral")),
+// Colour of a device line by its own severity (backup runs, checks)
+const SEVERITY_COLOURS = {success: "okc", warning: "warnc", error: "bad"};
+/** Text of one device of a schedule run. Backup: unchanged = its settings are the same
+ *  as in its newest backup, so none is stored; not backed up with the reason, as in
+ *  "Back up now". */
+function runDetail(f) {
+  if (!f.severity) return f.detail;   // restart, cloud, Bluetooth
+  if (f.result === "unchanged") return "unchanged – same as the last backup";
+  if (f.result === "asleep") return "not backed up – battery device asleep";
+  return f.result === "ok" ? "stored" : `not backed up – ${f.detail}`;
+}
+/** Devices of a schedule run, each coloured by its result (a backup by its severity, as
+ *  in "Back up now"), then the devices left out (not tried). */
+const runFindings = e => box("ul", null, ...(e.findings || []).map(f => el("li", `${f.device}: ${runDetail(f)}`,
+  f.severity ? SEVERITY_COLOURS[f.severity] || "neutral" : RUN_RESULTS[f.result] || "neutral")),
   ...(e.left_out || []).map(x => el("li", `${x.device}: left out – ${x.reason}`, "neutral")));
 // "install": check after installations, only in entries of 3.1.0-rc2 to 3.1.1-rc2
 const TRIGGER_LABELS = {manual: "Manual", scheduled: "Scheduled", device: "Single-device", install: "After-installation",

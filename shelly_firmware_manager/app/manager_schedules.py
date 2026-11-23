@@ -32,8 +32,8 @@ run; its counts relate to all chosen devices, left-out ones included ("2 of 3
 restarted · 1 left out"). A Home Assistant notification once per run if a device was
 not reached or refused the action. A backup run stores only devices whose settings
 changed since their newest backup and tries battery devices too – one that is asleep is
-left out, not failed ("3 stored · 17 unchanged · 1 not backed up"). A missed run is only logged; a run cut off by the
-app stop is logged as interrupted.
+counted on its own, not failed ("3 stored · 17 unchanged · 1 asleep · 1 not backed up").
+A missed run is only logged; a run cut off by the app stop is logged as interrupted.
 
 A device removed from the list ("Remove from list") is struck from the schedules that
 name it (logged as a change; a schedule left without devices is switched off), a device
@@ -709,14 +709,10 @@ class Schedules(Installs):
             else:
                 name = str(item.get("name") or "")
                 results = list(await asyncio.gather(*(self._act(d, action, user, name) for d in targets)))
-            if action == "backup":
-                # A sleeping battery device is left out, not failed: it is backed up when a run reaches it awake
-                asleep = [r for r in results if r["result"] == "asleep"]
-                left += [{"device": r["device"], "reason": "battery device asleep"} for r in asleep]
-                results = [r for r in results if r["result"] != "asleep"]
             chosen = len(targets) + len(left)
             self._record_run(item, trigger, user, results, left, time.monotonic() - started, chosen)
-            failed = [r for r in results if r["result"] not in ("ok", "unchanged")]
+            # A sleeping battery device has not failed: it is backed up when a run reaches it awake
+            failed = [r for r in results if r["result"] not in ("ok", "unchanged", "asleep")]
             if failed:
                 names = ", ".join(markdown_text(r["device"], 120) for r in failed[:20])
                 more = f" and {len(failed) - 20} more" if len(failed) > 20 else ""
@@ -748,8 +744,13 @@ class Schedules(Installs):
     ) -> None:
         """Log entry and "Last run" of a finished run; "n of m" counts all chosen
         devices, the left-out ones included. interrupted: the app stopped during the
-        run (results holds the devices done until then)."""
+        run (results holds the devices done until then). Backup: a battery device that
+        was asleep is counted on its own ("1 asleep", as in "Back up now") and does not
+        change the severity of the run; "left out" are the devices the run did not try
+        (the same as "left out at the moment" in the Schedules tab before the run)."""
         action = str(item["action"])
+        asleep = sum(1 for r in results if r["result"] == "asleep")
+        awake = [r for r in results if r["result"] != "asleep"]
         done = sum(1 for r in results if r["result"] == "ok")
         unchanged = sum(1 for r in results if r["result"] == "unchanged")
         unreachable = sum(1 for r in results if r["result"] == "unreachable")
@@ -758,7 +759,10 @@ class Schedules(Installs):
         if not results and chosen <= len(left):
             parts = ["No device to run on"]
         elif action == "backup":
-            parts = [f"{done} stored", f"{unchanged} unchanged", f"{unreachable + refused} not backed up"]
+            parts = [f"{done} stored", f"{unchanged} unchanged"]
+            if asleep:
+                parts.append(f"{asleep} asleep")
+            parts.append(f"{unreachable + refused} not backed up")
         else:
             parts = [f"{done} of {chosen} {verb}"]
             if unreachable:
@@ -770,9 +774,9 @@ class Schedules(Installs):
         if interrupted:
             parts.append("interrupted – the app stopped")
         text = " · ".join(parts)
-        severity = "success" if results and done + unchanged == len(results) and not interrupted else "warning"
+        severity = "success" if awake and done + unchanged == len(awake) and not interrupted else "warning"
         if action == "backup":  # a device that should have answered makes the run an error
-            severity = worst(severity, *(r.get("severity", "success") for r in results))
+            severity = worst(severity, *(r.get("severity", "success") for r in awake))
         self.events.add(
             "schedule",
             severity=severity,
@@ -799,6 +803,7 @@ class Schedules(Installs):
                 "total": chosen,  # chosen devices, left-out ones included
                 "run": len(results),  # devices the action ran on
                 "unchanged": unchanged,  # backup: devices whose settings did not change
+                "asleep": asleep,  # backup: battery devices that did not answer
                 "unreachable": unreachable,
                 "refused": refused,
                 "left": len(left),

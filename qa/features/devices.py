@@ -137,6 +137,10 @@ def _action_popups(c):
             page.screenshot(path=out / f"{case}-popup-debug.png")
         if label == "Eco mode":
             page.screenshot(path=out / f"{case}-popup-eco.png")
+        if label == "Power-on action":  # the select stays inside the dialog, its text shortened
+            inside = f.evaluate("""() => { const d = document.getElementById('dlg-body').getBoundingClientRect();
+              return [...document.querySelectorAll('#dlg-body select')].every(s => s.getBoundingClientRect().right <= d.right + 0.5); }""")
+            check(f"{case}: Power-on action select inside the dialog", inside)
         f.locator("#dlg-btns button", has_text="Cancel").click()
     # Notes of greyed-out icons: strip with the reason
     for name, label, pill, text in (("Garden plug", "Websocket debug log", "Not supported", "no websocket debug log"),

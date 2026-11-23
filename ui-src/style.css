@@ -14,8 +14,10 @@
    menus, popovers, notices, tooltips), medium (pills, tags, tiles, cards, dialogs) and the
    button radius of the HA theme (buttons and outlined tile buttons). Lines: fine (the
    theme's divider colour) and strong (at least 3:1 against the card in light and dark
-   themes: fields, tiles, outlined tile buttons). Warning text: mixed half towards the
-   text colour like the status pills (at least 4.5:1 on light and dark cards). Coloured
+   themes: fields, tiles, outlined tile buttons). Warning text: one colour for every
+   warning text, tag and pill – the warning colour turned towards orange (30 % error
+   colour), then mixed 55 % towards the text colour: at least 5:1 on light cards and
+   unread log rows and clearly apart from the green success text. Coloured
    text is mixed towards the text colour in the same way, so that it reaches 4.5:1 also
    on an unread log row: link text (links, new version, active tab, chosen entry, icons
    that are links), error text and the text of grey tags; the pure theme colour is for
@@ -28,7 +30,7 @@
 :root{--fs-tag:11px;--fs-small:12px;--fs-text:14px;--fs-title:15px;
   --radius-s:8px;--radius-m:12px;--radius-btn:var(--ha-button-border-radius,18px);
   --line:var(--divider-color);--line-strong:color-mix(in srgb,var(--primary-text-color) 50%,var(--card-background-color));
-  --warn-text:color-mix(in srgb,var(--warning-color) 50%,var(--primary-text-color));--control-h:33px;
+  --warn-text:color-mix(in srgb,color-mix(in srgb,var(--warning-color) 70%,var(--error-color)) 55%,var(--primary-text-color));--control-h:33px;
   --link-text:color-mix(in srgb,var(--primary-color) 60%,var(--primary-text-color));--error-text:color-mix(in srgb,var(--error-color) 70%,var(--primary-text-color));
   --tag-text:color-mix(in srgb,var(--secondary-text-color) 70%,var(--primary-text-color));
   --success-text:color-mix(in srgb,var(--success-color) 60%,var(--primary-text-color));
@@ -167,18 +169,20 @@ button.filter-item[aria-checked=true]::after{margin-left:0;padding-left:8px}
 .pill{display:inline-flex;align-items:center;gap:4px;padding:2px 10px;border-radius:var(--radius-m);font-size:var(--fs-small);
   border:0;font-weight:500;cursor:default;white-space:nowrap;
   background:color-mix(in srgb,var(--tone) 16%,transparent);
-  /* Text mixed half towards the text colour: >= 4.5:1 (WCAG AA) on light and dark cards */
-  color:color-mix(in srgb,var(--tone) 50%,var(--primary-text-color))}
+  /* Text mixed half towards the text colour: >= 4.5:1 (WCAG AA) on light and dark cards;
+     warning pills take the warning text colour */
+  color:var(--tone-text)}
 button.pill{cursor:pointer}
 /* Tones: neutral by default, then one rule per tone for every state class */
-.pill,.act,.fstrip,.prechk>li.wait{--tone:var(--secondary-text-color)}
+.pill,.act,.fstrip,.prechk>li.wait{--tone:var(--secondary-text-color);--tone-text:color-mix(in srgb,var(--tone) 50%,var(--primary-text-color))}
 .tone-success,.p-uptodate,.p-updated,.act.s-on,.act.c-good,.fstrip.t-good,.msg-success,.prechk>li.ok{--tone:var(--success-color)}
 .act.restart,.fstrip.t-neutral{--tone:var(--primary-text-color)}
-.tone-warning,.p-ready,.p-available,.p-queued,.p-installing,.p-ignored,.p-removed,.fstrip.t-warn,.msg-warning,.prechk>li.warn{--tone:var(--warning-color)}
+.tone-warning,.p-ready,.p-available,.p-queued,.p-installing,.p-ignored,.p-removed,.fstrip.t-warn,.msg-warning,.prechk>li.warn{
+  --tone:var(--warning-color);--tone-text:var(--warn-text)}
 .tone-error,.p-error,.p-unconfirmed,.act.c-alert,.fstrip.t-alert,.msg-error,.prechk>li.err{--tone:var(--error-color)}
 .tone-primary,.p-activity,.p-scheduled,.prechk>li.run{--tone:var(--primary-color)}   /* run: the step that is running (spinner) */
 .act.alert.s-on{--tone:var(--error-color)}
-.act.s-on.c-warn{--tone:var(--warning-color)}
+.act.s-on.c-warn{--tone:var(--warning-color);--tone-text:var(--warn-text)}
 .status-cell{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
 .spinner{width:10px;height:10px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;
   animation:spin 1s linear infinite}
@@ -262,7 +266,7 @@ html.dlg-open{overflow:hidden}
   border-radius:50%;color:var(--tone);background:color-mix(in srgb,var(--tone) 16%,transparent)}
 .fstrip .fs-icon svg{width:var(--icon);height:var(--icon);fill:currentColor}
 .fstrip .fs-name{flex:1 1 auto;font-weight:500;min-width:0;overflow-wrap:anywhere}
-.fstrip .fs-pill{--tone:inherit;margin-left:auto;white-space:normal}
+.fstrip .fs-pill{--tone:inherit;--tone-text:inherit;margin-left:auto;white-space:normal}
 #dlg-body{padding:4px 20px 12px;overflow:auto;max-height:calc(100vh - 200px);overscroll-behavior:contain}
 #dlg-body>p.hint{margin:14px 0 2px}
 .btns{display:flex;justify-content:flex-end;gap:8px;padding:12px 20px 16px;border-top:1px solid var(--line)}
@@ -304,6 +308,8 @@ dl.kv>dd.src{font-size:var(--fs-small)}
 dialog table{border-collapse:collapse;width:100%}
 dialog th,dialog td{padding:6px 8px;text-align:left;vertical-align:middle;border-bottom:1px solid var(--line)}
 dialog th{color:var(--secondary-text-color);font-weight:500;font-size:var(--fs-small);white-space:nowrap;user-select:none}
+/* Power-on action: the select takes at most the width that is left and shortens its text with "…" */
+.aop-table select{width:100%;min-width:0;max-width:100%;text-overflow:ellipsis}
 .field{display:flex;flex-direction:column;gap:6px;margin:8px 0;color:var(--secondary-text-color)}
 
 .field input,.field select{min-width:min(320px,100%)}

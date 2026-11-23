@@ -24,7 +24,7 @@ How this differs from the update entities of the Shelly integration is answered 
 
 <p align="center">
   <img src="docs/images/install-dialog.png" alt="Installation dialog with checks, SHA-256 and changelog" width="420">
-  <img src="docs/images/devices-phone.png" alt="Devices tab on a phone" width="250">
+  <img src="docs/images/backups-phone.png" alt="Backups tab on a phone" width="250">
 </p>
 
 ## Features

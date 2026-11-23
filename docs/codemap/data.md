@@ -46,7 +46,7 @@ Schedule entry (`state.schedules[]`, see `timetable.py`): `id` (12 hex), `name`,
 (`restart|cloud_on|cloud_off|ble_on|ble_off|backup`), `pause` (restart only), `time` (HH:MM),
 `repeat` (`{kind: daily}`, `{kind: weekdays, days}`, `{kind: every, n}`), `devices` (`"all"` or
 device IDs; empty only on a switched-off schedule whose devices were removed from the list), `anchor` (first day of "every n days"), `next` (epoch, None while off), `last`
-(`{at, severity, text}` with `counts` of a run – `done`, `total` (chosen devices incl. left out), `run` (acted on), `unreachable`, `refused`, `left`, `unchanged` (backup: settings as in the newest backup) – or `reason` of a missed run).
+(`{at, severity, text}` with `counts` of a run – `done`, `total` (chosen devices incl. left out), `run` (acted on), `unreachable`, `refused`, `left`, `unchanged` (backup: settings as in the newest backup), `asleep` (backup: battery devices that did not answer) – or `reason` of a missed run).
 
 Backup (`backups/<id>.sfmb`, payload `{meta, data}`): `data` Gen2+ `{config, scripts: [{id, name, enable, code}],
 schedules, webhooks}`, Gen1 `{settings, actions}` (`actions` None: not readable, `parts.partial`), plus

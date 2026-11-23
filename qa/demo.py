@@ -236,15 +236,23 @@ if scenario == "features":  # beta firmware, a scheduled installation and schedu
     m.schedules.append(
         {"id": "9a8b7c6d5e4f", "name": "Weekly backup", "on": True, "action": "backup", "pause": None, "time": "03:15",
          "repeat": {"kind": "weekdays", "days": [6]}, "devices": "all", "anchor": None, "next": None,
-         "last": {"at": now - 5 * 86400, "severity": "warning", "text": "3 stored · 17 unchanged · 2 not backed up · 3 left out",
-                  "counts": {"done": 3, "total": 25, "run": 22, "unchanged": 17, "unreachable": 2, "refused": 0, "left": 3,
-                             "interrupted": False}}})
+         "last": {"at": now - 5 * 86400, "severity": "error", "text": "3 stored · 17 unchanged · 1 asleep · 2 not backed up · 2 left out",
+                  "counts": {"done": 3, "total": 25, "run": 23, "unchanged": 17, "asleep": 1, "unreachable": 2, "refused": 0,
+                             "left": 2, "interrupted": False}}})
     for item in m.schedules:
         item["next"] = timetable.next_run(item, now, m.tz) if item["on"] else None
     m.events.add("schedule", severity="warning", event="run", name="Weekly restart", action="Restart", trigger="scheduled",
                  devices=23, done=22, duration=241, result="22 of 23 restarted · 1 not reachable · 2 left out", user="Schedule",
                  findings=[{"device": "Hall", "result": "unreachable", "detail": "Device not reachable"}],
                  left_out=[{"device": "Doorbell", "reason": "battery device"}, {"device": "Garage door", "reason": "ignored"}])
+    m.events.add("schedule", severity="error", event="run", name="Weekly backup", action="Backup", trigger="scheduled",
+                 devices=4, done=1, duration=6, result="1 stored · 1 unchanged · 1 asleep · 1 not backed up · 1 left out",
+                 user="Schedule",
+                 findings=[{"device": "Kitchen light", "result": "ok", "detail": "stored", "severity": "success"},
+                           {"device": "Bathroom", "result": "unchanged", "detail": "unchanged", "severity": "success"},
+                           {"device": "Doorbell", "result": "asleep", "detail": "Device not reachable", "severity": "warning"},
+                           {"device": "Hall", "result": "unreachable", "detail": "Device not reachable", "severity": "error"}],
+                 left_out=[{"device": "Garage door", "reason": "ignored"}])
     m.events.add("install", device="Bathroom", event="scheduled", type="Plus1", old="1.4.0", new="1.5.0",
                  at=timetable.local_text(now + 86400 + 3600, m.tz), user="demo")
 if scenario in ("features", "docs"):  # backups of device settings and Shellys in memory that answer

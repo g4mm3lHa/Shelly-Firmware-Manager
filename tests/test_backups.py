@@ -592,9 +592,9 @@ async def test_backup_before_the_installation(net, shellys, monkeypatch, quick_i
 
 
 async def test_schedule_backup_stores_only_changes(backed, net, shellys):
-    """A backup run stores what changed since the newest backup; an ignored device is
-    left out, a sleeping battery device too (not failed); a device that does not
-    answer makes the run an error; one log entry per run."""
+    """A backup run stores what changed since the newest backup; a sleeping battery
+    device is counted as asleep (not failed, not left out, the run stays a success); a
+    device that does not answer makes the run an error; one log entry per run."""
     mgr = backed
     data = {
         "name": "Weekly backup",
@@ -611,8 +611,9 @@ async def test_schedule_backup_stores_only_changes(backed, net, shellys):
     await asyncio.gather(*list(mgr._timetable_tasks))
     run = mgr.events.entries[-1]
     assert run["kind"] == "schedule" and run["action"] == "Backup"
-    assert run["result"] == "2 stored · 0 unchanged · 0 not backed up · 1 left out" and run["severity"] == "success"
-    assert run["left_out"] == [{"device": "Garage", "reason": "battery device asleep"}]
+    assert run["result"] == "2 stored · 0 unchanged · 1 asleep · 0 not backed up" and run["severity"] == "success"
+    assert "left_out" not in run and mgr.schedules[0]["last"]["counts"]["asleep"] == 1
+    assert {f["device"]: (f["result"], f["severity"]) for f in run["findings"]}["Garage"] == ("asleep", "warning")
     assert not backup_events(mgr) and not mgr.notified
     entry = mgr.backups.of("AABBCC00000A")[0]
     assert entry["reason"] == "schedule" and entry["note"] == "Weekly backup"
@@ -621,13 +622,13 @@ async def test_schedule_backup_stores_only_changes(backed, net, shellys):
     mgr.start_due(mgr.schedules[0]["next"])
     await asyncio.gather(*list(mgr._timetable_tasks))
     run = mgr.events.entries[-1]
-    assert run["result"] == "1 stored · 0 unchanged · 1 not backed up · 1 left out" and run["severity"] == "error"
+    assert run["result"] == "1 stored · 0 unchanged · 1 asleep · 1 not backed up" and run["severity"] == "error"
     assert mgr.schedules[0]["last"]["severity"] == "error"  # a device that should answer did not
     assert len(mgr.backups.of("AABBCC00000A")) == 2 and "Hall" in mgr.notified[-1][1]
     fake(shellys, net, B).down = False
     mgr.start_due(mgr.schedules[0]["next"])
     await asyncio.gather(*list(mgr._timetable_tasks))
-    assert mgr.events.entries[-1]["result"] == "0 stored · 2 unchanged · 0 not backed up · 1 left out"
+    assert mgr.events.entries[-1]["result"] == "0 stored · 2 unchanged · 1 asleep · 0 not backed up"
     assert mgr.schedules[0]["last"]["counts"]["unchanged"] == 2 and len(mgr.backups.entries) == 3
 
 

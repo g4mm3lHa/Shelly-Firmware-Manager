@@ -362,11 +362,19 @@ def _logs(c):
     devices = run.locator("li").count()
     check(f"{case}: Logs – one entry for a run of “Back up now”, one line per device", bool(found) and devices == int(found[1]),
           f"{line} / {devices}")
+    # Schedule run "Backup": the device lines coloured like "Back up now", the left-out one neutral
+    sched = entries.filter(has_text="“Weekly backup”: Backup").first
+    lines = sched.evaluate("""e => [...e.querySelectorAll('li')].map(li => li.textContent.split(':')[0] + '=' + li.className)""")
+    check(f"{case}: Logs – schedule Backup lines coloured like “Back up now”", lines == [
+        "Kitchen light=okc", "Bathroom=okc", "Doorbell=warnc", "Hall=bad", "Garage door=neutral"], str(lines))
+    texts = sched.evaluate("e => e.textContent")
+    check(f"{case}: Logs – unchanged explained", "Bathroom: unchanged – same as the last backup" in texts, texts[:300])
     single = entries.filter(has_text="backup stored · manual").count()
     check(f"{case}: Logs – no entry per device of the run", single <= 2, str(single))
     f.locator("#tab-devices").click()
     f.locator("#tab-logs").click()
     f.wait_for_selector("#log-list .log, #log-list .log-m")
+    wait_until(lambda: unread.count() == 0)
     check(f"{case}: Logs – nothing highlighted at the next visit", unread.count() == 0)
 
 
@@ -377,7 +385,10 @@ def _other_tabs(c):
     card = f.locator("#view-schedules .sch-row, #view-schedules tr", has_text="Weekly backup").first
     card.wait_for()
     text = card.inner_text()
-    check(f"{case}: schedule Backup – stored, unchanged, not backed up", "3 stored · 17 unchanged · 2 not backed up" in text, text[:200])
+    check(f"{case}: schedule Backup – stored, unchanged, asleep, not backed up",
+          "3 stored · 17 unchanged · 1 asleep · 2 not backed up · 2 left out" in text, text[:200])
+    parts = f.evaluate("""() => [...document.querySelectorAll('#view-schedules .sch-last .sub .nowrap')].map(s => s.textContent)""")
+    check(f"{case}: schedule Backup – the result wraps only between its parts", "1 asleep" in parts and "2 left out" in parts, str(parts))
     if c.width <= 700:
         check(f"{case}: phone tiles of the schedules with the strong line", f.evaluate(STRONG_BORDER_JS, "#view-schedules .sch-row:not(.sch-head)"))
     f.locator("#tab-settings").click()
@@ -444,7 +455,7 @@ def _contrast(c):
     values = f.evaluate(CONTRAST_JS, [".tab.active", "#dev-cards td a", "#dev-cards .newver", "#dev-cards .tag:not([class*=' '])"])
     f.locator("#tab-logs").click()
     f.wait_for_selector("#log-list .log, #log-list .log-m")
-    values += f.evaluate(CONTRAST_JS, ["#log-list .bad"])
+    values += f.evaluate(CONTRAST_JS, ["#log-list .bad", "#log-list .tag.sev-warning"])
     check(f"{case}: contrast of coloured text at least 4.5:1", all(value is not None and value >= 4.5 for _sel, value in values), str(values))
 
 
