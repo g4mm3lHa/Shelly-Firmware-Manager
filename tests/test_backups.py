@@ -336,7 +336,7 @@ def test_password_copy_opens_with_the_password_only(tmp_path):
 
 # ---------------------------------------------------------------- Fixed files of the format
 
-# Files written by an earlier version of the app (rc3/rc4 format "SFMB1", format_version 1).
+# Files written by an earlier version of the app (format "SFMB1" of 3.11.0, format_version 1).
 # They must stay readable: a change of the construction, the header or the key derivation
 # fails here. FORMAT_KEY is the key of a stored file, FORMAT_PASSWORD the password of the
 # downloaded file and of the store export that carries it.
