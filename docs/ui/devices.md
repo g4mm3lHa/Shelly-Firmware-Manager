@@ -50,8 +50,7 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
   afterwards – while the check runs the device stays in the card (UI `shownUpdates`).
 - Phones: "Ignored" and "Checking…" labels 32 px like the status pill. Row menu
   "Downgrade" disabled without a stored older version; while the option "Allow
-  downgrades" is off it is disabled with the menu hint "Downgrades are off – enable
-  “Allow downgrades” in Settings" below it (Gen2+ only, 2026-11-19).
+  downgrades" is off the entry is not shown (Gen2+ only; 3.11.1, approved 2026-11-23).
 - **Sorting:** sort tool of the toolbar (see "Toolbar") with all sortable columns, also
   hidden ones. Desktop column heads keep sorting and share the state with the sort tool.
   Sort order, hidden columns and column order are kept per browser (localStorage);
@@ -195,6 +194,20 @@ Wordings: `mockups/3.9.0/TEXTE.md`.
 - **Downgrade while scheduled (review 3.10.0, F5 a, approved 2026-11-22):** row menu
   "Downgrade" disabled with the menu hint "Cancel the scheduled installation first" (same
   rule as "Install").
+- **Downgrade warning (3.11.1, mockups `3.11.1-downgrade`, approved 2026-11-23):** red box
+  (`warnbox danger`) with the text "Downgrade at your own risk. …" (two bold parts: the
+  first sentence and "brick the Shelly") in every downgrade dialog: step 1 of the row
+  menu (version list) as last element, the installation step, the Firmware-tab dialog and
+  its last step, and the popup of the option. Row menu: two steps – the version list
+  (blue "Continue") and the installation dialog as last step with the tick "I understand
+  the risk" (imported file: "… and that the Shelly update server has not confirmed this
+  file") and the red "Downgrade", enabled only after the tick. Firmware tab: dialog with
+  the devices (blue "Continue"), then the last step with the same tick and button.
+- **Popup "Allow downgrades?" (3.11.1, approved 2026-11-23):** ticking the option in the
+  Settings tab opens it (history icon): the red warning, the tick "I understand the
+  risk", the line "Applies only after saving."; Cancel and red "Enable" (enabled only
+  after the tick). Cancel, the X and Escape take the tick back; "Enable" keeps it (saved
+  with "Save settings"). Unticking needs no popup.
 - **Running downgrade (review 3.10.0, F1 a, approved 2026-11-22):** the device stays in the
   section it had before (usually "Up-To-Date"); Firmware column "installed → target" with
   the tag "Downgrade" beside the firmware ID; status pill "Downgrading n %".

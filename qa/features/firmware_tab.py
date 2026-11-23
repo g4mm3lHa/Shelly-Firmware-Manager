@@ -6,7 +6,7 @@ from features.base import (
 
 
 def _downgrade(c):
-    """Row menu entry and the three steps of a downgrade (nothing is installed)."""
+    """Row menu entry and the two steps of a downgrade (nothing is installed)."""
     case, f, page, out, width = c.case, c.f, c.page, c.out, c.width
     entry = "Downgrade"
     # Menu entry: Gen2+ (also ignored), never Gen1
@@ -33,24 +33,24 @@ def _downgrade(c):
     check(f"{case}: dialog fits", f.evaluate("() => { const r = document.getElementById('dlg').getBoundingClientRect();"
                                              f" return r.left >= 0 && r.right <= {width}; }}"))
     page.screenshot(path=out / f"{case}-downgrade-list.png")
+    check(f"{case}: red warning at the bottom of the version list", f.evaluate(
+        "() => { const b = document.getElementById('dlg-body'); const w = b.lastElementChild;"
+        " return w.matches('.warnbox.danger') && w.textContent.startsWith('Downgrade at your own risk.'); }"))
     f.locator("#dlg-body .modes input").nth(1).check()
 
-    # Step 2: installation dialog with the older target
+    # Step 2 (last): installation dialog with the older target, acknowledgment and "Downgrade"
     f.locator("#dlg-btns button", has_text="Continue").click()
     d = dialog(f)
     check(f"{case}: install dialog with older target", d["title"] == "Downgrade?" and "Version (older)" in d["body"]
-          and "1.3.0" in d["body"] and "A downgrade installs an older firmware" in d["body"], d["body"][:200])
-    page.screenshot(path=out / f"{case}-downgrade-install.png")
-
-    # Step 3: second confirmation
-    f.locator("#dlg-btns button", has_text="Continue").click()
-    d = dialog(f)
+          and "1.3.0" in d["body"] and "brick the Shelly" in d["body"], d["body"][:200])
+    check(f"{case}: red warning in the install dialog", f.locator("#dlg-body .warnbox.danger").count() == 1)
     go = dict(d["buttons"]).get("Downgrade")
-    check(f"{case}: confirmation button disabled", go is True, str(d["buttons"]))
+    check(f"{case}: Downgrade disabled until the risk is acknowledged", go is True and "Continue" not in dict(d["buttons"]),
+          str(d["buttons"]))
+    page.screenshot(path=out / f"{case}-downgrade-install.png")
     f.locator("#dlg-body input[type=checkbox]").check()
     go = dict(dialog(f)["buttons"]).get("Downgrade")
     check(f"{case}: enabled after acknowledgment", go is False)
-    page.screenshot(path=out / f"{case}-downgrade-confirm.png")
     f.locator("#dlg-btns button", has_text="Cancel").click()   # nothing is installed in the demo
 
 
@@ -358,8 +358,9 @@ def _sorting_and_downgrade(c):
         page.screenshot(path=out / f"{case}-fw-downgrade.png")
         f.locator("#dlg-btns button", has_text="Continue").click()
         d = dialog(f)
-        check(f"{case}: then the second confirmation", d["title"] == "Downgrade?"
-              and dict(d["buttons"]).get("Downgrade") is True, str(d["buttons"]))
+        check(f"{case}: then the second confirmation with the red warning", d["title"] == "Downgrade?"
+              and dict(d["buttons"]).get("Downgrade") is True and f.locator("#dlg-body .warnbox.danger").count() == 1,
+              str(d["buttons"]))
         f.locator("#dlg-btns button", has_text="Cancel").click()
 
 

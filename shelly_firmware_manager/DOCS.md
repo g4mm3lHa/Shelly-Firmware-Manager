@@ -411,11 +411,18 @@ no beta versions.
 
 ### Downgrade (Gen2+)
 
-Downgrades are off until **Allow downgrades** is switched on in the Settings tab; while
-it is off, the entries below are greyed out with a hint and the app refuses downgrades.
+**Downgrade at your own risk.** Shelly does not officially support downgrades. A
+downgrade can brick the Shelly; in the worst case the device is permanently broken and
+cannot be repaired. Jumping back to a very old version will almost certainly brick it.
+
+Downgrades are off until **Allow downgrades** is switched on in the Settings tab; ticking
+it shows this warning, and you confirm it with **I understand the risk**. While the option
+is off, the row menu has no **Downgrade** entry, the Firmware tab shows no downgrade icon
+and the app refuses downgrades.
 
 Row menu ⋮ → **Downgrade** lists all stored versions that are older than the installed
-one (the entry is greyed out while no older version is stored). Choose a version, check the installation dialog and confirm a second time.
+one (the entry is greyed out while no older version is stored). Choose a version, check
+the installation dialog, tick **I understand the risk** and choose **Downgrade**.
 In the Firmware tab, the downgrade icon of an older version lists the devices of this
 type with a newer version installed; choose one and confirm a second time. The
 downgrade runs like a normal installation and is logged as such; meanwhile the device

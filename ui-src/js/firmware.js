@@ -5,7 +5,7 @@ import {
   setTip, shaRow, sortControl, t, tn, toast, ui, uploadFile, valueList,
 } from "./core.js";
 import {installable, installBlocker} from "./devices.js";
-import {changelogNodes, DOWNGRADE_OFF, DOWNGRADE_WARNING, downgradeConfirm, fwSource, IMPORT_WARNING, openInstall, UPLOAD_HINT} from "./install.js";
+import {changelogNodes, downgradeConfirm, downgradeWarning, fwSource, IMPORT_WARNING, openInstall, UPLOAD_HINT} from "./install.js";
 import {render} from "./main.js";
 
 // ---------------------------------------------------------------- Sorting
@@ -188,11 +188,11 @@ const STABLE = /^\d{1,4}\.\d{1,4}\.\d{1,4}$/;   // downgrades only to stable ver
 /** Gen2+ devices of the file's firmware ID with a newer installed version. */
 const downgradeTargets = f => STABLE.test(f.version || "") ? (ui.state?.devices || []).filter(d =>
   d.gen >= 2 && d.type === f.type && d.version && collator.compare(d.version, f.version) > 0) : [];
-/** Downgrade icon of an older version; disabled (reason as title, also on touch)
- *  while the option is off or no device has a newer version installed. */
+/** Downgrade icon of an older version, only while the option "Allow downgrades" is on;
+ *  disabled (reason as title, also on touch) while no device has a newer version installed. */
 function downgradeButton(f) {
-  const reason = !ui.state?.allow_downgrade ? DOWNGRADE_OFF : !downgradeTargets(f).length
-    ? t("No device of this firmware ID has a newer version installed") : null;
+  if (!ui.state?.allow_downgrade) return null;
+  const reason = !downgradeTargets(f).length ? t("No device of this firmware ID has a newer version installed") : null;
   const b = iconButton("history", reason || t("Downgrade"), () => openFirmwareDowngrade(f));
   b.disabled = !!reason; b.setAttribute("aria-label", reason ? `${t("Downgrade to {version}", {version: f.version})}: ${reason}` : t("Downgrade to {version}", {version: `${f.type} ${f.version}`}));
   return b;
@@ -207,7 +207,7 @@ function openFirmwareDowngrade(f) {
   modal(t("Downgrade to {version}", {version: `${f.type} ${f.version}`}), [
     valueList([[t("Firmware ID"), f.type], [t("Version"), f.version], [t("Size"), mb(f.size || 0)], [t("Stored"), fmt(f.downloaded)],
       [t("Source"), fwSource(f), "src"], shaRow(f.sha256)]),
-    section(t("Device (newer version installed)"), list), el("div", DOWNGRADE_WARNING, "warnbox"),
+    section(t("Device (newer version installed)"), list), downgradeWarning(),
     f.source === "upload" ? el("div", UPLOAD_HINT, "warnbox") : f.source === "import" ? el("div", IMPORT_WARNING, "warnbox") : null].filter(Boolean),
   [{text: t("Cancel")}, {text: t("Continue"), kind: "primary", action: () => {
     downgradeConfirm(targets[Number(list.querySelector("input:checked").value)], f);

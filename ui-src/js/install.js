@@ -234,9 +234,18 @@ export function cancelPlan(d) {
     action: async () => { await api(`${devUrl(d)}/planned/cancel`, {confirm: true}); closeModal(); }});
 }
 // ---------------------------------------------------------------- Downgrade
-// Flow: list of stored older versions -> installation dialog for the selected
-// version -> second confirmation with acknowledgment (as for the device password).
-export const DOWNGRADE_WARNING = t("A downgrade installs an older firmware. The device may refuse it, settings added by newer versions may be lost, and some devices may need a factory reset afterwards. Install only if you need this version.");
+// Flow from the row menu: list of stored older versions -> installation dialog for the
+// selected version with the acknowledgment and the red "Downgrade" button. From the
+// Firmware tab: the stored version with its devices -> downgradeConfirm. Every step shows
+// the red downgrade warning; the last step needs the tick "I understand the risk".
+/** Red downgrade warning (every downgrade dialog and the popup of the option "Allow
+ *  downgrades"); the two bold parts are separate texts, so the sentence is split. */
+export const downgradeWarning = () => box("div", "warnbox danger", el("strong", t("Downgrade at your own risk.")),
+  " " + t("Shelly does not officially support downgrades. A downgrade can") + " ", el("strong", t("brick the Shelly")),
+  t("; in the worst case the device is permanently broken and cannot be repaired. Jumping back to a very old version will almost certainly brick the Shelly. Settings may be lost or behave differently. Only install an older version if you knowingly accept this risk."));
+/** Acknowledgment of the last downgrade step; an imported file is named in it. */
+const downgradeAck = v => checkbox(v.source === "import" ? t("I understand the risk and that the Shelly update server has not confirmed this file")
+  : t("I understand the risk"));
 export const UPLOAD_HINT = t("An uploaded file does not come from the Shelly update server; its origin is only as trustworthy as its source.");
 /** Label of a stored version for lists and dialogs. */
 export const fwSource = v => v.source === "import" ? t("Imported (not confirmed by the Shelly update server)")
@@ -260,34 +269,37 @@ export async function openDowngrade(d) {
       i === 0, String(i))[1]);
   });
   modal(title, [valueList([[t("Firmware ID"), r.type], [t("Installed"), r.installed]]), el("p", t("Stored older versions (newest first):")), list,
-    el("p", t("Newer versions are installed with “Install update”."), "hint")],
+    el("p", t("Newer versions are installed with “Install update”."), "hint"), downgradeWarning()],
   [{text: t("Cancel")}, {text: t("Continue"), kind: "primary", action: () => {
     downgradeInstall(d, r.versions[Number(list.querySelector("input:checked").value)]);
   }}], "history");
 }
-/** Step 2: the known installation dialog, with the selected older version as target. */
+/** Step 2 (last): the known installation dialog with the selected older version as target;
+ *  the red "Downgrade" button needs the acknowledgment. */
 function downgradeInstall(d, v) {
   const content = [deviceSection(d), section(t("Firmware"), valueList([[t("Firmware ID"), d.type],
     [t("Version (older)"), versionStep(d.version, v.version), "ver"], [t("Size"), mb(v.size || 0)], [t("Source"), fwSource(v), "src"], shaRow(v.sha256)])),
-  el("div", DOWNGRADE_WARNING, "warnbox")];
+  downgradeWarning()];
   const checks = backupCheck(true);
   if (checks.length) content.splice(2, 0, section(t("Before installing"), box("ul", "prechk", ...checks)));
   if (v.source === "upload") content.push(el("div", UPLOAD_HINT, "warnbox"));
   if (v.source === "import") content.push(el("div", IMPORT_WARNING, "warnbox"));
-  content.push(el("p", t("The device restarts during the installation."), "hint"));
-  modal(t("Downgrade?"), content, [{text: t("Cancel")}, {text: t("Continue"), kind: "primary", action: () => downgradeConfirm(d, v)}], "history");
+  const [ack, ackLabel] = downgradeAck(v);
+  content.push(ackLabel, el("p", t("The device restarts during the installation."), "hint"));
+  confirmDialog({title: t("Downgrade?"), icon: "history", button: t("Downgrade"), ack, content, action: () => startDowngrade(d, v, ack)});
 }
-/** Hint while the option "Allow downgrades" is off (row menu, Firmware tab). */
-export const DOWNGRADE_OFF = t("Downgrades are off – enable “Allow downgrades” in Settings");
-/** Step 3: explicit confirmation; the red button needs the acknowledgment
- *  (also the last step of a downgrade started in the Firmware tab). */
+/** Start the downgrade on the device (the server checks option, version and acknowledgment). */
+async function startDowngrade(d, v, ack) {
+  await api(`${devUrl(d)}/install`, {sha256: v.sha256, confirm: true, downgrade: true, acknowledged: ack.checked});
+  closeModal();
+}
+/** Last step of a downgrade started in the Firmware tab: the red "Downgrade" button needs
+ *  the acknowledgment. */
 export function downgradeConfirm(d, v) {
-  const imported = v.source === "import";   // the acknowledgment also names the unconfirmed file
-  const [ack, ackLabel] = checkbox(imported ? t("I understand that the downgrade may fail or reset settings, and that the Shelly update server has not confirmed this file")
-    : t("I understand that the downgrade may fail or reset settings"));
+  const [ack, ackLabel] = downgradeAck(v);
   confirmDialog({title: t("Downgrade?"), icon: "history", button: t("Downgrade"), ack,
-    content: [el("p", t("Install {version} on {name} (installed: {installed})?", {version: v.version, name: d.name, installed: d.version})), el("div", DOWNGRADE_WARNING, "warnbox"),
-      imported ? el("div", IMPORT_WARNING, "warnbox") : null, ackLabel].filter(Boolean),
-    action: async () => { await api(`${devUrl(d)}/install`, {sha256: v.sha256, confirm: true, downgrade: true, acknowledged: ack.checked}); closeModal(); }});
+    content: [el("p", t("Install {version} on {name} (installed: {installed})?", {version: v.version, name: d.name, installed: d.version})), downgradeWarning(),
+      v.source === "import" ? el("div", IMPORT_WARNING, "warnbox") : null, ackLabel].filter(Boolean),
+    action: () => startDowngrade(d, v, ack)});
 }
 $("scan").onclick = () => api("api/scan", {}).then(() => load(true)).catch(e => message(t("Check"), e.message, "error"));

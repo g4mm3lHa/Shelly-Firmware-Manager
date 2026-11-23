@@ -121,6 +121,32 @@ def _bulk_passwords(c, page, f, out):
     f.click("#dlg-x")
 
 
+def _allow_downgrades_popup(c, page, f, out):
+    """Ticking "Allow downgrades": popup with the red warning, "Enable" only after the
+    acknowledgment; Cancel and Escape take the tick back (the demo has the option on)."""
+    box = f.locator("#opt-allow_downgrade")
+    box.uncheck()
+    check(f"{c}: no popup when downgrades are switched off", not f.evaluate("() => document.getElementById('dlg').open"))
+    box.check()
+    d = dialog(f)
+    check(f"{c}: popup when downgrades are switched on", d["title"] == "Allow downgrades?"
+          and f.locator("#dlg-body .warnbox.danger").count() == 1 and "Applies only after saving." in d["body"], d["body"][:120])
+    check(f"{c}: Enable disabled until the risk is acknowledged", d["buttons"] == [["Cancel", False], ["Enable", True]], str(d["buttons"]))
+    page.screenshot(path=out / f"settings-downgrade-popup-{c}.png")
+    f.locator("#dlg-btns button", has_text="Cancel").click()
+    check(f"{c}: Cancel takes the tick back", wait_until(lambda: not box.is_checked()))
+    box.check()
+    page.keyboard.press("Escape")
+    check(f"{c}: Escape takes the tick back", wait_until(lambda: not box.is_checked()))
+    box.check()
+    f.locator("#dlg-body input[type=checkbox]").check()
+    check(f"{c}: Enable is red and enabled after the acknowledgment", dialog(f)["buttons"] == [["Cancel", False], ["Enable", False]]
+          and f.locator("#dlg-btns button").last.get_attribute("class") == "danger")
+    f.locator("#dlg-btns button", has_text="Enable").click()
+    check(f"{c}: Enable keeps the tick", wait_until(lambda: box.is_checked()
+                                                    and not f.evaluate("() => document.getElementById('dlg').open")))
+
+
 def store_transfer(browser, out):
     """Firmware store export/import, device passwords for several devices, first start."""
     cases = ((360, "light", True), (1440, "dark", False))
@@ -144,6 +170,7 @@ def store_transfer(browser, out):
         check(f"{c}: store block between Allow downgrades and Max. import size",
               order == ["opt-allow_downgrade", "store", "opt-import_max_mb"], str(order))
         check(f"{c}: import size option", f.locator("#opt-import_max_mb").input_value() == "100")
+        _allow_downgrades_popup(c, page, f, out)
         page.screenshot(path=out / f"store-cards-{c}.png", full_page=True)
         _export_import(c, page, f, out)
         _import_in_parts(c, page, f, out)
