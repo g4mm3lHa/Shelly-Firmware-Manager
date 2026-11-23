@@ -18,6 +18,8 @@ import data_paths
 import manager
 import manager_installs
 import shelly
+import shelly_cloud
+import shelly_net
 import web_ui
 from aiohttp.test_utils import TestClient, TestServer
 
@@ -32,6 +34,7 @@ OPTIONS = {
     "log_entry_limit": 1000,
     "allow_downgrade": True,
     "keep_installed": False,  # switched on by the tests of "Keep installed versions"
+    "backup_before_install": False,  # switched on by the tests of the backups
 }
 
 
@@ -113,6 +116,7 @@ def net(monkeypatch, tmp_path):
         "CREDENTIALS_FILE": data / "credentials.json",
         "CHANGELOG_FILE": data / "changelog.json",
         "EVENTS_FILE": data / "events.json",
+        "BACKUP_DIR": data / "backups",
     }.items():
         monkeypatch.setattr(data_paths, name, value)
 
@@ -202,13 +206,13 @@ def net(monkeypatch, tmp_path):
         async def __aenter__(self):
             raise OSError("no device WebSocket in tests")
 
-    monkeypatch.setattr(shelly, "resolve_device_origin", resolve)
+    monkeypatch.setattr(shelly_net, "resolve_device_origin", resolve)
     monkeypatch.setattr(shelly, "device_info", device_info)
     monkeypatch.setattr(shelly, "read_settings", read_settings)
-    monkeypatch.setattr(shelly, "fetch_offer", fetch_offer)
-    monkeypatch.setattr(shelly, "download_firmware", download_firmware)
+    monkeypatch.setattr(shelly_cloud, "fetch_offer", fetch_offer)
+    monkeypatch.setattr(shelly_cloud, "download_firmware", download_firmware)
     monkeypatch.setattr(shelly, "OtaChannel", NoWebSocket)
-    monkeypatch.setattr(shelly, "host_resolves", host_resolves)
+    monkeypatch.setattr(shelly_net, "host_resolves", host_resolves)
     fake.refresh = refresh
     fake.data = data
     return fake
@@ -222,6 +226,23 @@ def quick_install(monkeypatch):
     monkeypatch.setattr(manager_installs, "INSTALL_POLL_S", 0.01)
     monkeypatch.setattr(manager_installs, "INSTALL_NO_DOWNLOAD_S", 0.1)
     monkeypatch.setattr(manager_installs, "INSTALL_WAIT_S", 0.3)
+
+
+@pytest.fixture
+def updating(mgr, net, monkeypatch, quick_install):
+    """End-to-end installs against FakeNet: the update command "installs" the version
+    of the served store file on the fake device; short timings. The returned dict's
+    "accept" = False makes the device ignore the command."""
+    result = {"accept": True}
+
+    async def trigger(_session, _gen, origin, url, _auth=None):
+        if result["accept"]:
+            device = net.by_origin(origin)
+            version = mgr.firmware[url.rsplit("/", 1)[-1]]["version"]
+            net.devices[device] = (*net.devices[device][:2], version, version)
+
+    monkeypatch.setattr(shelly, "trigger_update", trigger)
+    return result
 
 
 @pytest.fixture

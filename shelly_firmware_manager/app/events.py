@@ -3,7 +3,8 @@
 Recorded: checks, firmware downloads and uploads, installations and downgrades that
 were actually started, deleted firmware, setting changes on Shellys, per-device password
 changes (set / removed / test failed), app option changes, schedules (created, changed,
-deleted, every run or missed run) and scheduled installations. Not recorded: approvals
+deleted, every run or missed run), scheduled installations and the backups of device
+settings (stored, removed, restored, downloaded, imported). Not recorded: approvals
 that never started, restarts outside a schedule run, anything secret (passwords and hashes never reach this
 module; for secret options only the key is logged).
 Retention: entries older than retention_days and beyond max_entries are dropped.
@@ -32,6 +33,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+import data_paths
 from shelly import clip
 
 log = logging.getLogger("sfm.events")
@@ -39,10 +41,11 @@ log = logging.getLogger("sfm.events")
 # "log": the log itself was cleared (see EventLog.clear); "store": firmware files read
 # back from the disk at the start (FirmwareStore.adopt_files); "device": a removed
 # device was removed from the list (DeviceSettings.forget_device) or its beta version
-# withdrawn; "schedule": schedules of the Schedules tab (see manager_schedules)
+# withdrawn; "schedule": schedules of the Schedules tab (see manager_schedules); "backup":
+# backups of the device settings (stored, removed, restored, downloaded, imported)
 KINDS = (
     "check", "download", "upload", "install", "delete", "setting", "password", "options", "log", "export", "import",
-    "setup", "store", "device", "schedule",
+    "setup", "store", "device", "schedule", "backup",
 )
 ENTRY_ID_RE = re.compile(r"^[0-9a-f]{12}$")  # "id" of an entry, also checked for IDs from the URL
 SEVERITIES = ("success", "warning", "error")  # ordered from lowest to highest
@@ -57,6 +60,12 @@ def worst(*severities: str) -> str:
 def _line(entry: dict[str, Any]) -> str:
     """One entry as a JSON line (compact, ASCII-safe)."""
     return json.dumps(entry, separators=(",", ":")) + "\n"
+
+
+def severity_of_entry(entry: dict[str, Any]) -> str:
+    """Severity of an entry; a historic entry without one is an error only if "ok" is False."""
+    severity = entry.get("severity")
+    return str(severity) if severity in SEVERITIES else ("success" if entry.get("ok", True) else "error")
 
 
 def _has_time(entry: dict[str, Any]) -> bool:
@@ -135,18 +144,21 @@ class EventLog:
             log.warning("Log could not be written: %s", err)
         return entry
 
-    def latest(self) -> int:
-        """Mark of the newest entry for the UI (unread "!" of the Logs tab, reload of
-        the tab): its time in seconds × 1000 plus the number of newest entries written in
-        that same second, so it grows with every new entry, also within one second.
-        0 for an empty log."""
-        if not self.entries:
-            return 0
-        ts = int(self.entries[-1].get("ts", 0))
-        same = 0
-        for entry in reversed(self.entries):
-            if int(entry.get("ts", 0)) != ts:
+    def latest(self, severity: str | None = None) -> int:
+        """Mark of the newest entry for the UI (reload of the Logs tab, unread
+        entries): its time in seconds × 1000 plus the number of entries written in that
+        same second up to it, so it grows with every new entry, also within one second.
+        severity: the mark of the newest entry of this severity instead (unread "!" of
+        the Logs tab: errors only) – the value latest() had when that entry was
+        written. 0 if there is no such entry."""
+        for index in range(len(self.entries) - 1, -1, -1):
+            if severity is None or severity_of_entry(self.entries[index]) == severity:
                 break
+        else:
+            return 0
+        ts = int(self.entries[index].get("ts", 0))
+        same = 0
+        while index - same >= 0 and int(self.entries[index - same].get("ts", 0)) == ts:
             same += 1
         return ts * 1000 + min(same, 999)
 
@@ -181,12 +193,9 @@ class EventLog:
 
     def _compact(self) -> None:
         """Rewrite the file with the kept entries (temporary file, then rename)."""
-        temp = self.path.with_suffix(".tmp")
         try:
-            temp.write_text("".join(_line(e) for e in self.entries))
-            temp.replace(self.path)
+            data_paths.write_atomic(self.path, "".join(_line(e) for e in self.entries).encode(), durable=False)
         except OSError as err:
-            temp.unlink(missing_ok=True)
             log.warning("Log could not be written: %s", err)
             return
         self._lines = len(self.entries)

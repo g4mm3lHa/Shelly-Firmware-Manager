@@ -17,7 +17,7 @@ def setting_help(browser, out):
         described = f.get_attribute("#opt-check_interval_days", "aria-describedby")
         check(f"{case}: help text stays the description of the field", described == "opt-check_interval_days-help", str(described))
         icons = f.locator(".set-name button.help")
-        check(f"{case}: one i-icon per setting", icons.count() == 15, str(icons.count()))
+        check(f"{case}: one i-icon per setting", icons.count() == 17, str(icons.count()))
         name = f.locator("label[for=opt-check_interval_days]")
         info = f.locator(".set-name", has=name).locator("button.help")
         geo = f.evaluate("""() => { const l = document.querySelector('label[for=opt-check_interval_days]'), i = l.nextElementSibling;

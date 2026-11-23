@@ -57,13 +57,14 @@ from common import launch
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_SHOTS = {tab: f"tab:{tab}" for tab in ("devices", "firmware", "schedules", "logs", "settings")}
+DEFAULT_SHOTS = {tab: f"tab:{tab}" for tab in ("devices", "firmware", "schedules", "backups", "logs", "settings")}
 GATE_CASES = ((360, "dark", False), (360, "light", False), (430, "dark", False), (430, "light", False),
               (390, "dark", True), (1440, "dark", False), (1440, "light", False))
 GATE_SHOTS = {
     "devices": "full",
     "firmware": "tab:firmware;click:#fw-cards details summary;full",
     "schedules": "tab:schedules;full",
+    "backups": "tab:backups;full",
     "settings": "tab:settings;tall;full",
     "settings-unsaved": "tab:settings;fill:#opt-check_interval_days=5",
 }

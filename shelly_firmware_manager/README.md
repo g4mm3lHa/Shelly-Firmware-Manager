@@ -1,7 +1,7 @@
 # Firmware Manager for Shelly
 
 Keeps your Shelly devices (Gen1 to Gen4) up to date – locally and under your control.
-The app finds all Shellys of the Shelly integration, checks for new stable firmware,
+The app finds all Shellys of the Shelly integration, checks for new firmware,
 downloads it and serves it to the devices from its own download server in your network.
 Nothing is installed without your approval.
 
@@ -17,6 +17,8 @@ Nothing is installed without your approval.
 - Device settings, cloud switch and passwords for one or many devices; the firmware
   store moves to another Home Assistant instance as one sealed ZIP file.
 - Schedules restart Shellys or switch their cloud or Bluetooth at fixed times.
+- Backups of the device settings (scripts, schedules and webhooks included): by hand,
+  before every installation and on a schedule; compare and restore part by part.
 - English and German interface (German machine translated – corrections welcome).
 
 Requires Home Assistant 2026.10 or newer and the Home Assistant Shelly integration (the

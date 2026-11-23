@@ -165,18 +165,6 @@ def test_texts_for_the_log():
 # ---------------------------------------------------------------- Scheduled installations
 
 
-@pytest.fixture
-def updating(mgr, net, monkeypatch, quick_install):
-    """The update command "installs" the version of the served store file."""
-
-    async def trigger(_session, _gen, origin, url, _auth=None):
-        device = net.by_origin(origin)
-        version = mgr.firmware[url.rsplit("/", 1)[-1]]["version"]
-        net.devices[device] = (*net.devices[device][:2], version, version)
-
-    monkeypatch.setattr(shelly, "trigger_update", trigger)
-
-
 async def run_jobs(mgr, at):
     """Start the jobs due at `at` and wait for them."""
     mgr.start_due(at)

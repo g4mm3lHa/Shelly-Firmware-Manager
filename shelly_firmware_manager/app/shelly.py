@@ -1,19 +1,17 @@
-"""Access to Shelly devices and the manufacturer's firmware servers.
+"""Access to Shelly devices: shared helpers, authentication, device requests, settings.
 
-All functions are stateless and receive the shared aiohttp session.
+All functions are stateless and receive the shared aiohttp session. Device addresses
+come from shelly_net (private networks only), the manufacturer's servers are reached
+through shelly_cloud; both build on the errors and text helpers defined here.
 
 Security:
-- Devices are only contacted at private IP addresses (SSRF protection), the
-  resolved IP is pinned (DNS rebinding) and redirects are forbidden.
+- Devices are only contacted at the origin pinned by shelly_net.resolve_device_origin
+  (private IP, no DNS rebinding); redirects are never followed and
+  every answer is size-limited (MAX_DEVICE_BODY, MAX_WS_FRAME).
 - Device authentication: Gen1 Basic Auth, Gen2+ Digest Auth (SHA-256, user
   "admin"). Credentials are only sent in the scheme matching the device's
-  generation (no downgrade from Digest to Basic) and only after a challenge.
-- Metadata and firmware come only from shelly.cloud; every redirect is checked
-  again. Metadata and Gen2+ firmware only via HTTPS. Gen1 firmware is offered by
-  Shelly only via plain HTTP and without a checksum, so its integrity and origin
-  CANNOT be verified – the SHA-256 computed here only identifies the stored file
-  and detects later modification on disk.
-- File names consist only of the SHA-256 plus a fixed extension.
+  generation (no downgrade from Digest to Basic, no MD5, no Digest without qop
+  "auth") and only after a challenge; a rejected password is not tried twice.
 - Values written to a device (name, NTP server, power-on action, AP/Bluetooth
   switch, password protection) are validated against strict patterns or the
   options the device itself reported. Gen1 passwords are sent as query
@@ -27,28 +25,18 @@ import base64
 import datetime
 import hashlib
 import hmac
-import ipaddress
 import json
 import re
 import secrets
-import socket
 import unicodedata
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
 from types import TracebackType
 from typing import Any, Literal
-from urllib.parse import quote, urljoin, urlsplit
 
 import aiohttp
-from tls import CertificatePins, explain_tls_error
 from yarl import URL
 
-MAX_FW_SIZE = 64 * 1024 * 1024  # upper limit for a firmware file
-MIN_FW_SIZE = 1024  # anything smaller is certainly no firmware
-FW_EXTENSIONS = (".zip", ".bin", ".gbl")
-FW_NAME_RE = re.compile(r"^[0-9a-f]{64}\.(zip|bin|gbl)$")
-SHA256_RE = re.compile(r"[0-9a-f]{64}")
 # Build date at the start of a Gen2+ build_id ("20241011-114455/1.4.4-g6d2a586") or a Gen1
 # version text ("20230913-112003/v1.14.0-gcb84623"): YYYYMMDD-HHMMSS
 BUILD_DATE_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})-\d{6}(?:/|$)")
@@ -56,10 +44,7 @@ _ERROR_LABEL_RE = re.compile(r"\b(?:message|url)=(?=['\"])")  # labels of aiohtt
 VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)(\d+))?")
 
 DEVICE_TIMEOUT = aiohttp.ClientTimeout(total=15)
-CLOUD_TIMEOUT = aiohttp.ClientTimeout(total=30)
-DOWNLOAD_TIMEOUT = aiohttp.ClientTimeout(total=300, sock_read=60)
 MAX_DEVICE_BODY = 1024 * 1024  # upper limit for a device response
-MAX_CLOUD_JSON = 2 * 1024 * 1024  # upper limit for a version offer / firmware list
 AUTH_USER = "admin"  # fixed user name of Gen2+ devices, also the Gen1 default
 DIGEST_PARAM_RE = re.compile(r'(\w+)=(?:"([^"]*)"|([^,\s]*))')
 
@@ -69,11 +54,6 @@ OTA_WS_ANSWER_S = 15  # wait for the answer to Shelly.Update (and the auth round
 MAX_WS_FRAME = 64 * 1024  # upper limit for one WebSocket frame from the device
 OTA_EVENTS = ("ota_begin", "ota_progress", "ota_success", "ota_error")
 WS_HA2_INPUT = "dummy_method:dummy_uri"  # fixed HA2 input of the WebSocket Digest auth
-
-GEN2_META_URL = "https://updates.shelly.cloud/update/{app}"
-# Request header of a Shelly's own update check (JSON); only "app" and "ver" are sent
-SHELLY_INFO_HEADER = "Shelly-Info"
-GEN1_META_URL = "https://api.shelly.cloud/files/firmware"
 
 # Device settings that can be edited in the UI
 NAME_RE = re.compile(r"^[^\x00-\x1f\x7f]{0,64}$")  # printable, max. 64 characters
@@ -104,24 +84,6 @@ class AuthError(ShellyError):
 
 class UnsupportedError(ShellyError):
     """The device does not provide the requested method/endpoint (not an outage)."""
-
-
-# Why the device registry gives no usable device address (AddressError.reason)
-ADDRESS_MISSING = "missing"  # no configuration_url, or not plain http://host[:port]
-
-ADDRESS_UNRESOLVED = "unresolved"  # host name does not resolve
-
-ADDRESS_NOT_PRIVATE = "not_private"  # (resolved) IP address outside LAN_NETWORKS
-
-
-class AddressError(ShellyError):
-    """The device registry gives no usable local address for a device; reason is one
-    of ADDRESS_MISSING, ADDRESS_UNRESOLVED, ADDRESS_NOT_PRIVATE."""
-
-    def __init__(self, reason: str, message: str) -> None:
-        """Error with the machine-readable reason and the text for the user."""
-        super().__init__(message)
-        self.reason = reason
 
 
 class OtaError(ShellyError):
@@ -186,115 +148,17 @@ def parse_version(text: object) -> tuple[int, int, int, int, int]:
     return int(major), int(minor), int(patch), rank, int(pre_num or 0)
 
 
-def is_prerelease(text: object) -> bool:
-    """True for a pre-release version (alpha, beta or release candidate, e.g.
-    '1.5.0-beta2'); False for a final version and for an unknown format."""
-    try:
-        return parse_version(text)[3] < 3
-    except ShellyError:
-        return False
+# --------------------------------------------------------------------------- Responses
 
 
-# --------------------------------------------------------------------------- Devices
-
-
-# Networks a Shelly may be in: the private IPv4 ranges (RFC 1918) and the unique local
-# IPv6 addresses (RFC 4193). A fixed list on purpose: the result does not depend on what
-# the Python version in use counts as "private". Everything else is refused – loopback,
-# link-local, carrier-grade NAT, multicast, public addresses, and IPv4 addresses written
-# as IPv6 (::ffff:a.b.c.d).
-LAN_NETWORKS: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = (
-    ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"),
-    ipaddress.ip_network("fc00::/7"),
-)
-
-
-def is_lan_address(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    """True only for an address inside one of LAN_NETWORKS."""
-    return any(ip in network for network in LAN_NETWORKS)
-
-
-def host_name_of(configuration_url: str | None) -> str | None:
-    """Host name of the integration's configuration_url (e.g. shellyplus1-abc.local);
-    None for an IP address or a URL without host (shown in the Host name column)."""
-    try:
-        host = urlsplit(configuration_url or "").hostname
-    except ValueError:
-        return None
-    if not host:
-        return None
-    try:
-        ipaddress.ip_address(host)
-    except ValueError:
-        return clip(host, 253)
-    return None
-
-
-# Device ID as a host name label (Gen2+ id, e.g. shellyplus1pm-a0dd6c29c3e0; Gen1
-# /settings device.hostname, e.g. shelly1-b929cc)
-HOST_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
-
-HOST_RESOLVE_TIMEOUT_S = 5  # longest wait for one host name lookup (mDNS may be slow)
-
-
-def local_host_name(device_id: object) -> str | None:
-    """Host name <device id>.local the device announces itself under (mDNS), from
-    the ID the device reports; None if the ID is missing or no valid host label."""
-    label = str(device_id or "").strip().lower()
-    return f"{label}.local" if HOST_LABEL_RE.fullmatch(label) else None
-
-
-async def host_resolves(host: str) -> bool:
-    """True if the host name resolves to at least one address within
-    HOST_RESOLVE_TIMEOUT_S. Only a lookup: no request is sent to the address."""
-    loop = asyncio.get_running_loop()
-    try:
-        infos = await asyncio.wait_for(
-            loop.getaddrinfo(host, 80, type=socket.SOCK_STREAM), HOST_RESOLVE_TIMEOUT_S
-        )
-    except (OSError, UnicodeError, TimeoutError):  # socket.gaierror is an OSError
-        return False
-    return bool(infos)
-
-
-async def resolve_device_origin(configuration_url: str | None) -> str:
-    """Returns 'http://<private-ip>:<port>' from the integration's configuration_url.
-
-    Raises AddressError (with its reason) if the registry gives no usable address: no
-    or no plain http URL, a host name that does not resolve, or an address outside
-    the private networks (LAN_NETWORKS)."""
-    try:
-        parts = urlsplit(configuration_url or "")
-        port = parts.port or 80
-    except ValueError:  # invalid port or brackets
-        raise AddressError(ADDRESS_MISSING, "No usable local device address in the device registry") from None
-    if parts.scheme != "http" or not parts.hostname or parts.username or parts.password:
-        raise AddressError(ADDRESS_MISSING, "No usable local device address in the device registry")
-
-    loop = asyncio.get_running_loop()
-    try:
-        infos = await loop.getaddrinfo(parts.hostname, port, type=socket.SOCK_STREAM)
-    except (socket.gaierror, UnicodeError) as err:
-        raise AddressError(
-            ADDRESS_UNRESOLVED, f"Host name {clip(parts.hostname, 100)} could not be resolved ({error_text(err, 100)})"
-        ) from None
-    addresses = sorted({str(info[4][0]).split("%")[0] for info in infos})
-    if not addresses:
-        raise AddressError(ADDRESS_UNRESOLVED, f"Host name {clip(parts.hostname, 100)} could not be resolved")
-    for address in addresses:
-        if not is_lan_address(ipaddress.ip_address(address)):
-            raise AddressError(ADDRESS_NOT_PRIVATE, f"Device address {address} is not in a private network")
-
-    ip = addresses[0]
-    host = f"[{ip}]" if ":" in ip else ip
-    return f"http://{host}:{port}"
-
-
-def origin_ip(origin: str) -> str | None:
-    """IP address from an origin created by resolve_device_origin."""
-    return urlsplit(origin).hostname
+async def read_limited(resp: aiohttp.ClientResponse, limit: int, message: str) -> bytes:
+    """Complete response body, aborting as soon as it exceeds limit bytes."""
+    raw = bytearray()
+    async for chunk in resp.content.iter_chunked(64 * 1024):
+        raw += chunk
+        if len(raw) > limit:
+            raise ShellyError(message)
+    return bytes(raw)
 
 
 # --------------------------------------------------------------------------- Authentication
@@ -386,12 +250,16 @@ class DeviceAuth:
         }
 
 
+# Query of a device request: parameters by name, or pairs where a name repeats (Gen1 "urls[]")
+Query = Mapping[str, str] | Sequence[tuple[str, str]]
+
+
 async def _call(
     session: aiohttp.ClientSession,
     origin: str,
     path: str,
     auth: DeviceAuth | None,
-    params: dict[str, str] | None = None,
+    params: Query | None = None,
     body: dict[str, Any] | None = None,
 ) -> tuple[int, Any]:
     """One request to a device; answers an authentication challenge once.
@@ -439,7 +307,7 @@ async def _device_json(
     origin: str,
     path: str,
     auth: DeviceAuth | None = None,
-    params: dict[str, str] | None = None,
+    params: Query | None = None,
 ) -> dict[str, Any]:
     """GET on the device; HTTP errors and invalid JSON become a ShellyError."""
     status, data = await _call(session, origin, path, auth, params=params)
@@ -475,6 +343,11 @@ async def _rpc(
     return answer if isinstance(answer, dict) else {}
 
 
+# Device requests for shelly_backup (the same limits and error handling as everything here)
+device_get = _device_json
+device_rpc = _rpc
+
+
 async def device_info(
     session: aiohttp.ClientSession,
     origin: str,
@@ -495,7 +368,7 @@ async def device_info(
     itself (Gen2+ auth_en, Gen1 auth; None if not reported) – never derived from
     stored credentials."""
     info = await _device_json(session, origin, "/shelly")
-    gen = _int_field(info, "gen", 1)
+    gen = int_field(info, "gen", 1)
     if on_identity:
         on_identity(gen, clip(info.get("id"), 64) if gen >= 2 else None)
     protected = info.get("auth_en" if gen >= 2 else "auth")
@@ -509,7 +382,7 @@ async def device_info(
         raise ShellyError("Incomplete device information from the Shelly") from None
 
 
-def _int_field(data: dict[str, Any], key: str, default: int) -> int:
+def int_field(data: dict[str, Any], key: str, default: int) -> int:
     """Integer field of a device or manufacturer answer; ShellyError if it is no number."""
     value = data.get(key) or default
     if isinstance(value, bool) or not isinstance(value, (int, str)):
@@ -1078,7 +951,7 @@ async def protection_status(session: aiohttp.ClientSession, origin: str) -> bool
     """Password protection as reported by /shelly (no authentication needed):
     True/False, None if the device does not report it."""
     info = await _device_json(session, origin, "/shelly")
-    value = info.get("auth_en" if _int_field(info, "gen", 1) >= 2 else "auth")
+    value = info.get("auth_en" if int_field(info, "gen", 1) >= 2 else "auth")
     return value if isinstance(value, bool) else None
 
 
@@ -1120,239 +993,3 @@ async def restart(session: aiohttp.ClientSession, gen: int, origin: str, auth: D
         await _device_json(session, origin, "/reboot", auth)
 
 
-# --------------------------------------------------------------------------- Manufacturer
-
-
-async def read_limited(resp: aiohttp.ClientResponse, limit: int, message: str) -> bytes:
-    """Complete response body, aborting as soon as it exceeds limit bytes."""
-    raw = bytearray()
-    async for chunk in resp.content.iter_chunked(64 * 1024):
-        raw += chunk
-        if len(raw) > limit:
-            raise ShellyError(message)
-    return bytes(raw)
-
-
-async def _cloud_get(
-    session: aiohttp.ClientSession,
-    url: str,
-    pins: CertificatePins | None,
-    limit: int,
-    too_large: str,
-    headers: dict[str, str] | None = None,
-) -> tuple[bytes, str | None]:
-    """Body of a GET on the manufacturer's server: HTTPS only, redirects only within
-    shelly.cloud (every hop checked again), certificate pinning, size limit.
-    headers are sent with every hop (all within shelly.cloud).
-    Returns (body bytes, charset or None)."""
-    for _ in range(4):
-        check_download_url(url, https_only=True)
-        async with _CloudRequest(session, url, pins, CLOUD_TIMEOUT, headers) as resp:
-            if resp.status in (301, 302, 303, 307, 308):
-                url = urljoin(url, resp.headers.get("Location", ""))
-                continue
-            resp.raise_for_status()
-            return await read_limited(resp, limit, too_large), resp.charset
-    raise ShellyError("Too many redirects from the manufacturer's server")
-
-
-async def _cloud_json(
-    session: aiohttp.ClientSession, url: str, pins: CertificatePins | None, headers: dict[str, str] | None = None
-) -> Any:
-    """JSON from the manufacturer's server (see _cloud_get)."""
-    raw, _ = await _cloud_get(
-        session, url, pins, MAX_CLOUD_JSON, "Response from the manufacturer's server too large", headers
-    )
-    try:
-        return parse_json(raw.decode("utf-8", "replace"))
-    except ValueError as err:
-        raise ShellyError("Invalid response from the manufacturer's server") from err
-
-
-class _CloudRequest:
-    """session.get() for manufacturer servers: applies certificate pinning and
-    translates TLS errors into a readable message including the fingerprint."""
-
-    def __init__(
-        self,
-        session: aiohttp.ClientSession,
-        url: str,
-        pins: CertificatePins | None,
-        timeout: aiohttp.ClientTimeout,
-        headers: dict[str, str] | None = None,
-    ) -> None:
-        """Prepare the request; nothing is sent before 'async with'."""
-        self.url = url
-        ssl_param: aiohttp.Fingerprint | bool = pins.ssl_for(url) if pins else True
-        self.request = session.get(url, ssl=ssl_param, allow_redirects=False, timeout=timeout, headers=headers)
-
-    async def __aenter__(self) -> aiohttp.ClientResponse:
-        """Send the request and return the response (TLS errors explained)."""
-        try:
-            return await self.request.__aenter__()
-        except (aiohttp.ClientConnectorCertificateError, aiohttp.ServerFingerprintMismatch) as err:
-            raise ShellyError(await explain_tls_error(self.url, err)) from None
-
-    async def __aexit__(
-        self, exc_type: type[BaseException] | None, exc: BaseException | None, tb: TracebackType | None
-    ) -> None:
-        """Release the connection."""
-        await self.request.__aexit__(exc_type, exc, tb)
-
-
-async def fetch_cloud_text(
-    session: aiohttp.ClientSession, url: str, pins: CertificatePins | None, limit: int
-) -> str:
-    """Text page (e.g. changelog) from a shelly.cloud server (see _cloud_get).
-    Sends no device data."""
-    too_large = f"Page larger than {limit // 1024 // 1024} MB: {clip(url)}"
-    raw, charset = await _cloud_get(session, url, pins, limit, too_large)
-    return raw.decode(charset or "utf-8", "replace")
-
-
-async def fetch_offer(
-    session: aiohttp.ClientSession,
-    fw_type: str,
-    pins: CertificatePins | None = None,
-    version: str | None = None,
-    beta: bool = False,
-) -> dict[str, str] | None:
-    """Stable firmware offer {'version', 'url', 'steps', 'build'} of a Gen2+ firmware ID,
-    or None. 'build' is the build ID the server names (starts with the build date, see
-    build_date; "" if none).
-
-    version: installed version of the device. It is sent the way a Shelly asks for
-    updates itself – header Shelly-Info with only the firmware ID ("app") and the
-    version ("ver"), nothing else – and the server then answers with the next
-    allowed step (e.g. a required intermediate version) instead of the newest
-    version. Without version the answer is the newest version. 'steps' is the number
-    of update steps the server reports ("1" if it reports none).
-
-    beta: also take the optional beta offer of the same answer (no further request);
-    it is added as 'beta_version', 'beta_url' and 'beta_build' when the server names
-    one with a URL. Without a stable offer the answer is None, also with a beta."""
-    headers = None
-    if version is not None:
-        headers = {SHELLY_INFO_HEADER: json.dumps({"app": fw_type, "ver": version}, separators=(",", ":"))}
-    meta = await _cloud_json(session, GEN2_META_URL.format(app=quote(fw_type, safe="")), pins, headers)
-    stable = meta.get("stable") if isinstance(meta, dict) else None
-    if not isinstance(stable, dict) or not stable.get("url"):
-        return None
-    steps = max(1, _int_field(stable, "nsteps", 1))
-    offer = {
-        "version": clip(stable.get("version"), 64),
-        "url": str(stable["url"]),
-        "steps": str(steps),
-        "build": plain(stable.get("build_id"), 128),
-    }
-    pre = meta.get("beta") if beta and isinstance(meta, dict) else None
-    if isinstance(pre, dict) and pre.get("url") and pre.get("version"):
-        offer.update(
-            beta_version=clip(pre.get("version"), 64),
-            beta_url=str(pre["url"]),
-            beta_build=plain(pre.get("build_id"), 128),
-        )
-    return offer
-
-
-async def fetch_gen1_offers(session: aiohttp.ClientSession, pins: CertificatePins | None = None) -> dict[str, Any]:
-    """Firmware list of all Gen1 types {type: entry} – the manufacturer serves it as
-    one document, so one request per check covers every Gen1 type (see gen1_offer)."""
-    meta = await _cloud_json(session, GEN1_META_URL, pins)
-    if not isinstance(meta, dict) or not meta.get("isok"):
-        raise ShellyError("Gen1 firmware server reports an error")
-    data = meta.get("data")
-    return data if isinstance(data, dict) else {}
-
-
-def gen1_offer(offers: dict[str, Any], fw_type: str) -> dict[str, str] | None:
-    """Stable firmware offer {'version', 'url'} of one Gen1 type from the list of
-    fetch_gen1_offers, or None."""
-    entry = offers.get(fw_type)
-    if not isinstance(entry, dict) or not entry.get("url"):
-        return None
-    return {"version": clip(entry.get("version"), 128), "url": str(entry["url"])}
-
-
-def check_download_url(url: str, https_only: bool = False) -> None:
-    """Allow only the manufacturer's servers (shelly.cloud) for metadata and firmware."""
-    parts = urlsplit(url)
-    host = (parts.hostname or "").lower()
-    trusted = host == "shelly.cloud" or host.endswith(".shelly.cloud")
-    schemes = ("https",) if https_only else ("http", "https")
-    if parts.scheme not in schemes or parts.username or not trusted:
-        raise ShellyError(f"Download source not allowed: {clip(url)}")
-
-
-def url_sha256(url: str) -> str | None:
-    """SHA-256 named by a firmware URL: the manufacturer's Gen2+ download URLs end in
-    the SHA-256 of the file (fwcdn.shelly.cloud/…/<sha256>). None for other URLs."""
-    last = urlsplit(url).path.rsplit("/", 1)[-1].lower()
-    return last if SHA256_RE.fullmatch(last) else None
-
-
-async def download_firmware(
-    session: aiohttp.ClientSession,
-    url: str,
-    target_dir: Path,
-    pins: CertificatePins | None = None,
-    https_only: bool = False,
-) -> tuple[str, str, int, bool]:
-    """Downloads the firmware to target_dir. Returns (file name, sha256, size, https).
-
-    https_only: required for Gen2+ (every hop must be HTTPS). https in the result
-    tells whether the whole transfer was protected by TLS. If the offered URL names
-    a SHA-256 (see url_sha256), the file must have exactly this checksum, else it is
-    not stored."""
-    expected = url_sha256(url)
-    secure = True
-    for _ in range(5):  # at most 4 redirects
-        check_download_url(url, https_only=https_only)  # check every hop again
-        secure &= urlsplit(url).scheme == "https"
-        async with _CloudRequest(session, url, pins, DOWNLOAD_TIMEOUT) as resp:
-            if resp.status in (301, 302, 303, 307, 308):
-                url = urljoin(url, resp.headers.get("Location", ""))
-                continue
-            resp.raise_for_status()
-            return (*await _store(resp, url, target_dir, expected), secure)
-    raise ShellyError("Too many redirects during download")
-
-
-async def _store(
-    resp: aiohttp.ClientResponse, url: str, target_dir: Path, expected: str | None = None
-) -> tuple[str, str, int]:
-    """Stores the response size-limited and atomically as <sha256>.<ext>.
-    expected: required SHA-256 (from the offered URL); a different file is discarded."""
-    ext = Path(urlsplit(url).path).suffix.lower()
-    ext = ext if ext in FW_EXTENSIONS else ".bin"
-    temp = target_dir / f".part-{secrets.token_hex(8)}"
-    digest, size = hashlib.sha256(), 0
-    try:
-        with temp.open("wb") as handle:
-            async for chunk in resp.content.iter_chunked(128 * 1024):
-                size += len(chunk)
-                if size > MAX_FW_SIZE:
-                    raise ShellyError("Firmware larger than 64 MB")
-                digest.update(chunk)
-                # In a worker thread: a slow disk (SD card) never blocks the event loop
-                await asyncio.to_thread(handle.write, chunk)
-        if size < MIN_FW_SIZE:
-            raise ShellyError("Firmware file implausibly small")
-        if expected and digest.hexdigest() != expected:
-            raise ShellyError("Download does not match the SHA-256 named by the manufacturer's URL – not stored")
-        name = digest.hexdigest() + ext
-        temp.replace(target_dir / name)  # atomic: never a half-written file visible
-        return name, digest.hexdigest(), size
-    finally:
-        temp.unlink(missing_ok=True)
-
-
-def file_sha256(target_dir: Path, name: str) -> str:
-    """Checksum of a stored file; rejects foreign file names."""
-    if not FW_NAME_RE.fullmatch(name or ""):
-        raise ShellyError("Invalid firmware file name")
-    digest = hashlib.sha256()
-    with (target_dir / name).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(128 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()

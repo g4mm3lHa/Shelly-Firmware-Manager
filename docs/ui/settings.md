@@ -7,7 +7,10 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
 - Settings tab design approved.
 - **Settings cards (3.5.0; Device Passwords first since 2026-11-22):** Device Passwords, Checks, Download Server (download base URL, serve only to
   known Shellys), Firmware & Storage (Gen1 updates, Allow downgrades, block
-  "Firmware store" with export/import, Max. import size), Logs, Advanced (Max.
+  "Firmware store" with export/import, Max. import size), Backups (3.11.0, F16: "Back up
+  before every installation", on; "Keep backups per device", 10, 1–50, with the note how
+  many backups are stored; the firmware store hint, the export dialog and the import
+  summary name the backups as part of the export), Logs, Advanced (Max.
   parallel installations, Resolve host names, Pinned certificates; 3.8.0, mockup
   `3.8.0-hostname` B). Option labels with "Max." in front. Units in texts always "MB".
 - **Columns (live test 3.10.0-rc1, approved 2026-11-22):** the cards fill independent column stacks
@@ -29,7 +32,7 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
 - **Export (8b B):** dialog with value list (files with downloaded/uploaded, size, file
   name), the generated password in a read-only field with copy icon (shown only here;
   if the browser refuses copying, the field's text is selected),
-  hint that it seals and is stored nowhere, checkbox "I have saved the password";
+  yellow box that it seals and is stored nowhere (live test rc5), checkbox "I have saved the password";
   "Export" is enabled only after it and starts the browser download. A prepared export
   that is older than its download period is refused in the dialog ("Export expired –
   please start it again.", 2026-11-21); too little free disk space is reported when the

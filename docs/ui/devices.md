@@ -101,7 +101,8 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
 - Popups opened by an action icon and the notes of greyed-out icons start with a
   **status strip** (32 px tinted icon circle in the action-column colour, feature name,
   state pill On/Off, Protected/Not protected/Unknown, Not available, Not supported;
-  restart without pill; power-on pill = current value "Restore last state" / "Mixed").
+  restart without pill; power-on pill = current value "Restore last state" / "Mixed"; a
+  pill too long for the line moves below the name, right-aligned).
   Switch popups (eco, access point, Bluetooth, websocket debug log) ask no question:
   strip + button, the button names the action ("Turn on" / "Turn off"). Restart popup:
   no question, hint "The device will be unavailable for a few seconds.", button
@@ -140,6 +141,13 @@ Wordings: `mockups/3.9.0/TEXTE.md`.
   "every device". Row "Build date" (date · age) in the section "Firmware" (one device).
   After a failed installation: section "Last attempt" with the reason, pre-ticked
   "Restart the device first" and the button "Restart & install".
+- **Backups (3.11.0, mockups `3.11.0-backups`, approved 2026-11-22):** row menu group 3:
+  "Backups" last, after "Device password" (F15). Device details: section "Backups" (Last
+  backup, Stored, small button "Show backups"). Dialog "Backups" of a device: name, model,
+  pill "n of N stored", its backups (rows as in the Backups tab, see `backups.md`),
+  "Import backup" / "Close" / blue "Back up now". Installation and downgrade dialog: check
+  line "Backup" in "Before installing" while "Back up before every installation" is on; a
+  failed backup stops the installation with the reason, also for "Install at" (F6).
 - **Imported files (F18, F21):** source "Firmware store (imported file)" (table: "Import");
   offered only while Shelly cannot be asked: yellow box (unconfirmed origin, no server;
   Gen1 text without the intermediate-version sentence) and the checkbox "I accept the risk
@@ -151,7 +159,9 @@ Wordings: `mockups/3.9.0/TEXTE.md`.
   dialog naming the settings, activity log entry failed, `not_applied` in the API
   answer.
 - Gen1 power-on labels as in the Gen1 web interface ("Restore last mode", "Switch"),
-  Gen2+ "Restore last state", "Match input".
+  Gen2+ "Restore last state", "Match input". These values come from the Shelly and stay
+  English in every language, as on the device (choices, pill, action column; live test
+  rc4, 2026-11-23); "Mixed" and the dialog texts are translated.
 
 ## Phone tiles (mockups approved 2026-11-12, T1 of 2026-11-19 in 3.5.0)
 - Line 1 = tile head like the head of a firmware card (2026-11-19): checkbox, name

@@ -137,7 +137,7 @@ def store_transfer(browser, out):
           .map(s => [...s.querySelectorAll('h2')].map(h => h.textContent))""")
         heads = [s[i] for i in range(max(map(len, stacks), default=0)) for s in stacks if i < len(s)]
         check(f"{c}: cards in the Settings tab", len(stacks) == (1 if width < 1168 else 2) and heads == [
-            "Device Passwords", "Checks", "Download Server", "Firmware & Storage", "Logs", "Advanced", "Display"], str(stacks))
+            "Device Passwords", "Checks", "Download Server", "Firmware & Storage", "Backups", "Logs", "Advanced", "Display"], str(stacks))
         order = f.evaluate("""() => [...document.querySelectorAll('#settings-form .form > *')]
           .map(e => e.classList.contains('set-store') ? 'store' : (e.querySelector('input,select,textarea,.pins') || {}).id || '')
           .filter(x => ['opt-allow_downgrade', 'store', 'opt-import_max_mb'].includes(x))""")

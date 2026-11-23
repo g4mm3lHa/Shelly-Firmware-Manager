@@ -4,11 +4,13 @@ Usage: python demo.py <app_dir> <port> <scenario: idle|busy|legacy|missing|featu
 legacy: download_base_url is the former example value (not confirmed) and one device
 installs with device progress; missing: download_base_url not set; public: download_base_url is a public IP address (saved
 before it was refused); features: idle
-plus stored older versions (one of them uploaded) for downgrade and upload checks; docs: features with
+plus stored older versions (one of them uploaded) for downgrade and upload checks, and backups of device
+settings with Shellys in memory that answer a backup and a restore; docs: features with
 fewer open updates and other models, for the screenshots of the documentation.
 Serves the UI app below /ui/ and a same-origin wrapper /wrap that embeds it in an
 iframe (like the HA Ingress panel)."""
 
+import asyncio
 import hashlib
 import sys
 import tempfile
@@ -26,7 +28,8 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 data = Path(tempfile.mkdtemp())
 for name, value in {"STATE_FILE": data / "state.json", "FW_DIR": data / "fw", "CREDENTIALS_FILE": data / "c.json",
-                    "CHANGELOG_FILE": data / "cl.json", "EVENTS_FILE": data / "ev.json"}.items():
+                    "CHANGELOG_FILE": data / "cl.json", "EVENTS_FILE": data / "ev.json",
+                    "BACKUP_DIR": data / "backups"}.items():
     setattr(data_paths, name, value)
 
 opts = {"check_interval_days": 7, "check_time": "02:45", "download_base_url": "http://192.168.1.2:8098", "restrict_downloads_to_devices": True,
@@ -230,14 +233,146 @@ if scenario == "features":  # beta firmware, a scheduled installation and schedu
          "repeat": {"kind": "daily"}, "devices": ids[:5], "anchor": None, "next": None,
          "last": {"at": now - 86400, "severity": "missed", "text": "Missed – the app was not running", "reason": "the app was not running"}},
     ]
+    m.schedules.append(
+        {"id": "9a8b7c6d5e4f", "name": "Weekly backup", "on": True, "action": "backup", "pause": None, "time": "03:15",
+         "repeat": {"kind": "weekdays", "days": [6]}, "devices": "all", "anchor": None, "next": None,
+         "last": {"at": now - 5 * 86400, "severity": "error", "text": "3 stored · 17 unchanged · 1 asleep · 2 not backed up · 2 left out",
+                  "counts": {"done": 3, "total": 25, "run": 23, "unchanged": 17, "asleep": 1, "unreachable": 2, "refused": 0,
+                             "left": 2, "interrupted": False}}})
     for item in m.schedules:
         item["next"] = timetable.next_run(item, now, m.tz) if item["on"] else None
     m.events.add("schedule", severity="warning", event="run", name="Weekly restart", action="Restart", trigger="scheduled",
                  devices=23, done=22, duration=241, result="22 of 23 restarted · 1 not reachable · 2 left out", user="Schedule",
                  findings=[{"device": "Hall", "result": "unreachable", "detail": "Device not reachable"}],
                  left_out=[{"device": "Doorbell", "reason": "battery device"}, {"device": "Garage door", "reason": "ignored"}])
+    m.events.add("schedule", severity="error", event="run", name="Weekly backup", action="Backup", trigger="scheduled",
+                 devices=4, done=1, duration=6, result="1 stored · 1 unchanged · 1 asleep · 1 not backed up · 1 left out",
+                 user="Schedule",
+                 findings=[{"device": "Kitchen light", "result": "ok", "detail": "stored", "severity": "success"},
+                           {"device": "Bathroom", "result": "unchanged", "detail": "unchanged", "severity": "success"},
+                           {"device": "Doorbell", "result": "asleep", "detail": "Device not reachable", "severity": "warning"},
+                           {"device": "Hall", "result": "unreachable", "detail": "Device not reachable", "severity": "error"}],
+                 left_out=[{"device": "Garage door", "reason": "ignored"}])
     m.events.add("install", device="Bathroom", event="scheduled", type="Plus1", old="1.4.0", new="1.5.0",
                  at=timetable.local_text(now + 86400 + 3600, m.tz), user="demo")
+if scenario in ("features", "docs"):  # backups of device settings and Shellys in memory that answer
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tests"))
+    import shelly
+    import shelly_backup
+    from fake_shelly import FakeGen1, FakeShelly
+
+    fakes = {}
+    for i in (0, 1, 2, 3, 6, 9, 11):
+        dev = m.devices[f"{i:032x}"]
+        fakes[dev["origin"]] = fake = FakeShelly(dev["mac"])
+        fake.config["sys"]["device"]["name"] = dev["name"]
+        fake.chunk = 1024
+    gen1 = m.devices[f"{8:032x}"]
+    fakes[gen1["origin"]] = FakeGen1()
+    fakes[gen1["origin"]].settings["device"]["mac"] = gen1["mac"]
+    pace = {"s": 0.0}  # pause per request, set after the demo data was stored: the steps of a restore stay visible
+
+    def device_of(origin):
+        return next(d for d in m.devices.values() if d["origin"] == origin)
+
+    async def answering(origin):
+        """The Shelly in memory at this address; every other device does not answer."""
+        await asyncio.sleep(pace["s"])
+        if origin not in fakes:
+            raise TimeoutError
+        return fakes[origin]
+
+    async def fake_rpc(_session, origin, method, params=None, _auth=None):
+        return await (await answering(origin)).rpc(method, params)
+
+    async def fake_get(_session, origin, path, _auth=None, params=None):
+        fake = await answering(origin)
+        return {} if path == "/shelly" else await fake.get(path, params)
+
+    async def fake_info(_session, origin, _auth_for=None, _on_identity=None):
+        await answering(origin)
+        dev = device_of(origin)
+        return {"auth_enabled": dev.get("auth_enabled"), "gen": dev["gen"], "shelly_id": dev["shelly_name"], "type": dev["type"],
+                "model": dev["model"], "mac": dev["mac"], "version": dev["version"], "build": dev["build"]}
+
+    async def fake_restart(_session, gen, origin, _auth=None):
+        fake = await answering(origin)
+        if gen > 1:
+            fake.restart()
+
+    shelly.device_rpc, shelly.device_get, shelly.device_info, shelly.restart = fake_rpc, fake_get, fake_info, fake_restart
+    shelly_backup.RESTART_FIRST_S, shelly_backup.RESTART_POLL_S = 1, 0.5
+
+    def stored(i, age_days, reason, note=None, kept=False, imported=False, version=None):
+        """Store a backup of device i as it answers now."""
+        dev = m.devices[f"{i:032x}"]
+        target = shelly_backup.Target(None, dev["gen"], dev["origin"], None)
+        content = asyncio.run(shelly_backup.read(target))
+        content["protected"] = dev.get("auth_enabled")
+        return m.backups.add({
+            "id": hashlib.sha256(f"{i}-{age_days}".encode()).hexdigest()[:16], "at": now - int(age_days * 86400), "reason": reason,
+            "note": note, "mac": dev["mac"], "gen": dev["gen"], "device": dev["name"], "model": dev["model"], "type": dev["type"],
+            "fw": version or dev["version"], "parts": shelly_backup.summary(dev["gen"], content),
+            "digest": shelly_backup.digest(dev["gen"], content)}, content, kept=kept, imported=imported)
+
+    kitchen = fakes[m.devices[f"{0:032x}"]["origin"]]
+    stored(0, 200, "manual", kept=True, version="1.2.0")
+    stored(0, 61, "manual", imported=True, kept=True, version="1.3.0")
+    stored(0, 40, "schedule", "Weekly backup", version="1.3.1")
+    stored(0, 12, "update", "1.3.1 → 1.4.0", version="1.3.1")
+    # Since its backup of three days ago the device was changed: settings, a script, a schedule, a webhook
+    stored(0, 3, "manual", "before rewiring")
+    kitchen.config["sys"]["device"]["name"] = "Kitchen light (new)"
+    kitchen.config["switch:0"].update(initial_state="on", auto_off=True)
+    kitchen.config["wifi"]["sta"]["ssid"] = "Home-IoT"
+    kitchen.config["mqtt"]["enable"] = True
+    kitchen.scripts[1]["code"] += "// changed afterwards\nprint(n);\n"
+    kitchen.scripts[3] = {"name": "night-mode.js", "enable": False, "running": False, "code": "let night = true;\n"}
+    kitchen.jobs.clear()
+    kitchen.hooks.append({"id": 2, "cid": 0, "enable": True, "event": "switch.on", "name": "Notify",
+                          "urls": ["http://192.168.1.2:8123/api/webhook/on"]})
+    stored(0, 0.05, "manual")
+    stored(1, 2, "update", "1.3.1 → 1.4.0", version="1.3.1")
+    stored(2, 45, "schedule", "Weekly backup")
+    stored(3, 9, "downgrade", "1.5.0 → 1.4.0", version="1.5.0")
+    stored(6, 1, "restore")
+    stored(6, 20, "schedule", "Weekly backup")
+    stored(8, 5, "manual")
+    stored(9, 33, "manual", kept=True)
+    # A device removed from Home Assistant keeps its backups; one of a device that is not listed any more
+    removed = m.devices[f"{13:032x}"]
+    fakes[removed["origin"]] = FakeShelly(removed["mac"])
+    stored(13, 70, "schedule", "Weekly backup")
+    del fakes[removed["origin"]]
+    data_of_old = asyncio.run(shelly_backup.read(shelly_backup.Target(None, 2, m.devices[f"{2:032x}"]["origin"], None)))
+    m.backups.add({"id": "01d0a1bc00000000",
+                   "at": now - 120 * 86400, "reason": "manual", "note": None, "mac": "AABBCC00FFFF", "gen": 2,
+                   "device": "Old plug", "model": "SNPL-00112EU", "type": "PlusPlugS", "fw": "1.3.0",
+                   "parts": shelly_backup.summary(2, data_of_old), "digest": shelly_backup.digest(2, data_of_old)}, data_of_old)
+    pace["s"] = 0.15
+    # Failed attempts: asleep, not reachable, another failure
+    m.devices[f"{24:032x}"]["backup_failed"] = {"at": now - 7200, "reason": "asleep", "message": "Device not reachable"}
+    m.devices[f"{23:032x}"]["backup_failed"] = {"at": now - 7200, "reason": "unreachable", "message": "Device not reachable"}
+    m.devices[f"{5:032x}"]["backup_failed"] = {"at": now - 3600, "reason": "failed",
+                                               "message": "Device reports: out of memory while reading the scripts"}
+    m.events.add("backup", event="stored", device="Kitchen light", reason="manual", note="before rewiring", size=1840,
+                 parts={"settings": True, "scripts": 1, "schedules": 1, "webhooks": 1}, user="demo")
+    m.events.add("backup", severity="error", event="failed", device="Office desk", reason="update", note="1.4.0 → 1.5.0",
+                 error="Device reports: out of memory while reading the scripts", user="demo")
+    m.events.add("backup", severity="warning", event="restored", device="Bedroom shutter", backup_at=now - 20 * 86400,
+                 restored=["settings", "scripts"], changes=7, not_applied=1, confirmed=True, restart=True, error=None, user="demo",
+                 findings=[{"part": "settings", "key": "MQTT · Server", "error": "Device reports: invalid value for server"}])
+    # One entry for a run of "Back up now" over several devices
+    m.events.add("backup", severity="warning", event="run", devices=4, stored=2, duration=6, user="demo",
+                 result="2 stored · 1 asleep · 1 not backed up",
+                 findings=[{"device": "Garage door", "result": "unreachable", "severity": "warning",
+                            "detail": "Device not reachable: timeout"},
+                           {"device": "Garden sensor", "result": "asleep", "severity": "warning",
+                            "detail": "Device not reachable: timeout"},
+                           {"device": "Kitchen light", "result": "stored", "severity": "success", "size": 1840,
+                            "parts": {"settings": True, "scripts": 1, "schedules": 1, "webhooks": 1}},
+                           {"device": "Living room", "result": "stored", "severity": "success", "size": 1210,
+                            "parts": {"settings": True, "scripts": 0, "schedules": 2, "webhooks": 0}}])
 if scenario == "legacy":  # an installation started before (device progress shown)
     ids = list(m.devices)
     m.devices[ids[7]].update(status="installing", ota_progress=55, message="The Shelly is downloading the firmware: 55 %")

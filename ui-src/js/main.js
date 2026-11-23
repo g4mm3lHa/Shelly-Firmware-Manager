@@ -1,5 +1,7 @@
 // Entry module: rendering, tabs and polling. Importing it loads all other modules.
-import {$, api, attachTip, box, closeModal, el, fmt, getState, hideTip, loadLocal, message, modal, saveLocal, setTip, t, ui} from "./core.js";
+import {
+  $, api, attachTip, box, closeModal, confirmDialog, el, fmt, getState, guarded, hideTip, keepFocus, loadLocal, message, modal, saveLocal, setTip, t, ui,
+} from "./core.js";
 import {lang} from "./i18n.js";
 import {buildChooser, closeRowMenu, loadPrefs, renderDevices, syncChooser} from "./devices.js";
 import {renderFirmware} from "./firmware.js";
@@ -7,15 +9,17 @@ import {mobileQuery, renderLogs} from "./logs.js";
 import {IMPORT_OWN, importDialog, renderSettings} from "./app-settings.js";
 import "./install.js";
 import {renderSchedules} from "./schedules.js";
+import {renderBackups} from "./backups.js";
 import "./device-settings.js";
 
 // ---------------------------------------------------------------- Rendering, tabs & polling
-/** Render the active view; unchanged data is not re-rendered unless forced. */
+/** Render the active view; unchanged data is not re-rendered unless forced. The keyboard
+ *  focus stays on the control it was on (keepFocus). */
 export function render(force) {
   const s = ui.state;
   if (!s) return;
   renderMeta(s);
-  $("busy").textContent = s.storage_error ? t("Storage error: {error}", {error: s.storage_error}) : s.progress ? "" : s.busy || "";
+  $("busy").textContent = s.storage_error ? t("Storage error: {error}", {error: s.storage_error}) : s.busy_note || "";
   $("busy").classList.toggle("error", !!s.storage_error);
   renderProgress(s.progress);
   renderNotice(s.first_start_open ? {issue: "first_start"} : s.download_base || {});
@@ -26,30 +30,39 @@ export function render(force) {
   setTip($("scan"), s.first_start_open ? FIRST_START_BLOCK : s.schedule_running ? t("Schedule “{name}” is running", {name: s.schedule_running}) : "");
   if (s.first_start_open) askFirstStart();
   else if (loadLocal("firstStartAsked")) saveLocal("firstStartAsked", null);   // answered: a reinstallation asks again
-  const key = JSON.stringify([ui.view, mobileQuery.matches, s, ui.view === "firmware" ? ui.firmware : ui.view === "logs" ? ui.logs : null]);
+  const key = JSON.stringify([ui.view, mobileQuery.matches, s,
+    ui.view === "firmware" ? ui.firmware : ui.view === "logs" ? [ui.logs, ui.logsUnreadFrom] : ui.view === "backups" ? ui.backups : null]);
   if (!force && key === ui.rendered) return;
   ui.rendered = key; hideTip();
-  if (ui.view === "devices") renderDevices();
-  else if (ui.view === "firmware") renderFirmware();
-  else if (ui.view === "logs") renderLogs();
-  else if (ui.view === "schedules") renderSchedules();
+  keepFocus($("view-" + ui.view), () => {
+    if (ui.view === "devices") renderDevices();
+    else if (ui.view === "firmware") renderFirmware();
+    else if (ui.view === "logs") renderLogs();
+    else if (ui.view === "schedules") renderSchedules();
+    else if (ui.view === "backups") renderBackups();
+  });
 }
-/** Logs tab: a yellow "!" while the log holds entries newer than the newest one this
- *  browser has shown in the Logs tab (per browser; on the first visit nothing counts
- *  as unread). Opening the Logs tab marks everything as read. log_latest is a mark that
- *  grows with every entry, also within one second (stored as "logsMark"). */
+/** Logs tab: a red "!" while the log holds an error entry newer than the newest entry
+ *  this browser has shown in the Logs tab (per browser; on the first visit nothing counts
+ *  as unread; warnings and successes never set it). Opening the Logs tab marks
+ *  everything as read; the entries that were unread at that moment stay lightly
+ *  highlighted until the tab is left (ui.logsUnreadFrom: the mark read before). The
+ *  marks grow with every entry, also within one second (stored as "logsMark"). */
 function markUnreadLogs(s) {
   const latest = s.log_latest || 0, stored = loadLocal("logsMark");
   let seen = typeof stored === "number" ? stored : latest;
-  if (ui.view === "logs") seen = latest;
+  if (ui.view === "logs") {
+    if (ui.logsUnreadFrom == null) ui.logsUnreadFrom = seen;
+    seen = latest;
+  } else ui.logsUnreadFrom = null;
   if (seen !== stored) saveLocal("logsMark", seen);
   const tab = $("tab-logs");
   let mark = tab.querySelector(".tab-unread");
   if (!mark) {
-    mark = box("span", "tab-unread", el("span", "!"), el("span", t("Unread log entries"), "sr-only"));
+    mark = box("span", "tab-unread", el("span", "!"), el("span", t("Unread error entries in the log"), "sr-only"));
     mark.firstChild.setAttribute("aria-hidden", "true"); tab.append(mark);
   }
-  mark.hidden = !(latest > seen);
+  mark.hidden = !((s.log_latest_error || 0) > seen);
 }
 /** Header: last check and check cycle as two neutral pills; the cycle uses the
  *  Home Assistant time zone (not the browser's). */
@@ -107,17 +120,14 @@ const WELCOME_TITLE = t("Welcome – import a firmware store?");
 /** Answer the first-start question with "Skip": checks may run from now on. An error
  *  keeps the title of the welcome dialog when it was skipped there (title). */
 async function skipFirstStart(title) {
-  try { await api("api/first-start/skip", {}); closeModal(); }
-  catch (e) { message(title || t("First start"), e.message, "error", title ? "importIcon" : undefined); }
+  await guarded(title || t("First start"), title ? "importIcon" : undefined, async () => { await api("api/first-start/skip", {}); closeModal(); });
 }
 /** Confirm that the former example URL really is the address of Home Assistant. */
 function confirmDownloadBase(url) {
-  modal(t("Confirm download base URL"), [el("p", t("Is {url} really the LAN address of Home Assistant with the host port 8098?", {url})),
-    el("p", t("The Shellys download the firmware from this address. If it is wrong, every update fails. The confirmation ends when the address is changed."), "hint")],
-  [{text: t("Cancel")}, {text: t("Yes, this is correct"), kind: "primary", action: async () => {
-    try { await api("api/settings/download-base/confirm", {url}); closeModal(); }
-    catch (e) { message(t("Confirm download base URL"), e.message, "error"); }   // keeps the title of this dialog
-  }}]);
+  confirmDialog({title: t("Confirm download base URL"), button: t("Yes, this is correct"), kind: "primary",
+    content: [el("p", t("Is {url} really the LAN address of Home Assistant with the host port 8098?", {url})),
+      el("p", t("The Shellys download the firmware from this address. If it is wrong, every update fails. The confirmation ends when the address is changed."), "hint")],
+    action: async () => { await api("api/settings/download-base/confirm", {url}); closeModal(); }});
 }
 const PHASES = {queued: t("starting"), registry: t("reading the device list"), devices: t("checking devices"),
   download: t("downloading firmware"), changelog: t("checking firmware information")};
@@ -134,7 +144,7 @@ function renderProgress(p) {
   const bar = $("progress-bar");
   if (p.total) { bar.max = p.total; bar.value = p.done; } else bar.removeAttribute("value");   // indeterminate
 }
-const VIEWS = ["devices", "firmware", "schedules", "logs", "settings"];
+const VIEWS = ["devices", "firmware", "schedules", "backups", "logs", "settings"];
 /** Switch tab and load its data. */
 function showView(v) {
   ui.view = v; closeRowMenu();
@@ -154,14 +164,16 @@ let timer = 0, inflight = false;
 // lasts longer is shown.
 const AUTH_RETRY_MS = [1000, 3000, 8000, 15000];
 let authRetry = 0;
-export let queued = false;   // read by devices.js
+let queued = false;   // a refresh asked for while one runs: true (forced) or "again"
 const POLL_IDLE_MS = 30000, POLL_BUSY_MS = 3000;
 // A schedule run or scheduled installation starts at its time: the page refreshes this
 // long after it, so the Devices, Schedules and Logs tabs show it at once
 const DUE_DELAY_MS = 2000;
 let duePolled = 0;   // time of the last job the page refreshed for (epoch s)
-/** Something runs: a check, an installation, a schedule run or another device activity. */
-const isActive = s => !!(s && (s.busy || s.progress || s.schedule_running || s.devices.some(d => d.installing || d.activity)));
+/** Something runs: a check, an installation, a schedule run, a backup run, a restore or
+ *  another device activity. */
+const isActive = s => !!(s && (s.busy || s.progress || s.schedule_running || (s.backup_job && !s.backup_job.finished) ||
+  (s.restore && !s.restore.finished) || s.devices.some(d => d.installing || d.activity)));
 /** Time of the next schedule run or scheduled installation the page has not refreshed
  *  for yet (epoch s; Infinity: none). */
 function nextDue(s) {
@@ -195,6 +207,9 @@ export async function load(force) {
     if (ui.view === "firmware") { const f = await api("api/firmware"); ui.firmware = f.firmware; ui.firmwareTotal = f.total_size || 0; ui.firmwareFree = f.free_space ?? null; }
     // Logs tab: reloaded when a new entry was written (newest entry time) or work ended
     if (ui.view === "logs" && (force || workEnded(ui.state, s) || s.log_latest !== ui.state?.log_latest || Date.now() - ui.logsLoaded > 30000)) { ui.logs = (await api("api/logs")).entries; ui.logsLoaded = Date.now(); }
+    // Backups tab: its lists are fetched again whenever the state changed (a backup was
+    // stored or removed, an attempt failed, a device was renamed)
+    if (ui.view === "backups" && (force || !ui.backups || s !== ui.state)) ui.backups = await api("api/backups");
     ui.state = s;
     authRetry = 0;
     render(force);

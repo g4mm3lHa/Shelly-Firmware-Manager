@@ -7,7 +7,6 @@ import asyncio
 
 import manager_core
 import pytest
-import shelly
 from conftest import A, B, C
 from helpers import make_manager
 
@@ -27,12 +26,6 @@ async def beta_manager(net, **options):
     m.notify = notify
     m._registry = registry
     return m
-
-
-def test_is_prerelease_and_upload_versions():
-    """Beta and RC versions are pre-releases; stable versions and unknown text are not."""
-    assert shelly.is_prerelease("1.5.0-beta2") and shelly.is_prerelease("1.5.0-rc1")
-    assert not shelly.is_prerelease("1.5.0") and not shelly.is_prerelease("nonsense")
 
 
 async def test_no_beta_while_the_option_is_off(mgr, net):

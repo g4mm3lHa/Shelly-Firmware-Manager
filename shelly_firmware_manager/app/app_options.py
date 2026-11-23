@@ -12,7 +12,7 @@ import re
 from typing import Any
 from urllib.parse import urlsplit
 
-from shelly import is_lan_address
+from shelly_net import is_lan_address
 from tls import is_shelly_host, parse_fingerprint
 
 INT_RANGES = {
@@ -22,6 +22,7 @@ INT_RANGES = {
     "log_entry_limit": (100, 3000),
     "import_max_mb": (1, 2048),
     "offer_after_days": (0, 60),
+    "backup_keep": (1, 50),
 }
 BOOLS = (
     "restrict_downloads_to_devices",
@@ -30,6 +31,7 @@ BOOLS = (
     "beta_firmware",
     "resolve_host_names",
     "keep_installed",
+    "backup_before_install",
 )
 DEFAULTS = {
     "check_interval_days": 7,
@@ -41,6 +43,8 @@ DEFAULTS = {
     "import_max_mb": 100,
     "keep_installed": True,
     "offer_after_days": 0,
+    "backup_before_install": True,
+    "backup_keep": 10,
 }
 # All option keys of config.yaml. Anything else in options.json is ignored everywhere,
 # so an unknown (e.g. removed) key can never reach the UI, the log or a save request –
@@ -68,7 +72,7 @@ DOWNLOAD_BASE_NOT_PRIVATE = "download_base_url: the IP address is not in a priva
 def download_host_problem(host: str) -> str | None:
     """Why a host of the download base URL is refused, else None (allow-list).
 
-    Allowed: an IP address inside shelly.LAN_NETWORKS, or an ASCII host name (labels of
+    Allowed: an IP address inside shelly_net.LAN_NETWORKS, or an ASCII host name (labels of
     letters, digits and hyphens, at most one trailing dot). Everything else is refused:
     a public or local IP address, an IP address in disguise (numbers-only forms such as
     2130706433 or 0x7f.1), IPv6 zone ids and any other character – the Shellys fetch the

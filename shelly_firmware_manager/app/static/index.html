@@ -14,14 +14,15 @@
 <div id="notice" class="notice" role="alert" hidden></div>
 <!-- Tab icons: Material Design Icons (Apache 2.0), inlined so nothing is loaded externally -->
 <nav class="tabs tabs-icons" role="tablist">
-<button id="tab-devices" class="tab active" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6H21V4H3C1.9 4 1 4.9 1 6V18C1 19.1 1.9 20 3 20H7V18H3V6M13 12H9V13.78C8.39 14.33 8 15.11 8 16C8 16.89 8.39 17.67 9 18.22V20H13V18.22C13.61 17.67 14 16.88 14 16S13.61 14.33 13 13.78V12M11 17.5C10.17 17.5 9.5 16.83 9.5 16S10.17 14.5 11 14.5 12.5 15.17 12.5 16 11.83 17.5 11 17.5M22 8H16C15.5 8 15 8.5 15 9V19C15 19.5 15.5 20 16 20H22C22.5 20 23 19.5 23 19V9C23 8.5 22.5 8 22 8M21 18H17V10H21V18Z"/></svg><span>Devices</span></button>
-<button id="tab-firmware" class="tab" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6,4H18V5H21V7H18V9H21V11H18V13H21V15H18V17H21V19H18V20H6V19H3V17H6V15H3V13H6V11H3V9H6V7H3V5H6V4M11,15V18H12V15H11M13,15V18H14V15H13M15,15V18H16V15H15Z"/></svg><span>Firmware</span></button>
-<button id="tab-schedules" class="tab" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15,13H16.5V15.82L18.94,17.23L18.19,18.53L15,16.69V13M19,8H5V19H9.67C9.24,18.09 9,17.07 9,16A7,7 0 0,1 16,9C17.07,9 18.09,9.24 19,9.67V8M5,21C3.89,21 3,20.1 3,19V5C3,3.89 3.89,3 5,3H6V1H8V3H16V1H18V3H19A2,2 0 0,1 21,5V11.1C22.24,12.36 23,14.09 23,16A7,7 0 0,1 16,23C14.09,23 12.36,22.24 11.1,21H5M16,11.15A4.85,4.85 0 0,0 11.15,16C11.15,18.68 13.32,20.85 16,20.85A4.85,4.85 0 0,0 20.85,16C20.85,13.32 18.68,11.15 16,11.15Z"/></svg><span>Schedules</span></button>
-<button id="tab-logs" class="tab" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5,3C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3H5M5,5H19V19H5V5M7,7V9H17V7H7M7,11V13H17V11H7M7,15V17H14V15H7Z"/></svg><span>Logs</span></button>
-<button id="tab-settings" class="tab" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/></svg><span>Settings</span></button>
+<button id="tab-devices" class="tab active" role="tab" aria-selected="true" aria-controls="view-devices"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6H21V4H3C1.9 4 1 4.9 1 6V18C1 19.1 1.9 20 3 20H7V18H3V6M13 12H9V13.78C8.39 14.33 8 15.11 8 16C8 16.89 8.39 17.67 9 18.22V20H13V18.22C13.61 17.67 14 16.88 14 16S13.61 14.33 13 13.78V12M11 17.5C10.17 17.5 9.5 16.83 9.5 16S10.17 14.5 11 14.5 12.5 15.17 12.5 16 11.83 17.5 11 17.5M22 8H16C15.5 8 15 8.5 15 9V19C15 19.5 15.5 20 16 20H22C22.5 20 23 19.5 23 19V9C23 8.5 22.5 8 22 8M21 18H17V10H21V18Z"/></svg><span>Devices</span></button>
+<button id="tab-firmware" class="tab" role="tab" aria-selected="false" aria-controls="view-firmware"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6,4H18V5H21V7H18V9H21V11H18V13H21V15H18V17H21V19H18V20H6V19H3V17H6V15H3V13H6V11H3V9H6V7H3V5H6V4M11,15V18H12V15H11M13,15V18H14V15H13M15,15V18H16V15H15Z"/></svg><span>Firmware</span></button>
+<button id="tab-schedules" class="tab" role="tab" aria-selected="false" aria-controls="view-schedules"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15,13H16.5V15.82L18.94,17.23L18.19,18.53L15,16.69V13M19,8H5V19H9.67C9.24,18.09 9,17.07 9,16A7,7 0 0,1 16,9C17.07,9 18.09,9.24 19,9.67V8M5,21C3.89,21 3,20.1 3,19V5C3,3.89 3.89,3 5,3H6V1H8V3H16V1H18V3H19A2,2 0 0,1 21,5V11.1C22.24,12.36 23,14.09 23,16A7,7 0 0,1 16,23C14.09,23 12.36,22.24 11.1,21H5M16,11.15A4.85,4.85 0 0,0 11.15,16C11.15,18.68 13.32,20.85 16,20.85A4.85,4.85 0 0,0 20.85,16C20.85,13.32 18.68,11.15 16,11.15Z"/></svg><span>Schedules</span></button>
+<button id="tab-backups" class="tab" role="tab" aria-selected="false" aria-controls="view-backups"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12,3A9,9 0 0,0 3,12H0L4,16L8,12H5A7,7 0 0,1 12,5A7,7 0 0,1 19,12A7,7 0 0,1 12,19C10.5,19 9.09,18.5 7.94,17.7L6.5,19.14C8.04,20.3 9.94,21 12,21A9,9 0 0,0 21,12A9,9 0 0,0 12,3M14,12A2,2 0 0,0 12,10A2,2 0 0,0 10,12A2,2 0 0,0 12,14A2,2 0 0,0 14,12Z"/></svg><span>Backups</span></button>
+<button id="tab-logs" class="tab" role="tab" aria-selected="false" aria-controls="view-logs"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5,3C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3H5M5,5H19V19H5V5M7,7V9H17V7H7M7,11V13H17V11H7M7,15V17H14V15H7Z"/></svg><span>Logs</span></button>
+<button id="tab-settings" class="tab" role="tab" aria-selected="false" aria-controls="view-settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/></svg><span>Settings</span></button>
 </nav>
 
-<section id="view-devices">
+<section id="view-devices" role="tabpanel" aria-labelledby="tab-devices">
 <!-- Toolbar: row 1 search/sort/filter icons, then the extras of the tab -->
 <div class="toolbar">
 <div class="tb-main"><input id="dev-search" type="search" placeholder="Search name, IP or model" aria-label="Search devices">
@@ -32,25 +33,33 @@
 <div id="dev-cards"></div>
 </section>
 
-<section id="view-firmware" hidden>
+<section id="view-firmware" role="tabpanel" aria-labelledby="tab-firmware" hidden>
 <div class="toolbar">
 <div class="tb-main"><input id="fw-search" type="search" placeholder="Search firmware ID, version or device" aria-label="Search firmware">
 <div id="fw-sort"></div>
 <div id="fw-filter"></div></div>
 <div class="tb-extra"><span class="meta" id="fw-summary"></span>
 <button class="icon" id="fw-info" aria-label="Storage" data-tip="Firmware is never deleted automatically – delete files here when they are no longer needed. Older versions allow a downgrade of Gen2+ devices (device menu “Downgrade” or the downgrade icon of a version) once “Allow downgrades” is switched on in Settings. Gen2+: the Shelly update server decides which version is next; a stored file of that version (download or upload, after a SHA-256 check) is used instead of a download. Gen1: the store comes first."></button>
-<button id="fw-upload" aria-label="Upload firmware"><span>Upload firmware</span></button></div>
+<button id="fw-upload" class="icon-text sm" aria-label="Upload firmware"><span>Upload firmware</span></button></div>
 </div>
 <div id="fw-cards"></div>
 </section>
 
-<section id="view-schedules" hidden>
+<section id="view-schedules" role="tabpanel" aria-labelledby="tab-schedules" hidden>
 <div class="toolbar"><div class="tb-main"><span class="meta" id="sch-summary">Times in the time zone of Home Assistant</span></div>
-<div class="tb-extra"><button id="sch-add"><span>Add schedule</span></button></div></div>
+<div class="tb-extra"><button id="sch-add" class="icon-text"><span>Add schedule</span></button></div></div>
 <div id="sch-cards"></div>
 </section>
 
-<section id="view-logs" hidden>
+<section id="view-backups" role="tabpanel" aria-labelledby="tab-backups" hidden>
+<div class="toolbar"><div class="tb-main"><input id="bk-search" type="search" placeholder="Search device" aria-label="Search device">
+<div id="bk-filter"></div>
+<span class="meta" id="bk-summary"></span></div>
+<div class="tb-extra"><button id="bk-now" class="icon-text"><span>Back up now</span></button></div></div>
+<div id="bk-cards"></div>
+</section>
+
+<section id="view-logs" role="tabpanel" aria-labelledby="tab-logs" hidden>
 <div class="toolbar">
 <div class="tb-main"><input id="log-search" type="search" placeholder="Search device" aria-label="Search device">
 <div id="log-filter"></div></div>
@@ -60,13 +69,13 @@
 <div id="log-list"></div>
 </section>
 
-<section id="view-settings" hidden>
+<section id="view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
 <!-- Grouped settings cards and the common Save button, filled by app.js -->
 <div id="settings-form"></div>
 </section>
 
 <!-- One dialog for everything: title + close, content, buttons bottom right -->
-<dialog id="dlg"><div class="dlg-head"><h2 id="dlg-title"></h2><button class="icon" id="dlg-x" aria-label="Close"></button></div>
+<dialog id="dlg" aria-labelledby="dlg-title"><div class="dlg-head"><h2 id="dlg-title"></h2><button class="icon" id="dlg-x" aria-label="Close"></button></div>
 <div id="dlg-body"></div><div class="btns" id="dlg-btns"></div></dialog>
 <div id="tip" class="tooltip" role="tooltip" hidden></div>
 <div id="rowmenu" class="rowmenu" role="menu" hidden></div>

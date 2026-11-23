@@ -9,6 +9,8 @@ import re
 
 import data_paths
 import shelly
+import shelly_cloud
+import web_firmware
 import web_ui
 from aiohttp.test_utils import TestClient, TestServer
 from conftest import A, B, C
@@ -54,7 +56,7 @@ async def test_double_tap_gets_409(client, mgr, net):
     assert (r1.status, r2.status, r3.status, r4.status) == (200, 409, 409, 200)  # B: in parallel
     state = await (await client.get("/api/state")).json()
     assert not state["scanning"] and state["progress"] is None
-    assert state["busy"] == "Checking 2 devices"
+    assert state["busy"] == "Checking 2 devices" and state["busy_note"] is None
     net.gate.set()
     await wait_idle(mgr)
     checks = [e for e in mgr.events.entries if e["kind"] == "check" and e.get("trigger") == "device"]
@@ -272,7 +274,7 @@ async def test_http_upload_guards(client, mgr, net):
     # Announced size above 64 MiB: refused before the body is read (last – the
     # server closes the connection)
     r = await client.post("/api/firmware/upload", data=data,
-                          headers={**binary(client), "Content-Length": str(shelly.MAX_FW_SIZE + 1)})
+                          headers={**binary(client), "Content-Length": str(shelly_cloud.MAX_FW_SIZE + 1)})
     assert r.status == 413
 
 
@@ -448,10 +450,10 @@ async def test_http_first_start_and_bulk_passwords(client, mgr, net):
 async def test_http_upload_and_import_in_parts(client, mgr, net, monkeypatch):
     """Parts with X-Upload-Total/Offset/Transfer (Ingress refuses bodies above 16 MiB);
     invalid headers, oversized parts and totals are refused."""
-    import manager_store
+    import manager_transfer
 
-    monkeypatch.setattr(manager_store, "PART_MAX", 20000)
-    monkeypatch.setattr(web_ui, "PART_MAX", 20000)
+    monkeypatch.setattr(manager_transfer, "PART_MAX", 20000)
+    monkeypatch.setattr(web_firmware, "PART_MAX", 20000)
     await mgr.scan()
     data = firmware_zip({"name": "Plus1", "version": "1.3.0"}, size=50000)
     transfer, answer = None, None

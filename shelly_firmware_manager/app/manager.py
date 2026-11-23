@@ -1,15 +1,16 @@
-"""Manager, layer 7 of 7: the complete object and its view for the UI.
+"""Manager, layer 9 of 9: the complete object and its view for the UI.
 
 See manager_core for the layers. Everything outside the manager modules uses this
 class only.
 """
 
 import logging
+import shelly_net
 import time
 from typing import Any
 
 import schedule
-import shelly
+from backup_store import normalize_mac
 
 from manager_core import BATTERY_FROM_DEVICE, DOWNLOAD_BASE_MESSAGES, section_of
 from manager_schedules import Schedules
@@ -78,6 +79,7 @@ class Manager(Schedules):
         devices: list[dict[str, Any]] = []
         stored = self._downgrade_candidates()
         kept = self._stored_versions()
+        backups = self.backup_counts()
         for key, dev in self.devices.items():
             origin = dev.get("origin")  # checked by resolve_device_origin: private IP
             devices.append(
@@ -99,9 +101,11 @@ class Manager(Schedules):
                     # Running downgrade: its target version (the offer of the last check stays offer_version)
                     "target": dev.get("pending_version") if dev.get("downgrade") else None,
                     "password_set": self.credentials.has_device_password(key),  # flag only
-                    "ip": shelly.origin_ip(origin) if origin else None,
+                    "ip": shelly_net.origin_ip(origin) if origin else None,
                     "web_url": f"{origin}/" if origin else None,
                     "planned": self.planned_view(dev),  # scheduled installation ("Install at")
+                    # Stored backups of the settings: {"count", "kept", "last", "reason", "size"} or None
+                    "backups": backups.get(normalize_mac(dev.get("mac")) or ""),
                 }
             )
         return {
@@ -112,9 +116,20 @@ class Manager(Schedules):
             "offer_after_days": self.offer_after_days,
             "last_scan": self.last_scan,
             "busy": self.busy,
+            "busy_note": self.busy_note,  # line under the page title (no checks, see busy_note)
             "schedule_running": self.schedule_running,  # name of the schedule whose run is going on
-            # mark of the newest log entry (EventLog.latest): the Logs tab reloads and marks unread entries
+            # mark of the newest log entry (EventLog.latest): the Logs tab reloads and marks unread
+            # entries; the "!" of the tab follows the newest error entry
             "log_latest": self.events.latest(),
+            "log_latest_error": self.events.latest("error"),
+            # Backups of the device settings: options, a change counter of the list (the
+            # Backups tab reloads), totals for the Settings tab and the two running jobs
+            "backup_before_install": self.backup_before_install,
+            "backup_keep": self.backup_keep,
+            "backups_rev": self.backups.rev,
+            "backup_totals": self.backups.totals(),
+            "backup_job": self.backup_job,
+            "restore": self.restore_view(),
             "schedule": {
                 "days": self.check_days,
                 "time": self.check_time,

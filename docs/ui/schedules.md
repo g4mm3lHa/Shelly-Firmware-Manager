@@ -7,9 +7,10 @@ as the UI change). Read when you change the Schedules tab or the schedule dialog
 - **Tab (F10):** toolbar note "Times in the time zone of Home Assistant" and "Add
   schedule" (plus icon). Card "Schedules · n": on/off checkbox, name (free text; restart:
   pause below it), action with icon, repeat, devices, next run, last run (time, outcome
-  tag Success / Warning / Missed, short result), pencil and red trash; switched-off rows
+  tag Success / Warning / Error / Missed, short result), pencil and red trash; switched-off rows
   dimmed. Card "Scheduled Installations · n": device, version (with "Beta" tag), install
-  at, approved (time · user), "Cancel". Phones: tiles with labelled lines. Empty state
+  at, approved (time · user), "Cancel". Phones: tiles with labelled lines and the strong
+  line (see `common.md`). Empty state
   names both ways (add a schedule; "Install at" in the installation dialog).
 - **Dialog "Add schedule" / "Edit schedule" (F12–F15):** name, action (Restart, Cloud on,
   Cloud off, Bluetooth on, Bluetooth off – one action per schedule), pause between devices
@@ -33,3 +34,17 @@ as the UI change). Read when you change the Schedules tab or the schedule dialog
 - **Logs (F18):** kind "Schedule" and filter "Schedules": one entry per run (name, action,
   devices, duration, result; findings expandable), "missed" as warning, creating, changing
   and deleting a schedule; scheduled installations under "Installation".
+- **Action "Backup" (3.11.0, F9, approved 2026-11-22):** sixth action with the backup
+  icon, no pause. A run stores a backup only for devices whose settings changed since
+  their newest backup: "n stored · n unchanged · n not backed up" (plus "n left out").
+  Battery devices are tried; one that is asleep is counted on its own ("n asleep", as in
+  "Back up now") and does not change the outcome, so "left out" matches "n left out at
+  the moment" under Devices (live test rc3, 2026-11-23). Log lines of a run are coloured
+  like "Back up now": stored and unchanged ("unchanged – same as the last backup") green,
+  asleep yellow, not backed up yellow or red; left-out devices in the normal text colour.
+  The result under "Last run" wraps only between its parts. A device that should
+  answer and does not (or whose last check failed with an error) makes the run an Error
+  (live test rc2, approved 2026-11-23). Logs: kind "Backup" and
+  filter "Backups" (stored, failed, restored, deleted, downloaded, imported, removed by
+  the limit); the run of a schedule stays one entry of the kind "Schedule" and is shown
+  by both filters.

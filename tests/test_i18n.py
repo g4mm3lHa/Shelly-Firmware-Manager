@@ -36,7 +36,7 @@ def _argument(src: str, start: int) -> str:
 
 
 def js_keys() -> set[str]:
-    """English texts of t("…") calls (also both texts of t(a ? "x" : "y")) and of the
+    """English texts of t("…") calls (also both texts of t(a ? "x" : "y")), of tn(n, "…", "…") and of the
     option fields of the Settings tab (translated when shown)."""
     keys: set[str] = set()
     for path in JS_DIR.glob("*.js"):
@@ -46,6 +46,13 @@ def js_keys() -> set[str]:
         for m in re.finditer(r"(?<![\w.$])t\(", src):
             for s in STRING.findall(_argument(src, m.end())):
                 keys.add(json.loads(f'"{s}"'))
+        # tn(n, "one", "many", vars): the second and the third argument
+        for m in re.finditer(r"(?<![\w.$])tn\(", src):
+            start = m.end() + len(_argument(src, m.end())) + 1
+            for _ in range(2):
+                text = _argument(src, start)
+                keys.update(json.loads(f'"{s}"') for s in STRING.findall(text))
+                start += len(text) + 1
     settings = (JS_DIR / "app-settings.js").read_text()
     block = settings[settings.index("export const OPTION_FIELDS = [") : settings.index("\n];", settings.index("OPTION_FIELDS"))]
     fields = re.findall(r'^  \["\w+", "([^"]+)", "\w+", "([^"]*)", (?:"[^"]+"|STORAGE)\],$', block, re.M)

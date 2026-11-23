@@ -1,4 +1,4 @@
-"""Manager, layer 5 of 7: installations and downgrades, and what the download server
+"""Manager, layer 7 of 9: installations and downgrades, and what the download server
 needs to serve the files.
 
 Installations are always started manually and bound to the SHA-256 of the provided
@@ -18,6 +18,8 @@ from typing import Any
 import aiohttp
 import data_paths
 import shelly
+import shelly_cloud
+import shelly_net
 from shelly import DeviceAuth, ShellyError, error_text
 
 from manager_checks import Checks
@@ -107,8 +109,10 @@ class Installs(Checks):
 
         Several installations run in parallel, at most max_parallel_installs at a
         time; others wait for a free slot. Nothing starts during the full check or
-        while the device itself is checked, and each device is in progress at most
-        once; other devices may be checked meanwhile. approved_by is only written to the log.
+        while the device itself is checked or restored, and each device is in progress
+        at most once; other devices may be checked meanwhile. approved_by is only
+        written to the log. With the option backup_before_install the settings of the
+        device are backed up first; if that fails, nothing is installed.
 
         downgrade (Gen2+ only): install the stored older version with this
         SHA-256 instead of the provided update. The confirmation flags are checked by
@@ -119,6 +123,7 @@ class Installs(Checks):
             or self.download_base_issue
             or device_id in self.installing
             or device_id in self.reloading
+            or device_id in self.restoring
             or device_id in self.device_checks
         ):
             return False
@@ -161,6 +166,8 @@ class Installs(Checks):
         entry: dict[str, Any] | None = None  # log context, set once the installation actually starts
         try:
             async with self.install_slots:
+                # Option "Back up before every installation": no backup, no installation
+                await self.backup_before_installation(device_id, dev, approved_by)
                 dev["message"] = "Downgrade started" if downgrade else "Installation started"
                 entry = {
                     "device": dev.get("name"),
@@ -273,9 +280,15 @@ class Installs(Checks):
         self, device_id: str, dev: Device, sha: str, restart_first: bool = False
     ) -> tuple[bool, str | None]:
         """Actual installation: optional restart, pre-check, update command, wait for
-        the target version. Returns (confirmed, diagnosis or None)."""
+        the target version. Returns (confirmed, diagnosis or None).
+
+        The pre-check (_verify_unchanged: same MAC, still the checked build) runs before
+        a restart and again before the update command, so a device swapped at the
+        address or updated meanwhile is never sent the approved file. Gen2+ sends the
+        command over the RPC WebSocket (OTA events), HTTP only if nothing was sent
+        there; Gen1 over HTTP."""
         # 1. The approval is valid only for exactly this file and this device state
-        if await asyncio.to_thread(shelly.file_sha256, data_paths.FW_DIR, dev["file"]) != sha:
+        if await asyncio.to_thread(shelly_cloud.file_sha256, data_paths.FW_DIR, dev["file"]) != sha:
             raise ShellyError("Firmware file was modified")
         auth = self._auth(device_id, dev)
         if restart_first:
@@ -566,7 +579,7 @@ class Installs(Checks):
         if not owners:
             return False  # unknown file: record nothing
         allowed = not self.restrict_downloads or any(
-            shelly.origin_ip(d.get("origin", "")) == client_ip for d in owners
+            shelly_net.origin_ip(d.get("origin", "")) == client_ip for d in owners
         )
         record = self.downloads.setdefault(name, {"served": {}, "rejected": set()})
         if not allowed and len(record["rejected"]) < 8:  # limited in case someone floods requests
@@ -587,7 +600,7 @@ class Installs(Checks):
         """Forget earlier downloads of this device only (installation start)."""
         record = self.downloads.get(str(dev.get("file")))
         if record is not None:
-            record["served"].pop(shelly.origin_ip(dev.get("origin", "")), None)
+            record["served"].pop(shelly_net.origin_ip(dev.get("origin", "")), None)
 
     def _downloaded(self, dev: Device) -> bool:
         """True if this device has started downloading its file. A request from an
@@ -595,9 +608,9 @@ class Installs(Checks):
         restrict_downloads_to_devices) cannot be attributed and counts for every
         device of that file."""
         served = (self.downloads.get(str(dev.get("file"))) or {}).get("served") or {}
-        if served.get(shelly.origin_ip(dev.get("origin", ""))):
+        if served.get(shelly_net.origin_ip(dev.get("origin", ""))):
             return True
-        known = {shelly.origin_ip(d["origin"]) for d in self.devices.values() if d.get("origin")}
+        known = {shelly_net.origin_ip(d["origin"]) for d in self.devices.values() if d.get("origin")}
         return any(count and address not in known for address, count in served.items())
 
     def _install_diagnosis(self, dev: Device) -> str:
@@ -613,7 +626,7 @@ class Installs(Checks):
             ips = ", ".join(sorted(record["rejected"]))
             return (
                 f"Download rejected: request came from {ips}, not from the device IP "
-                f"{shelly.origin_ip(dev['origin'])}. Disable the option "
+                f"{shelly_net.origin_ip(dev['origin'])}. Disable the option "
                 "restrict_downloads_to_devices"
             )
         return (

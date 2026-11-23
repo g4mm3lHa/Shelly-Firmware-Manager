@@ -10,6 +10,7 @@ Part of `docs/CODEMAP.md`; read when you change stored fields or files below `/d
 | `firmware/` | `<sha256>.<zip\|bin\|gbl>`; temporary `.part-*` (downloads, staged uploads, staged store imports and exports; removed at start) |
 | `events.json` | activity log, one JSON object per line with `id` (3.0.0: one JSON array, converted once; IDs added once by 3.1.1) |
 | `credentials.json` | `{device id: {"gen": 1, "password"} \| {"gen": 2, "realm", "ha1"}}` |
+| `backups/` | backups of device settings (`backup_store`): `<id>.sfmb` (16 hex; encrypted with the key of the app), `index.json` (`{backups: [{id, mac, gen, at, reason, note, device, model, type, fw, parts, digest, size, kept, imported}]}` – what the lists show, no settings; also the hidden rows of files that cannot be opened or read, so their marks survive; rebuilt from the files if lost), `key` (32 random bytes, 0600; never part of a download or an export; never overwritten: one of the wrong size is renamed to `key.damaged-<time>`) |
 | `changelog.json` | last fetched page per generation: `{"1"\|"2": {"fetched", "versions": {version: {"date", "entries"}}}}` |
 
 Device entry (`state.devices[<HA device id>]`): identity `name`, `shelly_name`,
@@ -27,8 +28,8 @@ Device entry (`state.devices[<HA device id>]`): identity `name`, `shelly_name`,
 check or single check of the device), `install_failed` (failed installation, not a downgrade: file stays
 provided for a retry, same lifetime as `updated`), `store_fallback` (Gen2+: server not reachable,
 newer stored version offered for a manual installation; cleared by the next check of the device),
-`step_target` (Gen2+: provided version is an intermediate version; newest version or ""), `beta` (provided version is a beta of the update server), `planned` ("Install at": `{at, by, on, sha256, version, target, beta, restart, fallback_ack}`, see `manager_schedules`), `offer_date` (build date of the provided version, ISO date), `hold` (`{version, built, until}` while option `offer_after_days` holds a new version back; the device stays up to date), `hold_released` (version "Offer update now" released for this device). Memory only: `Manager.activity`, `progress`,
-`installing`, `reloading`, `device_checks`, `downloads`, `_provisions` / `_provision_waiters` / `_fetching`, `_upload`, `_scan_user` / `_check_users` / `_verifying` /
+`step_target` (Gen2+: provided version is an intermediate version; newest version or ""), `beta` (provided version is a beta of the update server), `planned` ("Install at": `{at, by, on, sha256, version, target, beta, restart, fallback_ack}`, see `manager_schedules`), `offer_date` (build date of the provided version, ISO date), `hold` (`{version, built, until}` while option `offer_after_days` holds a new version back; the device stays up to date), `hold_released` (version "Offer update now" released for this device), `backup_failed` (`{at, reason: password|asleep|unreachable|failed, message}` after a failed backup, until the next successful one). Memory only: `Manager.activity`, `progress`,
+`installing`, `reloading`, `device_checks`, `downloads`, `_provisions` / `_provision_waiters` / `_fetching`, `_upload` / `_import` / `_export` / `_backup_download` / `_backup_import` (`Pending`), `_scan_user` / `_check_users` / `_verifying` /
 `_fresh` (running checks only).
 
 Firmware entry (`state.firmware[<file name>]`): `type`, `gen`, `version`, `sha256`,
@@ -42,7 +43,14 @@ disk at the start; Gen2+: removed once an offer URL names its SHA-256 – until 
 fallback or downgrade).
 
 Schedule entry (`state.schedules[]`, see `timetable.py`): `id` (12 hex), `name`, `on`, `action`
-(`restart|cloud_on|cloud_off|ble_on|ble_off`), `pause` (restart only), `time` (HH:MM),
+(`restart|cloud_on|cloud_off|ble_on|ble_off|backup`), `pause` (restart only), `time` (HH:MM),
 `repeat` (`{kind: daily}`, `{kind: weekdays, days}`, `{kind: every, n}`), `devices` (`"all"` or
 device IDs; empty only on a switched-off schedule whose devices were removed from the list), `anchor` (first day of "every n days"), `next` (epoch, None while off), `last`
-(`{at, severity, text}` with `counts` of a run – `done`, `total` (chosen devices incl. left out), `run` (acted on), `unreachable`, `refused`, `left` – or `reason` of a missed run).
+(`{at, severity, text}` with `counts` of a run – `done`, `total` (chosen devices incl. left out), `run` (acted on), `unreachable`, `refused`, `left`, `unchanged` (backup: settings as in the newest backup), `asleep` (backup: battery devices that did not answer) – or `reason` of a missed run).
+
+Backup (`backups/<id>.sfmb`, payload `{meta, data}`): `data` Gen2+ `{config, scripts: [{id, name, enable, running, code}],
+schedules, webhooks}`, Gen1 `{settings, actions}` (`actions` None: not readable, `parts.partial`), plus
+`protected` (password protection at the time of the backup; compared, never written). Never in it:
+passwords and keys, the key-value store, the Bluetooth proxy script of Home Assistant. A backup belongs
+to a device by its MAC address. A store export carries the backups as `Backups/<MAC>/<id>.sfmb`,
+encrypted with the key of the export password (manifest list `backups`).

@@ -137,6 +137,10 @@ def _action_popups(c):
             page.screenshot(path=out / f"{case}-popup-debug.png")
         if label == "Eco mode":
             page.screenshot(path=out / f"{case}-popup-eco.png")
+        if label == "Power-on action":  # the select stays inside the dialog, its text shortened
+            inside = f.evaluate("""() => { const d = document.getElementById('dlg-body').getBoundingClientRect();
+              return [...document.querySelectorAll('#dlg-body select')].every(s => s.getBoundingClientRect().right <= d.right + 0.5); }""")
+            check(f"{case}: Power-on action select inside the dialog", inside)
         f.locator("#dlg-btns button", has_text="Cancel").click()
     # Notes of greyed-out icons: strip with the reason
     for name, label, pill, text in (("Garden plug", "Websocket debug log", "Not supported", "no websocket debug log"),
@@ -231,7 +235,7 @@ def _battery(c):
     check(f"{case}: sleeping battery device – Asleep pill and dimmed IP", geo["pill"] == "Asleep" and geo["dim"], str(geo))
     pill = row("Doorbell").locator("td.c-status .pill")
     grey = pill.evaluate("""p => { const s = getComputedStyle(p);
-      return [s.getPropertyValue('--pill').trim(), s.getPropertyValue('--secondary-text-color').trim()]; }""")
+      return [s.getPropertyValue('--tone').trim(), s.getPropertyValue('--secondary-text-color').trim()]; }""")
     check(f"{case}: Asleep pill grey", grey[0] == grey[1] and grey[0] != "", str(grey))
     awake = row("Carport").evaluate("r => [!!r.querySelector('.battery'), r.querySelector('td.c-ip .num').classList.contains('dim')]")
     check(f"{case}: awake battery device – icon, IP not dimmed", awake == [True, False], str(awake))
@@ -475,7 +479,7 @@ def _layout(c):
       right: r(p).left >= r(m).right, title: document.getElementById('dlg-title').textContent,
       sections: [...document.querySelectorAll('#dlg .dsec h3')].map(h => h.textContent)}; }""")
     check(f"{case}: status dialog – message left, status right, sections", pos["right"] and pos["title"] == "Fridge"
-          and pos["sections"] == ["Firmware", "Device", "History"], str(pos))
+          and pos["sections"] == ["Firmware", "Device", "History", "Backups"], str(pos))
     page.screenshot(path=out / f"{case}-status-failed.png")
     f.locator("#dlg-x").click()
     tip_after_tap = None

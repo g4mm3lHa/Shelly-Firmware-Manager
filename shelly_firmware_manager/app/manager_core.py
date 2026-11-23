@@ -1,16 +1,18 @@
-"""Manager, layer 1 of 7: state, persistence, Home Assistant access, app options and the
+"""Manager, layer 1 of 9: state, persistence, Home Assistant access, app options and the
 check slot.
 
 The manager is one object built from layers, each in its own module and each extending
 the one before: ManagerCore (this file) -> FirmwareStore (manager_store) ->
-DeviceSettings (manager_devices) -> Checks (manager_checks) -> Installs
-(manager_installs) -> Schedules (manager_schedules) -> Manager (manager). A layer only uses what the layers below it
+Transfers (manager_transfer) -> DeviceSettings (manager_devices) -> Backups
+(manager_backups) -> Checks (manager_checks) -> Installs (manager_installs) -> Schedules
+(manager_schedules) -> Manager (manager). A layer only uses what the layers below it
 provide; the complete object is manager.Manager.
 
 State lives in /data/state.json (with the previous save as backup state.bak, see
 ManagerCore.save and _load), firmware in /data/firmware, device passwords in
-/data/credentials.json, changelogs in /data/changelog.json and the activity log in
-/data/events.json (all private to the app, paths in data_paths).
+/data/credentials.json, changelogs in /data/changelog.json, the activity log in
+/data/events.json and the backups of device settings in /data/backups (all private to
+the app, paths in data_paths).
 The full check ("check all") runs exclusively (asyncio.Lock): it starts only while no
 single-device check, installation or Reload Device Info runs, and blocks all of them
 while it runs. Single-device checks and installations of different devices run in
@@ -27,6 +29,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -37,10 +40,11 @@ import app_options
 import data_paths
 import schedule
 import timetable
+from backup_store import BackupStore
 from changelog import Changelogs
 from credentials import Credentials
 from events import EventLog
-from shelly import AuthError, DeviceAuth, ShellyError, clip, error_text, plain
+from shelly import AuthError, DeviceAuth, ShellyError, clip, error_text, plain, same_secret
 from tls import CertificatePins
 
 
@@ -68,10 +72,6 @@ STATUS_ERROR = "error"
 # A battery device (marker battery, detected from the device while awake) that was
 # not reachable: it sleeps between wake-ups, so this is no error
 STATUS_ASLEEP = "asleep"
-
-# Not in the device registry at its last check (state of versions before the "removed"
-# marker); shown as "Not checked" until the device is checked again
-STATUS_UNREGISTERED = "unregistered"
 
 # Gen1 device while Gen1 updates are disabled; also a Gen2+ device whose beta offer was
 # withdrawn at the start because beta firmware is switched off (until its next check)
@@ -146,6 +146,13 @@ SUPERVISOR_TIMEOUT = aiohttp.ClientTimeout(total=15)
 # devices of all integrations in one message (aiohttp's default of 4 MiB is too small
 # for very large installations)
 REGISTRY_MAX = 32 * 1024 * 1024  # bytes
+# Readable name of a Core WebSocket list request in error texts (unknown ones: the request)
+HA_REQUEST_NAMES = {
+    "config/device_registry/list": "device registry",
+    "config/entity_registry/list": "entity registry",
+    "config_entries/get": "config entries",
+    "config_entries/flow/progress": "discovery flows",
+}
 
 # Pages of the Home Assistant frontend: the page of this app (its info card has the
 # "Changelog" link next to the version) and, if the slug is unknown, the list of apps
@@ -162,7 +169,7 @@ ACTIVITY_DOWNLOADING = "downloading"  # firmware for this device is being downlo
 
 ACTIVITY_RELOADING = "reloading"  # Reload Device Info is reading the device
 
-PART_PREFIX = ".part-"  # temporary download files (see shelly._store)
+PART_PREFIX = ".part-"  # temporary download files (see shelly_cloud._store)
 
 # ASCII punctuation: escaped with a backslash in texts of the Home Assistant notification,
 # which renders Markdown (links, images, emphasis, HTML, autolinks); shown unchanged
@@ -209,10 +216,87 @@ def severity_of(err: BaseException) -> str:
     return "warning"
 
 
+def unreachable(err: BaseException) -> bool:
+    """True if the device did not answer at all (timeout, connection failure) – not
+    for an answer the device gave, e.g. a refused password."""
+    return isinstance(err, (TimeoutError, aiohttp.ClientConnectionError, OSError))
+
+
 def unexpected_text(err: BaseException) -> str:
     """Status message for an error no code path expects (e.g. a device answer of an
     unexpected shape): names the error type; the traceback is in the app log."""
     return clip(f"Unexpected error ({type(err).__name__}: {error_text(err, 300)}) – see the app log", 500)
+
+
+class Pending:
+    """What a dialog holds for a short time under a random token: a staged file, a
+    prepared download or export (memory only; a file it names lies below /data).
+
+    One rule for all of them: a wrong token is refused and drops nothing (it can only
+    come from an outdated tab – 128 bit are not guessed); the payload is dropped
+    exactly when its time is up, and on_drop removes what it left on disk; take uses
+    it up (a download, an export, a confirmed import). Creating a new one drops the
+    one held before."""
+
+    def __init__(self) -> None:
+        """Nothing held."""
+        self.payload: dict[str, Any] | None = None  # None while nothing is held; use get/take
+        self._token = ""
+        self._ttl = 0.0
+        self._deadline = 0.0
+        self._on_drop: Callable[[dict[str, Any]], None] | None = None
+        self._timer: asyncio.TimerHandle | None = None
+
+    def create(
+        self, payload: dict[str, Any], ttl: float, on_drop: Callable[[dict[str, Any]], None] | None = None
+    ) -> str:
+        """Hold payload for ttl seconds; returns its new token."""
+        self.drop()
+        self.payload, self._token, self._ttl, self._on_drop = payload, secrets.token_hex(16), ttl, on_drop
+        self.renew()
+        return self._token
+
+    def renew(self) -> None:
+        """The full time again from now (the next step of a dialog gets all of it)."""
+        if self.payload is None:
+            return
+        self._deadline = time.monotonic() + self._ttl
+        if self._timer is not None:
+            self._timer.cancel()
+        try:
+            self._timer = asyncio.get_running_loop().call_later(max(self._ttl, 0), self.drop)
+        except RuntimeError:  # no event loop (direct calls): get and take check the time
+            self._timer = None
+
+    def get(self, token: object) -> dict[str, Any] | None:
+        """The payload held under token; None if nothing is held, its time is up or the
+        token is another one (nothing is dropped then)."""
+        if self.payload is not None and time.monotonic() >= self._deadline:
+            self.drop()
+        if self.payload is None or not same_secret(token, self._token):
+            return None
+        return self.payload
+
+    def take(self, token: object) -> dict[str, Any] | None:
+        """As get, and nothing is held afterwards. on_drop is not called: the caller
+        uses what the payload names (or removes it)."""
+        payload = self.get(token)
+        if payload is not None:
+            self._clear()
+        return payload
+
+    def drop(self) -> None:
+        """Forget the payload and remove what it left behind (on_drop)."""
+        payload, on_drop = self.payload, self._on_drop
+        self._clear()
+        if payload is not None and on_drop is not None:
+            on_drop(payload)
+
+    def _clear(self) -> None:
+        """Nothing held any more; the timer is stopped."""
+        if self._timer is not None:
+            self._timer.cancel()
+        self.payload, self._token, self._on_drop, self._timer = None, "", None, None
 
 
 class ManagerCore:
@@ -246,6 +330,10 @@ class ManagerCore:
         self.keep_installed = options["keep_installed"] is True
         # A new version is offered only once it is this many days old (build date); 0 = at once
         self.offer_after_days = int(options["offer_after_days"])
+        # Backups of the device settings: one before every installation, and how many
+        # of the newest are kept per device (see manager_backups)
+        self.backup_before_install = options["backup_before_install"] is True
+        self.backup_keep = int(options["backup_keep"])
         self.session = session
         self.token = token
         self.pins = pins  # certificate pins for shelly.cloud
@@ -291,6 +379,14 @@ class ManagerCore:
         # installation sends one notification of its own), memory only
         self.notify_muted: set[str] = set()
         self.reloading: set[str] = set()  # device IDs whose Reload Device Info is running
+        # Device whose backup is being restored (one at a time): nothing else touches it meanwhile
+        self.restoring: set[str] = set()
+        # "Back up now" for several devices and the running or last restore, for the
+        # dialogs of the UI (memory only, see manager_backups)
+        self.backup_job: dict[str, Any] | None = None
+        self.restore_job: dict[str, Any] | None = None
+        self._backup_download = Pending()  # prepared download of one backup
+        self._backup_import = Pending()  # staged backup file of an import
         # (firmware ID, version) -> running provide task (single flight)
         self._provisions: dict[tuple[str, str], asyncio.Future[tuple[str, str, int]]] = {}
         # (firmware ID, version) -> devices waiting for that provide task (full and
@@ -314,14 +410,14 @@ class ManagerCore:
         self._header_got = ""  # version the reference request was answered with
         # Devices that installed an intermediate version: checked again at once
         self._step_checks: set[str] = set()
-        self._upload: dict[str, Any] | None = None  # staged manual upload (see stage_upload), memory only
+        self._upload = Pending()  # staged manual upload (see stage_upload)
         self._upload_lock = asyncio.Lock()  # one upload transfer at a time
-        self._export: dict[str, Any] | None = None  # prepared store export (see prepare_export), memory only
-        self._import: dict[str, Any] | None = None  # staged store import (see stage_import), memory only
+        self._export = Pending()  # prepared store export (see prepare_export)
+        self._import = Pending()  # staged store import (see stage_import)
         self._import_lock = asyncio.Lock()  # one import transfer / check / confirmation at a time
         self._import_storing = False  # confirm_import is writing its files to the store
         # File transfers in parts (upload, import) that are not complete yet, by kind;
-        # memory only (see FirmwareStore._receive_part)
+        # memory only (see Transfers._receive_part)
         self._receiving: dict[str, dict[str, Any]] = {}
         # First start of a fresh installation (no state.json): no check runs until the
         # user answered the import question (import a store or skip); persisted
@@ -338,6 +434,7 @@ class ManagerCore:
         self.credentials = Credentials(data_paths.CREDENTIALS_FILE)
         self.changelogs = Changelogs(data_paths.CHANGELOG_FILE)
         self.events = EventLog(data_paths.EVENTS_FILE, options["log_retention_days"], options["log_entry_limit"])
+        self.backups = BackupStore(data_paths.BACKUP_DIR)
         self._load()
         self.schedule, changed = schedule.configure(
             self.schedule, self.check_days, self.check_time, time.time(), self.tz
@@ -572,7 +669,8 @@ class ManagerCore:
             msg = await ws.receive(timeout=30)
             if msg.type is not aiohttp.WSMsgType.TEXT:
                 # e.g. closed by aiohttp because the message exceeds REGISTRY_MAX
-                raise ShellyError(f"Home Assistant did not answer the device registry request ({msg.type.name})")
+                name = HA_REQUEST_NAMES.get(request, request)
+                raise ShellyError(f"Home Assistant did not answer the {name} request ({msg.type.name})")
             try:
                 data = json.loads(msg.data)
             except ValueError:
@@ -741,10 +839,11 @@ class ManagerCore:
         Two quick requests (double tap, two browsers) can therefore never start the
         same check twice, and an approval arriving in between is refused.
         kind "all": only while nothing else runs (no single-device check, installation,
-        Reload Device Info or run of a schedule). kind "device": not during the full check, and not for
-        a device that is being checked, installed or reloaded – other devices may be
+        Reload Device Info, restore or run of a schedule). kind "device": not during the full check, and not for
+        a device that is being checked, installed, reloaded or restored – other devices may be
         checked or installed at the same time. No check starts while a store import
-        writes its files. Raises ShellyError otherwise."""
+        writes its files; while a schedule runs only single-device checks start.
+        Raises ShellyError otherwise."""
         if self.first_start_open:
             raise ShellyError(FIRST_START_BLOCK)
         if self.checking:
@@ -755,6 +854,8 @@ class ManagerCore:
             raise ShellyError("Store import in progress – please try again in a moment")
         if self.reloading and (kind != "device" or device_id in self.reloading):
             raise ShellyError("Device info is being reloaded – please try again in a moment")
+        if self.restoring and (kind != "device" or device_id in self.restoring):
+            raise ShellyError("A backup is being restored – please try again afterwards")
         if kind == "device":
             if device_id is None:
                 raise ValueError("device_id required for a single-device check")
@@ -791,10 +892,22 @@ class ManagerCore:
         if self.device_checks:
             names = [str(self.devices.get(i, {}).get("name") or "device") for i in self.device_checks]
             parts.append(f"Checking {names[0]}" if len(names) == 1 else f"Checking {len(names)} devices")
+        if note := self.busy_note:
+            parts.append(note)
+        return " · ".join(parts) or None
+
+    @property
+    def busy_note(self) -> str | None:
+        """The line under the page title: what busy names except checks – a check
+        shows "Checking …" in the row of its device (a full check in the progress
+        line), not under the title."""
+        parts = []
         if self.installing:
             parts.append(f"Installations running: {len(self.installing)}")
         if self.reloading:
             parts.append("Reloading device info")
+        if self.restoring:
+            parts.append("Restoring a backup")
         return " · ".join(parts) or None
 
     def _progress(self) -> dict[str, Any]:

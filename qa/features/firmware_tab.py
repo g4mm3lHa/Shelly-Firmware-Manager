@@ -86,10 +86,22 @@ def _firmware_tab(c):
     style = step.first.evaluate("e => { const s = getComputedStyle(e); return [s.backgroundColor, s.borderTopStyle, s.borderTopWidth]; }")
     check(f"{case}: intermediate label outlined", step.count() == 1 and step.first.inner_text() == "Intermediate"
           and style == ["rgba(0, 0, 0, 0)", "solid", "1px"], str(style))
+    # below: the labels moved under the version (phones, when they do not fit beside it);
+    # lines: tops of the labels (one value: all in one line); fits: they have room for one line
     labels = f.evaluate("""() => [...document.querySelectorAll('.fw-row .fw-ver')].filter(v => v.querySelector('.tag')).map(v => {
-      const n = v.querySelector('.name').getBoundingClientRect(), t = v.querySelector('.tag').getBoundingClientRect();
-      return {gap: Math.round(t.left - n.right), dy: Math.abs((n.top + n.height / 2) - (t.top + t.height / 2))}; })""")
-    check(f"{case}: labels 12 px after the version, centred", labels and all(x["gap"] == 12 and x["dy"] < 1.5 for x in labels), str(labels))
+      const n = v.querySelector('.name').getBoundingClientRect(), tags = [...v.querySelectorAll('.tag')],
+        t = tags[0].getBoundingClientRect(), last = tags[tags.length - 1].getBoundingClientRect(),
+        need = tags.reduce((sum, e) => sum + e.getBoundingClientRect().width, 0) + 6 * (tags.length - 1);
+      return {gap: Math.round(t.left - n.right), dy: Math.abs((n.top + n.height / 2) - (t.top + t.height / 2)), below: t.top >= n.bottom - 1,
+        lines: new Set(tags.map(e => Math.round(e.getBoundingClientRect().top))).size, fits: need <= v.clientWidth + 0.5,
+        inside: last.right <= v.getBoundingClientRect().right + 0.5}; })""")
+    check(f"{case}: labels 12 px after the version, centred (phones: also together below it)", labels
+          and all((x["gap"] == 12 and x["dy"] < 1.5) or (width < 700 and x["below"]) for x in labels), str(labels))
+    check(f"{case}: labels of a version in one line", all(x["lines"] == 1 or not x["fits"] for x in labels)
+          and all(x["inside"] for x in labels), str(labels))
+    if width < 700:
+        check(f"{case}: no empty line for a version without devices",
+              f.locator(".fw-row .fw-dev.fw-none").count() > 0 and not f.locator(".fw-row .fw-dev.fw-none").first.is_visible())
     up = f.evaluate("""() => { const b = document.getElementById('fw-upload'), s = b.querySelector('svg'), r = e => e.getBoundingClientRect();
       const t = document.createRange(); t.selectNodeContents(b.querySelector('span')); const tr = t.getBoundingClientRect();
       return {size: Math.round(r(s).width), hidden: s.getAttribute('aria-hidden'), before: r(s).right < tr.left,
@@ -372,6 +384,10 @@ def _firmware_delete_and_upload(c, rows):
     # Upload: pre-filled form; wrong SHA shows an inline error (first case), store (last case)
     f.locator("#fw-upload").click()
     check(f"{case}: upload dialog with title icon", f.locator("#dlg-title svg.ti-upload").count() == 1)
+    f.locator("#dlg-btns button", has_text="Upload").click()   # no file chosen: the error stays in this step
+    err = f.locator("#dlg-body .bad")
+    check(f"{case}: upload without a file: error in the step", wait_until(err.is_visible) and "No file selected" in err.text_content()
+          and f.locator("#dlg-body input[type=file]").count() == 1)
     f.locator("#dlg-body input[type=file]").set_input_files(
         files=[{"name": "plüs1-1.1.0.zip", "mimeType": "application/zip", "buffer": firmware_zip()}])
     page.screenshot(path=out / f"{case}-upload-choose.png")

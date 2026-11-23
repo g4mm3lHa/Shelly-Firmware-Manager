@@ -1,5 +1,81 @@
 # Changelog
 
+## 3.11.0
+
+Released 2026-11-23. Backups of the device settings by hand, before every installation
+and on a schedule, with restore part by part; better keyboard use and contrast.
+
+Added
+- Backups tab: settings of every Shelly stored in the app – Gen2+ configuration,
+  scripts, schedules, webhooks; Gen1 settings and actions. Never the passwords.
+- Back up now for all, chosen or one device (Backups tab, row menu, device details); the
+  card "No Backup" names the devices without one and why; the hint names the passwords.
+- Backup before every update and downgrade (Settings, on by default); if it fails,
+  nothing is installed. Also for installations scheduled with "Install at".
+- Schedule action "Backup": stores a backup only for devices whose settings changed
+  since their newest one; battery devices are backed up while awake, else "asleep".
+- Restore: device and backup are compared, parts are chosen (settings, scripts,
+  schedules, webhooks, actions); only to the device of the backup, read again after.
+- Restore makes a chosen part equal to the backup (what exists only on the device is
+  removed); a backup is stored first; network settings need an extra confirmation.
+- Restore: the red network warning names another Wi-Fi (SSID) in the backup; the Wi-Fi
+  password is not part of a backup and stays as it is.
+- Backups are refused when another Shelly answers at the device's address (MAC address
+  checked), like a restore.
+- Keep backups per device (Settings, default 10, 1–50): older ones are removed; a
+  backup marked "Kept" (pin) stays and does not count, as does the one being restored.
+- Download of one backup as a file sealed with a password shown once; import for the
+  same device (MAC address and model checked), marked "Imported" and "Kept".
+- Store export and import also carry the backups, encrypted with the export password.
+- Logs: kind "Backup" with filter; "Back up now" for several devices writes one entry
+  per run with the result of each device; entries unread on opening are highlighted.
+- Keyboard: the focus stays on its control when the page redraws and returns to the
+  control that opened a dialog; messages in dialogs are announced.
+- Keyboard: Escape closes the row menu and returns to its button; the column heads of
+  the Devices table also sort with the space bar.
+
+Changed
+- Logs tab: the "!" only marks unread error entries and is red, no longer yellow for
+  warnings and successes.
+- A device that does not answer (not a battery device asleep, not ignored) counts as an
+  error in checks, backups and schedule runs: log, notification, device list.
+- Contrast: coloured text (links, new version, active tab, errors, grey tags) reaches
+  4.5:1 in light and dark; warning text is one darker orange everywhere.
+- Input errors stay in the dialog with everything entered: device and bulk passwords,
+  upload, store import, NTP server and power-on action; a refused file is kept.
+- The X and Escape do what "Cancel" or "Close" does: a staged upload or import is
+  discarded.
+- A dialog that holds a file, download or export is no longer cancelled by an outdated
+  tab; what it holds is removed exactly when its time is up.
+- Lists in dialogs (bulk passwords, schedule devices, run results) sort names like the
+  tables ("Shelly 2" before "Shelly 10").
+- Firmware store export: the note that the password seals the file and is stored
+  nowhere is a yellow box.
+- Power-on action: the values the Shelly reports ("Restore last state", "Match input",
+  …) stay English in every language, as on the device.
+- Tabs on phones: six tabs; the icon tabs are narrower so that all fit 360 px; the tiles
+  of the Schedules tab have the strong border of the Devices and Logs tiles.
+- Schedules tab: the result of the last run wraps only between its parts.
+- No "Checking …" line under the page title while a device is checked; its row shows it.
+- The app starts faster: the Python modules are compiled when the image is built.
+
+Fixed
+- Firmware tab (phone): the labels of a version stay in one line beside the version; no
+  empty line with a dash for a version without devices.
+- Dialogs: the page behind an open dialog no longer scrolls.
+- Phones: a long state in the popups of the action icons moves below the name; the
+  select of the power-on action stays inside the dialog.
+
+Security
+- Backups are stored encrypted (key in the app data, file mode 0600); downloaded and
+  exported backups are encrypted with their password, which is stored nowhere.
+- Backups: a lost, damaged or replaced key is noticed at the start; backups it cannot
+  open or read are not listed and keep their marks, so a schedule stores a new one.
+- Backups: the key file is never overwritten (a damaged one is kept as
+  `key.damaged-<time>`; an unreadable one turns backups off until the next start).
+- Imported backups: the checksum is computed from the content and a time in the future
+  is refused, so an imported file cannot hide changes from a schedule.
+
 ## 3.10.0
 
 Released 2026-11-22. Updates can be installed at a chosen time, beta firmware can be
