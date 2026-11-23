@@ -299,6 +299,10 @@ class BackupStore:
         # Set if the files could not be read with the key of this app (key lost): shown in the tab
         self.warning: str | None = None
         self.rev = 0  # grows with every change of the list (the UI reloads the tab)
+        # Index rows of files the key cannot open: not listed, but kept in the index, so
+        # with the matching key file they come back with their marks (a "Kept" backup
+        # must not become one the retention removes)
+        self._hidden: list[dict[str, Any]] = []
         folder.mkdir(parents=True, exist_ok=True)
         for path in folder.glob(".part-*"):  # left behind by a crash while a file was written
             path.unlink(missing_ok=True)
@@ -368,7 +372,7 @@ class BackupStore:
         """Read the index; entries without a file are dropped, files without an entry
         (or all files, if the index is unreadable) are read again. The tag of every
         listed file is checked against the key (nothing is decrypted): a file it does
-        not fit is not listed and counted in the warning."""
+        not fit is not listed, counted in the warning and keeps its row (_hidden)."""
         listed: dict[str, dict[str, Any]] = {}
         try:
             stored = json.loads((self.folder / INDEX).read_text())
@@ -398,9 +402,15 @@ class BackupStore:
                     meta, _data = open_sealed(key, blob, wrong_key)
                     row = {**clean_meta({**meta, "id": backup_id}), "kept": False, "imported": False}
                     log.warning("Backup %s was not listed – read again from its file", backup_id)
-                else:
+                    found.append(self._entry({**row, "size": len(blob)}))
+                    continue
+                entry = self._entry({**row, "size": len(blob)})
+                try:
                     _verified(key, blob, wrong_key)
-                (found if backup_id not in listed else kept).append(self._entry({**row, "size": len(blob)}))
+                except BackupError:
+                    self._hidden.append(entry)
+                    raise
+                kept.append(entry)
             except (OSError, BackupError) as err:
                 unreadable += 1
                 log.error("Backup file %s unreadable: %s", path.name, err)
@@ -416,12 +426,14 @@ class BackupStore:
         self.entries = sorted(kept, key=lambda e: -e["at"])
         for entry in found:
             self._insert(entry)
-        if [e["id"] for e in self.entries] != list(listed):  # files were added or are gone
+        if [e["id"] for e in self.entries + self._hidden] != list(listed):  # files were added or are gone
             self._save()
 
     def _insert(self, entry: dict[str, Any]) -> None:
         """Put an entry at its place in the list: newest first, and before the
-        entries of the same second (the one stored last is the newest)."""
+        entries of the same second (the one stored last is the newest). A hidden row
+        of the same ID goes: its file was just replaced by a readable one (import)."""
+        self._hidden = [row for row in self._hidden if row["id"] != entry["id"]]
         place = next((i for i, e in enumerate(self.entries) if e["at"] <= entry["at"]), len(self.entries))
         self.entries.insert(place, entry)
 
@@ -442,7 +454,8 @@ class BackupStore:
         and are read again at the next start)."""
         self.rev += 1
         try:
-            self._write(self.folder / INDEX, json.dumps({"backups": self.entries}, separators=(",", ":")).encode())
+            rows = self.entries + self._hidden
+            self._write(self.folder / INDEX, json.dumps({"backups": rows}, separators=(",", ":")).encode())
         except OSError as err:
             log.error("Backup list could not be written: %s", err)
 

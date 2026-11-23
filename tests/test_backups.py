@@ -243,19 +243,24 @@ def test_listed_backups_the_key_cannot_open_are_not_listed(tmp_path):
     and stays; a key file of the wrong size is kept under another name, never overwritten."""
     folder = tmp_path / "b"
     store = BackupStore(folder)
-    store.add(dict(META), {"config": {}})
+    store.add(dict(META), {"config": {}}, kept=True)
     (folder / "key").write_bytes(bytes(32))
     replaced = BackupStore(folder)
     assert replaced.entries == [] and "1 backup file(s) cannot be read" in replaced.warning
     assert (folder / f"{META['id']}.sfmb").exists()
+    replaced.add({**META, "id": "f" * 16}, {"config": {}})  # the index keeps the row of the hidden one
     original = store.key
     (folder / "key").write_bytes(original[:31])
     shortened = BackupStore(folder)
     damaged = list(folder.glob("key.damaged-*"))
     assert [p.read_bytes() for p in damaged] == [original[:31]] and len(shortened.key) == 32
     assert shortened.entries == [] and "cannot be read" in shortened.warning
-    (folder / "key").write_bytes(original)  # the matching key is back: the file is listed again
-    assert [e["id"] for e in BackupStore(folder).entries] == [META["id"]]
+    (folder / "key").write_bytes(original)  # the matching key is back: the file is listed again, still kept
+    back = BackupStore(folder)
+    assert [e["id"] for e in back.entries] == [META["id"]] and back.entries[0]["kept"]
+    assert "1 backup file(s)" in back.warning  # now the one stored with the other key
+    back.add({**META, "id": "f" * 16}, {"config": {}})  # imported again: a readable file replaces it
+    assert len(json.loads((folder / "index.json").read_text())["backups"]) == 2 and BackupStore(folder).warning is None
 
 
 def test_an_unreadable_key_turns_the_backups_off(tmp_path):
