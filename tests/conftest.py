@@ -117,6 +117,7 @@ def net(monkeypatch, tmp_path):
         "CHANGELOG_FILE": data / "changelog.json",
         "EVENTS_FILE": data / "events.json",
         "BACKUP_DIR": data / "backups",
+        "SETTINGS_FILE": data / "settings.json",
     }.items():
         monkeypatch.setattr(data_paths, name, value)
 

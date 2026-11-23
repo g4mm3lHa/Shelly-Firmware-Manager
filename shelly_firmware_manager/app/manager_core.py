@@ -759,7 +759,7 @@ class ManagerCore:
         return app_options.public_view(self.options)
 
     async def save_options(self, changes: object, user: str | None = None) -> list[str]:
-        """Validate and save via the Supervisor; the caller restarts the app.
+        """Validate and store in settings.json; the caller restarts the app.
 
         The attempt is written to the activity log with the changed keys – values
         only for non-secret options. Returns the list of changed keys (empty:
@@ -772,10 +772,11 @@ class ManagerCore:
             raise ShellyError(f"Not possible – {busy}")
         diff = app_options.change_list(self.options, new, changed)
         try:
-            await self._supervisor_post("/addons/self/options", {"options": new})
-        except ShellyError as err:
-            self.events.add("options", ok=False, changes=diff, user=user, error=error_text(err, 300))
-            raise
+            app_options.write_settings(new)
+        except OSError as err:
+            error = f"Settings could not be stored: {err.strerror or type(err).__name__}"
+            self.events.add("options", ok=False, changes=diff, user=user, error=error)
+            raise ShellyError(error) from None
         log.info("App options changed by %s (%s) – restarting", user, ", ".join(changed))
         self.events.add("options", changes=diff, user=user)
         self.options = new

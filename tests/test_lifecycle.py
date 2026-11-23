@@ -20,6 +20,7 @@ def app_env(net, monkeypatch, tmp_path):
     options = tmp_path / "options.json"
     options.write_text(json.dumps(OPTIONS))
     monkeypatch.setattr(main, "OPTIONS_FILE", options)
+    data_paths.SETTINGS_FILE.write_text(json.dumps(OPTIONS))  # options stored by the app
     monkeypatch.setattr(main, "UI_PORT", 0)  # any free port
     monkeypatch.setattr(main, "DOWNLOAD_PORT", 0)
     monkeypatch.setattr(main, "STARTUP_DELAY_S", 0)

@@ -18,6 +18,7 @@ CREDENTIALS_FILE = DATA_DIR / "credentials.json"
 CHANGELOG_FILE = DATA_DIR / "changelog.json"
 EVENTS_FILE = DATA_DIR / "events.json"
 BACKUP_DIR = DATA_DIR / "backups"  # backups of device settings (see backup_store)
+SETTINGS_FILE = DATA_DIR / "settings.json"  # app options of the Settings tab (see app_options)
 
 
 def write_atomic(path: Path, content: bytes, temp: Path | None = None, *, durable: bool, private: bool = False) -> None:
