@@ -123,11 +123,15 @@ class Backups(DeviceSettings):
 
     async def _read_backup(self, device_id: str, dev: Device) -> tuple[dict[str, Any], dict[str, Any]]:
         """Read the identity and everything a backup holds from the device:
-        (meta without ID, time and reason; data)."""
+        (meta without ID, time and reason; data). Refused if another Shelly answers at
+        the address of the device (MAC address other than the known one)."""
         info = await shelly.device_info(self.session, dev["origin"], self._auth_for(device_id))
         mac = normalize_mac(info.get("mac"))
         if mac is None:
             raise ShellyError("The device reported no MAC address")
+        known = normalize_mac(dev.get("mac"))
+        if known is not None and mac != known:
+            raise ShellyError("Another device answers at the address – no backup was stored")
         gen = int(info["gen"])
         target = shelly_backup.Target(self.session, gen, dev["origin"], self._auth(device_id, dev))
         data = await shelly_backup.read(target)
@@ -153,6 +157,7 @@ class Backups(DeviceSettings):
         user: str = "unknown",
         only_changed: bool = False,
         log_entry: bool = True,
+        spare: str | None = None,
     ) -> dict[str, Any] | None:
         """Read the settings of a device and store them as a backup; then the
         retention of this device is applied (the newest backup_keep that are not
@@ -160,8 +165,9 @@ class Backups(DeviceSettings):
         only_changed is set and the device reports the same settings as in its newest
         backup. A failure is noted on the device (backup_failed), logged (unless
         log_entry is False: a run over several devices writes one entry for all of
-        them) and raised. No guard here: the callers decide whether the device may be
-        read now."""
+        them) and raised. The retention never removes the backup with the ID spare (the
+        one being restored). No guard here: the callers decide whether the device may
+        be read now."""
         name = dev.get("name")
         try:
             meta, data = await self._read_backup(device_id, dev)
@@ -189,7 +195,7 @@ class Backups(DeviceSettings):
                 "backup", event="stored", device=name, reason=reason, note=note, size=entry["size"],
                 parts=entry["parts"], user=user,
             )  # fmt: skip
-        for removed in self.backups.prune(entry["mac"], self.backup_keep):
+        for removed in self.backups.prune(entry["mac"], self.backup_keep, spare):
             log.info("%s: oldest backup removed (more than %d stored)", name, self.backup_keep)
             self.events.add(
                 "backup", event="pruned", device=name, backup_at=removed["at"], keep=self.backup_keep, user=APP_USER
@@ -641,7 +647,7 @@ class Backups(DeviceSettings):
                 raise ShellyError("Another device answers at the address – nothing was restored")
             _meta, data = self.backups.load(job["backup"])
             try:
-                safety = await self._backup(device_id, dev, "restore", user=user)
+                safety = await self._backup(device_id, dev, "restore", user=user, spare=job["backup"])
             except (TimeoutError, ShellyError, aiohttp.ClientError, OSError, KeyError, ValueError) as err:
                 raise ShellyError(
                     f"The backup before the restore failed – nothing was restored: {_failure_text(err)}"

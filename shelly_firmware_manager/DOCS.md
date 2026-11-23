@@ -532,8 +532,9 @@ The tab lists every device with its newest backup; the chevron opens all its bac
 date, reason, firmware, contents and size. The card **No Backup** names the devices
 without one and why (no backup yet, password not stored, asleep, not reachable). Per
 device the newest **Keep backups per device** backups stay, older ones are removed
-automatically. The pin marks a backup as **Kept**: it is never removed automatically and
-does not count. The bin deletes a backup after a confirmation. A device removed from Home
+automatically. The backup you restore stays until the next backup of the device, even
+if it is the oldest one. The pin marks a backup as **Kept**: it is never removed
+automatically and does not count. The bin deletes a backup after a confirmation. A device removed from Home
 Assistant keeps its backups but gets no new ones.
 
 **Restore** reads the device and compares it with the backup. You choose the parts
@@ -546,7 +547,7 @@ unreachable. If the backup names another Wi-Fi (SSID) than the device uses now, 
 warning says so: the Wi-Fi password is not part of a backup and stays as it is on the
 device, so the device can only join the Wi-Fi of the backup with the password it has
 stored now. A backup can only be restored to the device it was made on (MAC address and
-model); a different firmware version is allowed, settings it does not know are skipped
+model), and no backup is stored while another Shelly answers at the device's address; a different firmware version is allowed, settings it does not know are skipped
 and named. Afterwards the app reads the device again and shows per part what was applied;
 the device restarts if a setting needs it.
 
@@ -734,8 +735,9 @@ Gen2+ firmware is downloaded over HTTPS only.
 | The device did not answer again after the restore | Usually restored network settings that no longer fit. Check the device in your network; if it stays away, reset it at the device and set it up again |
 | Wrong password, or the file was changed since the download | The password does not belong to this backup file, or the file is damaged. Use the password shown at the download of exactly this file |
 | Damaged backup file: its time lies in the future (Import backup) | The file names a time more than one day after now: the clock of the system that made it was wrong, or the file was built by hand. It is not imported; a store import skips such a backup and names it in the app log |
-| n backup file(s) cannot be read with the key of this app and are not listed | The key file of the app was lost, damaged or replaced (e.g. app data restored only in part). The files stay in the app data; with the matching key file they are listed again. A key file of the wrong size is kept as `key.damaged-<time>` |
-| The key of the backups cannot be read – backups are off until the app is restarted | The disk reported an error while the key file was read. Nothing was changed; restart the app. If it stays, check the storage of Home Assistant |
+| n backup file(s) cannot be read with the key of this app and are not listed | The key file of the app was lost, damaged or replaced (e.g. app data restored only in part), or the disk reported an error while a file was read. The files stay in the app data; with the matching key file (or once the disk reads them again) they are listed again with their marks. A key file of the wrong size is kept as `key.damaged-<time>` |
+| The key of the backups cannot be read – backups are off until the app is restarted | The disk reported an error while the key file was read. Nothing was changed; restart the app. If it stays, check the storage of Home Assistant. While **Back up before every installation** is on, no installation starts until then – switch it off in the Settings tab to install without a backup |
+| Another device answers at the address – no backup was stored | Another Shelly answers at the address the app knows for this device (e.g. after an address change in the router). Run **Check now** so the app reads the current addresses from Home Assistant, or correct the address in the Shelly integration |
 | A backup run is in progress / A backup is being restored | Wait for the end (bar in the **Backups** tab), then try again |
 | Storage error: The state file was unreadable – the backup of the previous save was loaded | The app's state file was damaged (e.g. by a power failure) and the copy of the save before was used. Check the devices again; the message disappears with the next restart |
 | Storage error: The state file was unreadable and no backup could be loaded | The device list starts empty and is filled by the next check. The firmware files stay on disk; at the start the app reads back those whose content names firmware ID and version, the others are listed as **Unknown Files** in the Firmware tab (see [Firmware](#firmware)) |

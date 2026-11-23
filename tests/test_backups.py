@@ -263,6 +263,29 @@ def test_listed_backups_the_key_cannot_open_are_not_listed(tmp_path):
     assert len(json.loads((folder / "index.json").read_text())["backups"]) == 2 and BackupStore(folder).warning is None
 
 
+def test_a_read_error_at_the_start_keeps_the_row_and_its_marks(tmp_path, monkeypatch):
+    """A listed file that cannot be read at the start (disk error) is not listed but
+    keeps its row: once it can be read again it is back with its mark "kept"."""
+    folder = tmp_path / "b"
+    store = BackupStore(folder)
+    store.add(dict(META), {"config": {}}, kept=True)
+    broken = folder / f"{META['id']}.sfmb"
+    real_read = type(broken).read_bytes
+
+    def failing_read(path):
+        if path == broken:
+            raise OSError(5, "Input/output error")
+        return real_read(path)
+
+    monkeypatch.setattr(type(broken), "read_bytes", failing_read)
+    failed = BackupStore(folder)
+    assert failed.entries == [] and "1 backup file(s)" in failed.warning
+    assert [row["id"] for row in json.loads((folder / "index.json").read_text())["backups"]] == [META["id"]]
+    monkeypatch.setattr(type(broken), "read_bytes", real_read)
+    back = BackupStore(folder)
+    assert [e["id"] for e in back.entries] == [META["id"]] and back.entries[0]["kept"] and back.warning is None
+
+
 def test_an_unreadable_key_turns_the_backups_off(tmp_path):
     """A key file that cannot be read (here: a folder) is never replaced: no backup is
     listed, stored or read until the next start, and the list stays as it is."""
@@ -917,6 +940,9 @@ async def test_restore_only_to_the_device_of_the_backup(backed, net, shellys, mo
         "device_model": "SNSW-001X16EU",
     }
     assert "parts" not in preview
+    with pytest.raises(ShellyError, match="Another device answers at the address – no backup was stored"):
+        await mgr.backup_now(A, "alice")
+    assert [e["id"] for e in mgr.backups.entries] == [backup["id"]]
     mgr.reserve_restore(backup["id"], ["settings"], False, "alice")
     await mgr.run_restore()
     assert "Another device" in mgr.restore_job["error"] and device.config["switch:0"]["initial_state"] == "on"
@@ -936,6 +962,25 @@ async def test_restore_only_to_the_device_of_the_backup(backed, net, shellys, mo
         await mgr.preview_restore(backup["id"])
     orphan = mgr.backups_view()["devices"][-1]
     assert orphan["id"] is None and orphan["name"] == "Kitchen" and len(orphan["backups"]) == 1
+
+
+async def test_restore_of_the_oldest_backup_keeps_it(net, shellys):
+    """The retention after the backup "Before restore" leaves the backup being restored;
+    it still counts and goes with the next backup of the device."""
+    mgr = manager_with(net, shellys, backup_keep=2)
+    await mgr.scan()
+    fake(shellys, net, A)
+    oldest = await mgr.backup_now(A, "alice")
+    await mgr.backup_now(A, "alice")
+    mgr.reserve_restore(oldest["id"], ["settings"], False, "alice")
+    await mgr.run_restore()
+    assert mgr.restore_job["error"] is None
+    entries = mgr.backups.of("AABBCC00000A")
+    assert len(entries) == 3 and entries[0]["reason"] == "restore" and entries[-1]["id"] == oldest["id"]
+    assert backup_events(mgr, "pruned") == []
+    await mgr.backup_now(A, "alice")
+    assert oldest["id"] not in [e["id"] for e in mgr.backups.of("AABBCC00000A")]
+    assert len(mgr.backups.of("AABBCC00000A")) == 2 and len(backup_events(mgr, "pruned")) == 2
 
 
 # ---------------------------------------------------------------- Manager: download, import, export
