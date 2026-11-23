@@ -693,7 +693,7 @@ export default {
   "Stored · {details}": "Gespeichert · {details}",
   "Stored · {details} – actions not readable on this device (Gen 1)": "Gespeichert · {details} – Aktionen auf diesem Gerät nicht lesbar (Gen 1)",
   "Stores the settings of a device right before an update or downgrade is installed on it; on by default": "Speichert die Einstellungen eines Geräts, direkt bevor ein Update oder Downgrade darauf installiert wird; standardmäßig an",
-  "Stores the settings, scripts, schedules and webhooks of each device (Gen 1: settings and actions) encrypted in this app. Passwords are not part of a backup – a Shelly never gives them out. Nothing is changed on the devices.": "Speichert die Einstellungen, Skripte, Zeitpläne und Webhooks jedes Geräts (Gen 1: Einstellungen und Aktionen) verschlüsselt in dieser App. Passwörter sind nicht Teil eines Backups – ein Shelly gibt sie nie heraus. An den Geräten wird nichts geändert.",
+  "Stores the settings, scripts, schedules and webhooks of each device (Gen 1: settings and actions) encrypted in this app. Passwords (Wi-Fi, device, MQTT) are not part of a backup – a Shelly never gives them out. Nothing is changed on the devices.": "Speichert die Einstellungen, Skripte, Zeitpläne und Webhooks jedes Geräts (Gen 1: Einstellungen und Aktionen) verschlüsselt in dieser App. Passwörter (WLAN, Gerät, MQTT) sind nicht Teil eines Backups – ein Shelly gibt sie nie heraus. An den Geräten wird nichts geändert.",
   "Success": "Erfolg",
   "Suggestion from the address of this page – please check it before saving.": "Vorschlag aus der Adresse dieser Seite – bitte vor dem Speichern prüfen.",
   "Sun": "So",

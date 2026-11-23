@@ -299,7 +299,7 @@ async function exportDialog() {
     valueList([[t("Files"), files], [t("Backups"), x.backups ? tn(x.backups, "{n} backup of device settings", "{n} backups of device settings") : null],
       [t("Size"), mb(x.size)], [t("File"), x.filename]]),
     field(t("Export password (generated, shown only now)"), box("div", "pw-row", out, copy)),
-    el("p", t("The password seals the file: the import checks that no file and no entry was changed. It is not stored anywhere – the file cannot be imported without it."), "hint"),
+    el("div", t("The password seals the file: the import checks that no file and no entry was changed. It is not stored anywhere – the file cannot be imported without it."), "warnbox"),
     ackLabel],
   [{text: t("Cancel")}, {text: t("Export"), kind: "primary", action: () => {
     // The server refuses the download of an expired export; a download through a link

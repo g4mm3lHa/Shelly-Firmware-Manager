@@ -255,7 +255,7 @@ async function openDownload(d, b, back) {
     section(t("Backup"), valueList([[t("Device"), `${d.name} · ${modelGen(d)}`], [t("Backup"), backupText(b)], [t("Contents"), partsText(b.parts)],
       [t("File"), `${x.filename} · ${fmtSize(x.size)}`]])),
     section(t("Password"), box("div", "bk-pwrow", out, copy),
-      el("p", t("The file is sealed with this password. It is shown only here and stored nowhere – without it the file cannot be imported again."), "hint")),
+      el("div", t("The file is sealed with this password. It is shown only here and stored nowhere – without it the file cannot be imported again."), "warnbox")),
     box("div", "warnbox", el("span", t("Scripts and webhook addresses in a backup can contain secrets (tokens, keys). Keep the file and the password apart."))),
     savedLabel],
   [{text: t("Cancel"), cancel: true, action: back}, {text: t("Download"), kind: "primary", action: () => {
@@ -354,7 +354,7 @@ function openBackupNow() {
   const modes = box("div", "modes", ...pick.nodes);
   modal(title, [
     section(t("Devices"), modes),
-    el("p", t("Stores the settings, scripts, schedules and webhooks of each device (Gen 1: settings and actions) encrypted in this app. Passwords are not part of a backup – a Shelly never gives them out. Nothing is changed on the devices."), "hint")],
+    el("p", t("Stores the settings, scripts, schedules and webhooks of each device (Gen 1: settings and actions) encrypted in this app. Passwords (Wi-Fi, device, MQTT) are not part of a backup – a Shelly never gives them out. Nothing is changed on the devices."), "hint")],
   [{text: t("Cancel")}, {text: "", kind: "primary", action: async () => {
     const ids = pick.all.checked ? "all" : pick.ticked().map(d => d.id);
     if (Array.isArray(ids) && ids.length === 1) { backupOne(devs.find(d => d.id === ids[0]), toTab); return; }

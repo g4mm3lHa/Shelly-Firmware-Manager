@@ -28,8 +28,8 @@ as the UI change). Read when you change the Backups tab, a backup dialog or the 
   "no longer listed": download and delete only.
 - **Download (F12 b):** download icon per backup → dialog "Download backup": value list
   (device, backup, contents, file), generated password in a read-only field with copy
-  icon, hint (shown only here, stored nowhere), yellow box about secrets in scripts and
-  webhooks, checkbox "I have saved the password"; blue "Download" enabled only after it.
+  icon, yellow box (sealed with it, shown only here, stored nowhere; as in the store
+  export), yellow box about secrets in scripts and webhooks, checkbox "I have saved the password"; blue "Download" enabled only after it.
 - **Import:** button "Import backup" in the device's "Backups" dialog. Step 1: file +
   password, blue "Check file" (enabled with both). Step 2: success icon, value list, check
   list (Seal intact, Same device, Not stored yet – all three green), blue "Import

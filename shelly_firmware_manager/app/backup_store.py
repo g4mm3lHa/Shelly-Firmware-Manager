@@ -372,7 +372,8 @@ class BackupStore:
         """Read the index; entries without a file are dropped, files without an entry
         (or all files, if the index is unreadable) are read again. The tag of every
         listed file is checked against the key (nothing is decrypted): a file it does
-        not fit is not listed, counted in the warning and keeps its row (_hidden)."""
+        not fit, or a listed file that cannot be read, is not listed, counted in the
+        warning and keeps its row (_hidden)."""
         listed: dict[str, dict[str, Any]] = {}
         try:
             stored = json.loads((self.folder / INDEX).read_text())
@@ -397,7 +398,12 @@ class BackupStore:
         for backup_id, path in files.items():
             row = listed.get(backup_id)
             try:
-                blob = path.read_bytes()
+                try:
+                    blob = path.read_bytes()
+                except OSError:
+                    if row is not None:  # a read error (disk) keeps the row and its marks, as a wrong key does
+                        self._hidden.append(self._entry(row))
+                    raise
                 if row is None:
                     meta, _data = open_sealed(key, blob, wrong_key)
                     row = {**clean_meta({**meta, "id": backup_id}), "kept": False, "imported": False}
@@ -562,11 +568,13 @@ class BackupStore:
         self._save()
         return entry
 
-    def prune(self, mac: object, keep: int) -> list[dict[str, Any]]:
+    def prune(self, mac: object, keep: int, spare: str | None = None) -> list[dict[str, Any]]:
         """Apply the retention to one device: of its backups that are not marked as
-        kept only the newest `keep` stay. Returns the removed entries (oldest last)."""
+        kept only the newest `keep` stay. The backup with the ID `spare` (the one being
+        restored) still counts but is not removed now; the next backup of the device
+        applies the rule to it. Returns the removed entries (oldest last)."""
         counted = [e for e in self.of(mac) if not e["kept"]]
-        removed = counted[max(keep, 1) :]
+        removed = [e for e in counted[max(keep, 1) :] if e["id"] != spare]
         for entry in removed:
             with contextlib.suppress(OSError):
                 self._path(entry["id"]).unlink(missing_ok=True)
