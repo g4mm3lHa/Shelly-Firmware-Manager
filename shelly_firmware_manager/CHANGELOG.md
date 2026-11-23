@@ -2,14 +2,12 @@
 
 ## 3.11.1
 
-Release candidate. All settings only in the app's Settings tab; stronger downgrade
-warning, and no downgrade entries while downgrades are off.
+Release candidate. Stronger downgrade warning with a risk tick, and no downgrade
+entries while downgrades are off.
 
 Changes in rc1
 
 Changed
-- Settings are stored by the app; the Configuration tab of the app page only points to
-  the Settings tab. Saved values are taken over once at the first start.
 - Downgrade: red warning "Downgrade at your own risk" (can brick the Shelly) in every
   downgrade dialog, also at the bottom of the version list.
 - Downgrade from the row menu: two steps; the installation dialog needs the tick "I
