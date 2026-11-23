@@ -32,7 +32,7 @@ both servers in parallel (cancels checks/installations, saves the state), exit 0
 - `manager_transfer.py` (3): upload, store export/import, transfers in parts → `test_firmware_store.py`, `test_store_transfer.py`
 - `manager_devices.py` (4): device settings, passwords → `test_device_settings.py`
 - `manager_backups.py` (5): backups of device settings: store, restore, download, import → `test_backups.py`
-- `manager_checks.py` (6): full and single checks, offers → `test_check.py`
+- `manager_checks.py` (6): full and single checks, offers → `test_check.py`, `test_offers.py`
 - `manager_installs.py` (7): installation, OTA, verification → `test_install.py`
 - `manager_schedules.py` (8): scheduled installations, schedules and their runs → `test_timetable.py`
 - `manager.py` (9): `Manager`, `public_state` → `test_web.py`
@@ -42,7 +42,7 @@ both servers in parallel (cancels checks/installations, saves the state), exit 0
 - `download_server.py`: LAN download server for the Shellys → `test_security.py`
 - `shelly.py`: device access: errors and text helpers, authentication, requests, settings, OTA WebSocket → `test_device_settings.py`, `test_device_transport.py`, `test_guards.py`
 - `shelly_net.py`: device addresses: private networks only, origin pinning, host names → `test_guards.py`, `test_check.py`
-- `shelly_cloud.py`: manufacturer servers: offers, changelog pages, firmware downloads → `test_check.py`, `test_guards.py`, `test_tls.py`
+- `shelly_cloud.py`: manufacturer servers: offers, changelog pages, firmware downloads → `test_offers.py`, `test_guards.py`, `test_tls.py`
 - `store_transfer.py`: export/import archive (pure functions) → `test_store_transfer.py`
 - `backup_store.py`: encrypted backup files and their list (no device access) → `test_backups.py`
 - `shelly_backup.py`: read, compare and restore the settings of one device → `test_backups.py`, `test_device_transport.py`
