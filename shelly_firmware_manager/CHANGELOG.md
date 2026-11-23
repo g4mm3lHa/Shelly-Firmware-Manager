@@ -5,6 +5,20 @@
 Release candidate. Backups of the device settings: by hand, before every installation
 and on a schedule, with comparison and restore part by part.
 
+Changes in rc6
+
+Changed
+- Back up now: the hint names the passwords a backup leaves out (Wi-Fi, device, MQTT).
+- Firmware store export and backup download: the note that the password seals the file
+  and is stored nowhere is a yellow box.
+- Backups: no backup is stored when another Shelly answers at the device's address.
+
+Fixed
+- Restoring the oldest backup of a device no longer removes it through the retention;
+  it stays until the next backup of the device.
+- Backups: a file that cannot be read at the start (disk error) keeps its "Kept" and
+  "Imported" marks once it can be read again.
+
 Changes in rc5
 
 Changed
