@@ -815,7 +815,7 @@ class Backups(DeviceSettings):
         header, _offset = backup_store.read_header(staged["blob"])
         key = await asyncio.to_thread(backup_store.derive_key, text, backup_store.password_salt(header))
         meta, data = backup_store.open_sealed(key, staged["blob"], WRONG_FILE_PASSWORD)
-        clean = backup_store.clean_meta(meta)
+        clean = backup_store.clean_imported(meta, data)
         dev = self.devices.get(staged["device"]) or {}
         other = self._other_device(clean, dev.get("mac"), dev.get("model"))
         known = self.backups.known(clean)

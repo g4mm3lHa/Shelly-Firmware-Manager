@@ -6,6 +6,7 @@ No connection is opened: the Shellys are in-memory fakes (FakeShelly, FakeGen1).
 
 import asyncio
 import json
+import time
 
 import backup_store
 import manager_backups
@@ -150,6 +151,38 @@ def test_meta_is_reduced_to_known_fields():
     for bad in ({"mac": "nope"}, {"at": "now"}, {"gen": 0}):
         with pytest.raises(BackupError):
             backup_store.clean_meta({**META, **bad})
+
+
+def test_imported_meta_gets_its_digest_from_the_content():
+    """A file from outside cannot claim "unchanged" (digest of its own) or stay the
+    newest backup for good (a time in the future)."""
+    data = {"config": {"switch:0": {"name": "x"}}}
+    past = {**META, "at": 1_700_000_000}
+    clean = backup_store.clean_imported(past, data)
+    assert clean["digest"] == shelly_backup.digest(2, data) != META["digest"]
+    with pytest.raises(BackupError, match="future"):
+        backup_store.clean_imported({**META, "at": int(time.time()) + 2 * backup_store.MAX_AHEAD_S}, data)
+    with pytest.raises(BackupError, match="incomplete"):
+        backup_store.clean_imported(past, {"scripts": ["not an object"]})
+
+
+async def test_import_checks_digest_and_time_of_the_file(backed):
+    """Both import ways use the digest of the content and refuse a future time."""
+    mgr = backed
+    salt = bytes(16)
+    key = backup_store.derive_key("ABCD-EFGH", salt)
+    data = {"config": {"switch:0": {"name": "x"}}}
+    forged = backup_store.seal(key, {**META, "at": 1_700_000_000}, data, backup_store.password_header(salt))
+    staged = await mgr.stage_backup_import(A, chunks(forged), len(forged))
+    await mgr.check_backup_import(staged["token"], "ABCD-EFGH")
+    entry = mgr.confirm_backup_import(staged["token"], "alice")
+    assert mgr.backups.get(entry["id"])["digest"] == shelly_backup.digest(2, data)
+    late = backup_store.seal(
+        key, {**META, "id": "e" * 16, "at": int(time.time()) + 3 * 86400}, data, backup_store.password_header(salt)
+    )
+    staged = await mgr.stage_backup_import(A, chunks(late), len(late))
+    with pytest.raises(BackupError, match="future"):
+        await mgr.check_backup_import(staged["token"], "ABCD-EFGH")
 
 
 def test_store_keeps_lists_and_prunes(tmp_path):

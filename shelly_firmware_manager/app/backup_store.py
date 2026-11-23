@@ -50,6 +50,7 @@ from pathlib import Path
 from typing import Any
 
 import data_paths
+import shelly_backup
 from shelly import clip, parse_json
 
 log = logging.getLogger("sfm.backups")
@@ -79,6 +80,8 @@ MAX_HEADER = 4096  # bytes; upper limit for the header of a file
 MAX_FILE = 4 * 1024 * 1024  # bytes; largest backup file read or accepted
 
 MAX_PAYLOAD = 16 * 1024 * 1024  # bytes; largest unpacked payload
+
+MAX_AHEAD_S = 86400  # seconds; an imported backup may be dated at most this far after now (clocks differ)
 
 ID_RE = re.compile(r"^[0-9a-f]{16}$")  # ID of a backup (also checked for IDs from the URL)
 
@@ -264,6 +267,21 @@ def clean_meta(meta: dict[str, Any]) -> dict[str, Any]:
         clean["parts"]["partial"] = True  # the actions of the device could not be read
     for key, limit in ENTRY_TEXT.items():
         clean[key] = clip(meta.get(key), limit) or None if isinstance(meta.get(key), str) else None
+    return clean
+
+
+def clean_imported(meta: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+    """clean_meta for a backup from outside (an imported file or store export): the
+    digest is computed from the content, never taken from the file (a wrong one would
+    let a schedule take changed settings for unchanged), and a time more than
+    MAX_AHEAD_S after now is refused (it would stay the newest backup for good)."""
+    clean = clean_meta(meta)
+    if clean["at"] > time.time() + MAX_AHEAD_S:
+        raise BackupError("Damaged backup file: its time lies in the future")
+    try:
+        clean["digest"] = shelly_backup.digest(clean["gen"], data)
+    except (TypeError, ValueError, KeyError, AttributeError):
+        raise BackupError("Damaged backup file: content incomplete") from None
     return clean
 
 

@@ -419,7 +419,7 @@ class Transfers(FirmwareStore):
             try:
                 content = store_transfer.read_backup(staged["path"], checked["prefix"], entry)
                 meta, data = backup_store.open_sealed(checked["key"], content, "not readable with the export password")
-                clean = backup_store.clean_meta(meta)
+                clean = backup_store.clean_imported(meta, data)
                 if self.backups.known(clean):
                     continue
                 self.backups.add(clean, data, kept=meta.get("kept") is True, imported=True)
