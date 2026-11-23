@@ -22,7 +22,8 @@ Protection layers:
    nowhere: the export password (/api/firmware/export) and the password of a
    downloaded backup (/api/backups/{bid}/download). The settings inside a backup
    leave the app only as such an encrypted file – and as the list of differences of
-   the restore dialog, which holds no passwords or keys (they are no part of a backup).
+   the restore dialog, which holds no password fields (they are no part of a backup;
+   a secret written into a script or a webhook or action URL is, see shelly_backup).
 5. Device-side password changes, deleting stored firmware and downgrades need
    explicit confirmation flags (confirm + acknowledged), a beta installation (also a
    scheduled one) the flag beta_acknowledged; deleting log entries, a schedule or a

@@ -5,9 +5,12 @@ Gen2+ (RPC): the configuration of all components (Shelly.GetConfig), the scripts
 their code, the schedules and the webhooks of the device. Gen1 (HTTP): /settings and
 the actions (/settings/actions, where the device offers them).
 
-Never part of a backup: passwords and keys (a Shelly does not give out its Wi-Fi,
-device and MQTT password; anything that looks like one is removed from what was read),
-the key-value store, and the script Home Assistant maintains for its Bluetooth proxy.
+Never part of a backup: passwords and keys the device keeps in their own fields (a
+Shelly does not give out its Wi-Fi, device and MQTT password; fields named like one,
+SECRET_KEYS, are removed from what was read), the key-value store, and the script Home
+Assistant maintains for its Bluetooth proxy. Script code, webhook URLs (Gen2+) and
+action URLs (Gen1) are kept as they are: a token or a user:password@ written into them
+is part of the backup (encrypted) and of the list of differences of a restore.
 
 A backup is restored in parts (PARTS): each chosen part is made equal to the backup –
 what differs is written, and scripts, schedules and webhooks that exist only on the

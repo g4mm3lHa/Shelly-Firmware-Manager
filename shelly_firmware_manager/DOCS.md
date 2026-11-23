@@ -506,8 +506,9 @@ If Home Assistant uses a Shelly as Bluetooth proxy, it turns Bluetooth on again 
 A backup stores the settings of one Shelly in the app: Gen2+ the configuration of all
 components, the scripts with their code, the schedules and the webhooks; Gen1 the
 settings and the actions. Passwords are never part of a backup – a Shelly does not give
-out its Wi-Fi, device or MQTT password. Nothing is changed on a device while it is backed
-up.
+out its Wi-Fi, device or MQTT password. Scripts, webhooks and actions are saved as they
+are: a token or password written into a script or a URL is part of the backup
+(encrypted). Nothing is changed on a device while it is backed up.
 
 A backup is made
 
@@ -555,6 +556,9 @@ imported. **Import backup** in the **Backups** dialog of a device takes such a f
 its password; the file must come from this device. An imported backup is marked
 **Imported** and **Kept**; restoring it is a separate step. All backups are also part of
 the store export (see [Moving the firmware store](#moving-the-firmware-store)).
+
+Stored backups are encrypted with a key of this app. Key and backups are part of every
+Home Assistant backup of this app, which Home Assistant protects with its own encryption.
 
 ### Logs
 

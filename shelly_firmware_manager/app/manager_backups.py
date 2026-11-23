@@ -13,7 +13,8 @@ settings only if the request names and acknowledges them. While it runs the devi
 neither checked nor installed nor changed otherwise (self.restoring).
 
 Never part of an answer or the log: the settings themselves, except the differences
-the restore dialog lists (passwords and keys are no part of a backup at all).
+the restore dialog lists (password fields are no part of a backup; a secret written
+into a script or a webhook or action URL is, see shelly_backup).
 """
 
 import asyncio
