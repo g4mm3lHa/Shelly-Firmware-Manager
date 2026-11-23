@@ -726,17 +726,15 @@ class Backups(DeviceSettings):
         known = self._device_by_mac(entry["mac"])
         day = timetable.local_text(entry["at"], self.tz)[:10]
         filename = _file_name(known[1] if known else {"name": entry.get("device")}, entry, day)
-        self._backup_download = {
-            "token": secrets.token_hex(16),
+        prepared = {
             "blob": blob,
             "filename": filename,
-            "created": time.monotonic(),
             "device": known[1].get("name") if known else entry.get("device"),
             "backup_at": entry["at"],
             "user": user,
         }
         return {
-            "token": self._backup_download["token"],
+            "token": self._backup_download.create(prepared, DOWNLOAD_TTL_S),
             "password": password,
             "filename": filename,
             "size": len(blob),
@@ -745,13 +743,9 @@ class Backups(DeviceSettings):
 
     def take_backup_download(self, token: object) -> tuple[bytes, str]:
         """Step 2: (content, file name) of the download prepared with token (single
-        use). Logged."""
-        pending, self._backup_download = self._backup_download, None
-        if (
-            not pending
-            or time.monotonic() - pending["created"] > DOWNLOAD_TTL_S
-            or not shelly.same_secret(token, pending["token"])
-        ):
+        use; another token is refused and leaves it). Logged."""
+        pending = self._backup_download.take(token)
+        if pending is None:
             raise ShellyError("Download expired – please start it again")
         log.info("%s: backup downloaded by %s", pending["device"], pending["user"])
         self.events.add(
@@ -771,7 +765,7 @@ class Backups(DeviceSettings):
         too_large = "The file is too large for a backup"
         if length is not None and length > backup_store.MAX_FILE:
             raise ValueError(too_large)
-        self._backup_import = None
+        self._backup_import.drop()
         parts: list[bytes] = []
         size = 0
         async for chunk in chunks:
@@ -782,24 +776,14 @@ class Backups(DeviceSettings):
         blob = b"".join(parts)
         header, _offset = backup_store.read_header(blob)
         backup_store.password_salt(header)  # a file without a password seal is refused here already
-        self._backup_import = {
-            "token": secrets.token_hex(16),
-            "device": device_id,
-            "blob": blob,
-            "created": time.monotonic(),
-            "checked": None,
-        }
-        return {"token": self._backup_import["token"], "size": len(blob)}
+        token = self._backup_import.create({"device": device_id, "blob": blob, "checked": None}, IMPORT_TTL_S)
+        return {"token": token, "size": len(blob)}
 
     def _staged_backup(self, token: object) -> dict[str, Any]:
-        """The staged backup file with this token; ShellyError if it expired."""
-        staged = self._backup_import
-        if (
-            not staged
-            or time.monotonic() - staged["created"] > IMPORT_TTL_S
-            or not shelly.same_secret(token, staged["token"])
-        ):
-            self._backup_import = None
+        """The staged backup file with this token; ShellyError if it expired (another
+        token is refused and leaves it, see Pending)."""
+        staged = self._backup_import.get(token)
+        if staged is None:
             raise ShellyError("The file is no longer available – please choose it again")
         return staged
 
@@ -820,7 +804,7 @@ class Backups(DeviceSettings):
         other = self._other_device(clean, dev.get("mac"), dev.get("model"))
         known = self.backups.known(clean)
         staged["checked"] = None if other or known else (clean, data)
-        staged["created"] = time.monotonic()  # the confirmation gets the full time
+        self._backup_import.renew()  # the confirmation gets the full time
         return {
             # As it is listed after the import: with both marks
             "backup": {**self._entry_view(clean), "size": len(staged["blob"]), "kept": True, "imported": True},
@@ -836,7 +820,7 @@ class Backups(DeviceSettings):
         if staged["checked"] is None:
             raise ShellyError("The file has not been checked, or it cannot be imported")
         clean, data = staged["checked"]
-        self._backup_import = None
+        self._backup_import.take(token)
         entry = self.backups.add(clean, data, kept=True, imported=True)
         name = (self.devices.get(staged["device"]) or {}).get("name")
         log.info("%s: backup of %s imported by %s", name, timetable.local_text(entry["at"], self.tz), user)
@@ -848,6 +832,5 @@ class Backups(DeviceSettings):
 
     def cancel_backup_import(self, token: object) -> None:
         """Discard the staged backup file (Cancel in the import dialog)."""
-        staged = self._backup_import
-        if staged and shelly.same_secret(token, staged["token"]):
-            self._backup_import = None
+        if self._backup_import.get(token) is not None:
+            self._backup_import.drop()

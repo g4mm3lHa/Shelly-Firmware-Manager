@@ -16,7 +16,6 @@ whether to import before its first check (first_start_open, see ManagerCore).
 """
 
 import asyncio
-import contextlib
 import hmac
 import logging
 import re
@@ -154,19 +153,15 @@ class Transfers(FirmwareStore):
 
     # --------------------------------------------------------------------------------------- Manual upload
 
-    def _drop_upload(self) -> None:
-        """Forget the staged upload and remove its temporary file."""
-        staged, self._upload = self._upload, None
-        if staged:
-            staged["path"].unlink(missing_ok=True)
+    @staticmethod
+    def _remove_file(staged: dict[str, Any]) -> None:
+        """on_drop of a staged upload or import: remove its temporary file."""
+        staged["path"].unlink(missing_ok=True)
 
     def _staged(self, token: object) -> dict[str, Any]:
-        """The staged upload for token (expired ones are dropped), else ShellyError."""
-        staged = self._upload
-        if staged and time.monotonic() - staged["created"] > UPLOAD_TTL_S:
-            self._drop_upload()
-            staged = None
-        if not staged or not shelly.same_secret(token, staged["token"]):
+        """The staged upload for token, else ShellyError (expired: dropped, see Pending)."""
+        staged = self._upload.get(token)
+        if staged is None:
             raise ShellyError("No pending upload – please upload the file again")
         return staged
 
@@ -220,7 +215,7 @@ class Transfers(FirmwareStore):
             raise ShellyError("Another upload is in progress – please wait")
         async with self._upload_lock:
             if offset == 0:
-                self._drop_upload()
+                self._upload.drop()
             done = await self._receive_part("upload", UPLOAD_PREFIX, chunks, length, total, offset, transfer)
             if done is None:
                 part = self._receiving["upload"]
@@ -236,20 +231,14 @@ class Transfers(FirmwareStore):
             except BaseException:
                 path.unlink(missing_ok=True)
                 raise
-            self._upload = {
-                "token": secrets.token_hex(16),
-                "path": path,
-                "ext": ext,
-                "sha256": sha,
-                "size": size,
-                "created": time.monotonic(),
-                "filename": clip(Path(str(filename)).name, 120),
-            }
-        log.info("Firmware upload staged by %s (%s, %d bytes, SHA-256 %s)", user, self._upload["filename"], size, sha)
+            name = clip(Path(str(filename)).name, 120)
+            staged = {"path": path, "ext": ext, "sha256": sha, "size": size, "filename": name}
+            token = self._upload.create(staged, UPLOAD_TTL_S, self._remove_file)
+        log.info("Firmware upload staged by %s (%s, %d bytes, SHA-256 %s)", user, name, size, sha)
         stored = self._by_sha(sha)
         return {
-            "token": self._upload["token"],
-            "filename": self._upload["filename"],
+            "token": token,
+            "filename": name,
             "sha256": sha,
             "size": size,
             "detected": {"type": detected.get("type"), "version": detected.get("version")},
@@ -294,7 +283,7 @@ class Transfers(FirmwareStore):
         if any(m.get("type") == fw_type and m.get("version") == version for m in self.firmware.values()):
             raise ShellyError(f"{fw_type} {version} is already stored")
         staged["path"].replace(data_paths.FW_DIR / name)  # same directory: atomic
-        self._upload = None
+        self._upload.take(token)
         self._register_firmware(
             name, fw_type, types[fw_type], version, staged["sha256"], staged["size"],
             source=SOURCE_UPLOAD, sha_checked=checked,
@@ -309,9 +298,8 @@ class Transfers(FirmwareStore):
 
     def cancel_upload(self, token: object) -> None:
         """Discard the staged upload (Cancel in the confirmation form)."""
-        with contextlib.suppress(ShellyError):
-            self._staged(token)
-            self._drop_upload()
+        if self._upload.get(token) is not None:
+            self._upload.drop()
 
     # -------------------------------------------------------------------------------- Store export / import
 
@@ -334,15 +322,9 @@ class Transfers(FirmwareStore):
         salt = secrets.token_bytes(backup_store.SALT_BYTES)
         key = await asyncio.to_thread(backup_store.derive_key, password, salt)
         sources = [self._source(m) for m in self.firmware.values()]
-        self._export = {
-            "token": secrets.token_hex(16),
-            "key": key,
-            "salt": salt,
-            "created": time.monotonic(),
-            "user": user,
-        }
+        token = self._export.create({"key": key, "salt": salt, "user": user}, EXPORT_TTL_S)
         return {
-            "token": self._export["token"],
+            "token": token,
             "password": password,
             "files": len(self.firmware),
             "downloads": sources.count(SOURCE_DOWNLOAD),
@@ -357,15 +339,9 @@ class Transfers(FirmwareStore):
     async def build_export(self, token: object, app_version: str) -> tuple[Path, str]:
         """Step 2: write the export prepared with token to a temporary file (single
         use). Returns (path, download file name); the caller sends and deletes it."""
-        pending = self._export
-        if (
-            not pending
-            or time.monotonic() - pending["created"] > EXPORT_TTL_S
-            or not shelly.same_secret(token, pending["token"])
-        ):
-            self._export = None
+        pending = self._export.take(token)
+        if pending is None:
             raise ShellyError("Export expired – please start it again")
-        self._export = None
         if self._free_space() < self.store_size() + SPACE_MARGIN:
             raise ShellyError("Not enough free disk space for the export")
         target = data_paths.FW_DIR / f"{EXPORT_PREFIX}{secrets.token_hex(8)}"
@@ -444,19 +420,10 @@ class Transfers(FirmwareStore):
         written = await asyncio.to_thread(self.backups.write_many, new)
         return len(self.backups.list_many(written))
 
-    def _drop_import(self) -> None:
-        """Forget the staged import and remove its temporary file."""
-        staged, self._import = self._import, None
-        if staged:
-            staged["path"].unlink(missing_ok=True)
-
     def _staged_import(self, token: object) -> dict[str, Any]:
-        """The staged import for token (expired ones are dropped), else ShellyError."""
-        staged = self._import
-        if staged and time.monotonic() - staged["created"] > IMPORT_TTL_S:
-            self._drop_import()
-            staged = None
-        if not staged or not shelly.same_secret(token, staged["token"]):
+        """The staged import for token, else ShellyError (expired: dropped, see Pending)."""
+        staged = self._import.get(token)
+        if staged is None:
             raise ShellyError("No pending import – please choose the file again")
         return staged
 
@@ -488,7 +455,7 @@ class Transfers(FirmwareStore):
             raise ShellyError("Another import is in progress – please wait")
         async with self._import_lock:
             if offset == 0:
-                self._drop_import()
+                self._import.drop()
             done = await self._receive_part(
                 "import", IMPORT_PREFIX, chunks, length, total, offset, transfer, space=2 * total
             )
@@ -499,8 +466,8 @@ class Transfers(FirmwareStore):
             if not await asyncio.to_thread(zipfile.is_zipfile, path):
                 path.unlink(missing_ok=True)
                 raise ValueError("The file is no ZIP archive")
-            self._import = {"token": secrets.token_hex(16), "path": path, "size": size, "created": time.monotonic()}
-        return {"token": self._import["token"], "size": size}
+            token = self._import.create({"path": path, "size": size}, IMPORT_TTL_S, self._remove_file)
+        return {"token": token, "size": size}
 
     @staticmethod
     def _same_firmware(entry: dict[str, Any], stored: FirmwareMeta) -> bool:
@@ -546,9 +513,10 @@ class Transfers(FirmwareStore):
         async with self._import_lock:
             staged = self._staged_import(token)
             text = store_transfer.normalize_password(password)
+            self._import.renew()  # a long check of a large file must not run out of time
             checked = await asyncio.to_thread(store_transfer.read_export, staged["path"], text)
             staged["checked"] = checked
-            staged["created"] = time.monotonic()  # the confirmation gets the full time
+            self._import.renew()  # the confirmation gets the full time
         groups = self._classify(checked["entries"])
 
         def brief(e: dict[str, Any], note: str = "") -> dict[str, Any]:
@@ -577,7 +545,8 @@ class Transfers(FirmwareStore):
         made it: every new file gets the source SOURCE_IMPORT, whatever the manifest
         says (see _stored_firmware and _store_offer), and an import never changes the
         source of a stored file. acknowledged: the user stated to have created the export
-        or to trust its source (the web UI passes the checkbox; False is refused)."""
+        or to trust its source (the web UI passes the checkbox; False is refused). Once
+        the copying starts the staged file is used up: it is removed in any case."""
         if self.checking or self.device_checks:
             raise ShellyError("Not possible during a check – please try again afterwards")
         if self._import_lock.locked():
@@ -595,44 +564,48 @@ class Transfers(FirmwareStore):
                 # The sizes are sealed; a compressed archive can unpack to more than its size
                 if self._free_space() < sum(e["size"] for e in groups["new"]) + SPACE_MARGIN:
                     raise ShellyError("Not enough free disk space for the files of this import")
-                stored = 0
-                for entry in groups["new"]:
-                    name = f"{entry['sha256']}{entry['ext']}"
-                    part = data_paths.FW_DIR / f"{PART_PREFIX}import-file-{secrets.token_hex(6)}"
-                    try:
-                        await asyncio.to_thread(
-                            store_transfer.extract_entry, staged["path"], checked["prefix"], entry, part
+                # Used from here on: no expiry while the files are copied, removed in any case
+                self._import.take(token)
+                try:
+                    stored = 0
+                    for entry in groups["new"]:
+                        name = f"{entry['sha256']}{entry['ext']}"
+                        part = data_paths.FW_DIR / f"{PART_PREFIX}import-file-{secrets.token_hex(6)}"
+                        try:
+                            await asyncio.to_thread(
+                                store_transfer.extract_entry, staged["path"], checked["prefix"], entry, part
+                            )
+                            part.replace(data_paths.FW_DIR / name)  # same directory: atomic
+                        except BaseException:
+                            part.unlink(missing_ok=True)
+                            self.save()
+                            raise
+                        self._register_firmware(
+                            name, entry["type"], entry["gen"], entry["version"], entry["sha256"], entry["size"],
+                            source=SOURCE_IMPORT,
                         )
-                        part.replace(data_paths.FW_DIR / name)  # same directory: atomic
-                    except BaseException:
-                        part.unlink(missing_ok=True)
-                        self.save()
-                        raise
-                    self._register_firmware(
-                        name, entry["type"], entry["gen"], entry["version"], entry["sha256"], entry["size"],
-                        source=SOURCE_IMPORT,
-                    )
-                    meta = self.firmware[name]
-                    if entry["downloaded"]:
-                        meta["downloaded"] = entry["downloaded"]  # original date of the download / upload
-                    if entry.get("intermediate"):
-                        meta["intermediate"] = True
-                    if "changelog" in entry:
-                        meta["changelog"] = entry["changelog"]
-                    stored += 1
-                merged = 0
-                for entry in groups["same"]:
-                    known = self._by_sha(entry["sha256"])
-                    if known is None or not self._merge_note(entry):
-                        continue
-                    meta = known
-                    if "changelog" in entry and "changelog" not in meta:
-                        meta["changelog"] = entry["changelog"]
-                    if entry.get("intermediate"):
-                        meta["intermediate"] = True
-                    merged += 1
-                backups = await self._import_backups(staged)
-                self._drop_import()
+                        meta = self.firmware[name]
+                        if entry["downloaded"]:
+                            meta["downloaded"] = entry["downloaded"]  # original date of the download / upload
+                        if entry.get("intermediate"):
+                            meta["intermediate"] = True
+                        if "changelog" in entry:
+                            meta["changelog"] = entry["changelog"]
+                        stored += 1
+                    merged = 0
+                    for entry in groups["same"]:
+                        known = self._by_sha(entry["sha256"])
+                        if known is None or not self._merge_note(entry):
+                            continue
+                        meta = known
+                        if "changelog" in entry and "changelog" not in meta:
+                            meta["changelog"] = entry["changelog"]
+                        if entry.get("intermediate"):
+                            meta["intermediate"] = True
+                        merged += 1
+                    backups = await self._import_backups(staged)
+                finally:
+                    self._remove_file(staged)
                 if self.first_start_open:
                     self.first_start_open = False
                     self.schedule_changed.set()
@@ -652,9 +625,8 @@ class Transfers(FirmwareStore):
 
     def cancel_import(self, token: object) -> None:
         """Discard the staged import (Cancel in one of the import dialogs)."""
-        with contextlib.suppress(ShellyError):
-            self._staged_import(token)
-            self._drop_import()
+        if self._import.get(token) is not None:
+            self._import.drop()
 
     def skip_first_start(self, user: str = "unknown") -> None:
         """First-start question answered with "Skip": checks may run from now on."""

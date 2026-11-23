@@ -3,6 +3,7 @@ archives, new / already stored / conflicting entries, limits, first-start questi
 
 All HA/Shelly/vendor traffic is mocked (conftest.FakeNet); no network is used."""
 
+import asyncio
 import hashlib
 import io
 import json
@@ -273,19 +274,36 @@ async def test_damaged_files_are_left_out_of_the_export(mgr, net):
     assert [e["version"] for e in (await mgr.check_import(token, password))["new"]] == ["1.3.0"]
 
 
+async def test_pending_drops_at_its_time_and_keeps_on_a_wrong_token(tmp_path):
+    """One rule for every token of a dialog: a wrong token drops nothing, the time drops
+    the payload by itself (and on_drop removes its file), take uses it up."""
+    pending = manager_core.Pending()
+    file = tmp_path / "staged"
+    file.write_bytes(b"x")
+    token = pending.create({"path": file}, 0.05, lambda p: p["path"].unlink())
+    assert pending.get("0" * 32) is None and pending.get(None) is None and pending.get(token) == {"path": file}
+    await asyncio.sleep(0.1)
+    assert pending.payload is None and not file.exists()  # dropped without another access
+    token = pending.create({"n": 1}, 60)
+    second = pending.create({"n": 2}, 60)
+    assert pending.get(token) is None and pending.take(second) == {"n": 2} and pending.get(second) is None
+
+
 async def test_export_token_is_single_use_and_expires(mgr, net, monkeypatch):
-    """The download works once; an expired or unknown token is refused; an empty
-    store has nothing to export."""
+    """The download works once; an expired or unknown token is refused (and leaves the
+    prepared export); an empty store has nothing to export."""
     with pytest.raises(ShellyError, match="empty"):
         await mgr.prepare_export()
     store(mgr, "Plus1", "1.3.0")
     prepared = await mgr.prepare_export()
+    with pytest.raises(ShellyError, match="expired"):
+        await mgr.build_export("0" * 32, "3.4.0")
     path, _ = await mgr.build_export(prepared["token"], "3.4.0")
     path.unlink()
     with pytest.raises(ShellyError, match="expired"):
         await mgr.build_export(prepared["token"], "3.4.0")
+    monkeypatch.setattr(manager_transfer, "EXPORT_TTL_S", 0)
     prepared = await mgr.prepare_export()
-    monkeypatch.setattr(manager_transfer, "EXPORT_TTL_S", -1)
     with pytest.raises(ShellyError, match="expired"):
         await mgr.build_export(prepared["token"], "3.4.0")
 

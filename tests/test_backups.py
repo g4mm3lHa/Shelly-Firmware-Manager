@@ -943,6 +943,8 @@ async def test_download_and_import_roundtrip(backed, net, shellys):
     backup = await mgr.backup_now(A, "alice")
     prepared = await mgr.prepare_backup_download(backup["id"], "alice")
     assert prepared["filename"].startswith("backup-plus1-") and prepared["filename"].endswith(".sfmb")
+    with pytest.raises(ShellyError, match="expired"):
+        mgr.take_backup_download("0" * 32)  # an outdated tab: refused, the download stays
     content, filename = mgr.take_backup_download(prepared["token"])
     assert filename == prepared["filename"] and b"auto-light" not in content
     assert backup_events(mgr, "downloaded")[-1]["user"] == "alice"
@@ -956,6 +958,8 @@ async def test_download_and_import_roundtrip(backed, net, shellys):
     with pytest.raises(BackupError, match="not downloaded with a password"):
         await mgr.stage_backup_import(A, chunks(stored_file), len(stored_file))
     staged = await mgr.stage_backup_import(A, chunks(content), len(content))
+    with pytest.raises(ShellyError, match="no longer available"):
+        await mgr.check_backup_import("0" * 32, prepared["password"])  # refused, the file stays
     with pytest.raises(BackupError, match="Wrong password"):
         await mgr.check_backup_import(staged["token"], "AAAA-BBBB-CCCC-DDDD-EEEE")
     checked = await mgr.check_backup_import(staged["token"], prepared["password"].lower())

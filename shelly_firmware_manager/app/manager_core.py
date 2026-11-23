@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -43,7 +44,7 @@ from backup_store import BackupStore
 from changelog import Changelogs
 from credentials import Credentials
 from events import EventLog
-from shelly import AuthError, DeviceAuth, ShellyError, clip, error_text, plain
+from shelly import AuthError, DeviceAuth, ShellyError, clip, error_text, plain, same_secret
 from tls import CertificatePins
 
 
@@ -227,6 +228,77 @@ def unexpected_text(err: BaseException) -> str:
     return clip(f"Unexpected error ({type(err).__name__}: {error_text(err, 300)}) – see the app log", 500)
 
 
+class Pending:
+    """What a dialog holds for a short time under a random token: a staged file, a
+    prepared download or export (memory only; a file it names lies below /data).
+
+    One rule for all of them: a wrong token is refused and drops nothing (it can only
+    come from an outdated tab – 128 bit are not guessed); the payload is dropped
+    exactly when its time is up, and on_drop removes what it left on disk; take uses
+    it up (a download, an export, a confirmed import). Creating a new one drops the
+    one held before."""
+
+    def __init__(self) -> None:
+        """Nothing held."""
+        self.payload: dict[str, Any] | None = None  # None while nothing is held; use get/take
+        self._token = ""
+        self._ttl = 0.0
+        self._deadline = 0.0
+        self._on_drop: Callable[[dict[str, Any]], None] | None = None
+        self._timer: asyncio.TimerHandle | None = None
+
+    def create(
+        self, payload: dict[str, Any], ttl: float, on_drop: Callable[[dict[str, Any]], None] | None = None
+    ) -> str:
+        """Hold payload for ttl seconds; returns its new token."""
+        self.drop()
+        self.payload, self._token, self._ttl, self._on_drop = payload, secrets.token_hex(16), ttl, on_drop
+        self.renew()
+        return self._token
+
+    def renew(self) -> None:
+        """The full time again from now (the next step of a dialog gets all of it)."""
+        if self.payload is None:
+            return
+        self._deadline = time.monotonic() + self._ttl
+        if self._timer is not None:
+            self._timer.cancel()
+        try:
+            self._timer = asyncio.get_running_loop().call_later(max(self._ttl, 0), self.drop)
+        except RuntimeError:  # no event loop (direct calls): get and take check the time
+            self._timer = None
+
+    def get(self, token: object) -> dict[str, Any] | None:
+        """The payload held under token; None if nothing is held, its time is up or the
+        token is another one (nothing is dropped then)."""
+        if self.payload is not None and time.monotonic() >= self._deadline:
+            self.drop()
+        if self.payload is None or not same_secret(token, self._token):
+            return None
+        return self.payload
+
+    def take(self, token: object) -> dict[str, Any] | None:
+        """As get, and nothing is held afterwards. on_drop is not called: the caller
+        uses what the payload names (or removes it)."""
+        payload = self.get(token)
+        if payload is not None:
+            self._clear()
+        return payload
+
+    def drop(self) -> None:
+        """Forget the payload and remove what it left behind (on_drop)."""
+        payload, on_drop = self.payload, self._on_drop
+        self._clear()
+        if payload is not None and on_drop is not None:
+            on_drop(payload)
+
+    def _clear(self) -> None:
+        """Nothing held any more; the timer is stopped."""
+        if self._timer is not None:
+            self._timer.cancel()
+        self.payload, self._token, self._on_drop, self._timer = None, "", None, None
+
+
 class ManagerCore:
     """State of all Shellys, its persistence and the services every layer needs."""
 
@@ -313,8 +385,8 @@ class ManagerCore:
         # dialogs of the UI (memory only, see manager_backups)
         self.backup_job: dict[str, Any] | None = None
         self.restore_job: dict[str, Any] | None = None
-        self._backup_download: dict[str, Any] | None = None  # prepared download of one backup
-        self._backup_import: dict[str, Any] | None = None  # staged backup file of an import
+        self._backup_download = Pending()  # prepared download of one backup
+        self._backup_import = Pending()  # staged backup file of an import
         # (firmware ID, version) -> running provide task (single flight)
         self._provisions: dict[tuple[str, str], asyncio.Future[tuple[str, str, int]]] = {}
         # (firmware ID, version) -> devices waiting for that provide task (full and
@@ -338,10 +410,10 @@ class ManagerCore:
         self._header_got = ""  # version the reference request was answered with
         # Devices that installed an intermediate version: checked again at once
         self._step_checks: set[str] = set()
-        self._upload: dict[str, Any] | None = None  # staged manual upload (see stage_upload), memory only
+        self._upload = Pending()  # staged manual upload (see stage_upload)
         self._upload_lock = asyncio.Lock()  # one upload transfer at a time
-        self._export: dict[str, Any] | None = None  # prepared store export (see prepare_export), memory only
-        self._import: dict[str, Any] | None = None  # staged store import (see stage_import), memory only
+        self._export = Pending()  # prepared store export (see prepare_export)
+        self._import = Pending()  # staged store import (see stage_import)
         self._import_lock = asyncio.Lock()  # one import transfer / check / confirmation at a time
         self._import_storing = False  # confirm_import is writing its files to the store
         # File transfers in parts (upload, import) that are not complete yet, by kind;
