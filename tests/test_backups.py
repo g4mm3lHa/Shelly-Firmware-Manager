@@ -190,6 +190,60 @@ def test_lost_key_is_reported_and_files_stay(tmp_path):
     assert (tmp_path / "b" / f"{META['id']}.sfmb").exists()
 
 
+def test_listed_backups_the_key_cannot_open_are_not_listed(tmp_path):
+    """A replaced key with the list intact: the warning names the file, it is not listed
+    and stays; a key file of the wrong size is kept under another name, never overwritten."""
+    folder = tmp_path / "b"
+    store = BackupStore(folder)
+    store.add(dict(META), {"config": {}})
+    (folder / "key").write_bytes(bytes(32))
+    replaced = BackupStore(folder)
+    assert replaced.entries == [] and "1 backup file(s) cannot be read" in replaced.warning
+    assert (folder / f"{META['id']}.sfmb").exists()
+    original = store.key
+    (folder / "key").write_bytes(original[:31])
+    shortened = BackupStore(folder)
+    damaged = list(folder.glob("key.damaged-*"))
+    assert [p.read_bytes() for p in damaged] == [original[:31]] and len(shortened.key) == 32
+    assert shortened.entries == [] and "cannot be read" in shortened.warning
+    (folder / "key").write_bytes(original)  # the matching key is back: the file is listed again
+    assert [e["id"] for e in BackupStore(folder).entries] == [META["id"]]
+
+
+def test_an_unreadable_key_turns_the_backups_off(tmp_path):
+    """A key file that cannot be read (here: a folder) is never replaced: no backup is
+    listed, stored or read until the next start, and the list stays as it is."""
+    folder = tmp_path / "b"
+    BackupStore(folder).add(dict(META), {"config": {}})
+    index = (folder / "index.json").read_bytes()
+    (folder / "key").rename(folder / "saved")
+    (folder / "key").mkdir()
+    off = BackupStore(folder)
+    assert off.key is None and off.entries == [] and off.warning == backup_store.KEY_UNREADABLE
+    with pytest.raises(BackupError, match="backups are off"):
+        off.add({**META, "id": "f" * 16}, {"config": {}})
+    with pytest.raises(BackupError):
+        off.load(META["id"])
+    assert (folder / "index.json").read_bytes() == index and (folder / "key").is_dir()
+    (folder / "key").rmdir()
+    (folder / "saved").rename(folder / "key")
+    assert [e["id"] for e in BackupStore(folder).entries] == [META["id"]]
+
+
+async def test_a_schedule_stores_again_when_the_newest_backup_cannot_be_read(backed, net):
+    """With the key replaced the newest backup is not listed, so a run that stores only
+    changes stores a new backup instead of comparing with one that cannot be restored."""
+    mgr = backed
+    first = await mgr.backup_now(A, "alice")
+    dev = mgr.devices[A]
+    assert await mgr._backup(A, dev, "schedule", only_changed=True) is None  # unchanged
+    (net.data / "backups" / "key").write_bytes(bytes(32))
+    mgr.backups = BackupStore(net.data / "backups")
+    assert mgr.backups_view()["warning"] and mgr.backups.get(first["id"]) is None
+    entry = await mgr._backup(A, dev, "schedule", only_changed=True)
+    assert entry is not None and mgr.backups.of("AABBCC00000A") == [entry]
+
+
 def test_password_copy_opens_with_the_password_only(tmp_path):
     store = BackupStore(tmp_path / "b")
     store.add(dict(META), {"config": {"a": 1}}, kept=True)
