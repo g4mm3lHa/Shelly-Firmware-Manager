@@ -6,7 +6,7 @@ from features.base import (
 
 
 def _downgrade(c):
-    """Row menu entry and the two steps of a downgrade (nothing is installed)."""
+    """Row menu entry and the three steps of a downgrade (nothing is installed)."""
     case, f, page, out, width = c.case, c.f, c.page, c.out, c.width
     entry = "Downgrade"
     # Menu entry: Gen2+ (also ignored), never Gen1
@@ -38,16 +38,22 @@ def _downgrade(c):
         " return w.matches('.warnbox.danger') && w.textContent.startsWith('Downgrade at your own risk.'); }"))
     f.locator("#dlg-body .modes input").nth(1).check()
 
-    # Step 2 (last): installation dialog with the older target, acknowledgment and "Downgrade"
+    # Step 2: installation dialog with the older target, red warning at the bottom, "Continue"
     f.locator("#dlg-btns button", has_text="Continue").click()
     d = dialog(f)
     check(f"{case}: install dialog with older target", d["title"] == "Downgrade?" and "Version (older)" in d["body"]
           and "1.3.0" in d["body"] and "brick the Shelly" in d["body"], d["body"][:200])
-    check(f"{case}: red warning in the install dialog", f.locator("#dlg-body .warnbox.danger").count() == 1)
-    go = dict(d["buttons"]).get("Downgrade")
-    check(f"{case}: Downgrade disabled until the risk is acknowledged", go is True and "Continue" not in dict(d["buttons"]),
-          str(d["buttons"]))
+    check(f"{case}: red warning at the bottom of the install dialog", f.evaluate(
+        "() => document.getElementById('dlg-body').lastElementChild.matches('.warnbox.danger')"))
+    check(f"{case}: install dialog continues", dict(d["buttons"]).get("Continue") is False, str(d["buttons"]))
     page.screenshot(path=out / f"{case}-downgrade-install.png")
+
+    # Step 3: confirmation with red warning, tick and red "Downgrade"
+    f.locator("#dlg-btns button", has_text="Continue").click()
+    d = dialog(f)
+    go = dict(d["buttons"]).get("Downgrade")
+    check(f"{case}: Downgrade disabled until the risk is acknowledged", go is True
+          and f.locator("#dlg-body .warnbox.danger").count() == 1 and "I understand the risk" in d["body"], str(d["buttons"]))
     f.locator("#dlg-body input[type=checkbox]").check()
     go = dict(dialog(f)["buttons"]).get("Downgrade")
     check(f"{case}: enabled after acknowledgment", go is False)

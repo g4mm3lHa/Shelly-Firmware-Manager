@@ -235,9 +235,9 @@ export function cancelPlan(d) {
 }
 // ---------------------------------------------------------------- Downgrade
 // Flow from the row menu: list of stored older versions -> installation dialog for the
-// selected version with the acknowledgment and the red "Downgrade" button. From the
-// Firmware tab: the stored version with its devices -> downgradeConfirm. Every step shows
-// the red downgrade warning; the last step needs the tick "I understand the risk".
+// selected version -> downgradeConfirm. From the Firmware tab: the stored version with its
+// devices -> downgradeConfirm. Every step shows the red downgrade warning; the last step
+// needs the tick "I understand the risk" before its red "Downgrade" button works.
 /** Red downgrade warning (every downgrade dialog and the popup of the option "Allow
  *  downgrades"); the two bold parts are separate texts, so the sentence is split. */
 export const downgradeWarning = () => box("div", "warnbox danger", el("strong", t("Downgrade at your own risk.")),
@@ -274,27 +274,25 @@ export async function openDowngrade(d) {
     downgradeInstall(d, r.versions[Number(list.querySelector("input:checked").value)]);
   }}], "history");
 }
-/** Step 2 (last): the known installation dialog with the selected older version as target;
- *  the red "Downgrade" button needs the acknowledgment. */
+/** Step 2: the known installation dialog with the selected older version as target; the
+ *  red warning stands at the bottom, "Continue" leads to downgradeConfirm. */
 function downgradeInstall(d, v) {
   const content = [deviceSection(d), section(t("Firmware"), valueList([[t("Firmware ID"), d.type],
-    [t("Version (older)"), versionStep(d.version, v.version), "ver"], [t("Size"), mb(v.size || 0)], [t("Source"), fwSource(v), "src"], shaRow(v.sha256)])),
-  downgradeWarning()];
+    [t("Version (older)"), versionStep(d.version, v.version), "ver"], [t("Size"), mb(v.size || 0)], [t("Source"), fwSource(v), "src"], shaRow(v.sha256)]))];
   const checks = backupCheck(true);
-  if (checks.length) content.splice(2, 0, section(t("Before installing"), box("ul", "prechk", ...checks)));
+  if (checks.length) content.push(section(t("Before installing"), box("ul", "prechk", ...checks)));
   if (v.source === "upload") content.push(el("div", UPLOAD_HINT, "warnbox"));
   if (v.source === "import") content.push(el("div", IMPORT_WARNING, "warnbox"));
-  const [ack, ackLabel] = downgradeAck(v);
-  content.push(ackLabel, el("p", t("The device restarts during the installation."), "hint"));
-  confirmDialog({title: t("Downgrade?"), icon: "history", button: t("Downgrade"), ack, content, action: () => startDowngrade(d, v, ack)});
+  content.push(el("p", t("The device restarts during the installation."), "hint"), downgradeWarning());
+  modal(t("Downgrade?"), content, [{text: t("Cancel")}, {text: t("Continue"), kind: "primary", action: () => downgradeConfirm(d, v)}], "history");
 }
 /** Start the downgrade on the device (the server checks option, version and acknowledgment). */
 async function startDowngrade(d, v, ack) {
   await api(`${devUrl(d)}/install`, {sha256: v.sha256, confirm: true, downgrade: true, acknowledged: ack.checked});
   closeModal();
 }
-/** Last step of a downgrade started in the Firmware tab: the red "Downgrade" button needs
- *  the acknowledgment. */
+/** Last step of every downgrade (row menu and Firmware tab): the red "Downgrade" button
+ *  needs the acknowledgment. */
 export function downgradeConfirm(d, v) {
   const [ack, ackLabel] = downgradeAck(v);
   confirmDialog({title: t("Downgrade?"), icon: "history", button: t("Downgrade"), ack,

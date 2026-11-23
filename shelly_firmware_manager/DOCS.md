@@ -422,7 +422,7 @@ and the app refuses downgrades.
 
 Row menu ⋮ → **Downgrade** lists all stored versions that are older than the installed
 one (the entry is greyed out while no older version is stored). Choose a version, check
-the installation dialog, tick **I understand the risk** and choose **Downgrade**.
+the installation dialog, then tick **I understand the risk** and choose **Downgrade**.
 In the Firmware tab, the downgrade icon of an older version lists the devices of this
 type with a newer version installed; choose one and confirm a second time. The
 downgrade runs like a normal installation and is logged as such; meanwhile the device

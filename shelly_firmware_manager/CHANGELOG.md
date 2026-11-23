@@ -10,8 +10,8 @@ Changes in rc1
 Changed
 - Downgrade: red warning "Downgrade at your own risk" (can brick the Shelly) in every
   downgrade dialog, also at the bottom of the version list.
-- Downgrade from the row menu: two steps; the installation dialog needs the tick "I
-  understand the risk" before its red "Downgrade" button works.
+- Downgrade confirmation: the red "Downgrade" button works only after the tick "I
+  understand the risk".
 - While downgrades are off, the row menu has no Downgrade entry and the Firmware tab
   no downgrade icon.
 - Ticking "Allow downgrades" in Settings shows the downgrade warning; it needs the tick

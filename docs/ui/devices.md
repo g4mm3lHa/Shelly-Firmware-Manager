@@ -197,12 +197,12 @@ Wordings: `mockups/3.9.0/TEXTE.md`.
 - **Downgrade warning (3.11.1, mockups `3.11.1-downgrade`, approved 2026-11-23):** red box
   (`warnbox danger`) with the text "Downgrade at your own risk. …" (two bold parts: the
   first sentence and "brick the Shelly") in every downgrade dialog: step 1 of the row
-  menu (version list) as last element, the installation step, the Firmware-tab dialog and
-  its last step, and the popup of the option. Row menu: two steps – the version list
-  (blue "Continue") and the installation dialog as last step with the tick "I understand
-  the risk" (imported file: "… and that the Shelly update server has not confirmed this
-  file") and the red "Downgrade", enabled only after the tick. Firmware tab: dialog with
-  the devices (blue "Continue"), then the last step with the same tick and button.
+  menu (version list) and step 2 (installation dialog) as last element, the Firmware-tab
+  dialog, the confirmation and the popup of the option. Steps 1 and 2 (and the
+  Firmware-tab dialog) keep the blue "Continue"; the confirmation (last step of both ways)
+  has the tick "I understand the risk" (imported file: "… and that the Shelly update
+  server has not confirmed this file") and the red "Downgrade", enabled only after the
+  tick.
 - **Popup "Allow downgrades?" (3.11.1, approved 2026-11-23):** ticking the option in the
   Settings tab opens it (history icon): the red warning, the tick "I understand the
   risk", the line "Applies only after saving."; Cancel and red "Enable" (enabled only
