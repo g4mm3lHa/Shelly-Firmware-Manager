@@ -6,7 +6,8 @@
 # version arrives again via beta or main); different content fails the run - bump the
 # version instead. A branch other than main that still carries the version of main is
 # work in progress before the version bump and builds nothing. "Run workflow" with
-# "force" replaces an existing image on purpose.
+# "force" replaces an existing image on purpose. A new image is started once before it
+# is pushed (tools/dev/image_test.py); an image that fails this start test is not published.
 name: Images
 
 on:
@@ -109,7 +110,27 @@ jobs:
             exit 1
           fi
 
-      - name: Build and push
+      # Built into the local image store first, so the start test runs on the image
+      # before anything is published
+      - name: Build
+        if: steps.existing.outputs.build == 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ./shelly_firmware_manager
+          platforms: ${{ matrix.platform }}
+          load: true
+          provenance: false
+          sbom: false
+          tags: image-under-test:${{ matrix.arch }}
+
+      # The image as it will be shipped: starts without Home Assistant, both servers
+      # answer, C extensions and compiled bytecode are in use, clean stop
+      - name: Start test
+        if: steps.existing.outputs.build == 'true'
+        run: python3 tools/dev/image_test.py "image-under-test:${{ matrix.arch }}"
+
+      # Same build again (all layers come from the cache of the step above), now pushed
+      - name: Push
         if: steps.existing.outputs.build == 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:

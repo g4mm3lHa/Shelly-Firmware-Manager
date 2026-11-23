@@ -247,9 +247,10 @@ async def test_compare_lists_differences_per_part(one):
         {"key": "sys · device.profile", "reason": "fixed"},
         {"key": "input:0 · type", "reason": "unknown"},
     ]
-    assert [(r["key"], r["device"], r["backup"]) for r in diff["network"]["rows"]] == [
-        ("wifi · sta.ssid", "Guest", "Home")
+    assert shelly_backup.public_rows(diff["network"]["rows"]) == [
+        {"key": "wifi · sta.ssid", "device": "Guest", "backup": "Home", "wifi_name": True}
     ]
+    assert not any("wifi_name" in r for r in diff["settings"]["rows"])
     scripts = {r["key"]: r for r in shelly_backup.public_rows(diff["scripts"]["rows"])}
     assert scripts["auto-light.js"] == {
         "key": "auto-light.js",
@@ -380,7 +381,7 @@ async def test_gen1_backup_and_restore(shellys):
         "sntp · enabled",
     }
     assert diff["settings"]["skipped"] == [{"key": "mode", "reason": "fixed"}]
-    assert [r["key"] for r in diff["network"]["rows"]] == ["wifi_sta · ssid"]
+    assert [(r["key"], r.get("wifi_name")) for r in diff["network"]["rows"]] == [("wifi_sta · ssid", True)]
     assert [(r["key"], r["device"], r["backup"]) for r in diff["actions"]["rows"]] == [
         ("out_on_url (0)", "http://192.168.1.2/on", "–")
     ]
@@ -490,6 +491,49 @@ async def test_back_up_now_for_several_devices(backed, net, shellys):
     assert "Device not reachable" in results[B]["detail"] and len(mgr.backups.entries) == 2
     mgr.clear_backup_run()
     assert mgr.backup_job is None
+    # One log entry for the run names every device; none per device
+    assert not backup_events(mgr, "stored") and not backup_events(mgr, "failed")
+    (entry,) = backup_events(mgr, "run")
+    assert entry["severity"] == "warning" and entry["user"] == "alice" and entry["devices"] == 3
+    assert entry["stored"] == 2 and entry["result"] == "2 stored · 1 not backed up"
+    findings = {f["device"]: f for f in entry["findings"]}
+    assert [f["device"] for f in entry["findings"]] == sorted(findings, key=str.casefold)
+    kitchen = findings[mgr.devices[A]["name"]]
+    assert kitchen["result"] == "stored" and kitchen["severity"] == "success" and kitchen["size"] == results[A]["size"]
+    assert kitchen["parts"] == results[A]["parts"] and "id" not in kitchen and "detail" not in kitchen
+    down = findings[mgr.devices[B]["name"]]
+    assert down["result"] == "unreachable" and down["severity"] == "warning" and "Device not reachable" in down["detail"]
+
+
+async def test_backup_run_names_sleeping_devices_and_an_interruption(backed, net, shellys):
+    """A battery device that does not answer is counted as asleep; a run the app stops
+    is logged with what was done."""
+    mgr = backed
+    fake(shellys, net, B).down = True
+    mgr.devices[B]["battery"] = True
+    await mgr.run_backups(mgr.reserve_backup_run([A, B]), "alice")
+    (entry,) = backup_events(mgr, "run")
+    assert entry["result"] == "1 stored · 1 asleep" and entry["severity"] == "warning"
+    assert {f["device"]: f["result"] for f in entry["findings"]} == {
+        mgr.devices[A]["name"]: "stored",
+        mgr.devices[B]["name"]: "asleep",
+    }
+    mgr.clear_backup_run()
+    fake(shellys, net, B).down = False
+    mgr.devices[B]["battery"] = False
+    await mgr.run_backups(mgr.reserve_backup_run([A, B]), "alice")
+    assert backup_events(mgr, "run")[-1]["severity"] == "success"
+    mgr.clear_backup_run()
+
+    async def stopped(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise asyncio.CancelledError
+
+    mgr._backup_result = stopped
+    with pytest.raises(asyncio.CancelledError):
+        await mgr.run_backups(mgr.reserve_backup_run([A]), "alice")
+    last = backup_events(mgr, "run")[-1]
+    assert last["interrupted"] is True and last["severity"] == "warning" and mgr.backup_job["finished"]
+    assert last["result"] == "0 stored · interrupted – the app stopped" and "findings" not in last
 
 
 # ---------------------------------------------------------------- Manager: installation and schedules
@@ -585,6 +629,9 @@ async def test_preview_and_restore(backed, net, shellys):
     counts = {p["part"]: len(p["rows"]) for p in preview["parts"]}
     assert counts == {"settings": 1, "scripts": 1, "schedules": 0, "webhooks": 0, "network": 1}
     assert preview["parts"][0]["rows"] == [{"key": "switch:0 · initial_state", "device": "on", "backup": "off"}]
+    assert preview["parts"][-1]["rows"] == [
+        {"key": "wifi · sta.ssid", "device": "Guest", "backup": "Home", "wifi_name": True}
+    ]
     assert not any("SetConfig" in c or "Put" in c for c in device.calls[calls:])
     with pytest.raises(ValueError, match="not confirmed"):
         mgr.reserve_restore(backup["id"], ["network"], False, "alice")

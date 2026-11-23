@@ -15,22 +15,28 @@
    button radius of the HA theme (buttons and outlined tile buttons). Lines: fine (the
    theme's divider colour) and strong (at least 3:1 against the card in light and dark
    themes: fields, tiles, outlined tile buttons). Warning text: mixed half towards the
-   text colour like the status pills (at least 4.5:1 on light and dark cards). Control
-   height: text buttons, fields and selects (desktop 33 px, phones 44 px). */
+   text colour like the status pills (at least 4.5:1 on light and dark cards). Coloured
+   text is mixed towards the text colour in the same way, so that it reaches 4.5:1 also
+   on an unread log row: link text (links, new version, active tab, chosen entry, icons
+   that are links), error text and the text of grey tags; the pure theme colour is for
+   lines and fills. Control height: text buttons, fields and selects (desktop 33 px,
+   phones 44 px). */
 :root{--fs-tag:11px;--fs-small:12px;--fs-text:14px;--fs-title:15px;
   --radius-s:8px;--radius-m:12px;--radius-btn:var(--ha-button-border-radius,18px);
   --line:var(--divider-color);--line-strong:color-mix(in srgb,var(--primary-text-color) 50%,var(--card-background-color));
-  --warn-text:color-mix(in srgb,var(--warning-color) 50%,var(--primary-text-color));--control-h:33px}
+  --warn-text:color-mix(in srgb,var(--warning-color) 50%,var(--primary-text-color));--control-h:33px;
+  --link-text:color-mix(in srgb,var(--primary-color) 60%,var(--primary-text-color));--error-text:color-mix(in srgb,var(--error-color) 70%,var(--primary-text-color));
+  --tag-text:color-mix(in srgb,var(--secondary-text-color) 70%,var(--primary-text-color))}
 *{box-sizing:border-box}
 body{font-family:var(--ha-font-family-body,var(--mdc-typography-font-family,Roboto,system-ui,sans-serif));
   margin:16px;color:var(--primary-text-color);background:var(--primary-background-color);font-size:var(--fs-text)}
 h1{font-size:1.4em;margin:0;font-weight:500}
 /* Pre-release builds only: red "(beta)" next to the app title */
-h1 .beta{margin-left:4px;color:var(--error-color);font-size:var(--fs-tag);font-weight:500}
+h1 .beta{margin-left:4px;color:var(--error-text);font-size:var(--fs-tag);font-weight:500}
 h2{font-size:var(--fs-title);margin:0;font-weight:500}
 /* Card heads (device groups, firmware IDs, settings cards): all in the same, bold weight */
 .card-head h2{font-weight:600}
-a{color:var(--primary-color)}
+a{color:var(--link-text)}
 .meta{color:var(--secondary-text-color);font-size:var(--fs-small);line-height:1.6}
 .meta:empty{display:none}.busy{color:var(--warn-text)}
 #meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
@@ -49,7 +55,7 @@ a{color:var(--primary-color)}
 .muted{color:var(--secondary-text-color)}
 .small{font-size:var(--fs-small)}
 .nowrap{white-space:nowrap}
-.error{color:var(--error-color);overflow-wrap:anywhere}
+.error{color:var(--error-text);overflow-wrap:anywhere}
 .hint{color:var(--secondary-text-color);font-size:var(--fs-small)}
 /* Visually hidden, read by screen readers (e.g. the help text of a setting) */
 .sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
@@ -62,10 +68,10 @@ a{color:var(--primary-color)}
 .tab{background:none;color:var(--secondary-text-color);border-radius:0;border:0;border-bottom:2px solid transparent;
   padding:8px 16px;display:flex;align-items:center;gap:6px}
 .tab svg{width:18px;height:18px;fill:currentColor}
-.tab.active{color:var(--primary-color);border-bottom-color:var(--primary-color)}
-/* Logs tab: unread entries (yellow round "!" after the name, on phones after the icon) */
+.tab.active{color:var(--link-text);border-bottom-color:var(--primary-color)}
+/* Logs tab: unread error entries (red round "!" after the name, on phones after the icon) */
 .tab-unread{display:inline-flex;align-items:center;justify-content:center;flex:none;width:16px;height:16px;
-  border-radius:50%;background:var(--warning-color);color:#000;font-size:11px;font-weight:700;line-height:1}
+  border-radius:50%;background:var(--error-color);color:#fff;font-size:11px;font-weight:700;line-height:1}
 .tab-unread[hidden]{display:none}
 
 /* Controls */
@@ -81,7 +87,7 @@ button:not(.icon):not(.small):not(.pill):not(.tab):not(.sort-item):not(.act){min
 input.ghost{visibility:hidden}   /* keeps the indentation of a row without checkbox */
 button:disabled{opacity:.45;cursor:default}
 button.icon,a.icon{background:none;border:0;padding:4px;line-height:0;color:var(--secondary-text-color);border-radius:50%}
-a.icon{display:inline-block;color:var(--primary-color)}   /* same box as an icon button: icons of a row stay on one line */
+a.icon{display:inline-block;color:var(--link-text)}   /* same box as an icon button: icons of a row stay on one line */
 button.icon:hover:not(:disabled),button.icon:focus-visible{color:var(--primary-color);
   background:color-mix(in srgb,var(--primary-color) 12%,transparent)}
 button.icon svg,.svg{width:18px;height:18px;fill:currentColor;vertical-align:middle}
@@ -108,7 +114,7 @@ input[type=file]::file-selector-button{min-height:var(--control-h);margin-right:
 .tool{position:relative;flex:none}
 button.icon.tool-btn{position:relative;width:36px;height:36px;padding:0;display:inline-flex;align-items:center;
   justify-content:center;border:1px solid var(--line);background:var(--card-background-color)}
-.tool.open>button.icon.tool-btn{color:var(--primary-color);border-color:var(--primary-color);
+.tool.open>button.icon.tool-btn{color:var(--link-text);border-color:var(--primary-color);
   background:color-mix(in srgb,var(--primary-color) 12%,var(--card-background-color))}
 /* Dot while a search text is set or a filter other than "All" is chosen */
 button.icon.tool-btn.has-value::after{content:"";position:absolute;top:3px;right:3px;width:8px;height:8px;border-radius:50%;
@@ -125,7 +131,7 @@ button.sort-item{display:flex;align-items:center;gap:8px;border:0;border-radius:
   padding:8px 16px;color:var(--primary-text-color)}
 button.sort-item:hover,button.sort-item:focus-visible{background:color-mix(in srgb,var(--primary-text-color) 8%,transparent)}
 button.sort-item svg{width:16px;height:16px;fill:currentColor;color:var(--secondary-text-color)}
-button.sort-item[aria-checked=true]{color:var(--primary-color);font-weight:500}
+button.sort-item[aria-checked=true]{color:var(--link-text);font-weight:500}
 button.sort-item[aria-checked=true]::after{content:"✓";margin-left:auto;padding-left:16px}
 button.sort-item[hidden]{display:none}
 /* Filter entries: label left, count right, check mark after the count of the chosen one */
@@ -141,7 +147,7 @@ button.filter-item[aria-checked=true]::after{margin-left:0;padding-left:8px}
   color:var(--primary-text-color);text-decoration:none;font-size:inherit}
 .rowmenu button:hover:not(:disabled),.rowmenu a:hover,.rowmenu button:focus-visible,.rowmenu a:focus-visible{
   background:color-mix(in srgb,var(--primary-text-color) 8%,transparent)}
-.rowmenu .red{color:var(--error-color)}
+.rowmenu .red{color:var(--error-text)}
 .rowmenu hr{border:0;border-top:1px solid var(--line);margin:4px 0}
 .menu-hint{padding:0 16px 6px;max-width:260px;color:var(--secondary-text-color);font-size:var(--fs-small)}
 
@@ -219,7 +225,7 @@ td.c-device .addr-reason{white-space:normal}
 .unk-name{overflow-wrap:anywhere}
 .sub{color:var(--secondary-text-color);font-size:var(--fs-small)}
 .arrow{color:var(--secondary-text-color);margin:0 4px}
-.newver{color:var(--primary-color);font-weight:600}
+.newver{color:var(--link-text);font-weight:600}
 
 /* Status pill and indicators */
 .pill{display:inline-flex;align-items:center;gap:4px;padding:2px 10px;border-radius:var(--radius-m);font-size:var(--fs-small);
@@ -264,7 +270,7 @@ button.pill{cursor:pointer}
 .act-strip.labeled .act svg{color:var(--act)}
 .act-strip.labeled .act.s-unknown::after{right:4px;top:4px}
 .tag{display:inline-block;padding:1px 8px;border-radius:var(--radius-m);font-size:var(--fs-tag);margin-right:4px;white-space:nowrap;
-  background:color-mix(in srgb,var(--secondary-text-color) 16%,transparent);color:var(--secondary-text-color)}
+  background:color-mix(in srgb,var(--secondary-text-color) 16%,transparent);color:var(--tag-text)}
 .tag.warn{background:color-mix(in srgb,var(--warning-color) 20%,transparent);color:var(--warn-text)}
 .tag.sec{background:var(--error-color);color:#fff}
 /* Log severity: color plus label text */
@@ -359,7 +365,7 @@ button.pill{cursor:pointer}
   box-shadow:0 4px 16px rgba(0,0,0,.3);overflow-wrap:anywhere}
 .toast.warn{border-left:4px solid var(--warning-color)}
 .toast[hidden]{display:none}
-.bad{color:var(--error-color)}.good{color:var(--success-color)}
+.bad{color:var(--error-text)}.good{color:var(--success-color)}
 
 /* Dialog */
 dialog{width:min(640px,calc(100vw - 32px));max-height:calc(100vh - 48px);padding:0;
@@ -371,6 +377,7 @@ html.dlg-open{overflow:hidden}
 /* Head and button area separated by divider lines; content in titled sections */
 .dlg-head{display:flex;align-items:center;gap:8px;padding:16px 20px 12px;border-bottom:1px solid var(--line)}
 .dlg-head h2{flex:1;font-size:1.15em;display:flex;align-items:center;gap:8px;min-width:0}
+.dlg-head h2:focus{outline:none}   /* focused when a dialog or a step opens (read out, no control) */
 /* Icon before the title (changelog, delete, upload, installation) */
 .dlg-head h2 .ti{width:20px;height:20px;flex:none;color:var(--secondary-text-color)}
 .dlg-head h2 .ti-delete,.dlg-head h2 .ti-chip{color:var(--error-color)}
@@ -407,6 +414,8 @@ dl.kv>dd.src{font-size:var(--fs-small)}
   background:color-mix(in srgb,var(--warning-color) 10%,transparent)}
 /* Red variant (e.g. deleting a provided firmware); text stays in the normal colour */
 .warnbox.danger{border-left-color:var(--error-color);background:color-mix(in srgb,var(--error-color) 10%,transparent)}
+/* Further paragraph of a warning box (restore: the backup names another Wi-Fi) */
+.warnbox>p{margin:6px 0 0}
 /* Message dialog: large round status icon left of the text (success, warning, error) */
 .msg{display:flex;align-items:center;gap:14px;margin:16px 0 6px}
 .msg>p{margin:0;line-height:1.45;overflow-wrap:anywhere;white-space:pre-line}
@@ -666,7 +675,7 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
 .bulk-dev .sub,.bulk-row>.sub{color:var(--secondary-text-color);font-size:var(--fs-small)}
 /* Step of a fitting device and reason of a greyed-out one: both right (wrapped: right on their own line) */
 .bulk-step,.bulk-row>.sub{margin-left:auto;text-align:right}
-.bulk-step{font-size:var(--fs-small);color:var(--primary-color)}
+.bulk-step{font-size:var(--fs-small);color:var(--link-text)}
 .bulk-res{display:flex;flex-direction:column}
 .bulk-res-row{display:flex;align-items:center;gap:12px;padding:6px 0;border-bottom:1px solid var(--line)}
 .msg-icon.sm{width:28px;height:28px}
@@ -698,7 +707,7 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
 .hold-note svg{width:13px;height:13px;fill:currentColor}
 /* "N of M Shellys listed · Why are K missing?": toolbar on wide screens, above the cards on phones */
 button.listing{border:0;background:none;padding:6px 4px;color:var(--secondary-text-color);font-size:var(--fs-small);cursor:pointer;min-height:0}
-button.listing .listing-link{margin-left:6px;color:var(--primary-color);text-decoration:underline}
+button.listing .listing-link{margin-left:6px;color:var(--link-text);text-decoration:underline}
 button.listing.listing-phone{display:none}
 .miss-list{display:flex;flex-direction:column}
 .miss-row{padding:8px 0;border-bottom:1px solid var(--line)}
@@ -724,7 +733,7 @@ button.listing.listing-phone{display:none}
   border:1px solid color-mix(in srgb,#9c27b0 50%,transparent);padding:0 7px;margin-right:0}
 .fw-id{display:flex;align-items:center;justify-content:center;gap:6px}
 .p-scheduled{--pill:var(--primary-color)}
-.plan-note{color:color-mix(in srgb,var(--primary-color) 60%,var(--primary-text-color))}
+.plan-note{color:var(--link-text)}
 .inst-when{display:flex;flex-wrap:wrap;gap:8px}.inst-when input{min-height:var(--control-h)}
 .dsec+label.check{display:flex;margin-top:12px}
 
@@ -753,9 +762,9 @@ button.listing.listing-phone{display:none}
 @media (max-width:700px){
   .sch-head{display:none}
   .card.schedules{background:none;box-shadow:none}
-  .sch-row,.sch-row.sch-inst{grid-template-columns:auto minmax(0,1fr) auto;gap:6px 10px;margin:10px;padding:12px;border:1px solid var(--line);
+  .sch-row,.sch-row.sch-inst{grid-template-columns:auto minmax(0,1fr) auto;gap:6px 10px;margin:10px;padding:12px;border:1px solid var(--line-strong);
     border-radius:var(--radius-m);background:var(--card-background-color)}
-  .sch-row:last-child{border-bottom:1px solid var(--line)}
+  .sch-row:last-child{border-bottom:1px solid var(--line-strong)}
   .sch-row.sch-inst{grid-template-columns:minmax(0,1fr) auto}
   .sch-row .sch-on{grid-column:1;grid-row:1}.sch-row .sch-name{grid-column:2;grid-row:1}.sch-row .sch-btns{grid-column:3;grid-row:1}
   .sch-inst .sch-name{grid-column:1}.sch-inst .sch-btns{grid-column:2}
@@ -810,7 +819,7 @@ button.listing.listing-phone{display:none}
 .bk-list.in-dlg .bk-fw::before{content:attr(data-label) " "}
 .bk-more{margin-top:8px}
 /* Kept backup: grey lock = can be kept, primary colour = kept */
-button.icon.bk-keep{color:var(--secondary-text-color);opacity:.55}button.icon.bk-keep.on{color:var(--primary-color);opacity:1}
+button.icon.bk-keep{color:var(--secondary-text-color);opacity:.55}button.icon.bk-keep.on{color:var(--link-text);opacity:1}
 /* Job bar above the cards (backup run, restore): neutral, with "Show" */
 .notice.bk-job{margin:0 0 12px;border-left-color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 10%,var(--card-background-color))}
 .bk-job .spinner{display:inline-block;vertical-align:-1px;margin-right:4px}
@@ -830,7 +839,7 @@ button.icon.bk-keep{color:var(--secondary-text-color);opacity:.55}button.icon.bk
 #dlg table.bk-diff th:first-child{width:44%}
 #dlg table.bk-diff td{padding:3px 8px 3px 0;overflow-wrap:break-word;vertical-align:top}
 #dlg table.bk-diff td.bk-key{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:var(--fs-tag);overflow-wrap:anywhere}
-#dlg table.bk-diff td.bk-new{color:var(--primary-color);font-weight:600}
+#dlg table.bk-diff td.bk-new{color:var(--link-text);font-weight:600}
 .bk-sure{display:flex;margin-top:10px;color:var(--primary-text-color);align-items:flex-start}
 /* Download and import of one backup: password with copy icon, file and password fields */
 .bk-pwrow{display:flex;gap:6px;align-items:center}.bk-pw{flex:1;min-width:0;font-family:ui-monospace,Menlo,Consolas,monospace}
@@ -839,7 +848,7 @@ button.icon.bk-keep{color:var(--secondary-text-color);opacity:.55}button.icon.bk
   .bk-head{display:none}
   .card.backups{background:none;box-shadow:none}
   .card.backups>.card-head{background:var(--card-background-color);border-radius:var(--radius-m);border:1px solid var(--line)}
-  .bk-row,.bk-row.bk-none{grid-template-columns:auto minmax(0,1fr) auto;gap:6px 10px;margin:10px 0;padding:12px;border:1px solid var(--line);border-radius:var(--radius-m);
+  .bk-row,.bk-row.bk-none{grid-template-columns:auto minmax(0,1fr) auto;gap:6px 10px;margin:10px 0;padding:12px;border:1px solid var(--line-strong);border-radius:var(--radius-m);
     background:var(--card-background-color)}
   .bk-row.bk-none{grid-template-columns:minmax(0,1fr) auto}
   .bk-row.open{margin-bottom:0;border-bottom:0;border-radius:var(--radius-m) var(--radius-m) 0 0}
@@ -849,7 +858,7 @@ button.icon.bk-keep{color:var(--secondary-text-color);opacity:.55}button.icon.bk
   .bk-row .bk-c[data-label],.bk-list:not(.in-dlg) .bk-c[data-label]{grid-column:1/-1;display:grid;grid-template-columns:96px minmax(0,1fr);align-items:baseline}
   .bk-row .bk-c[data-label]::before,.bk-list:not(.in-dlg) .bk-c[data-label]::before{content:attr(data-label);color:var(--secondary-text-color);font-size:var(--fs-small)}
   .bk-last .bk-why{grid-column:2}
-  .bk-list:not(.in-dlg){margin:0 0 10px;border-radius:0 0 var(--radius-m) var(--radius-m);background:var(--card-background-color)}
+  .bk-list:not(.in-dlg){margin:0 0 10px;border-color:var(--line-strong);border-radius:0 0 var(--radius-m) var(--radius-m);background:var(--card-background-color)}
   .bk-list:not(.in-dlg) .bk-item{grid-template-columns:minmax(0,1fr) auto;gap:4px 10px;padding:10px 12px}
   .bk-list:not(.in-dlg) .bk-date{grid-column:1;grid-row:1;font-weight:600}
   .bk-list .bk-btns,.bk-list.in-dlg .bk-btns{grid-column:1/-1;grid-row:auto;justify-content:flex-start}

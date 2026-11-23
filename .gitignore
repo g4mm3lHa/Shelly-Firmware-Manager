@@ -8,7 +8,7 @@ __pycache__/
 .devdeps/
 
 # Ad-hoc QA output (default output folder of the qa scripts; test results go into
-# the RC test report, curated screenshots are kept in qa/screenshots/)
+# the RC test report; the screenshot set of a release is kept outside the repository)
 shots/
 # Stray output of a qa run in the repository root (qa/run_ui.py uses a temp folder)
 /*.png

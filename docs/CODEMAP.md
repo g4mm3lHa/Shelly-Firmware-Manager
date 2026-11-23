@@ -8,7 +8,7 @@ files in sync when modules, stored fields, routes or test files change.
 
 | Detail file | Content | Read when you change |
 |---|---|---|
-| `docs/codemap/modules.md` | backend modules, key names, the eight manager layers | `shelly_firmware_manager/app/*.py` |
+| `docs/codemap/modules.md` | backend modules, the eight manager layers, pitfalls; names and lines: `python3 tools/dev/symbols.py` | `shelly_firmware_manager/app/*.py` |
 | `docs/codemap/data.md` | files below `/data` and their fields | stored data |
 | `docs/codemap/api.md` | HTTP routes → handlers → manager | `web_ui.py` |
 | `docs/codemap/ui.md` | UI modules and what they export | `ui-src/` |

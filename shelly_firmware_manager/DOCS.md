@@ -513,7 +513,8 @@ A backup is made
 
 - by hand: **Back up now** in the **Backups** tab (all Shellys or a selection), or for one
   device in its row there or in its **Backups** dialog (row menu and device details of the
-  **Devices** tab);
+  **Devices** tab). **Back up now** for several devices writes one log entry for the run;
+  it opens to the result of each device;
 - before every update and downgrade while **Back up before every installation** is on –
   if this backup fails, nothing is installed and the reason is shown;
 - by a schedule with the action **Backup**. A run stores a backup only for devices whose
@@ -535,7 +536,10 @@ differences** lists what would change, with the names the Shelly uses. A chosen 
 made equal to the backup: what exists only on the device (a newer script, schedule or
 webhook) is removed. **Wi-Fi and network settings** are a part of their own, not ticked
 by default, and need an extra confirmation – wrong network settings can make a device
-unreachable. A backup can only be restored to the device it was made on (MAC address and
+unreachable. If the backup names another Wi-Fi (SSID) than the device uses now, the
+warning says so: the Wi-Fi password is not part of a backup and stays as it is on the
+device, so the device can only join the Wi-Fi of the backup with the password it has
+stored now. A backup can only be restored to the device it was made on (MAC address and
 model); a different firmware version is allowed, settings it does not know are skipped
 and named. Afterwards the app reads the device again and shows per part what was applied;
 the device restarts if a setting needs it.
@@ -563,7 +567,7 @@ warning if it still answers at its last address and an error if not. A device th
 answer is an error; a battery device that is asleep is a warning. Filters and a device search help to find entries. Passwords never appear in the log. Consecutive
 entries of the same device are marked by a bar at the side.
 
-The tab updates itself when a new entry is written. A yellow "!" on the tab marks error
+The tab updates itself when a new entry is written. A red "!" on the tab marks error
 entries written since you last opened it in this browser; when you open the tab, the
 entries that are new since then are lightly highlighted.
 

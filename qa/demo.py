@@ -354,6 +354,17 @@ if scenario in ("features", "docs"):  # backups of device settings and Shellys i
     m.events.add("backup", severity="warning", event="restored", device="Bedroom shutter", backup_at=now - 20 * 86400,
                  restored=["settings", "scripts"], changes=7, not_applied=1, confirmed=True, restart=True, error=None, user="demo",
                  findings=[{"part": "settings", "key": "MQTT · Server", "error": "Device reports: invalid value for server"}])
+    # One entry for a run of "Back up now" over several devices
+    m.events.add("backup", severity="warning", event="run", devices=4, stored=2, duration=6, user="demo",
+                 result="2 stored · 1 asleep · 1 not backed up",
+                 findings=[{"device": "Garage door", "result": "unreachable", "severity": "warning",
+                            "detail": "Device not reachable: timeout"},
+                           {"device": "Garden sensor", "result": "asleep", "severity": "warning",
+                            "detail": "Device not reachable: timeout"},
+                           {"device": "Kitchen light", "result": "stored", "severity": "success", "size": 1840,
+                            "parts": {"settings": True, "scripts": 1, "schedules": 1, "webhooks": 1}},
+                           {"device": "Living room", "result": "stored", "severity": "success", "size": 1210,
+                            "parts": {"settings": True, "scripts": 0, "schedules": 2, "webhooks": 0}}])
 if scenario == "legacy":  # an installation started before (device progress shown)
     ids = list(m.devices)
     m.devices[ids[7]].update(status="installing", ota_progress=55, message="The Shelly is downloading the firmware: 55 %")

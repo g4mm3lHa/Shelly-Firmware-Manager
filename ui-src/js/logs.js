@@ -51,10 +51,10 @@ const INSTALL_EVENTS = {started: "started", confirmed: "confirmed", unconfirmed:
 const SCHEDULE_EVENTS = {created: "created", changed: "changed", deleted: "deleted"};
 const RUN_RESULTS = {ok: "okc", unreachable: "bad", refused: "bad"};
 // Backups of the device settings: one entry per stored, failed, removed, restored,
-// downloaded or imported backup
+// downloaded or imported backup, and one per run of "Back up now" over several devices
 const BACKUP_REASONS = {manual: "manual", update: "before update", downgrade: "before downgrade", schedule: "schedule", restore: "before restore"};
 const BACKUP_EVENTS = {stored: "stored", failed: "failed", pruned: "removed", deleted: "deleted", restored: "restored",
-  restore_failed: "restore failed", downloaded: "downloaded", imported: "imported"};
+  restore_failed: "restore failed", downloaded: "downloaded", imported: "imported", run: "run"};
 const kb = n => n >= 1048576 ? mb(n) : `${Math.max(1, Math.round((n || 0) / 1024))} KB`;
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 /** Contents of a backup ("settings, 2 scripts, 3 schedules, 1 webhook"; Gen1: "settings, 1 action"). */
@@ -78,6 +78,14 @@ function backupLine(e) {
     default: return `${e.device}: backup ${e.event}`;
   }
 }
+/** Main line of a run of "Back up now" over several devices. */
+const backupRunLine = e => `Backup run · manual · ${plural(e.devices ?? 0, "device")} · ${e.duration ?? 0} s · ${e.result}`;
+/** Devices of a backup run, each coloured by its own severity: what was stored, or why
+ *  the device was not backed up. */
+const backupRunFindings = e => box("ul", null, ...(e.findings || []).map(f => el("li",
+  f.result === "stored" ? `${f.device}: stored · ${kb(f.size)} · ${backupParts(f.parts)}`
+    : `${f.device}: not backed up – ${f.result === "asleep" ? "battery device asleep" : f.detail || f.result}`,
+  f.severity === "error" ? "bad" : f.severity === "warning" ? "warnc" : "okc")));
 /** Lines below a backup entry: the error, and for a restore what was not applied. */
 const backupDetails = e => [
   e.event === "restored" && e.confirmed === false ? el("div", "The device could not be read again – nothing is confirmed", "bad") : null,
@@ -165,7 +173,8 @@ function logContent(e) {
       return [keptDetails(`log-${e.ts}-sch`, scheduleLine(e), runFindings(e))];
     }
     case "backup":
-      return [el("div", backupLine(e)), ...backupDetails(e)];
+      if (e.event !== "run") return [el("div", backupLine(e)), ...backupDetails(e)];
+      return e.findings?.length ? [keptDetails(`log-${e.ts}-bkrun`, backupRunLine(e), backupRunFindings(e))] : [el("div", backupRunLine(e))];
     case "log":
       return [el("div", `Log cleared · ${e.entries ?? 0} entr${e.entries === 1 ? "y" : "ies"} deleted`)];
     default:
@@ -208,7 +217,9 @@ function logSummary(e) {
       if (e.event === "run") return [`“${e.name}”: ${e.action}`, e.result];
       if (e.event === "missed") return [`“${e.name}”: ${e.action} missed`];
       return [`“${e.name}” ${SCHEDULE_EVENTS[e.event] || e.event}`];
-    case "backup": return [`${e.device}: backup ${BACKUP_EVENTS[e.event] || e.event}`];
+    case "backup":
+      if (e.event === "run") return [`Backup run · ${plural(e.devices ?? 0, "device")}`, e.result];
+      return [`${e.device}: backup ${BACKUP_EVENTS[e.event] || e.event}`];
     default: return [e.kind];
   }
 }
@@ -251,10 +262,12 @@ const entryClass = (group, unread) => (group ? ` grp grp-${group}` : "") + (unre
  *  entries of the same device ("first" | "mid" | "last" | null): marked by a side bar. */
 function logRow(e, d, group, unread) {
   const sev = severity(e);
-  return box("div", "log" + entryClass(group, unread), el("span", `${pad(d.getHours())}:${pad(d.getMinutes())}`, "mono sub"),
+  const row = box("div", "log" + entryClass(group, unread), el("span", `${pad(d.getHours())}:${pad(d.getMinutes())}`, "mono sub"),
     el("span", KIND_LABELS[e.kind] || e.kind, "tag"),   // neutral like on phones: the outcome has its own label
     box("div", "log-body" + (sev === "error" ? " bad" : ""), el("span", SEVERITY_LABELS[sev], `tag sev-${sev}`), box("div", null, ...logContent(e))),
     el("span", e.user || "", "user"), logDelete(e));
+  if (e.id) row.dataset.key = e.id;   // the keyboard focus stays in this entry when the list is redrawn
+  return row;
 }
 /** Mobile entry: time/type/outcome, short summary, details collapsed. Details that
  *  only repeat the summary are left out: the summary is shown without expansion. */
@@ -263,11 +276,14 @@ function logTile(e, d, group, unread) {
   const head = box("div", "log-head", el("span", `${pad(d.getHours())}:${pad(d.getMinutes())}`, "mono sub"),
     el("span", KIND_LABELS[e.kind] || e.kind, "tag"), el("span", SEVERITY_LABELS[sev], `tag sev-${sev}`), el("span", null, "spacer"), logDelete(e));
   const body = box("div", "log-details", ...(e.kind === "check" ? (e.findings?.length || e.ignored?.length ? [checkFindings(e)] : [el("div", checkCounts(e), "sub")]) :
-    e.kind === "schedule" && e.event === "run" ? [runFindings(e)] : logContent(e)));
+    e.kind === "schedule" && e.event === "run" ? [runFindings(e)] :
+    e.kind === "backup" && e.event === "run" && e.findings?.length ? [backupRunFindings(e)] : logContent(e)));
   // The user stands top right, beside the first summary line
   const lines = () => summary.map((x, i) => i === 0 && e.user ? box("div", "first", el("span", x), el("span", e.user, "user")) : el("div", x));
   const same = [...body.children].map(c => c.textContent.trim()).join("\n") === summary.join("\n");
-  if (same) return box("div", "log-m" + entryClass(group, unread), head, box("div", "log-sum", ...lines()));
+  const tile = box("div", "log-m" + entryClass(group, unread), head);
+  if (e.id) tile.dataset.key = e.id;
+  if (same) { tile.append(box("div", "log-sum", ...lines())); return tile; }
   const det = el("details"), key = `logm-${e.ts}-${e.kind}`;
   det.open = openDetails.has(key);
   det.ontoggle = () => { det.open ? openDetails.add(key) : openDetails.delete(key); };
@@ -277,7 +293,8 @@ function logTile(e, d, group, unread) {
   (last.classList.contains("first") ? last.firstChild : last).append(chev);
   sum.append(...shown);
   det.append(sum, body);
-  return box("div", "log-m" + entryClass(group, unread), head, det);
+  tile.append(det);
+  return tile;
 }
 /** Logs tab: grouped by day, filter, device search, quiet checks. */
 export function renderLogs() {

@@ -9,7 +9,8 @@ as the UI change). Read when you change the Schedules tab or the schedule dialog
   pause below it), action with icon, repeat, devices, next run, last run (time, outcome
   tag Success / Warning / Missed, short result), pencil and red trash; switched-off rows
   dimmed. Card "Scheduled Installations · n": device, version (with "Beta" tag), install
-  at, approved (time · user), "Cancel". Phones: tiles with labelled lines. Empty state
+  at, approved (time · user), "Cancel". Phones: tiles with labelled lines and the strong
+  line (see `common.md`). Empty state
   names both ways (add a schedule; "Install at" in the installation dialog).
 - **Dialog "Add schedule" / "Edit schedule" (F12–F15):** name, action (Restart, Cloud on,
   Cloud off, Bluetooth on, Bluetooth off – one action per schedule), pause between devices

@@ -25,6 +25,10 @@ RUN rm -rf /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.12 \
         /usr/local/lib/python3.12/site-packages/wheel /usr/local/lib/python3.12/site-packages/wheel-*.dist-info
 COPY --from=deps /deps /deps
 COPY app /app
+# Bytecode of the packages and the app is compiled once here, so a start does not compile
+# them again (nothing is written at runtime: PYTHONDONTWRITEBYTECODE). A file that fails
+# to compile fails the build.
+RUN python3 -m compileall -q /deps /app
 WORKDIR /app
 # Container health: with the Watchdog switch of the app page on, the Supervisor
 # restarts the app if the download server stops accepting connections. TCP check

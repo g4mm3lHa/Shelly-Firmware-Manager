@@ -68,7 +68,7 @@ function scheduleRow(s) {
     : [el("span", t("never"), "sub")];
   const pause = s.action === "restart" ? el("div", s.pause ? t("{n} s between devices", {n: s.pause}) : t("All at once"), "sub") : null;
   const left = s.left_out ? el("div", t("{n} left out at the moment", {n: s.left_out}), "sub") : null;
-  return box("div", "sch-row" + (s.on ? "" : " off"),
+  const row = box("div", "sch-row" + (s.on ? "" : " off"),
     cell("", "sch-on", on),
     cell("", "sch-name", el("div", s.name, "name"), pause),
     cell(t("Action"), "sch-action", act),
@@ -80,16 +80,20 @@ function scheduleRow(s) {
       iconButton("play", t("Run “{name}” now", {name: s.name}), () => runNow(s)),
       iconButton("pencil", t("Edit “{name}”", {name: s.name}), () => openSchedule(s)),
       iconButton("delete", t("Delete “{name}”", {name: s.name}), () => deleteSchedule(s), "red")));
+  row.dataset.key = s.id;   // the keyboard focus stays in this row when the list is redrawn
+  return row;
 }
 function plannedRow(d) {
   const p = d.planned, cancel = el("button", t("Cancel"), "small"); cancel.onclick = () => cancelPlan(d);
-  return box("div", "sch-row sch-inst",
+  const row = box("div", "sch-row sch-inst",
     cell("", "sch-name", el("div", d.name, "name"), d.shelly_name && d.shelly_name !== d.name ? el("div", d.shelly_name, "sub") : null),
     cell(t("Version"), "sch-ver", box("span", "nowrap", el("span", p.version || "?"), el("span", "→", "arrow"), el("span", p.target, "newver")),
       p.beta ? el("span", t("Beta"), "tag beta") : null),
     cell(t("Install at"), "sch-next", el("span", p.at_text, "nowrap")),
     cell(t("Approved"), "sch-last", el("span", `${p.on_text} · ${p.by}`)),
     cell("", "sch-btns", cancel));
+  row.dataset.key = d.id;
+  return row;
 }
 
 /** Tab "Schedules": the schedules and the approved installations waiting for their time. */

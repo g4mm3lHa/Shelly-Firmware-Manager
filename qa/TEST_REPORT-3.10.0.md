@@ -21,7 +21,7 @@ code review before the release (including the display of a running downgrade), d
 | `tools/dev/check.sh full`: ruff, mypy --strict, build check, version 3.10.0, pytest, UI, layout gate | passed: 553 pytest; ui_test 210/210; ui_features 959/959 (new suite `schedules` 112/112: Schedules tab, Install at, scheduled device, running downgrade, German layout at 360–1440 px); layout gate 35/35 (now with the Schedules tab) |
 | CVE check | 2026-11-22: PyPI lists no known vulnerability for the ten pinned packages (all at their newest version, unchanged since 3.9.0); base image digest unchanged, 3.12.16-alpine3.24 is the newest 3.12 alpine tag |
 | Docs check (seven points) | changelog bullets match `DOCS.md` (Scheduled installation, Beta firmware, Downgrade, Schedules, Logs, Settings, Troubleshooting, Known limitations); options in `config.yaml`, `translations/en.yaml`, Settings tab and Configuration agree (no option change after rc2); feature list identical in both READMEs; minimum HA 2026.10 and architectures agree; Credits table matches `requirements.txt` (unchanged); relative links and anchors resolve; section order of `DOCS.md` and fixed content of `README.md` unchanged |
-| Screenshots | `qa/screenshots/3.10.0/` (1440 and 412 px: Devices, Firmware, Schedules, Logs, Settings, details); `docs/images/` replaced (Devices desktop and phone with the Schedules tab, installation dialog with "Start") |
+| Screenshots | set of the release kept outside the repository (1440 and 412 px: Devices, Firmware, Schedules, Logs, Settings, details); `docs/images/` replaced (Devices desktop and phone with the Schedules tab, installation dialog with "Start") |
 
 ## Live tests through the beta channel
 
