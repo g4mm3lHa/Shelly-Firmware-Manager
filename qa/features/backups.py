@@ -407,8 +407,8 @@ def _keyboard(c):
     f.locator("#rowmenu button", has_text="Device password").click()
     f.wait_for_selector("#dlg[open]")
     named = f.evaluate("() => document.getElementById(document.getElementById('dlg').getAttribute('aria-labelledby')).textContent")
-    check(f"{case}: keyboard – dialog named by its title, focus on the title", "Device password" in named
-          and f.evaluate("() => document.activeElement.id") == "dlg-title", named)
+    check(f"{case}: keyboard – dialog named by its title, focus on its first control", "Device password" in named
+          and f.evaluate("() => document.activeElement.id") == "dlg-x", named)
     f.locator("#dlg-btns button").last.click()  # next step without a password: the error replaces the content
     f.wait_for_selector("#dlg [role=alert]")
     check(f"{case}: keyboard – a new step keeps the focus in the dialog, the error is announced",

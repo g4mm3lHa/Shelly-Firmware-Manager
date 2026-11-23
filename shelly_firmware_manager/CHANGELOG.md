@@ -5,6 +5,11 @@
 Release candidate. Backups of the device settings: by hand, before every installation
 and on a schedule, with comparison and restore part by part.
 
+Changes in rc3
+
+Changed
+- Keyboard: a dialog starts on its first control again (the close icon), as before rc2.
+
 Changes in rc2
 
 Added

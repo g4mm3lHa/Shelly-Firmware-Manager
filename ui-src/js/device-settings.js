@@ -1,6 +1,9 @@
 // Dialogs for the settings of a single Shelly: name, NTP, power-on action, eco mode, switches,
 // websocket debug log, password, restart; passwords of several devices in one step.
-import {$, api, box, closeModal, devUrl, el, icon, message, messageBody, modal, section, t, ui, valueList, webUrl} from "./core.js";
+import {
+  api, box, checkbox, closeModal, confirmDialog, devUrl, el, field, gateButton, icon, input, message, messageBody,
+  modal, radio, section, t, tn, ui, valueList, webUrl,
+} from "./core.js";
 
 // ---------------------------------------------------------------- Device settings
 // Flow: read live values from the Shelly -> input -> (Shelly name: confirmation
@@ -51,19 +54,19 @@ async function saveSettings(d, title, changes, quiet) {
   } catch (e) { message(title, e.message, "error"); }
 }
 /** Edit the Shelly name (with old -> new confirmation) or the NTP server. */
-export function editValue(d, field) {
-  const {label, prop} = FIELDS[field], title = `${label} – ${d.name}`;
+export function editValue(d, key) {
+  const {label, prop} = FIELDS[key], title = `${label} – ${d.name}`;
   withLive(d, title, live => {
-    const input = el("input"); input.type = "text"; input.value = live[prop] || ""; input.maxLength = field === "name" ? 64 : 260;
+    const value = input("text", {value: live[prop] || "", maxLength: key === "name" ? 64 : 260});
     const old = live[prop] || "";
-    modal(title, [box("label", "field", label, input)], [{text: t("Cancel")}, {text: field === "name" ? t("Continue") : t("Save"), kind: "primary", action: () => {
-      const value = input.value.trim();
-      if (value === old) { message(title, t("Nothing changed.")); return; }
-      if (field !== "name") { saveSettings(d, title, {[field]: value}, true); return; }
-      modal(title, [el("p", t("Write this change to {name}?", {name: d.name})), valueList([[t("Current"), old || "–"], [t("New"), value || "–"]])],
-        [{text: t("Cancel")}, {text: t("Apply"), kind: "danger", action: () => saveSettings(d, title, {name: value}, false)}]);
+    modal(title, [field(label, value)], [{text: t("Cancel")}, {text: key === "name" ? t("Continue") : t("Save"), kind: "primary", action: () => {
+      const typed = value.value.trim();
+      if (typed === old) { message(title, t("Nothing changed.")); return; }
+      if (key !== "name") { saveSettings(d, title, {[key]: typed}, true); return; }
+      modal(title, [el("p", t("Write this change to {name}?", {name: d.name})), valueList([[t("Current"), old || "–"], [t("New"), typed || "–"]])],
+        [{text: t("Cancel")}, {text: t("Apply"), kind: "danger", action: () => saveSettings(d, title, {name: typed}, false)}]);
     }}]);
-    input.focus();
+    value.focus();
   });
 }
 /** Power-on action of all outputs. */
@@ -155,11 +158,9 @@ export function editDebug(d) {
 /** Restart: one confirmation (not logged). */
 export function restartDevice(d) {
   const title = `${t("Restart")} – ${d.name}`;
-  modal(title, [featureStrip("restart", t("Restart"), "neutral", null), el("p", t("The device will be unavailable for a few seconds."), "hint")], [{text: t("Cancel")},
-    {text: t("Restart"), kind: "danger", action: async () => {
-      try { await api(`${devUrl(d)}/restart`, {}); message(title, t("Restart command sent."), "success"); }
-      catch (e) { message(title, e.message, "error"); }
-    }}]);
+  confirmDialog({title, button: t("Restart"),
+    content: [featureStrip("restart", t("Restart"), "neutral", null), el("p", t("The device will be unavailable for a few seconds."), "hint")],
+    action: async () => { await api(`${devUrl(d)}/restart`, {}); message(title, t("Restart command sent."), "success"); }});
 }
 // Device password. Storing existing access credentials (this app only) is clearly
 // separated from changing the protection on the device. The password is
@@ -192,13 +193,11 @@ function passwordModes(d) {
 }
 export function editPassword(d) {
   const title = `${t("Device password")} – ${d.name}`, modes = passwordModes(d);
-  const pw = el("input"), pw2 = el("input");
-  for (const i of [pw, pw2]) { i.type = "password"; i.autocomplete = "new-password"; i.maxLength = d.gen === 1 ? 50 : 128; }
-  const pwField = box("label", "field", t("Password (user “admin”)"), pw), pw2Field = box("label", "field", t("Repeat password"), pw2);
+  const [pw, pw2] = [0, 0].map(() => input("password", {autocomplete: "new-password", maxLength: d.gen === 1 ? 50 : 128}));
+  const pwField = field(t("Password (user “admin”)"), pw), pw2Field = field(t("Repeat password"), pw2);
   const hint = el("p", null, "hint"), radios = el("div", null, "modes"), storage = el("div");
   // "Store in this app": only for enable/change, directly under the selected mode
-  const keep = el("input"); keep.type = "checkbox"; keep.checked = true;
-  const keepLabel = box("label", "check sub-check", keep, " " + t("Store in this app"));
+  const [keep, keepLabel] = checkbox(t("Store in this app"), true, "sub-check");
   const storedText = d.gen === 1 ? t("Gen1: the password is stored in plain text in the app's private storage (needed for Basic Auth); 1–50 characters.") :
     t("Gen2+: only a SHA-256 hash bound to this device is stored.");
   const update = () => {
@@ -214,8 +213,8 @@ export function editPassword(d) {
   };
   keep.onchange = update;
   modes.forEach((mode, i) => {
-    const r = el("input"); r.type = "radio"; r.name = "pw-mode"; r.value = mode; r.checked = i === 0; r.onchange = update;
-    radios.append(box("label", "check", r, " " + PASSWORD_MODES[mode].label));
+    const [r, label] = radio("pw-mode", PASSWORD_MODES[mode].label, i === 0, mode); r.onchange = update;
+    radios.append(label);
   });
   // Colours of the lock icon: green = protected and stored, yellow = protected without
   // stored password, grey = not protected
@@ -238,19 +237,14 @@ export function editPassword(d) {
  *  keep = store the new password in this app (enable/change). */
 function passwordConfirm(d, title, mode, password, keep) {
   const m = PASSWORD_MODES[mode], content = [el("p", t("{action} for {name}?", {action: m.label, name: d.name})), el("div", PASSWORD_WARNING, "warnbox")];
-  const ack = el("input"); ack.type = "checkbox";
-  if (m.risky) content.push(box("label", "check", ack, " " + t("I have stored the password securely")));
-  const send = async () => {
-    try {
+  const [ack, ackLabel] = checkbox(t("I have stored the password securely"));
+  if (m.risky) content.push(ackLabel);
+  confirmDialog({title, content, button: mode === "store" ? t("Test & store") : m.label, kind: mode === "forget" || mode === "store" ? "primary" : "danger",
+    ack: m.risky ? ack : null, action: async () => {
       await api(`${devUrl(d)}/password`, {mode, password, confirm: true, acknowledged: m.risky ? ack.checked : false, keep});
       const done = keep ? PASSWORD_DONE[mode] : `${PASSWORD_DONE[mode]} ${t("It is not stored in this app.")}`;
       modal(title, [messageBody(done, "success"), PASSWORD_HA[mode] ? el("div", PASSWORD_HA[mode], "warnbox") : null].filter(Boolean));
-    } catch (e) { message(title, e.message, "error"); }
-  };
-  modal(title, content, [{text: t("Cancel")}, {text: mode === "store" ? t("Test & store") : m.label, kind: mode === "forget" || mode === "store" ? "primary" : "danger", action: send}]);
-  if (m.risky) {
-    const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; };
-  }
+    }});
 }
 
 // ---------------------------------------------------------------- Passwords of several devices
@@ -273,11 +267,9 @@ function bulkStep(d, mode) {
 export function bulkPasswords() {
   const devices = [...((ui.state && ui.state.devices) || [])].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   const modes = el("div", null, "modes"), list = el("div", null, "bulk-list"), storage = el("div");
-  const pw = el("input"), pw2 = el("input");
-  for (const i of [pw, pw2]) { i.type = "password"; i.autocomplete = "new-password"; i.maxLength = 128; }
-  const pw2Field = box("label", "field", t("Repeat password"), pw2);
-  const keep = el("input"); keep.type = "checkbox"; keep.checked = true;
-  const keepLabel = box("label", "check", keep, " " + t("Store in this app"));
+  const [pw, pw2] = [0, 0].map(() => input("password", {autocomplete: "new-password", maxLength: 128}));
+  const pw2Field = field(t("Repeat password"), pw2);
+  const [keep, keepLabel] = checkbox(t("Store in this app"), true);
   let boxes = [];
   const mode = () => modes.querySelector("input:checked").value;
   const chosen = () => boxes.filter(([cb]) => cb.checked).map(([, d]) => d);
@@ -290,14 +282,13 @@ export function bulkPasswords() {
     else if (keep.checked) storage.replaceChildren(el("div", `${stored} ${ha}`, "warnbox"));
     else storage.replaceChildren(el("div", `${NOT_STORED} ${ha}`, "warnbox danger"));
     // Step 1 is "Continue" (blue); the red button with the count follows in the confirmation
-    const go = $("dlg-btns").lastChild;
-    if (go) go.disabled = !n;
+    gateButton(() => n > 0);
   };
   const fill = () => {
     const m = mode(), fits = devices.filter(d => bulkStep(d, m)[1]);
-    const all = el("input"); all.type = "checkbox"; all.checked = fits.length > 0; all.disabled = !fits.length;
+    const all = input("checkbox", {checked: fits.length > 0, disabled: !fits.length});
     boxes = devices.map(d => {
-      const [text, ok] = bulkStep(d, m), cb = el("input"); cb.type = "checkbox"; cb.checked = ok; cb.disabled = !ok;
+      const [text, ok] = bulkStep(d, m), cb = input("checkbox", {checked: ok, disabled: !ok});
       cb.onchange = () => { all.checked = boxes.every(([c]) => c.disabled || c.checked); update(); };
       return [cb, d, text, ok];
     });
@@ -311,12 +302,12 @@ export function bulkPasswords() {
     update();
   };
   BULK_MODES.forEach(([k, label]) => {
-    const r = el("input"); r.type = "radio"; r.name = "bulk-mode"; r.value = k; r.checked = k === "set"; r.onchange = fill;
-    modes.append(box("label", "check", r, " " + label));
+    const [r, row] = radio("bulk-mode", label, k === "set", k); r.onchange = fill;
+    modes.append(row);
   });
   keep.onchange = update;
   modal(BULK_TITLE, [section(t("Action"), modes), section(t("Devices"), devices.length ? list : el("p", t("No devices yet – they are found by the check."), "hint")),
-    section(t("Password (every selected device gets it)"), box("div", null, box("label", "field", t("Password (user “admin”)"), pw), pw2Field)),
+    section(t("Password (every selected device gets it)"), box("div", null, field(t("Password (user “admin”)"), pw), pw2Field)),
     keepLabel, storage, el("div", PASSWORD_WARNING, "warnbox")],
   [{text: t("Cancel")}, {text: t("Continue"), kind: "primary", action: () => {
     const m = mode(), set = m === "set", picked = chosen(), password = pw.value;
@@ -330,21 +321,18 @@ export function bulkPasswords() {
 }
 /** Second step: explicit confirmation ("set" also needs "stored securely"). */
 function bulkConfirm(mode, picked, password, keep) {
-  const set = mode === "set", ack = el("input"); ack.type = "checkbox";
+  const set = mode === "set", [ack, ackLabel] = checkbox(t("I have stored the password securely"));
   const names = picked.map(d => d.name || "?").join(", ");
-  const n = picked.length, count = n === 1 ? t("1 device") : t("{n} devices", {n});
+  const count = tn(picked.length, "1 device", "{n} devices");
   const content = [el("p", set ? t("Set the password on {count}?", {count}) : t("Test and store the password for {count}?", {count})),
     el("p", names, "hint"), el("div", PASSWORD_WARNING, "warnbox")];
-  if (set) content.push(box("label", "check", ack, " " + t("I have stored the password securely")));
-  const send = async () => {
-    modal(BULK_TITLE, [el("p", t("Working on {count} …", {count}), "hint")], [], "lock");
-    try {
+  if (set) content.push(ackLabel);
+  confirmDialog({title: BULK_TITLE, icon: "lock", content, button: set ? t("Set on {count}", {count}) : t("Test & store"), kind: set ? "danger" : "primary",
+    ack: set ? ack : null, action: async () => {
+      modal(BULK_TITLE, [el("p", t("Working on {count} …", {count}), "hint")], [], "lock");
       const r = await api("api/devices/passwords", {mode, devices: picked.map(d => d.id), password, confirm: true, acknowledged: set ? ack.checked : false, keep});
       bulkResult(mode, r.results, keep);
-    } catch (e) { message(BULK_TITLE, e.message, "error", "lock"); }
-  };
-  modal(BULK_TITLE, content, [{text: t("Cancel")}, {text: set ? t("Set on {count}", {count}) : t("Test & store"), kind: set ? "danger" : "primary", action: send}], "lock");
-  if (set) { const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; }; }
+    }});
 }
 const BULK_ICONS = {ok: ["check", "msg-success"], error: ["close", "msg-error"], skipped: ["alert", "msg-warning"]};
 /** Result per device: green check, red X, yellow "!" (skipped). */

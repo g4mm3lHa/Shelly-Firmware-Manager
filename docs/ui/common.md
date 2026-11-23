@@ -3,6 +3,15 @@
 Part of `docs/UI_DECISIONS.md` (approved, binding; change only with approval, in the same commit
 as the UI change). Read when you change a dialog, the toolbar, card heads or tooltips (all tabs).
 
+## Building blocks (3.11.0, `reports/optimierung-analyse` F1 a, approved 2026-11-23)
+- New UI builds from the building blocks of `ui-src/js/core.js`, not from its own copies:
+  `confirmDialog` (confirmation; red button unless `kind` says otherwise; an error keeps
+  title and icon), `gateButton` / `ackGate` (a condition or a tick enables the action
+  button), `guarded` (error of an action), `input`, `checkbox`, `radio`, `field`,
+  `checkLine` (ok, warn, err, run, wait), `deviceChoice` ("All" or a list of devices),
+  `passwordCopy`, `filePassword`, `startDownload`, `cell`, `tn` (singular/plural),
+  `fmtSize`, `modelGen`, `searchText` / `matches`.
+
 ## Dialogs (mockups approved 2026-11-12)
 - Divider lines under the title and over the buttons, titled sections, value lists
   with fixed label column (34 %, min 96 px), 4 px rows and thin lines, empty rows
@@ -28,8 +37,9 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
 - **Keyboard (3.11.0, `reports/optimierung-analyse` F5 a, approved 2026-11-23):** a redraw
   of a tab keeps the keyboard focus on the same control (rows and tiles are matched by
   their `data-key`, the control by its label). A dialog is named by its title and starts
-  with the focus on the title unless it focuses a field itself; a step that removes the
-  focused control moves the focus to the title; closing returns it to the control that
+  with the focus on its first control (the close icon) unless it focuses a field itself
+  (`reports/3.11.0/FRAGEN_rc2.md` 1 b, approved 2026-11-23); a step that removes the
+  focused control moves the focus there too; closing returns it to the control that
   opened the dialog. Escape closes the row menu and returns the focus to its ⋮ button.
   Column heads sort with Enter and Space and carry `aria-sort`; the tabs carry
   `aria-selected` and name their panel. Error and warning messages in dialogs are

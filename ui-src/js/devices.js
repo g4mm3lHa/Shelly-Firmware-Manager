@@ -1,7 +1,8 @@
 // Devices tab: status and action icons, the device table / phone tiles and the row menu.
 import {
-  $, api, attachTip, box, closeModal, collator, devUrl, el, filterControl, fmt, hideTip, icon, iconButton, loadLocal, message,
-  modal, openDetails, saveLocal, searchTool, section, selected, setTip, sortControl, t, toast, toolButton, ui, valueList, webUrl,
+  $, api, attachTip, box, closeModal, collator, confirmDialog, devUrl, el, filterControl, fmt, hideTip, icon, iconButton, input, loadLocal,
+  matches, message, modal, modelGen, openDetails, saveLocal, searchText, searchTool, section, selected, setTip, sortControl, t, toast, toolButton,
+  ui, valueList, webUrl,
 } from "./core.js";
 import {DOWNGRADE_OFF, OFFER_SOURCES, cancelPlan, daysAgo, openDowngrade, openInstall} from "./install.js";
 import {
@@ -145,7 +146,7 @@ function showStatus(d) {
       [t("Build date"), held(d) ? d.hold.built : d.offer_version ? d.offer_date : null],
       [t("Way back"), d.way_back ? (d.way_back.stored ? t("{version} is stored", {version: d.way_back.version}) : t("{version} is not stored", {version: d.way_back.version})) : null],
       [t("Source"), provided ? OFFER_SOURCES[d.offer_source] : null]])),
-    section(t("Device"), valueList([[t("Model"), [d.model, d.gen ? `Gen ${d.gen}` : null].filter(Boolean).join(" · ")], [t("Firmware ID"), d.type], ["NTP", d.ntp]])),
+    section(t("Device"), valueList([[t("Model"), modelGen(d)], [t("Firmware ID"), d.type], ["NTP", d.ntp]])),
     section(t("History"), valueList([[t("Last check"), fmt(d.last_check)], [t("Last success"), fmt(d.last_success)],
       [t("Last update"), d.last_update ? fmt(d.last_update) : "–"]])),
     backupsSection(d)],
@@ -314,7 +315,7 @@ function detailsCell(d) {
   const key = "dev:" + d.id, det = el("details");
   const fill = () => {
     const controls = box("div", "detail-actions", actionStrip(d, true));
-    const list = valueList([[t("Model"), [d.model, d.gen ? `Gen ${d.gen}` : null].filter(Boolean).join(" · ")], [t("Firmware ID"), d.type],
+    const list = valueList([[t("Model"), modelGen(d)], [t("Firmware ID"), d.type],
       ...(ui.state.host_names ? [[t("Host name"), d.host_name]] : []), ["NTP", d.ntp],
       [t("Last check"), fmt(d.last_check)], [t("Last success"), fmt(d.last_success)],
       [t("Last update"), d.last_update ? fmt(d.last_update) : "–"]], "tile-kv");
@@ -339,11 +340,11 @@ const shortVersion = (d, v) => { const m = d.gen === 1 && GEN1_VERSION_RE.exec(v
 const COLUMNS = {
   select: {label: "", fixed: true, cell: d => {
     if (installedRecently(d)) {   // no selection, but the row keeps the indentation of a checkbox
-      const gap = el("input"); gap.type = "checkbox"; gap.disabled = true; gap.className = "ghost"; gap.setAttribute("aria-hidden", "true"); gap.tabIndex = -1;
+      const gap = input("checkbox", {disabled: true, className: "ghost", tabIndex: -1}); gap.setAttribute("aria-hidden", "true");
       return [gap];
     }
     if (!installable(d, ui.state)) return [];
-    const cb = el("input"); cb.type = "checkbox"; cb.checked = selected.has(d.id); cb.setAttribute("aria-label", t("Select {name}", {name: d.name}));
+    const cb = input("checkbox", {checked: selected.has(d.id)}); cb.setAttribute("aria-label", t("Select {name}", {name: d.name}));
     cb.onchange = () => { cb.checked ? selected.add(d.id) : selected.delete(d.id); render(true); };
     return [cb];
   }},
@@ -559,13 +560,12 @@ function othersCard(list) {
  *  devices), then the read-only "Other Shellys"; the filter of the toolbar limits the
  *  rows ("Other Shellys": only that card, "All": every card). */
 export function renderDevices() {
-  const s = ui.state, q = $("dev-search").value.trim().toLowerCase();
+  const s = ui.state, q = searchText($("dev-search"));
   const ok = new Set(s.devices.filter(d => installable(d, s)).map(d => d.id));
   for (const id of [...selected]) if (!ok.has(id)) selected.delete(id);
   followHostNames(); syncChooser();
-  const match = d => !q || [d.name, d.shelly_name, d.ip, d.host_name, d.model, d.type].some(v => String(v || "").toLowerCase().includes(q));
-  const found = s.devices.filter(match);
-  const others = (s.others || []).filter(o => !q || [o.name, o.model, o.firmware, OTHER_KINDS[o.kind]].some(v => String(v || "").toLowerCase().includes(q)));
+  const found = s.devices.filter(d => matches(q, [d.name, d.shelly_name, d.ip, d.host_name, d.model, d.type]));
+  const others = (s.others || []).filter(o => matches(q, [o.name, o.model, o.firmware, OTHER_KINDS[o.kind]]));
   if (!FILTERS.some(f => f[0] === ui.devFilter)) ui.devFilter = "all";
   // Counts of the filter entries respect the search
   // "On hold" only while the option "Offer updates only after (days)" is above 0
@@ -585,7 +585,7 @@ export function renderDevices() {
     // "Updates Available" and "Beta Updates" each have their own selection and button:
     // one dialog never mixes stable and beta versions
     const sel = list.filter(d => ok.has(d.id)), mine = sel.filter(d => selected.has(d.id));
-    const all = el("input"); all.type = "checkbox";
+    const all = input("checkbox");
     all.setAttribute("aria-label", key === "beta" ? t("Select all installable beta updates") : t("Select all installable updates"));
     all.disabled = !sel.length; all.checked = sel.length > 0 && sel.every(d => selected.has(d.id));
     all.onchange = () => { for (const d of sel) all.checked ? selected.add(d.id) : selected.delete(d.id); render(true); };
@@ -760,14 +760,12 @@ function setIgnored(d, ignored) {
 /** Remove a device that was removed from Home Assistant from the list, after a
  *  confirmation (its stored data and stored password are forgotten). */
 function forgetDevice(d) {
-  const title = t("Remove from list?");
-  modal(title, [el("p", t("{name} was removed from Home Assistant / the Shelly integration. Its stored data and a password stored in this app are deleted.", {name: d.name})),
-    el("p", t("If the device is added to Home Assistant again, the next full check lists it anew."), "hint")],
-  [{text: t("Cancel")}, {text: t("Remove"), kind: "danger", action: async () => {
-    try {
+  confirmDialog({title: t("Remove from list?"), icon: "delete", button: t("Remove"),
+    content: [el("p", t("{name} was removed from Home Assistant / the Shelly integration. Its stored data and a password stored in this app are deleted.", {name: d.name})),
+      el("p", t("If the device is added to Home Assistant again, the next full check lists it anew."), "hint")],
+    action: async () => {
       await api(`${devUrl(d)}/forget`, {confirm: true}); selected.delete(d.id); closeModal(); toast(t("{name}: removed from the list", {name: d.name}));
-    } catch (e) { message(title, e.message, "error", "delete"); }
-  }}], "delete");
+    }});
 }
 /** Close the row menu. refocus: the keyboard focus returns to the ⋮ button it was
  *  opened from (the list may have been redrawn since: found by its label). */

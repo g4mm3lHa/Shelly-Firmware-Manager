@@ -413,10 +413,10 @@ export function keepFocus(root, draw) {
 // One dialog for everything: title + close, content, buttons bottom right.
 // buttons: [{text, kind: "primary"|"danger"|"", action}] – a button without
 // action closes the dialog; actions decide themselves (close or new content).
-// Keyboard and screen readers: the dialog is named by its title; a new dialog and every
-// new step start with the focus on the title (a dialog may then focus a field of its
-// own), so the focus never falls back to the page behind it. Closing returns the focus
-// to where it was.
+// Keyboard and screen readers: the dialog is named by its title; a new dialog starts with
+// the focus on its first control (the close icon; a dialog may then focus a field of its
+// own), a step that removed the focused control puts it there too, so the focus never
+// falls back to the page behind it. Closing returns the focus to where it was.
 const dlg = $("dlg");
 let opener = null;   // where the focus was when the dialog opened: {root, mark} (see keepFocus)
 /** Open (or replace the content of) the dialog. titleIcon: optional icon name before
@@ -441,9 +441,11 @@ export function modal(title, content, buttons = [{text: t("Close")}], titleIcon)
     opener = root ? {root, mark: focusMark(root, active)} : null;
     lockPage(true); dlg.showModal();
   }
-  // A step replaced the button that had the focus: the focus stays inside the dialog
-  if (opening || !dlg.contains(document.activeElement)) head.focus({preventScroll: true});
+  // Opening, or a step replaced the control that had the focus: the first control gets it
+  if (opening || !dlg.contains(document.activeElement)) { const first = dlg.querySelector(CONTROLS); if (first) first.focus({preventScroll: true}); }
 }
+// Controls that can take the keyboard focus (the first one in the dialog gets it)
+const CONTROLS = "button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),summary";
 /** Close the dialog and refresh. */
 export function closeModal() { if (dlg.open) dlg.close(); load(); }
 /** True while the dialog is open. */
@@ -499,3 +501,101 @@ export function valueList(pairs, cls) {
 export const section = (title, ...nodes) => box("section", "dsec", el("h3", title), ...nodes);
 /** SHA-256 row of a value list (small, monospace). */
 export const shaRow = sha => ["SHA-256", sha, "mono sha"];
+
+// ---------------------------------------------------------------- Building blocks
+// The parts every tab and dialog builds from: form controls, confirmation dialogs, the
+// action button that a tick enables, check lists and the small text helpers. New UI uses
+// them instead of building its own.
+/** Translated text in the singular (n = 1) or plural form; n is a placeholder of both. */
+export const tn = (n, one, many, vars) => t(n === 1 ? one : many, {n, ...vars});
+/** Size of a file: KB below 1 MB, MB below 1 GB, then GB. */
+export const fmtSize = n => n >= 1073741824 ? (n / 1073741824).toFixed(1) + " GB" : n >= 1048576 ? mb(n) : `${Math.max(1, Math.round((n || 0) / 1024))} KB`;
+/** "Model · Gen n" of a device (each part only if known). */
+export const modelGen = d => [d.model, d.gen ? `Gen ${d.gen}` : null].filter(Boolean).join(" · ");
+/** Lower-case text of a search field. */
+export const searchText = input => input.value.trim().toLowerCase();
+/** True if the search text q is empty or part of one of the values. */
+export const matches = (q, values) => !q || values.some(v => String(v || "").toLowerCase().includes(q));
+/** Cell of a grid row; on phones a labelled line of the tile (data-label). */
+export function cell(cls, label, ...nodes) { const c = box("div", cls, ...nodes); if (label) c.dataset.label = label; return c; }
+/** Input element of a type with properties (value, checked, placeholder, maxLength …). */
+export function input(type, props) { const i = el("input"); i.type = type; return Object.assign(i, props); }
+/** Checkbox with its label (class "check" plus cls); content: a text or nodes after the
+ *  box. Returns [input, label]. */
+export function checkbox(content, checked = false, cls = "") {
+  return choice(input("checkbox", {checked}), content, cls);
+}
+/** Radio button of the group name with its label; returns [input, label]. */
+export function radio(name, content, checked = false, value) {
+  return choice(input("radio", {name, checked, ...(value == null ? {} : {value})}), content, "");
+}
+/** Label "check" holding a checkbox or radio and its text (or nodes). */
+const choice = (control, content, cls) => [control, box("label", "check" + (cls ? " " + cls : ""), control,
+  ...(typeof content === "string" ? [" " + content] : [" ", ...[content].flat()]))];
+/** Labelled field of a dialog: the label text above the control. */
+export const field = (label, control) => box("label", "field", label, control);
+/** Read-only password field with a copy icon (export and download passwords). A password
+ *  the browser refuses to copy is selected for a manual copy. Returns [field, copy icon]. */
+export function passwordCopy(password, label, cls) {
+  const out = input("text", {readOnly: true, value: password, className: cls});
+  out.setAttribute("aria-label", label);
+  return [out, iconButton("copy", t("Copy password"), async () => { if (!await copyText(password)) { out.focus(); out.select(); } })];
+}
+/** Text field for the password of an exported file (not stored by the browser). */
+export function filePassword(placeholder) {
+  return input("text", {className: "mono", placeholder, autocomplete: "off", spellcheck: false, maxLength: 64});
+}
+/** Download through a link: the browser streams the file to disk, it is never held in memory. */
+export function startDownload(href, filename) {
+  const a = el("a"); a.href = href; a.download = filename;
+  document.body.append(a); a.click(); a.remove();
+}
+/** The action button of the open dialog (the last one); enabled only while ready() is
+ *  true, checked again on every change of the inputs. */
+export function gateButton(ready, ...inputs) {
+  const go = $("dlg-btns").lastChild, sync = () => { go.disabled = !ready(); };
+  for (const i of inputs) { i.addEventListener("change", sync); i.addEventListener("input", sync); }
+  sync();
+  return go;
+}
+/** The action button of the open dialog, enabled once the acknowledgment is ticked. */
+export const ackGate = ack => gateButton(() => ack.checked, ack);
+/** Run the action of a dialog; an error is shown keeping the dialog's title and icon. */
+export async function guarded(title, titleIcon, action) {
+  try { await action(); } catch (e) { message(title, e.message, "error", titleIcon); }
+}
+/** Confirmation dialog: content, "Cancel" (back: its action, else it closes) and the
+ *  button that runs action() – red unless kind says otherwise; an error keeps the title
+ *  and the icon. ack: a checkbox that enables the button. */
+export function confirmDialog({title, icon: titleIcon, content, button, kind = "danger", action, back, cancel = t("Cancel"), ack}) {
+  modal(title, content, [{text: cancel, action: back}, {text: button, kind, action: () => guarded(title, titleIcon, action)}], titleIcon);
+  if (ack) ackGate(ack);
+}
+// Lines of a check list: state class and icon (null: no icon)
+const CHECK_ICONS = {ok: "check", warn: "alert", err: "close", wait: null};
+/** One line of a check list: green check ("ok"), yellow exclamation mark ("warn"), red
+ *  cross ("err"), a spinner ("run": the step that is running) or nothing yet ("wait"). */
+export function checkLine(state, title, text) {
+  const mark = state === "run" ? el("span", null, "spinner") : CHECK_ICONS[state] ? icon(CHECK_ICONS[state]) : null;
+  return box("li", state, box("span", "pc-icon", mark), box("div", null, el("strong", title), text ? el("span", text) : null));
+}
+/** Choice "all devices" or a list of devices to tick (schedules, "Back up now"): radios
+ *  of the group name, the list below them (shown for "selected" only) with the count
+ *  "(n)" behind "Selected devices". selected: "all" or a set of device IDs; tags(d):
+ *  nodes after a name, read at every refresh(). Returns {nodes, all (its radio), list,
+ *  ticked() (the ticked devices), refresh()}. */
+export function deviceChoice(name, devices, allText, selected, tags) {
+  const ids = selected === "all" ? new Set() : selected;
+  const picks = devices.map(d => [d, input("checkbox", {checked: ids.has(d.id), value: d.id})]);
+  const list = box("div", "sch-pick"), count = el("span", "", "sub");
+  const [all, allRow] = radio(name, allText, selected === "all"), [, someRow] = radio(name, [el("span", t("Selected devices"))], selected !== "all");
+  someRow.append(" ", count);
+  const ticked = () => picks.filter(([, c]) => c.checked).map(([d]) => d);
+  const refresh = () => {
+    list.hidden = all.checked;
+    list.replaceChildren(...picks.map(([d, c]) => box("label", "check", c, " ", el("span", d.name), ...tags(d))));
+    count.textContent = all.checked ? "" : `(${ticked().length})`;
+  };
+  refresh();
+  return {nodes: [allRow, someRow, list], all, list, ticked, refresh};
+}

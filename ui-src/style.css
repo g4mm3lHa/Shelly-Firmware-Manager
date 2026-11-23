@@ -377,7 +377,6 @@ html.dlg-open{overflow:hidden}
 /* Head and button area separated by divider lines; content in titled sections */
 .dlg-head{display:flex;align-items:center;gap:8px;padding:16px 20px 12px;border-bottom:1px solid var(--line)}
 .dlg-head h2{flex:1;font-size:1.15em;display:flex;align-items:center;gap:8px;min-width:0}
-.dlg-head h2:focus{outline:none}   /* focused when a dialog or a step opens (read out, no control) */
 /* Icon before the title (changelog, delete, upload, installation) */
 .dlg-head h2 .ti{width:20px;height:20px;flex:none;color:var(--secondary-text-color)}
 .dlg-head h2 .ti-delete,.dlg-head h2 .ti-chip{color:var(--error-color)}
