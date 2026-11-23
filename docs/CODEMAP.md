@@ -16,7 +16,7 @@ files in sync when modules, stored fields, routes or test files change.
 
 ## Runtime flow
 
-`main.py` loads `/data/options.json` → `Manager(options, session, …)` (loads all
+`main.py` loads `/data/settings.json` (first start: takes over the options the Supervisor kept, `load_settings`) → `Manager(options, session, …)` (loads all
 `/data` files) → starts the UI app (port 8099, Ingress only) and the download server
 (port 8098) → `run_schedule` sleeps until the next scheduled date (`schedule.py`) and
 calls `Manager.scan(automatic=True)`; `run_timetable` starts due scheduled installations

@@ -12,7 +12,7 @@ cannot know: responsibility, layering, invariants and pitfalls.
 
 | Module | Responsibility and pitfalls |
 |---|---|
-| `main.py` | start, servers, scheduler loops (`run_schedule`, `run_timetable`), clean stop. `VERSION` must equal `config.yaml` (`bump.py` sets both). |
+| `main.py` | start (options: `load_settings`, first start takes over the options the Supervisor kept and empties them), servers, scheduler loops (`run_schedule`, `run_timetable`), clean stop. `VERSION` must equal `config.yaml` (`bump.py` sets both). |
 | `data_paths.py` | paths below `/data`; always read as `data_paths.NAME` (tests and the demo redirect them). `write_atomic`: the one way to replace a file there (temporary file, optional fsync and mode 0600, rename); only the state file has its own save (`state.bak`). |
 | `shelly.py` | all device access: errors (`ShellyError` and its kinds), text helpers for outside values, authentication (`DeviceAuth`), requests with redirect and size guards, settings read/write, OTA WebSocket. `shelly_net` and `shelly_cloud` build on it, never the other way round. |
 | `shelly_net.py` | device addresses: `resolve_device_origin` pins one checked IP; only `LAN_NETWORKS` (RFC 1918, `fc00::/7`), never extended; host names only looked up for display. |
@@ -21,7 +21,7 @@ cannot know: responsibility, layering, invariants and pitfalls.
 | `download_server.py` | GET/HEAD `<sha256>.<ext>` for the Shellys, only during an active update, by default only to the target IP. |
 | `schedule.py` | the automatic check: every N days at HH:MM, HA time zone, DST, catch-up. |
 | `timetable.py` | schedules and the time of "Install at": validation and next run, pure functions; stored entries re-checked at start (`check_stored`, `check_plan`). |
-| `app_options.py` | option validation, merge with defaults, log diff, download URL rules. |
+| `app_options.py` | option validation, merge with defaults, log diff, download URL rules, settings file (`read_settings`, `write_settings`, `take_over`). |
 | `events.py` | activity log (JSON Lines): severity, entry IDs, delete/clear, `latest` mark. |
 | `credentials.py` | per-device passwords, file 0600, Gen2+ HA1 only; a write error raises `ShellyError`. |
 | `changelog.py` | Shelly changelog pages → plain text (parsed in a worker thread). |

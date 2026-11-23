@@ -127,11 +127,6 @@ async def test_stored_public_ip_blocks_installations_until_corrected(net):
 async def test_changing_the_url_drops_the_confirmation(net):
     m = make_manager(net, download_base_url=LEGACY)
     m.confirm_download_base(LEGACY)
-
-    async def post(*_args):
-        return None
-
-    m._supervisor_post = post
     assert await m.save_options({"download_base_url": "http://192.168.1.5:8098"}) == ["download_base_url"]
     assert m.download_base_confirmed is None
     assert json.loads(data_paths.STATE_FILE.read_text())["download_base_confirmed"] is None
@@ -215,46 +210,28 @@ async def test_app_page_link(net):
         await client.close()
 
 
-def _translations(lang="en"):
-    """{key: (name, description)} of translations/<lang>.yaml in file order (small
-    parser: two-space keys, name/description, folded ">-" texts)."""
-    out, key, field = {}, None, None
-    for line in (APP_DIR / "translations" / f"{lang}.yaml").read_text().splitlines():
-        if line.startswith("network:"):
-            break
-        if re.match(r"^  \w+:$", line):
-            key = line.strip()[:-1]
-            out[key] = {"name": "", "description": ""}
-        elif m := re.match(r"^    (name|description): ?(.*)$", line):
-            field = m.group(1)
-            out[key][field] = "" if m.group(2) == ">-" else m.group(2)
-        elif line.startswith("      ") and key:
-            out[key][field] = (out[key][field] + " " + line.strip()).strip()
-    return {k: (v["name"], v["description"]) for k, v in out.items()}
-
-
-def test_app_configuration_matches_settings_tab():
-    """Configuration tab of the app page = Settings tab: same options in the same order
-    (schema and translations), same names and help texts. Allowed difference: the
-    Gen1 type list (list editor in HA). No changelog hint (HA does not show it)."""
+def test_app_configuration_holds_only_the_hint():
+    """Configuration tab of the app page: only the hint field "settings" (no effect),
+    named in English and German; every option lives in the Settings tab, and every option
+    without a default there is an optional switch or the optional download base URL."""
+    config = (APP_DIR / "config.yaml").read_text()
+    assert config.endswith('\noptions:\n  settings: ""\nschema:\n  settings: "str?"\n')
+    for lang in ("en", "de"):
+        text = (APP_DIR / "translations" / f"{lang}.yaml").read_text()
+        block = text[text.index("\nconfiguration:\n"):text.index("\nnetwork:")]
+        assert re.findall(r"^  (\w+):", block, re.M) == ["settings"] and "    name: " in block and "    description: " in block
     js = (ROOT / "ui-src" / "js" / "app-settings.js").read_text()
     fields = re.findall(r'^  \["(\w+)", "([^"]+)", "\w+", "([^"]*)", ', js, re.M)
-    config = (APP_DIR / "config.yaml").read_text()
-    schema = re.findall(r"^  (\w+):", config[config.index("\nschema:"):], re.M)
-    texts = _translations()
-    assert [f[0] for f in fields] == schema == list(texts) and set(schema) == app_options.KEYS
-    for key, name, desc in fields:
-        tname, tdesc = texts[key]
-        assert tname == name, key
-        assert tdesc == desc, key
+    assert {f[0] for f in fields} == app_options.KEYS
+    assert app_options.KEYS - set(app_options.DEFAULTS) == {"download_base_url", "allow_downgrade", "beta_firmware"}
+    assert "settings" not in app_options.with_defaults({"settings": "typed"})
 
 
-def test_german_configuration_matches_german_settings_tab():
-    """translations/de.yaml (shown by HA in German) = the German texts of the Settings tab
-    (ui-src/js/i18n-de.js), same options in the same order as en.yaml."""
-    german = dict(re.findall(r'^  "((?:[^"\\]|\\.)*)": "((?:[^"\\]|\\.)*)",?$',
-                             (ROOT / "ui-src" / "js" / "i18n-de.js").read_text(), re.M))
-    english, texts = _translations(), _translations("de")
-    assert list(texts) == list(english)
-    for key, (name, desc) in english.items():
-        assert texts[key] == (german[name], german[desc]), key
+def test_take_over_keeps_valid_values_only():
+    """Options kept by the Supervisor: valid values stay, invalid ones fall back to the
+    default (and are named), unknown keys are dropped."""
+    options, dropped = app_options.take_over({"backup_keep": 99, "resolve_host_names": True, "old_key": 1,
+                                              "pinned_certificates": [{"host": "evil.example", "sha256": "00"}],
+                                              "download_base_url": 5})
+    assert dropped == ["backup_keep", "download_base_url", "pinned_certificates"]
+    assert options == {**app_options.DEFAULTS, "resolve_host_names": True}

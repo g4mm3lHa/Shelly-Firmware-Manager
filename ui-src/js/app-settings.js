@@ -11,7 +11,7 @@ import {downgradeWarning} from "./install.js";
 
 // ---------------------------------------------------------------- App settings
 // All app options, grouped into cards in this order (Title Case card heads). Saving
-// goes through the Supervisor and restarts the app. [key, label, type, description, group]
+// stores them in the app (settings.json) and restarts it. [key, label, type, description, group]
 // in English (same texts as translations/en.yaml), translated when shown.
 const OPTION_GROUPS = ["Checks", "Download Server", "Firmware & Storage", "Backups", "Logs", "Advanced"];
 const STORAGE = "Firmware & Storage";
