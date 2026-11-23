@@ -10,6 +10,7 @@ import re
 import data_paths
 import shelly
 import shelly_cloud
+import web_firmware
 import web_ui
 from aiohttp.test_utils import TestClient, TestServer
 from conftest import A, B, C
@@ -452,7 +453,7 @@ async def test_http_upload_and_import_in_parts(client, mgr, net, monkeypatch):
     import manager_transfer
 
     monkeypatch.setattr(manager_transfer, "PART_MAX", 20000)
-    monkeypatch.setattr(web_ui, "PART_MAX", 20000)
+    monkeypatch.setattr(web_firmware, "PART_MAX", 20000)
     await mgr.scan()
     data = firmware_zip({"name": "Plus1", "version": "1.3.0"}, size=50000)
     transfer, answer = None, None

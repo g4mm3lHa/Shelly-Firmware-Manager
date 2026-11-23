@@ -10,7 +10,7 @@ files in sync when modules, stored fields, routes or test files change.
 |---|---|---|
 | `docs/codemap/modules.md` | backend modules, the nine manager layers, pitfalls; names and lines: `python3 tools/dev/symbols.py` | `shelly_firmware_manager/app/*.py` |
 | `docs/codemap/data.md` | files below `/data` and their fields | stored data |
-| `docs/codemap/api.md` | HTTP routes → handlers → manager | `web_ui.py` |
+| `docs/codemap/api.md` | HTTP routes → handlers → manager | `web_*.py` |
 | `docs/codemap/ui.md` | UI modules and what they export | `ui-src/` |
 | `docs/codemap/tests.md` | what each test file covers, `qa/` scripts, check flow | `tests/`, `qa/` |
 
@@ -36,7 +36,9 @@ both servers in parallel (cancels checks/installations, saves the state), exit 0
 - `manager_installs.py` (7): installation, OTA, verification → `test_install.py`
 - `manager_schedules.py` (8): scheduled installations, schedules and their runs → `test_timetable.py`
 - `manager.py` (9): `Manager`, `public_state` → `test_web.py`
-- `web_ui.py`: Ingress UI + JSON API, CSRF/size middleware → `test_web.py`, `test_security.py`
+- `web_ui.py`: Ingress UI + JSON API: CSRF/size middleware, page, state, route table → `test_web.py`, `test_security.py`
+- `web_base.py`: shared parts of the handlers: `Handlers`, `json_body`, `guarded`, `translated`, `SECURITY_HEADERS` → `test_web.py`, `test_security.py`
+- `web_devices.py`, `web_firmware.py`, `web_backups.py`, `web_schedules.py`, `web_settings.py` (logs and settings): handlers per area → `test_web.py`, `test_security.py`, `test_backups.py`, `test_timetable.py`
 - `download_server.py`: LAN download server for the Shellys → `test_security.py`
 - `shelly.py`: device access: errors and text helpers, authentication, requests, settings, OTA WebSocket → `test_device_settings.py`, `test_device_transport.py`, `test_guards.py`
 - `shelly_net.py`: device addresses: private networks only, origin pinning, host names → `test_guards.py`, `test_check.py`

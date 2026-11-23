@@ -1,6 +1,8 @@
 # Code map – HTTP API
 
-Part of `docs/CODEMAP.md`; read when you change routes in `web_ui.py`.
+Part of `docs/CODEMAP.md`; read when you change routes: the table and the middleware are in
+`web_ui.py`, the handlers in the area modules `web_devices.py`, `web_firmware.py`, `web_backups.py`,
+`web_schedules.py`, `web_settings.py` (shared checks and error translation: `web_base.py`).
 
 **HTTP API (`web_ui.py`, Ingress only; writes need `X-CSRF-Token` + JSON ≤ 32 KB; binary bodies only on `BINARY_ROUTES` (upload, store import, backup import); every answer – also refusals of the middleware and the 500 for an unexpected error – carries `SECURITY_HEADERS`)**
 
