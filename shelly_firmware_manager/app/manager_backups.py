@@ -1,4 +1,4 @@
-"""Manager, layer 4 of 8: backups of the device settings – storing them (by hand, before
+"""Manager, layer 5 of 9: backups of the device settings – storing them (by hand, before
 an installation, by a schedule), listing, restoring, download and import.
 
 A backup belongs to a device by its MAC address (backup_store holds the encrypted
@@ -34,7 +34,7 @@ from backup_store import BackupError, normalize_mac
 from events import worst
 from shelly import AuthError, ShellyError, clip, error_text
 
-from manager_core import Device, STATUS_INSTALLING, severity_of, unexpected_text, unreachable
+from manager_core import Device, STATUS_ERROR, STATUS_INSTALLING, severity_of, unexpected_text, unreachable
 from manager_devices import DeviceSettings
 
 log = logging.getLogger("sfm.manager")
@@ -46,8 +46,6 @@ DOWNLOAD_TTL_S = 600  # a prepared download must be fetched within 10 min
 IMPORT_TTL_S = 900  # a staged backup file that is not imported within 15 min is dropped
 
 APP_USER = "App"  # user of what the app does by itself (retention), in the log
-
-TOKEN_RE = re.compile(r"^[0-9a-f]{32}$")  # token of a prepared download or a staged import
 
 # Why a device has no backup (shown in the card "No Backup"; see Backups._no_backup)
 NONE_REMOVED = "removed"  # removed from Home Assistant: not backed up any more
@@ -87,9 +85,22 @@ class _UnexpectedAnswer(ShellyError):
     an error in the log, not a warning."""
 
 
-def _failure_severity(err: BaseException) -> str:
-    """Log severity of a backup that was not stored."""
-    return "error" if isinstance(err, _UnexpectedAnswer) else severity_of(err)
+class _NotChecked(ShellyError):
+    """The device of a run has no address or generation yet: no check succeeded."""
+
+
+def _failure_severity(err: BaseException, dev: Device) -> str:
+    """Log severity of a backup that was not stored: an unexpected answer is an
+    error; a device that did not answer is an error, a battery device a warning (it
+    sleeps); a device never checked successfully keeps the rating of its last check
+    (error only if that check rated it an error); anything else as severity_of."""
+    if isinstance(err, _UnexpectedAnswer):
+        return "error"
+    if unreachable(err):
+        return "warning" if dev.get("battery") is True else "error"
+    if isinstance(err, _NotChecked):
+        return "error" if dev.get("status") == STATUS_ERROR and dev.get("error_level") == "error" else "warning"
+    return severity_of(err)
 
 
 class Backups(DeviceSettings):
@@ -161,7 +172,8 @@ class Backups(DeviceSettings):
             meta.update(id=secrets.token_hex(8), at=int(time.time()), reason=reason, note=note)
             entry = self.backups.add(meta, data)
         except (TimeoutError, ShellyError, aiohttp.ClientError, OSError, KeyError, ValueError) as err:
-            self._backup_failed(dev, reason, note, user, err, _failure_text(err), severity_of(err), log_entry)
+            severity = _failure_severity(err, dev)
+            self._backup_failed(dev, reason, note, user, err, _failure_text(err), severity, log_entry)
             raise
         except Exception as err:
             # An answer of an unexpected shape: no backup of this device, the others go on
@@ -261,7 +273,7 @@ class Backups(DeviceSettings):
             if dev.get("removed"):
                 raise ShellyError(REMOVED_TEXT)
             if not dev.get("origin") or not dev.get("gen"):
-                raise ShellyError("Device has not been checked successfully yet")
+                raise _NotChecked("Device has not been checked successfully yet")
             entry = await self._backup(device_id, dev, reason, note, user, only_changed, log_entry)
             if entry is None:
                 result["result"] = RESULT_UNCHANGED
@@ -272,7 +284,7 @@ class Backups(DeviceSettings):
                 result["result"] = RESULT_ASLEEP if dev.get("battery") is True else RESULT_UNREACHABLE
             else:
                 result["result"] = RESULT_REFUSED
-            result.update(severity=_failure_severity(err), detail=_failure_text(err))
+            result.update(severity=_failure_severity(err, dev), detail=_failure_text(err))
             newest = next(iter(self.backups.of(dev.get("mac"))), None)
             if newest is not None:
                 result["last"] = newest["at"]

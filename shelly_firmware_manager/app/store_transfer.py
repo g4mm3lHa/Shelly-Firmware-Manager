@@ -25,7 +25,7 @@ level or in one folder (an archive that was unpacked and packed again).
 The seal proves that the file is unchanged since its creator sealed it – not who that
 was: the manager stores every imported file as unverified (source "import").
 
-Pure functions without manager state; the manager (manager_store) decides what is
+Pure functions without manager state; the manager (manager_transfer) decides what is
 stored. All functions here block (file I/O, scrypt) and run in a worker thread.
 """
 
@@ -43,6 +43,7 @@ from typing import Any
 
 import backup_store
 import shelly
+import shelly_cloud
 from changelog import MAX_TEXT
 from shelly import clip
 
@@ -144,15 +145,6 @@ def _seal(key: bytes, body: dict[str, Any]) -> str:
     return hmac.new(key, _canonical(body), hashlib.sha256).hexdigest()
 
 
-def _sha256_file(path: Path) -> str:
-    """SHA-256 of a file, read in chunks."""
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(READ_CHUNK):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def archive_path(meta: dict[str, Any], ext: str) -> str:
     """Readable path of a store entry inside the export (unique paths: see build)."""
     fw_type = PATH_PART_RE.sub("_", str(meta.get("type") or "unknown"))
@@ -211,7 +203,7 @@ def build_export(
     for name, meta in order:
         source = fw_dir / name
         try:
-            intact = source.is_file() and _sha256_file(source) == meta.get("sha256")
+            intact = source.is_file() and shelly_cloud.sha256_of(source) == meta.get("sha256")
         except OSError:
             intact = False
         if not intact:
@@ -315,12 +307,16 @@ def _clean_entry(raw: object) -> dict[str, Any]:
         or path.startswith("/")
         or "\\" in path
         or any(part in ("", ".", "..") for part in path.split("/"))
-        or ext not in shelly.FW_EXTENSIONS
+        or ext not in shelly_cloud.FW_EXTENSIONS
     ):
         raise TransferError("Damaged manifest: invalid file path")
     if not isinstance(sha, str) or not SHA_RE.fullmatch(sha):
         raise TransferError("Damaged manifest: invalid SHA-256")
-    if not isinstance(size, int) or isinstance(size, bool) or not shelly.MIN_FW_SIZE <= size <= shelly.MAX_FW_SIZE:
+    if (
+        not isinstance(size, int)
+        or isinstance(size, bool)
+        or not shelly_cloud.MIN_FW_SIZE <= size <= shelly_cloud.MAX_FW_SIZE
+    ):
         raise TransferError("Damaged manifest: invalid file size")
     fw_type, gen, version = raw.get("type"), raw.get("gen"), raw.get("version")
     if not isinstance(fw_type, str) or not TYPE_RE.fullmatch(fw_type):

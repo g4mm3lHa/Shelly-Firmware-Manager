@@ -1,11 +1,11 @@
-"""Manager, layer 5 of 8: checks – which firmware is installed, which one is provided.
+"""Manager, layer 6 of 9: checks – which firmware is installed, which one is provided.
 
 Within a check up to CHECK_PARALLEL devices are queried at the same time; offers and
 firmware downloads are shared (single flight), so parallelism never duplicates a
 request or a file. Ignored devices are left out of the full check (an explicit
 single-device check is still possible).
 Gen2+: the manufacturer's server decides. It is asked per firmware ID and installed
-version the way a Shelly asks itself (header Shelly-Info, see shelly.fetch_offer), so
+version the way a Shelly asks itself (header Shelly-Info, see shelly_cloud.fetch_offer), so
 it answers with the next allowed step – a required intermediate version first. A stored
 file of exactly the offered version is used instead of a download only if the offer URL
 names its SHA-256 (or it is the user's own upload). If the server cannot be asked, a
@@ -38,8 +38,11 @@ import aiohttp
 import data_paths
 import schedule
 import shelly
+import shelly_cloud
+import shelly_net
 from events import worst
-from shelly import AddressError, AuthError, ShellyError, clip, error_text
+from shelly import AuthError, ShellyError, clip, error_text
+from shelly_net import AddressError
 
 from manager_core import (
     ACTIVITY_CHECKING,
@@ -675,7 +678,7 @@ class Checks(Backups):
         instead of STATUS_ERROR (a warning); any other device that did not answer is
         an error – it should be reachable (an ignored device is not contacted by the
         full check at all). A registry entry without a usable address sets
-        address_issue ({"reason", "message"}, see shelly.AddressError)."""
+        address_issue ({"reason", "message"}, see shelly_net.AddressError)."""
         try:
             await self._scan_device(device_id, dev, configuration_url, offers)
         except (TimeoutError, ShellyError, aiohttp.ClientError, KeyError, ValueError, OSError) as err:
@@ -709,10 +712,10 @@ class Checks(Backups):
         if not self.resolve_host_names:
             dev.pop("host_name", None)
             return
-        host = shelly.host_name_of(configuration_url) or shelly.local_host_name(
+        host = shelly_net.host_name_of(configuration_url) or shelly_net.local_host_name(
             dev.get("shelly_id") or dev.get("gen1_hostname")
         )
-        dev["host_name"] = host if host and await shelly.host_resolves(host) else None
+        dev["host_name"] = host if host and await shelly_net.host_resolves(host) else None
 
     # ------------------------------------- One device: Gen2+ next step of the server, Gen1 firmware store first
 
@@ -720,7 +723,7 @@ class Checks(Backups):
         self, device_id: str, dev: Device, configuration_url: str | None, offers: OfferTasks
     ) -> None:
         """Check one device and provide the new firmware if there is one."""
-        origin = await shelly.resolve_device_origin(configuration_url)
+        origin = await shelly_net.resolve_device_origin(configuration_url)
         dev.pop("address_issue", None)
         dev.update(origin=origin)
         info = await shelly.device_info(
@@ -801,7 +804,7 @@ class Checks(Backups):
             and dev.get("pending_build") == info["build"]
             and meta is not None
             and meta.get("sha256") == dev.get("sha256")
-            and self._replaces_download(meta, info["gen"], shelly.url_sha256(offer["url"]))
+            and self._replaces_download(meta, info["gen"], shelly_cloud.url_sha256(offer["url"]))
             and (data_paths.FW_DIR / str(dev.get("file"))).is_file()
         )
         if not already:
@@ -864,7 +867,7 @@ class Checks(Backups):
         at every check). A failure is logged and does not change the result of the check."""
         if not self.keep_installed or shelly.parse_version(offer["version"]) != shelly.parse_version(info["version"]):
             return
-        if shelly.url_sha256(offer["url"]) is None and any(
+        if shelly_cloud.url_sha256(offer["url"]) is None and any(
             meta.get("type") == info["type"] and meta.get("version") == offer["version"]
             and (meta.get("gen") or 1) >= 2 and self._source(meta) == SOURCE_DOWNLOAD
             and not self._adopted_unconfirmed(meta)
@@ -975,7 +978,7 @@ class Checks(Backups):
         key = ("step", str(info["type"]), str(info["version"]))
         if key not in offers:
             offers[key] = asyncio.ensure_future(
-                shelly.fetch_offer(
+                shelly_cloud.fetch_offer(
                     self.session, info["type"], self.pins, str(info["version"]), beta=self.beta_firmware
                 )
             )
@@ -1005,7 +1008,7 @@ class Checks(Backups):
         key = ("newest", str(info["type"]))
         if key not in offers:
             offers[key] = asyncio.ensure_future(
-                shelly.fetch_offer(self.session, info["type"], self.pins, beta=self.beta_firmware)
+                shelly_cloud.fetch_offer(self.session, info["type"], self.pins, beta=self.beta_firmware)
             )
         try:
             newest: dict[str, str] | None = await offers[key]
@@ -1083,7 +1086,7 @@ class Checks(Backups):
         False if not, None if it could not be asked (no conclusion)."""
         app, version, expected = HEADER_CHECK
         try:
-            offer = await shelly.fetch_offer(self.session, app, self.pins, version)
+            offer = await shelly_cloud.fetch_offer(self.session, app, self.pins, version)
         except (TimeoutError, ShellyError, aiohttp.ClientError, OSError) as err:
             log.info("Reference request of the update server failed: %s", err)
             return None
@@ -1108,8 +1111,8 @@ class Checks(Backups):
         """Gen1 offer: the manufacturer serves one list for all types, so it is fetched
         once per check for all of them (single flight)."""
         if GEN1_OFFERS not in offers:
-            offers[GEN1_OFFERS] = asyncio.ensure_future(shelly.fetch_gen1_offers(self.session, self.pins))
-        return shelly.gen1_offer(await offers[GEN1_OFFERS], info["type"])
+            offers[GEN1_OFFERS] = asyncio.ensure_future(shelly_cloud.fetch_gen1_offers(self.session, self.pins))
+        return shelly_cloud.gen1_offer(await offers[GEN1_OFFERS], info["type"])
 
     def _provision_done(self, fw_key: tuple[str, str], _task: "asyncio.Future[Any]") -> None:
         """Forget a finished provide task (single flight per firmware ID and version)."""
@@ -1126,7 +1129,7 @@ class Checks(Backups):
         it (log text and the user of the download entry).
         Returns (file name, sha256, size)."""
         stored = await self._stored_firmware(
-            info["type"], offer["version"], info["gen"], offered_sha=shelly.url_sha256(offer["url"])
+            info["type"], offer["version"], info["gen"], offered_sha=shelly_cloud.url_sha256(offer["url"])
         )
         if stored:
             name, meta = stored
@@ -1139,7 +1142,7 @@ class Checks(Backups):
         if self.progress:
             self.progress["phase"] = "download"
         try:
-            name, sha, size, https = await shelly.download_firmware(
+            name, sha, size, https = await shelly_cloud.download_firmware(
                 self.session, offer["url"], data_paths.FW_DIR, self.pins, https_only=info["gen"] >= 2
             )
         finally:

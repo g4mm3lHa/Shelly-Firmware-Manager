@@ -8,9 +8,9 @@ files in sync when modules, stored fields, routes or test files change.
 
 | Detail file | Content | Read when you change |
 |---|---|---|
-| `docs/codemap/modules.md` | backend modules, the eight manager layers, pitfalls; names and lines: `python3 tools/dev/symbols.py` | `shelly_firmware_manager/app/*.py` |
+| `docs/codemap/modules.md` | backend modules, the nine manager layers, pitfalls; names and lines: `python3 tools/dev/symbols.py` | `shelly_firmware_manager/app/*.py` |
 | `docs/codemap/data.md` | files below `/data` and their fields | stored data |
-| `docs/codemap/api.md` | HTTP routes → handlers → manager | `web_ui.py` |
+| `docs/codemap/api.md` | HTTP routes → handlers → manager | `web_*.py` |
 | `docs/codemap/ui.md` | UI modules and what they export | `ui-src/` |
 | `docs/codemap/tests.md` | what each test file covers, `qa/` scripts, check flow | `tests/`, `qa/` |
 
@@ -27,27 +27,32 @@ both servers in parallel (cancels checks/installations, saves the state), exit 0
 ## Backend modules (`shelly_firmware_manager/app/`) – module: purpose → test file
 
 - `main.py`: start, servers, scheduler loop → `test_lifecycle.py`
-- `manager_core.py` (1): state, persistence, options, check slots → `test_check.py`, `test_options.py`, `test_state.py`
-- `manager_store.py` (2): firmware store, upload, downgrade, export/import → `test_firmware_store.py`, `test_store_transfer.py`
-- `manager_devices.py` (3): device settings, passwords → `test_device_settings.py`
-- `manager_backups.py` (4): backups of device settings: store, restore, download, import → `test_backups.py`
-- `manager_checks.py` (5): full and single checks, offers → `test_check.py`
-- `manager_installs.py` (6): installation, OTA, verification → `test_install.py`
-- `manager_schedules.py` (7): scheduled installations, schedules and their runs → `test_timetable.py`
-- `manager.py` (8): `Manager`, `public_state` → `test_web.py`
-- `web_ui.py`: Ingress UI + JSON API, CSRF/size middleware → `test_web.py`, `test_security.py`
+- `manager_core.py` (1): state, persistence, options, check slots → `test_check.py`, `test_options.py`, `test_state.py`, `test_ha_api.py`
+- `manager_store.py` (2): firmware store, downgrade → `test_firmware_store.py`
+- `manager_transfer.py` (3): upload, store export/import, transfers in parts → `test_firmware_store.py`, `test_store_transfer.py`
+- `manager_devices.py` (4): device settings, passwords → `test_device_settings.py`
+- `manager_backups.py` (5): backups of device settings: store, restore, download, import → `test_backups.py`
+- `manager_checks.py` (6): full and single checks, offers → `test_check.py`, `test_offers.py`
+- `manager_installs.py` (7): installation, OTA, verification → `test_install.py`
+- `manager_schedules.py` (8): scheduled installations, schedules and their runs → `test_timetable.py`
+- `manager.py` (9): `Manager`, `public_state` → `test_web.py`
+- `web_ui.py`: Ingress UI + JSON API: CSRF/size middleware, page, state, route table → `test_web.py`, `test_security.py`
+- `web_base.py`: shared parts of the handlers: `Handlers`, `json_body`, `guarded`, `translated`, `SECURITY_HEADERS` → `test_web.py`, `test_security.py`
+- `web_devices.py`, `web_firmware.py`, `web_backups.py`, `web_schedules.py`, `web_settings.py` (logs and settings): handlers per area → `test_web.py`, `test_security.py`, `test_backups.py`, `test_timetable.py`
 - `download_server.py`: LAN download server for the Shellys → `test_security.py`
-- `shelly.py`: device and manufacturer access, SSRF/size guards → `test_check.py`, `test_device_settings.py`
+- `shelly.py`: device access: errors and text helpers, authentication, requests, settings, OTA WebSocket → `test_device_settings.py`, `test_device_transport.py`, `test_guards.py`
+- `shelly_net.py`: device addresses: private networks only, origin pinning, host names → `test_guards.py`, `test_check.py`
+- `shelly_cloud.py`: manufacturer servers: offers, changelog pages, firmware downloads → `test_offers.py`, `test_guards.py`, `test_tls.py`
 - `store_transfer.py`: export/import archive (pure functions) → `test_store_transfer.py`
 - `backup_store.py`: encrypted backup files and their list (no device access) → `test_backups.py`
-- `shelly_backup.py`: read, compare and restore the settings of one device → `test_backups.py`
+- `shelly_backup.py`: read, compare and restore the settings of one device → `test_backups.py`, `test_device_transport.py`
 - `schedule.py`: schedule, DST → `test_schedule.py`
 - `timetable.py`: schedules and "Install at": validation, next run (pure functions) → `test_timetable.py`
 - `app_options.py`: option validation → `test_options.py`
 - `events.py`: activity log → `test_state.py`
 - `credentials.py`: per-device passwords → `test_state.py`
-- `changelog.py`: changelog pages → `test_changelog.py`
-- `tls.py`: certificate pinning → `test_security.py`
+- `changelog.py`: changelog pages → `test_changelog.py`, `test_changelog_pages.py`
+- `tls.py`: certificate pinning → `test_security.py`, `test_tls.py`
 - `data_paths.py`: paths below `/data` (read as `data_paths.NAME`)
 
 ## UI (`ui-src/js/*.js`, `ui-src/style.css`; built into `app/static/` – never read the build)

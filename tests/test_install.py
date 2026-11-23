@@ -14,6 +14,7 @@ import manager_core
 import manager_installs
 import pytest
 import shelly
+import shelly_cloud
 from aiohttp import WSMsgType, web
 from aiohttp.test_utils import TestClient, TestServer
 from conftest import A, B, C
@@ -54,7 +55,7 @@ def run_install(mgr, monkeypatch, quick_install):
         async def trigger(*_args):
             return None
 
-        monkeypatch.setattr(shelly, "file_sha256", lambda *_a: "s")
+        monkeypatch.setattr(shelly_cloud, "file_sha256", lambda *_a: "s")
         monkeypatch.setattr(shelly, "device_info", device_info)
         monkeypatch.setattr(shelly, "trigger_update", trigger)
         ok, diagnosis = await mgr._install(A, dev, "s")
@@ -222,7 +223,7 @@ def ota_install(monkeypatch):
     monkeypatch.setattr(manager_installs, "OTA_STALL_S", 0.3)
     monkeypatch.setattr(manager_installs, "OTA_RESTART_WAIT_S", 0.3)
     monkeypatch.setattr(manager_installs, "OTA_BOOT_WAIT_S", 0.3)
-    monkeypatch.setattr(shelly, "file_sha256", lambda *_a: "s")
+    monkeypatch.setattr(shelly_cloud, "file_sha256", lambda *_a: "s")
     calls = {"http": 0}
 
     async def device_info(*_args, **_kwargs):
@@ -386,22 +387,6 @@ async def test_only_get_counts_as_served(mgr, monkeypatch):
 
 
 # ---------------------------------------------------------------- No check after installations
-
-
-@pytest.fixture
-def updating(mgr, net, monkeypatch, quick_install):
-    """End-to-end installs against FakeNet: the update command "installs" the version
-    of the served store file on the fake device; short timings."""
-    result = {"accept": True}
-
-    async def trigger(_session, _gen, origin, url, _auth=None):
-        if result["accept"]:
-            device = net.by_origin(origin)
-            version = mgr.firmware[url.rsplit("/", 1)[-1]]["version"]
-            net.devices[device] = (*net.devices[device][:2], version, version)
-
-    monkeypatch.setattr(shelly, "trigger_update", trigger)
-    return result
 
 
 async def test_no_check_follows_an_installation(mgr, net, updating):
@@ -657,7 +642,7 @@ def restart_fakes(monkeypatch, answers):
     async def trigger(*_args):
         calls.append("trigger")
 
-    monkeypatch.setattr(shelly, "file_sha256", lambda *_a: "s")
+    monkeypatch.setattr(shelly_cloud, "file_sha256", lambda *_a: "s")
     monkeypatch.setattr(shelly, "restart", restart)
     monkeypatch.setattr(shelly, "device_info", info)
     monkeypatch.setattr(shelly, "trigger_update", trigger)

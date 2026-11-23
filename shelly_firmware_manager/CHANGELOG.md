@@ -5,6 +5,28 @@
 Release candidate. Backups of the device settings: by hand, before every installation
 and on a schedule, with comparison and restore part by part.
 
+Changes in rc3
+
+Changed
+- Keyboard: a dialog starts on its first control again (the close icon), as before rc2.
+- Input errors stay in the dialog with everything entered: device and bulk passwords,
+  upload, store and backup import, NTP server and power-on action. A refused file or
+  password shows the form again with the file and the password kept.
+- The X and Escape do what "Cancel" or "Close" does: a staged upload or import is
+  discarded, the backup dialogs return to the device's list.
+- Lists in dialogs (Back up now, bulk passwords, schedule devices, run results) sort
+  names like the tables ("Shelly 2" before "Shelly 10").
+- Backups tab: a pin marks a kept backup instead of the lock, which read as a password
+  or encryption.
+- Schedules tab: a backup run with an unreachable device shows "Error" as its last run.
+
+Fixed
+- Backups: a device that does not answer is an error in the log, also in a backup run
+  and a schedule "Backup"; a battery device asleep stays a warning.
+- No "Checking …" line under the page title while a device is checked; its row shows it.
+- Phones: in the popups of the action icons a long state (e.g. power-on action in
+  German) moves below the name instead of overlapping it.
+
 Changes in rc2
 
 Added

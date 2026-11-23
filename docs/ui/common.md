@@ -3,6 +3,15 @@
 Part of `docs/UI_DECISIONS.md` (approved, binding; change only with approval, in the same commit
 as the UI change). Read when you change a dialog, the toolbar, card heads or tooltips (all tabs).
 
+## Building blocks (3.11.0, `reports/optimierung-analyse` F1 a, approved 2026-11-23)
+- New UI builds from the building blocks of `ui-src/js/core.js`, not from its own copies:
+  `confirmDialog` (confirmation; red button unless `kind` says otherwise; an error keeps
+  title and icon), `gateButton` / `ackGate` (a condition or a tick enables the action
+  button), `guarded` (error of an action), `input`, `checkbox`, `radio`, `field`,
+  `checkLine` (ok, warn, err, run, wait), `deviceChoice` ("All" or a list of devices),
+  `passwordCopy`, `filePassword`, `startDownload`, `cell`, `tn` (singular/plural),
+  `fmtSize`, `modelGen`, `searchText` / `matches`.
+
 ## Dialogs (mockups approved 2026-11-12)
 - Divider lines under the title and over the buttons, titled sections, value lists
   with fixed label column (34 %, min 96 px), 4 px rows and thin lines, empty rows
@@ -17,6 +26,13 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   error dialog keeps the title (and icon) of the dialog it comes from (e.g. "Install
   update?", "Delete firmware?", "Save settings?"); errors without a dialog keep their
   short title ("Check", "Ignore", "Settings").
+- **Input errors (3.11.0, `reports/optimierung-analyse` F3 a, approved 2026-11-23):** an
+  error about the entries of a form step stays in that step, below its content (red text,
+  announced), and every entry stays as typed or chosen: a check before sending (no file,
+  no password, passwords differ, no device) and a refusal of the sent entries (upload,
+  store import, backup import, schedule, upload values, NTP server, power-on action).
+  An upload or import that was refused shows the step again with the chosen file and
+  the password. Errors after a confirmation step keep the error dialog of rule (c).
 - **Tables in dialogs (2026-11-22, F1, U7):** plain tables, left-aligned, on every width
   (not the Devices table or phone tile layout). Phones: "Install n updates?" shows two-line
   entries (name; below it IP · installed → target · source, mockup `M9`); desktop keeps
@@ -28,9 +44,12 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
 - **Keyboard (3.11.0, `reports/optimierung-analyse` F5 a, approved 2026-11-23):** a redraw
   of a tab keeps the keyboard focus on the same control (rows and tiles are matched by
   their `data-key`, the control by its label). A dialog is named by its title and starts
-  with the focus on the title unless it focuses a field itself; a step that removes the
-  focused control moves the focus to the title; closing returns it to the control that
-  opened the dialog. Escape closes the row menu and returns the focus to its ⋮ button.
+  with the focus on its first control (the close icon) unless it focuses a field itself
+  (`reports/3.11.0/FRAGEN_rc2.md` 1 b, approved 2026-11-23); a step that removes the
+  focused control moves the focus there too; closing returns it to the control that
+  opened the dialog. The X and Escape do what "Cancel" / "Close" of the step does
+  (discard a staged upload or import, return to the list of the device's backups).
+  Escape closes the row menu and returns the focus to its ⋮ button.
   Column heads sort with Enter and Space and carry `aria-sort`; the tabs carry
   `aria-selected` and name their panel. Error and warning messages in dialogs are
   announced (`role="alert"`), successes as status. No arrow keys in menus and tabs.
@@ -84,6 +103,10 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
 - Phones, title bar (H1): inside HA the app title is hidden; the pills "Last checked …"
   and "Every n days · HH:MM" stacked on the left (ellipsis if too long), "Check now"
   right, vertically centred, never wraps.
+- **Line under the header pills (live test rc2, approved 2026-11-23):** only for
+  installations, a device info reload, a restore and storage errors; never for a check
+  (a single check shows "Checking …" in its row, a full check its progress line) or a
+  schedule run.
 - **"Check now" in the Settings tab (2026-11-22):** hidden there (it belongs to the
   device data), its place is kept so the header does not move when the tab changes; all
   other tabs show it.
@@ -122,7 +145,21 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   `--tag-text`) and reaches at least 4.5:1 on cards and unread log rows in the light and
   dark fallback colours; the theme colour is used pure only for lines, fills and icons.
   Icons that are links or mark a chosen entry (link icons, tick of the chosen filter,
-  "Kept" lock, opened toolbar icon) use the link text colour.
+  "Kept" pin, opened toolbar icon) use the link text colour.
+- **CSS building blocks (3.11.0, `reports/optimierung-analyse` F1 a, approved 2026-11-23):**
+  `ui-src/style.css` is one file in the order tokens, base, building blocks, page head
+  and tabs, then one section per tab with its own phone block. A coloured state reads
+  `--tone` (pills, action icons, status strips, message and check-list icons), set by
+  `.tone-success|warning|error|primary` or a state class mapped there; neutral is the
+  default. Rows of a list share one line rule (fine line, none under the last row);
+  phone tiles have the card background, the strong line and the medium radius (one rule
+  for Devices and Schedules; Logs and Backups set it in their tab, after their own rules
+  for the last row). The
+  Devices table is `:where(.dev-table)`, so its rules never reach a table in a dialog.
+  A button with an icon before its text is `.icon-text` (`.sm`: 16 px icon). Tokens
+  also cover the monospace font, shadows, layers, icon sizes, the beta colour and the
+  success text; `[hidden]` always hides. New UI uses these blocks and adds CSS only for
+  its own grid or layout.
 
 ## Tooltips
 - **One tooltip (2026-11-22, U4):** every tooltip is the app's own dark tooltip, none

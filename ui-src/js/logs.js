@@ -1,7 +1,7 @@
 // Logs tab: activity log with filters, grouping per device and deleting entries.
 import {
-  $, api, box, closeModal, el, filterControl, fmt, iconButton, keptDetails, mb, message, modal, openDetails, pad, searchTool, t, ui,
-  valueList,
+  $, api, box, confirmDialog, closeModal, el, filterControl, fmt, fmtSize, iconButton, keptDetails, matches, mb, openDetails, pad, searchText,
+  searchTool, t, tn, ui, valueList,
 } from "./core.js";
 import {lang} from "./i18n.js";
 import {OFFER_SOURCES} from "./install.js";
@@ -11,6 +11,8 @@ import {load, render} from "./main.js";
 // ---------------------------------------------------------------- Logs
 // The entries stay English in every language, including their type and outcome labels
 // (a screenshot reads the same everywhere); controls, filters and the weekday are translated.
+/** Count with an English word: "1 file", "3 files" (many: an irregular plural). */
+const plural = (n, word, many = word + "s") => `${n} ${n === 1 ? word : many}`;
 // Severity of an entry; entries written before 3.0 only have "ok"
 const severity = e => ["success", "warning", "error"].includes(e.severity) ? e.severity : e.ok === false ? "error" : "success";
 const SEVERITY_LABELS = {success: "Success", warning: "Warning", error: "Error"};
@@ -33,8 +35,8 @@ const deviceAction = e => e.action === "offered_now" ? `${e.device}: held update
   : `${e.device}: removed from the list`;
 /** Firmware files read back from the disk after the store lost its list (kind "store"). */
 const adoptedCount = e => (e.adopted || []).length;
-const adoptedLine = e => `${adoptedCount(e)} file${adoptedCount(e) === 1 ? "" : "s"} read from the disk – they could have been changed` +
-  (e.unknown ? ` · ${e.unknown} unknown file${e.unknown === 1 ? "" : "s"} (Firmware tab)` : "");
+const adoptedLine = e => `${plural(adoptedCount(e), "file")} read from the disk – they could have been changed` +
+  (e.unknown ? ` · ${plural(e.unknown, "unknown file")} (Firmware tab)` : "");
 // Successful actions, failed actions are logged with the mode; older entries: set/removed/test_failed
 const PASSWORD_ACTIONS = {stored: "password stored", enabled: "password protection enabled", changed: "password changed",
   removed: "password protection removed", forgotten: "stored password forgotten",
@@ -55,8 +57,6 @@ const RUN_RESULTS = {ok: "okc", unreachable: "bad", refused: "bad"};
 const BACKUP_REASONS = {manual: "manual", update: "before update", downgrade: "before downgrade", schedule: "schedule", restore: "before restore"};
 const BACKUP_EVENTS = {stored: "stored", failed: "failed", pruned: "removed", deleted: "deleted", restored: "restored",
   restore_failed: "restore failed", downloaded: "downloaded", imported: "imported", run: "run"};
-const kb = n => n >= 1048576 ? mb(n) : `${Math.max(1, Math.round((n || 0) / 1024))} KB`;
-const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 /** Contents of a backup ("settings, 2 scripts, 3 schedules, 1 webhook"; Gen1: "settings, 1 action"). */
 const backupParts = p => !p ? "" : p.actions != null ? `settings, ${plural(p.actions, "action")}${p.partial ? " (actions not readable)" : ""}`
   : `settings, ${plural(p.scripts ?? 0, "script")}, ${plural(p.schedules ?? 0, "schedule")}, ${plural(p.webhooks ?? 0, "webhook")}`;
@@ -66,7 +66,7 @@ const backupReason = e => (BACKUP_REASONS[e.reason] || e.reason || "") + (e.note
 function backupLine(e) {
   const of = `backup of ${fmt(e.backup_at)}`;
   switch (e.event) {
-    case "stored": return `${e.device}: backup stored · ${backupReason(e)} · ${kb(e.size)} · ${backupParts(e.parts)}`;
+    case "stored": return `${e.device}: backup stored · ${backupReason(e)} · ${fmtSize(e.size)} · ${backupParts(e.parts)}`;
     case "failed": return `${e.device}: backup failed · ${backupReason(e)}`;
     case "pruned": return `${e.device}: ${of} removed – more than ${e.keep} stored`;
     case "deleted": return `${e.device}: ${of} deleted`;
@@ -74,7 +74,7 @@ function backupLine(e) {
       (e.not_applied ? ` · ${e.not_applied} not applied` : "");
     case "restore_failed": return `${e.device}: restoring the ${of} failed`;
     case "downloaded": return `${e.device}: ${of} downloaded`;
-    case "imported": return `${e.device}: ${of} imported · ${kb(e.size)} · ${backupParts(e.parts)}`;
+    case "imported": return `${e.device}: ${of} imported · ${fmtSize(e.size)} · ${backupParts(e.parts)}`;
     default: return `${e.device}: backup ${e.event}`;
   }
 }
@@ -83,7 +83,7 @@ const backupRunLine = e => `Backup run · manual · ${plural(e.devices ?? 0, "de
 /** Devices of a backup run, each coloured by its own severity: what was stored, or why
  *  the device was not backed up. */
 const backupRunFindings = e => box("ul", null, ...(e.findings || []).map(f => el("li",
-  f.result === "stored" ? `${f.device}: stored · ${kb(f.size)} · ${backupParts(f.parts)}`
+  f.result === "stored" ? `${f.device}: stored · ${fmtSize(f.size)} · ${backupParts(f.parts)}`
     : `${f.device}: not backed up – ${f.result === "asleep" ? "battery device asleep" : f.detail || f.result}`,
   f.severity === "error" ? "bad" : f.severity === "warning" ? "warnc" : "okc")));
 /** Lines below a backup entry: the error, and for a restore what was not applied. */
@@ -111,8 +111,7 @@ const arrow = (a, b) => `${a ?? "–"} → ${b ?? "–"}`;
  *  same form on every width; entries before 3.0 have only the server's text. */
 function checkCounts(e) {
   if (typeof e.updates !== "number") return e.result;
-  const n = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
-  return [n(e.updates, "update"), n(e.warnings || 0, "warning"), n(e.errors || 0, "error"),
+  return [plural(e.updates, "update"), plural(e.warnings || 0, "warning"), plural(e.errors || 0, "error"),
     e.ignored?.length ? `${e.ignored.length} ignored` : null].filter(Boolean).join(" · ");
 }
 
@@ -122,7 +121,7 @@ function logContent(e) {
     case "check": {
       // A scheduled check that could not start (other work running): cancelled, not repeated
       if (e.skipped) return [el("div", `Scheduled check cancelled · ${e.skipped}`)];
-      const line = el("div", `${TRIGGER_LABELS[e.trigger] || "Scheduled"} check · ${e.devices} device${e.devices === 1 ? "" : "s"} · ${e.duration} s · ${checkCounts(e)}`);
+      const line = el("div", `${TRIGGER_LABELS[e.trigger] || "Scheduled"} check · ${plural(e.devices, "device")} · ${e.duration} s · ${checkCounts(e)}`);
       if (!e.findings?.length && !e.ignored?.length) return [line];
       return [keptDetails(`log-${e.ts}-check`, line.textContent, checkFindings(e))];
     }
@@ -150,11 +149,11 @@ function logContent(e) {
         ...(e.changes || []).map(c => el("div", c.redacted ? `${optionLabel(c.option)}: changed` : `${optionLabel(c.option)}: ${arrow(c.old, c.new)}`, "sub")),
         e.error ? el("div", e.error, "bad") : null].filter(Boolean);
     case "export":
-      return [el("div", `Firmware store exported · ${e.files ?? 0} file${e.files === 1 ? "" : "s"} (${e.downloads ?? 0} downloaded, ${e.uploads ?? 0} uploaded, ${e.imports ?? 0} imported) · ${mb(e.size || 0)}`),
+      return [el("div", `Firmware store exported · ${plural(e.files ?? 0, "file")} (${e.downloads ?? 0} downloaded, ${e.uploads ?? 0} uploaded, ${e.imports ?? 0} imported) · ${mb(e.size || 0)}`),
         e.backups ? el("div", `${plural(e.backups, "backup")} of device settings included`, "sub") : null,
-        e.damaged ? el("div", `${e.damaged} damaged stored file${e.damaged === 1 ? "" : "s"} left out (SHA-256 no longer matches)`, "warnc") : null].filter(Boolean);
+        e.damaged ? el("div", `${plural(e.damaged, "damaged stored file")} left out (SHA-256 no longer matches)`, "warnc") : null].filter(Boolean);
     case "import": {
-      const line = el("div", `Firmware store imported · ${e.stored ?? 0} new · ${e.same ?? 0} already stored (${e.updated ?? 0} with data added) · ${e.conflicts ?? 0} conflict${e.conflicts === 1 ? "" : "s"}`);
+      const line = el("div", `Firmware store imported · ${e.stored ?? 0} new · ${e.same ?? 0} already stored (${e.updated ?? 0} with data added) · ${plural(e.conflicts ?? 0, "conflict")}`);
       const backups = e.backups ? el("div", `${plural(e.backups, "backup")} of device settings imported`, "sub") : null;
       if (!e.conflicts_list || !e.conflicts_list.length) return [line, backups].filter(Boolean);
       return [line, backups, el("div", `Conflicts – stored file kept: ${e.conflicts_list.join(", ")}`, "sub")].filter(Boolean);
@@ -176,7 +175,7 @@ function logContent(e) {
       if (e.event !== "run") return [el("div", backupLine(e)), ...backupDetails(e)];
       return e.findings?.length ? [keptDetails(`log-${e.ts}-bkrun`, backupRunLine(e), backupRunFindings(e))] : [el("div", backupRunLine(e))];
     case "log":
-      return [el("div", `Log cleared · ${e.entries ?? 0} entr${e.entries === 1 ? "y" : "ies"} deleted`)];
+      return [el("div", `Log cleared · ${plural(e.entries ?? 0, "entry", "entries")} deleted`)];
     default:
       return [el("div", e.kind)];
   }
@@ -197,7 +196,7 @@ function logSummary(e) {
   switch (e.kind) {
     case "check": {
       if (e.skipped) return ["Scheduled check cancelled", e.skipped];
-      const first = `${TRIGGER_LABELS[e.trigger] || "Scheduled"} · ${e.devices} device${e.devices === 1 ? "" : "s"} · ${e.duration} s`;
+      const first = `${TRIGGER_LABELS[e.trigger] || "Scheduled"} · ${plural(e.devices, "device")} · ${e.duration} s`;
       return [first, checkCounts(e)];
     }
     case "download": return [`${e.type} ${e.version}`];
@@ -208,8 +207,8 @@ function logSummary(e) {
     case "password": return [`${e.device}: ${passwordAction(e)}`];
     case "options": return [e.confirmed ? "Download base URL confirmed" : e.ok ? "App settings saved" : "App settings not saved"];
     case "log": return ["Log cleared"];
-    case "export": return [`${e.files ?? 0} file${e.files === 1 ? "" : "s"} exported`];
-    case "import": return [`${e.stored ?? 0} new · ${e.conflicts ?? 0} conflict${e.conflicts === 1 ? "" : "s"}`];
+    case "export": return [`${plural(e.files ?? 0, "file")} exported`];
+    case "import": return [`${e.stored ?? 0} new · ${plural(e.conflicts ?? 0, "conflict")}`];
     case "setup": return ["Import skipped"];
     case "store": return [`${adoptedCount(e)} read from the disk${e.unknown ? ` · ${e.unknown} unknown` : ""}`];
     case "device": return [deviceAction(e)];
@@ -230,13 +229,10 @@ mobileQuery.addEventListener("change", () => render(true));
 const logDevice = e => e.device || (e.kind === "check" && e.devices === 1 && e.findings && e.findings.length === 1 ? e.findings[0].device : null) || null;
 /** Delete one log entry after a confirmation. */
 function deleteLogEntry(e) {
-  const title = t("Delete log entry?");
-  modal(title, [valueList([[t("Time"), fmt(e.ts)], [t("Type"), KIND_LABELS[e.kind] || e.kind], [t("Entry"), logSummary(e).join(" · ")]]),
-    el("p", t("The entry is removed from the activity log for good."), "hint")],
-  [{text: t("Cancel")}, {text: t("Delete"), kind: "danger", action: async () => {
-    try { await api(`api/logs/${encodeURIComponent(e.id)}/delete`, {confirm: true}); closeModal(); ui.logsLoaded = 0; load(true); }
-    catch (err) { message(title, err.message, "error", "delete"); }
-  }}], "delete");
+  confirmDialog({title: t("Delete log entry?"), icon: "delete", button: t("Delete"),
+    content: [valueList([[t("Time"), fmt(e.ts)], [t("Type"), KIND_LABELS[e.kind] || e.kind], [t("Entry"), logSummary(e).join(" · ")]]),
+      el("p", t("The entry is removed from the activity log for good."), "hint")],
+    action: async () => { await api(`api/logs/${encodeURIComponent(e.id)}/delete`, {confirm: true}); closeModal(); ui.logsLoaded = 0; load(true); }});
 }
 /** Delete icon of an entry (entries of versions before 3.1.1 get their ID at the start). */
 function logDelete(e) {
@@ -298,8 +294,8 @@ function logTile(e, d, group, unread) {
 }
 /** Logs tab: grouped by day, filter, device search, quiet checks. */
 export function renderLogs() {
-  const q = $("log-search").value.trim().toLowerCase(), quiet = $("log-quiet").checked;
-  const devMatch = e => !q || [e.device, ...(e.findings || []).map(f => f.device), ...(e.ignored || [])].some(v => String(v || "").toLowerCase().includes(q));
+  const q = searchText($("log-search")), quiet = $("log-quiet").checked;
+  const devMatch = e => matches(q, [e.device, ...(e.findings || []).map(f => f.device), ...(e.ignored || [])]);
   const base = ui.logs.filter(e => devMatch(e) && !(quiet && e.kind === "check" && !(e.findings || []).length));
   logFilter.set(ui.logFilter, Object.fromEntries(Object.entries(LOG_FILTERS).map(([key, [, fn]]) => [key, base.filter(fn).length])));
   const out = [], shown = base.filter(LOG_FILTERS[ui.logFilter][1]);
@@ -328,11 +324,8 @@ searchTool($("log-search"));
 $("log-quiet").onchange = () => render(true);
 /** Delete the whole activity log after a confirmation (one entry naming the user stays). */
 $("log-clear").onclick = () => {
-  const title = t("Delete all logs?"), count = ui.logs.length;
-  modal(title, [el("p", count === 1 ? t("The log entry is deleted for good – regardless of the filter. One entry stays that names who cleared the log.")
-    : t("All {n} log entries are deleted for good – regardless of the filter. One entry stays that names who cleared the log.", {n: count}))],
-    [{text: t("Cancel")}, {text: t("Delete all"), kind: "danger", action: async () => {
-      try { await api("api/logs/clear", {confirm: true}); closeModal(); ui.logsLoaded = 0; load(true); }
-      catch (err) { message(title, err.message, "error", "delete"); }
-    }}], "delete");
+  confirmDialog({title: t("Delete all logs?"), icon: "delete", button: t("Delete all"),
+    content: [el("p", tn(ui.logs.length, "The log entry is deleted for good – regardless of the filter. One entry stays that names who cleared the log.",
+      "All {n} log entries are deleted for good – regardless of the filter. One entry stays that names who cleared the log."))],
+    action: async () => { await api("api/logs/clear", {confirm: true}); closeModal(); ui.logsLoaded = 0; load(true); }});
 };

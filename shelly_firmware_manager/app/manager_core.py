@@ -1,11 +1,12 @@
-"""Manager, layer 1 of 8: state, persistence, Home Assistant access, app options and the
+"""Manager, layer 1 of 9: state, persistence, Home Assistant access, app options and the
 check slot.
 
 The manager is one object built from layers, each in its own module and each extending
 the one before: ManagerCore (this file) -> FirmwareStore (manager_store) ->
-DeviceSettings (manager_devices) -> Backups (manager_backups) -> Checks (manager_checks)
--> Installs (manager_installs) -> Schedules (manager_schedules) -> Manager (manager). A
-layer only uses what the layers below it provide; the complete object is manager.Manager.
+Transfers (manager_transfer) -> DeviceSettings (manager_devices) -> Backups
+(manager_backups) -> Checks (manager_checks) -> Installs (manager_installs) -> Schedules
+(manager_schedules) -> Manager (manager). A layer only uses what the layers below it
+provide; the complete object is manager.Manager.
 
 State lives in /data/state.json (with the previous save as backup state.bak, see
 ManagerCore.save and _load), firmware in /data/firmware, device passwords in
@@ -70,10 +71,6 @@ STATUS_ERROR = "error"
 # A battery device (marker battery, detected from the device while awake) that was
 # not reachable: it sleeps between wake-ups, so this is no error
 STATUS_ASLEEP = "asleep"
-
-# Not in the device registry at its last check (state of versions before the "removed"
-# marker); shown as "Not checked" until the device is checked again
-STATUS_UNREGISTERED = "unregistered"
 
 # Gen1 device while Gen1 updates are disabled; also a Gen2+ device whose beta offer was
 # withdrawn at the start because beta firmware is switched off (until its next check)
@@ -148,6 +145,13 @@ SUPERVISOR_TIMEOUT = aiohttp.ClientTimeout(total=15)
 # devices of all integrations in one message (aiohttp's default of 4 MiB is too small
 # for very large installations)
 REGISTRY_MAX = 32 * 1024 * 1024  # bytes
+# Readable name of a Core WebSocket list request in error texts (unknown ones: the request)
+HA_REQUEST_NAMES = {
+    "config/device_registry/list": "device registry",
+    "config/entity_registry/list": "entity registry",
+    "config_entries/get": "config entries",
+    "config_entries/flow/progress": "discovery flows",
+}
 
 # Pages of the Home Assistant frontend: the page of this app (its info card has the
 # "Changelog" link next to the version) and, if the slug is unknown, the list of apps
@@ -164,7 +168,7 @@ ACTIVITY_DOWNLOADING = "downloading"  # firmware for this device is being downlo
 
 ACTIVITY_RELOADING = "reloading"  # Reload Device Info is reading the device
 
-PART_PREFIX = ".part-"  # temporary download files (see shelly._store)
+PART_PREFIX = ".part-"  # temporary download files (see shelly_cloud._store)
 
 # ASCII punctuation: escaped with a backslash in texts of the Home Assistant notification,
 # which renders Markdown (links, images, emphasis, HTML, autolinks); shown unchanged
@@ -341,7 +345,7 @@ class ManagerCore:
         self._import_lock = asyncio.Lock()  # one import transfer / check / confirmation at a time
         self._import_storing = False  # confirm_import is writing its files to the store
         # File transfers in parts (upload, import) that are not complete yet, by kind;
-        # memory only (see FirmwareStore._receive_part)
+        # memory only (see Transfers._receive_part)
         self._receiving: dict[str, dict[str, Any]] = {}
         # First start of a fresh installation (no state.json): no check runs until the
         # user answered the import question (import a store or skip); persisted
@@ -593,7 +597,8 @@ class ManagerCore:
             msg = await ws.receive(timeout=30)
             if msg.type is not aiohttp.WSMsgType.TEXT:
                 # e.g. closed by aiohttp because the message exceeds REGISTRY_MAX
-                raise ShellyError(f"Home Assistant did not answer the device registry request ({msg.type.name})")
+                name = HA_REQUEST_NAMES.get(request, request)
+                raise ShellyError(f"Home Assistant did not answer the {name} request ({msg.type.name})")
             try:
                 data = json.loads(msg.data)
             except ValueError:
@@ -765,7 +770,8 @@ class ManagerCore:
         Reload Device Info, restore or run of a schedule). kind "device": not during the full check, and not for
         a device that is being checked, installed, reloaded or restored – other devices may be
         checked or installed at the same time. No check starts while a store import
-        writes its files. Raises ShellyError otherwise."""
+        writes its files; while a schedule runs only single-device checks start.
+        Raises ShellyError otherwise."""
         if self.first_start_open:
             raise ShellyError(FIRST_START_BLOCK)
         if self.checking:
@@ -814,6 +820,16 @@ class ManagerCore:
         if self.device_checks:
             names = [str(self.devices.get(i, {}).get("name") or "device") for i in self.device_checks]
             parts.append(f"Checking {names[0]}" if len(names) == 1 else f"Checking {len(names)} devices")
+        if note := self.busy_note:
+            parts.append(note)
+        return " · ".join(parts) or None
+
+    @property
+    def busy_note(self) -> str | None:
+        """The line under the page title: what busy names except checks – a check
+        shows "Checking …" in the row of its device (a full check in the progress
+        line), not under the title."""
+        parts = []
         if self.installing:
             parts.append(f"Installations running: {len(self.installing)}")
         if self.reloading:

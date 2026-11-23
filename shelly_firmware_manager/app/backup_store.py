@@ -29,7 +29,6 @@ import hashlib
 import hmac
 import json
 import logging
-import os
 import re
 import secrets
 import time
@@ -37,6 +36,7 @@ import zlib
 from pathlib import Path
 from typing import Any
 
+import data_paths
 from shelly import clip, parse_json
 
 log = logging.getLogger("sfm.backups")
@@ -273,18 +273,10 @@ class BackupStore:
 
     @staticmethod
     def _write(path: Path, content: bytes) -> None:
-        """Write a file atomically and durably (temporary name, fsync, rename), mode 0600."""
+        """Write a file atomically and durably, mode 0600; the temporary name .part-<random>
+        is removed at the start if a crash left it behind."""
         temp = path.with_name(f".part-{secrets.token_hex(6)}")
-        try:
-            fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(fd, "wb") as handle:
-                handle.write(content)
-                handle.flush()
-                os.fsync(handle.fileno())
-            temp.replace(path)
-        except OSError:
-            temp.unlink(missing_ok=True)
-            raise
+        data_paths.write_atomic(path, content, temp, durable=True, private=True)
 
     def _path(self, backup_id: str) -> Path:
         """File of a backup (the ID is checked: never a path from outside)."""

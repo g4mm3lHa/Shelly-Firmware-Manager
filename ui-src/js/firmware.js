@@ -1,7 +1,8 @@
 // Firmware tab: stored files, changelog, Install button per device, delete and upload.
 import {
-  $, api, attachTip, box, closeModal, collator, copyText, el, filterControl, fmt, icon, iconButton, keptDetails, loadLocal, mb,
-  message, modal, saveLocal, searchTool, section, setTip, shaRow, sortControl, t, toast, ui, uploadFile, valueList,
+  $, api, attachTip, box, checkbox, closeModal, collator, confirmDialog, copyText, el, field, filterControl, fmt, fmtSize, guarded,
+  formError, icon, iconButton, input, keptDetails, loadLocal, matches, mb, message, modal, radio, saveLocal, searchText, searchTool, section,
+  setTip, shaRow, sortControl, t, tn, toast, ui, uploadFile, valueList,
 } from "./core.js";
 import {installable, installBlocker} from "./devices.js";
 import {changelogNodes, DOWNGRADE_OFF, DOWNGRADE_WARNING, downgradeConfirm, fwSource, IMPORT_WARNING, openInstall, UPLOAD_HINT} from "./install.js";
@@ -52,8 +53,8 @@ const FW_FILTERS = {all: [t("All"), () => true], provided: [t("Provided"), f => 
 function unusedTip() {
   const open = unidentified().length;
   if (!open) return null;
-  return open === 1 ? t("Firmware ID of 1 device not known yet (never reached) – no file counts as unused until it is checked once")
-    : t("Firmware ID of {n} devices not known yet (never reached) – no file counts as unused until they are checked once", {n: open});
+  return tn(open, "Firmware ID of 1 device not known yet (never reached) – no file counts as unused until it is checked once",
+    "Firmware ID of {n} devices not known yet (never reached) – no file counts as unused until they are checked once");
 }
 const FW_TIPS = {unused: unusedTip, beta: () => t("Beta versions of the Shelly update server (Settings → “Offer beta firmware”)"), installed: () => t("Versions that devices run at the moment – their way back after the next update"),
   imported: () => t("Files from an imported firmware store that the Shelly update server has not confirmed yet")};
@@ -62,19 +63,19 @@ const fwFilter = filterControl(Object.entries(FW_FILTERS).map(([key, [label]]) =
 $("fw-filter").replaceWith(fwFilter.node);
 
 // ---------------------------------------------------------------- Firmware
-/** Free disk space for the summary: MB, from 1024 MB on in GB (one decimal). */
-const freeText = bytes => t("{size} free", {size: bytes >= 1024 * 1048576 ? `${(bytes / 1073741824).toFixed(1)} GB` : mb(bytes)});
+/** Free disk space for the summary. */
+const freeText = bytes => t("{size} free", {size: fmtSize(bytes)});
 /** Firmware tab: one card per firmware ID, versions as rows, newest first. */
 export function renderFirmware() {
-  const q = $("fw-search").value.trim().toLowerCase();
+  const q = searchText($("fw-search"));
   // Files in the firmware folder the store does not list (marker unknown): own card, only under "All"
-  const stored = ui.firmware.filter(f => !f.unknown), unknown = ui.firmware.filter(f => f.unknown && (!q || f.name.toLowerCase().includes(q)));
-  const found = stored.filter(f => !q || [f.type, f.version, ...f.devices.map(d => d.name)].some(v => String(v || "").toLowerCase().includes(q)));
+  const stored = ui.firmware.filter(f => !f.unknown), unknown = ui.firmware.filter(f => f.unknown && matches(q, [f.name]));
+  const found = stored.filter(f => matches(q, [f.type, f.version, ...f.devices.map(d => d.name)]));
   fwFilter.set(ui.fwFilter, Object.fromEntries(Object.entries(FW_FILTERS).map(([key, [, fn]]) => [key, found.filter(fn).length])));
   const list = found.filter(FW_FILTERS[ui.fwFilter][1]);
   const total = ui.firmwareTotal, free = ui.firmwareFree;
   // Files of the store (unknown files are listed in their own card, not counted here)
-  $("fw-summary").textContent = (stored.length === 1 ? t("1 file · {size} stored", {size: mb(total)}) : t("{n} files · {size} stored", {n: stored.length, size: mb(total)})) +
+  $("fw-summary").textContent = tn(stored.length, "1 file · {size} stored", "{n} files · {size} stored", {size: mb(total)}) +
     (typeof free === "number" ? ` · ${freeText(free)}` : "");
   const groups = new Map();
   for (const f of list) { if (!groups.has(f.type)) groups.set(f.type, []); groups.get(f.type).push(f); }
@@ -103,15 +104,11 @@ function unknownCard(files) {
 }
 /** Delete an unknown file after a confirmation with acknowledgment. */
 function deleteUnknown(f) {
-  const title = t("Delete unknown file?"), ack = el("input"); ack.type = "checkbox";
-  modal(title, [valueList([[t("File"), f.name], [t("Size"), mb(f.size || 0)]]),
-    el("div", t("The file is not part of the firmware store; it is deleted for good."), "warnbox danger"),
-    box("label", "check", ack, " " + t("I understand that this file cannot be restored by the app"))],
-  [{text: t("Cancel")}, {text: t("Delete"), kind: "danger", action: async () => {
-    try { await api(`api/firmware/${encodeURIComponent(f.name)}/delete`, {confirm: true, acknowledged: ack.checked}); closeModal(); }
-    catch (e) { message(title, e.message, "error", "delete"); }
-  }}], "delete");
-  const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; };
+  const [ack, ackLabel] = checkbox(t("I understand that this file cannot be restored by the app"));
+  confirmDialog({title: t("Delete unknown file?"), icon: "delete", button: t("Delete"), ack,
+    content: [valueList([[t("File"), f.name], [t("Size"), mb(f.size || 0)]]),
+      el("div", t("The file is not part of the firmware store; it is deleted for good."), "warnbox danger"), ackLabel],
+    action: async () => { await api(`api/firmware/${encodeURIComponent(f.name)}/delete`, {confirm: true, acknowledged: ack.checked}); closeModal(); }});
 }
 /** Column titles over the version rows (wide screens; phones label the values in the tile). */
 // [title, sort field]: Version, Size and Stored sort the cards
@@ -144,11 +141,10 @@ function firmwareDevice(entry) {
  *  from Shelly; a check stores it when it provides the file). */
 async function openFirmwareChangelog(f) {
   const title = `${t("Changelog")} – ${f.type} ${f.version}`;
-  try { modal(title, changelogNodes(await api(`api/firmware/${encodeURIComponent(f.name)}/changelog`)), undefined, "changelog"); }
-  catch (e) { message(title, e.message, "error", "changelog"); }
+  await guarded(title, "changelog", async () => modal(title, changelogNodes(await api(`api/firmware/${encodeURIComponent(f.name)}/changelog`)), undefined, "changelog"));
 }
 const IMPORTED_TIP = t("Imported with a firmware store – not confirmed by the Shelly update server yet");
-const devicesText = names => names.length === 1 ? t("1 device") : t("{n} devices", {n: names.length});
+const devicesText = names => tn(names.length, "1 device", "{n} devices");
 /** One version row with size, date, SHA (copy), devices and icon actions.
  *  older: an older Gen2+ version (gets the downgrade icon). */
 function firmwareRow(f, latest, older) {
@@ -206,8 +202,7 @@ function downgradeButton(f) {
 function openFirmwareDowngrade(f) {
   const targets = downgradeTargets(f), list = el("div", null, "modes");
   targets.forEach((d, i) => {
-    const radio = el("input"); radio.type = "radio"; radio.name = "dg-device"; radio.value = String(i); radio.checked = i === 0;
-    list.append(box("label", "check", radio, " ", el("span", d.name, "name"), el("span", ` · ${t("installed {version}", {version: d.version})}`, "sub")));
+    list.append(radio("dg-device", [el("span", d.name, "name"), el("span", ` · ${t("installed {version}", {version: d.version})}`, "sub")], i === 0, String(i))[1]);
   });
   modal(t("Downgrade to {version}", {version: `${f.type} ${f.version}`}), [
     valueList([[t("Firmware ID"), f.type], [t("Version"), f.version], [t("Size"), mb(f.size || 0)], [t("Stored"), fmt(f.downloaded)],
@@ -228,44 +223,45 @@ function deleteFirmware(f) {
   // A version devices run now: without the file they have no way back after the next update
   const users = f.installed || [];
   const names = `${users.slice(0, 3).join(", ")}${users.length > 3 ? ", …" : ""}`;
-  const wayBack = users.length ? el("div", users.length === 1 ? t("Installed on 1 device ({names}): without this file it has no way back after the next update.", {names})
-    : t("Installed on {n} devices ({names}): without this file they have no way back after the next update.", {n: users.length, names}), "warnbox") : null;
-  const lose = held.length === 1 ? t("Provided for {names}: this device loses the provided update and is shown as “Available” until it is checked again.", {names: held.join(", ")})
-    : t("Provided for {names}: these devices lose the provided update and are shown as “Available” until they are checked again.", {names: held.join(", ")});
+  const wayBack = users.length ? el("div", tn(users.length, "Installed on 1 device ({names}): without this file it has no way back after the next update.",
+    "Installed on {n} devices ({names}): without this file they have no way back after the next update.", {names}), "warnbox") : null;
+  const lose = tn(held.length, "Provided for {names}: this device loses the provided update and is shown as “Available” until it is checked again.",
+    "Provided for {names}: these devices lose the provided update and are shown as “Available” until they are checked again.", {names: held.join(", ")});
   modal(title, [details, wayBack, held.length ? el("div", lose, "warnbox") : null,
     // What cannot be restored: red warning box
     el("div", f.source === "upload" ? t("An uploaded file can only be restored by uploading it again.") :
     f.source === "import" ? t("An imported file can only be restored by importing its export again.") :
     t("Only versions that Shelly still offers can be downloaded again; older versions are gone for good."), "warnbox danger")].filter(Boolean),
   [{text: t("Cancel")}, {text: t("Continue"), kind: "primary", action: () => {
-    const ack = el("input"); ack.type = "checkbox";
-    modal(title, [el("p", t("Delete {firmware} permanently?", {firmware: `${f.type} ${f.version}`})), box("label", "check", ack, " " + t("I understand that this file cannot be restored by the app"))],
-      [{text: t("Cancel")}, {text: t("Delete"), kind: "danger", action: async () => {
-        try { await api(`api/firmware/${encodeURIComponent(f.name)}/delete`, {confirm: true, acknowledged: ack.checked}); closeModal(); }
-        catch (e) { message(title, e.message, "error", "delete"); }
-      }}], "delete");
-    const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; };
+    const [ack, ackLabel] = checkbox(t("I understand that this file cannot be restored by the app"));
+    confirmDialog({title, icon: "delete", button: t("Delete"), ack,
+      content: [el("p", t("Delete {firmware} permanently?", {firmware: `${f.type} ${f.version}`})), ackLabel],
+      action: async () => { await api(`api/firmware/${encodeURIComponent(f.name)}/delete`, {confirm: true, acknowledged: ack.checked}); closeModal(); }});
   }}], "delete");
 }
 /** Upload a firmware file (a newer one is provided as update by the next check) –
  *  step 1 choose and transfer, step 2 confirm
  *  firmware ID and version (pre-filled from the file where possible), optional SHA-256. */
 function openUpload() {
-  const title = t("Upload firmware"), input = el("input"); input.type = "file"; input.accept = ".zip,.bin,.gbl";
-  modal(title, [box("label", "field", t("Firmware file (.zip, .bin or .gbl, max. 64 MB)"), input),
+  const title = t("Upload firmware"), chooser = input("file", {accept: ".zip,.bin,.gbl"}), error = formError();
+  const content = [field(t("Firmware file (.zip, .bin or .gbl, max. 64 MB)"), chooser),
     el("p", (ui.state?.beta_firmware ? t("Only for Gen2+ devices known to this app, stable versions and beta versions (“Offer beta firmware” is on).")
       : t("Only for Gen2+ devices known to this app and stable versions.")) + " " +
       t("An uploaded version is used when the Shelly update server offers exactly this version, or for a manual installation while the server cannot be reached; an older one allows a downgrade. Use files from a source you trust."), "hint"),
-    el("div", UPLOAD_HINT, "warnbox")],
-  [{text: t("Cancel")}, {text: t("Upload"), kind: "primary", action: async () => {
-    const file = input.files && input.files[0];
-    if (!file) { message(title, t("No file selected."), "error", "upload"); return; }
-    if (file.size > 64 * 1048576) { message(title, t("Firmware larger than 64 MB."), "error", "upload"); return; }
+    el("div", UPLOAD_HINT, "warnbox"), error.line];
+  // A refused file brings back this step with the chosen file and the error
+  const form = () => modal(title, content, [{text: t("Cancel")}, {text: t("Upload"), kind: "primary", action: async () => {
+    const file = chooser.files && chooser.files[0];
+    if (!file) { error.show(t("No file selected.")); return; }
+    if (file.size > 64 * 1048576) { error.show(t("Firmware larger than 64 MB.")); return; }
     const status = el("p", t("Uploading {name} …", {name: file.name}), "hint");
     modal(title, [status], [], "upload");
     const progress = (sent, total) => { status.textContent = `${t("Uploading {name} …", {name: file.name})} ${Math.floor(sent * 100 / total)} %`; };
-    try { uploadConfirm(await uploadFile(file, undefined, progress)); } catch (e) { message(title, e.message, "error", "upload"); }
+    let r;
+    try { r = await uploadFile(file, undefined, progress); } catch (e) { form(); error.show(e.message); return; }
+    uploadConfirm(r);
   }}], "upload");
+  form();
 }
 function uploadConfirm(r) {
   const title = t("Upload firmware");
@@ -274,26 +270,21 @@ function uploadConfirm(r) {
   for (const name of r.types) { const o = el("option", name); o.value = name; o.selected = name.toLowerCase() === String(r.detected.type || "").toLowerCase(); type.append(o); }
   // Beta versions (X.Y.Z-betaN) only while the option "Offer beta firmware" is on
   const beta = !!ui.state?.beta_firmware;
-  const version = el("input"); version.type = "text"; version.maxLength = beta ? 24 : 14; version.value = r.detected.version || "";
-  version.placeholder = beta ? t("e.g. 1.4.4 or 1.5.0-beta2") : t("e.g. 1.4.4");
-  const sha = el("input"); sha.type = "text"; sha.maxLength = 64; sha.placeholder = t("optional – compared with the file"); sha.spellcheck = false;
+  const version = input("text", {maxLength: beta ? 24 : 14, value: r.detected.version || "", placeholder: beta ? t("e.g. 1.4.4 or 1.5.0-beta2") : t("e.g. 1.4.4")});
+  const sha = input("text", {maxLength: 64, placeholder: t("optional – compared with the file"), spellcheck: false});
   const detected = r.detected.type || r.detected.version
     ? t("Read from the file: {type} · {version} – please check.", {type: r.detected.type || t("no firmware ID"), version: r.detected.version || t("no version")})
     : t("The file contains no readable firmware ID or version – please enter them.");
   const content = [valueList([[t("File"), r.filename], [t("Size"), mb(r.size)], shaRow(r.sha256)]), el("p", detected, "hint"),
-    box("label", "field", t("Firmware ID"), type), box("label", "field", beta ? t("Version (X.Y.Z or X.Y.Z-betaN)") : t("Version (stable, X.Y.Z)"), version), box("label", "field", t("Expected SHA-256"), sha)];
+    field(t("Firmware ID"), type), field(beta ? t("Version (X.Y.Z or X.Y.Z-betaN)") : t("Version (stable, X.Y.Z)"), version), field(t("Expected SHA-256"), sha)];
   if (r.duplicate) content.push(el("div", t("This file is already stored as {name}.", {name: r.duplicate}), "warnbox"));
-  const error = el("p", null, "bad"); error.hidden = true; error.setAttribute("role", "alert"); content.push(error);
+  const error = formError(); content.push(error.line);
   const cancel = () => api("api/firmware/upload/cancel", {token: r.token}).catch(() => {}).then(closeModal);
-  modal(title, content, [{text: t("Cancel"), action: cancel}, {text: t("Store"), kind: "primary", action: async () => {
+  modal(title, content, [{text: t("Cancel"), cancel: true, action: cancel}, {text: t("Store"), kind: "primary", action: async () => {
     try {
       const res = await api("api/firmware/upload/confirm", {token: r.token, type: type.value, version: version.value.trim(), sha256: sha.value.trim()});
       toast(t("{firmware} stored", {firmware: `${res.type} ${res.version}`})); closeModal();
-    } catch (e) {
-      // The upload stays staged: show the error and let the user correct the values
-      for (const b of $("dlg-btns").children) b.disabled = false;
-      error.textContent = e.message; error.hidden = false;
-    }
+    } catch (e) { error.show(e.message); }   // the upload stays staged: the user corrects the values
   }}], "upload");
 }
 $("fw-upload").prepend(icon("upload"));   // same icon as the upload dialog title, before the text (aria-hidden)

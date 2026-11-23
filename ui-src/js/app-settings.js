@@ -2,8 +2,8 @@
 // the firmware store block (export / import) in the card "Firmware & Storage" and the
 // card "Device Passwords" (several devices).
 import {
-  $, api, attachTip, box, closeModal, copyText, el, fmt, icon, iconButton, mb, message, messageBody, modal, section, ui,
-  t, uploadFile, valueList,
+  $, ackGate, api, attachTip, box, checkbox, closeModal, el, field, filePassword, fmt, fmtSize, formError, guarded, icon, iconButton, input,
+  mb, message, messageBody, modal, passwordCopy, section, startDownload, t, tn, ui, uploadFile, valueList,
 } from "./core.js";
 import {autoLanguage, languageChoice, LANGUAGES, setLanguage} from "./i18n.js";
 import {bulkPasswords} from "./device-settings.js";
@@ -37,8 +37,6 @@ export const OPTION_FIELDS = [
 // directly before this option
 const STORE_BEFORE = "import_max_mb";
 let settingsInputs = {};
-/** Size in MB, from 1 GB on in GB. */
-const size = n => n >= 1073741824 ? (n / 1073741824).toFixed(1) + " GB" : mb(n);
 /** Line under "Keep installed versions": storage of the versions the Gen2+ devices run
  *  (stored, downloaded by the next check with an estimated size) and the free space. */
 function installedNote(v) {
@@ -46,8 +44,8 @@ function installedNote(v) {
   const total = v.stored + v.pending, parts = [t("{n} stored ({size})", {n: v.stored, size: mb(v.stored_size)})];
   if (v.pending) parts.push(t("{n} downloaded at the next check", {n: v.pending}) +
     (v.pending_size ? " " + t("(about {mb} MB each)", {mb: Math.max(1, Math.round(v.pending_size / 1048576))}) : ""));
-  return t(total === 1 ? "1 installed version: {parts}." : "{n} installed versions: {parts}.", {n: total, parts: parts.join(", ")}) +
-    (v.free != null ? " " + t("Free: {size}.", {size: size(v.free)}) : "");
+  return tn(total, "1 installed version: {parts}.", "{n} installed versions: {parts}.", {parts: parts.join(", ")}) +
+    (v.free != null ? " " + t("Free: {size}.", {size: fmtSize(v.free)}) : "");
 }
 
 // The Shellys download the firmware from download_base_url, so it must point to Home
@@ -101,7 +99,7 @@ function suggestedBaseUrl() {
 function backupsNote(totals) {
   const where = t("Manage them in the Backups tab; a schedule with the action “Backup” stores them regularly.");
   if (!totals || !totals.count) return t("No backups are stored yet.") + " " + where;
-  const size = totals.size >= 1048576 ? mb(totals.size) : `${Math.max(1, Math.round(totals.size / 1024))} KB`;
+  const size = fmtSize(totals.size);
   const stored = totals.count === 1 ? t("1 backup of 1 device is stored ({size}), encrypted.", {size})
     : totals.devices === 1 ? t("{n} backups of 1 device are stored ({size}), encrypted.", {n: totals.count, size})
       : t("{n} backups of {devices} devices are stored ({size}), encrypted.", {n: totals.count, devices: totals.devices, size});
@@ -117,20 +115,16 @@ export function renderSettings() {
       if (key === STORE_BEFORE) form.append(storeBlock());
       const label = t(english), desc = t(descEn);
       const id = "opt-" + key, lab = el("label", label); lab.htmlFor = id;
-      let input;
-      if (type === "bool") { input = el("input"); input.type = "checkbox"; input.checked = !!o[key]; }
-      else if (type === "number") { input = el("input"); input.type = "number"; input.value = o[key]; }
-      else if (type === "time") { input = el("input"); input.type = "time"; input.step = 60; input.value = o[key] || ""; }
-      else if (type === "pins") input = pinsEditor(o[key] || []);
-      else { input = el("input"); input.type = "text"; input.value = o[key] ?? ""; }
-      if (key === "download_base_url" && !input.value) input.value = suggestedBaseUrl();   // only a suggestion: counts as unsaved
-      input.id = id; settingsInputs[key] = input;
+      const control = type === "bool" ? input("checkbox", {checked: !!o[key]}) : type === "number" ? input("number", {value: o[key]})
+        : type === "time" ? input("time", {step: 60, value: o[key] || ""}) : type === "pins" ? pinsEditor(o[key] || []) : input("text", {value: o[key] ?? ""});
+      if (key === "download_base_url" && !control.value) control.value = suggestedBaseUrl();   // only a suggestion: counts as unsaved
+      control.id = id; settingsInputs[key] = control;
       // One block per option: name with help icon, control (and the live warning of
       // the download base URL). On wide screens the block is "display: contents", so the
       // name/control grid is unchanged. The help text is a tooltip of the name and the
       // icon; it stays in the page (visually hidden) as description of the control.
       const help = el("div", desc, "sr-only"); help.id = id + "-help";
-      input.setAttribute("aria-describedby", help.id);
+      control.setAttribute("aria-describedby", help.id);
       const info = el("button", null, "icon help"); info.type = "button"; info.append(icon("info"));
       info.setAttribute("aria-label", t("Help: {name}", {name: label})); info.setAttribute("aria-describedby", help.id);
       attachTip(lab, () => desc, true); attachTip(info, () => desc, true);
@@ -138,18 +132,18 @@ export function renderSettings() {
       if (key === "download_base_url") {   // live hint while typing, no blocking
         warn = el("div", null, "desc warnc"); warn.id = id + "-warn"; warn.setAttribute("role", "status");
         // Note under the field while it still holds the suggested address
-        const suggested = !o[key] && input.value;
+        const suggested = !o[key] && control.value;
         suggest = el("div", SUGGESTION_NOTE, "desc"); suggest.id = id + "-suggest";
         const update = () => {
-          warn.textContent = lanHint(input.value.trim()); warn.hidden = !warn.textContent;
-          suggest.hidden = !(suggested && input.value === suggested);
+          warn.textContent = lanHint(control.value.trim()); warn.hidden = !warn.textContent;
+          suggest.hidden = !(suggested && control.value === suggested);
         };
-        input.addEventListener("input", update); update();
-        input.setAttribute("aria-describedby", `${help.id} ${warn.id} ${suggest.id}`);
+        control.addEventListener("input", update); update();
+        control.setAttribute("aria-describedby", `${help.id} ${warn.id} ${suggest.id}`);
       }
       const note = key === "keep_installed" ? el("div", installedNote(o.installed_versions), "desc set-note")
         : key === "backup_keep" ? el("div", backupsNote(ui.state && ui.state.backup_totals), "desc set-note") : null;
-      form.append(box("div", `set-field t-${type}`, box("div", "set-name", lab, info), box("div", "set-control", input), help, warn, suggest, note));
+      form.append(box("div", `set-field t-${type}`, box("div", "set-name", lab, info), box("div", "set-control", control), help, warn, suggest, note));
     }
     return box("div", "card", box("div", "card-head", el("h2", t(group))), box("div", "card-body", form));
   });
@@ -196,8 +190,8 @@ function changelogNote() {
 function pinsEditor(pins) {
   const wrap = el("div", null, "pins"), rows = el("div"); rows.style.flexDirection = "column";
   const addRow = (host = "", sha = "") => {
-    const h = el("input"), s = el("input"); h.type = s.type = "text"; h.value = host; s.value = sha;
-    h.placeholder = t("host, e.g. updates.shelly.cloud"); s.placeholder = t("SHA-256 AB:CD:…"); s.className = "mono";
+    const h = input("text", {value: host, placeholder: t("host, e.g. updates.shelly.cloud")});
+    const s = input("text", {value: sha, placeholder: t("SHA-256 AB:CD:…"), className: "mono"});
     h.setAttribute("aria-label", t("Host")); s.setAttribute("aria-label", t("SHA-256 fingerprint"));
     const row = box("div", null, h, s, iconButton("delete", t("Remove entry"), () => row.remove(), "red"));
     rows.append(row);
@@ -232,14 +226,12 @@ function saveOptions() {
   if (!Object.keys(changes).length) { message(t("Settings"), t("Nothing changed.")); return; }
   const names = Object.keys(changes).map(k => t(OPTION_FIELDS.find(f => f[0] === k)[1]));
   modal(t("Save settings?"), [el("p", t("Changed: ") + names.join(", ")), el("p", t("The app restarts to apply the settings; this page reconnects automatically."), "hint")],
-    [{text: t("Cancel")}, {text: t("Save & restart"), kind: "primary", action: async () => {
-      try {
-        const r = await api("api/settings", changes);
-        if (!r.restarting) { message(t("Settings"), t("Nothing changed.")); return; }
-        modal(t("Settings saved"), [el("p", t("The app is restarting …"), "hint")], []);
-        waitForRestart();
-      } catch (e) { message(t("Save settings?"), e.message, "error"); }   // keeps the title of this dialog
-    }}]);
+    [{text: t("Cancel")}, {text: t("Save & restart"), kind: "primary", action: () => guarded(t("Save settings?"), undefined, async () => {
+      const r = await api("api/settings", changes);
+      if (!r.restarting) { message(t("Settings"), t("Nothing changed.")); return; }
+      modal(t("Settings saved"), [el("p", t("The app is restarting …"), "hint")], []);
+      waitForRestart();
+    })}]);
 }
 /** Poll until the restarted app answers again, then reload the page. */
 function waitForRestart() {
@@ -261,8 +253,8 @@ function waitForRestart() {
 /** Block "Firmware store" of the card "Firmware & Storage" with the Export and Import
  *  buttons (full width of the card, between the options). */
 function storeBlock() {
-  const ex = el("button"); ex.append(icon("exportIcon"), " " + t("Export store")); ex.id = "store-export"; ex.onclick = exportDialog;
-  const im = el("button"); im.append(icon("importIcon"), " " + t("Import store")); im.id = "store-import"; im.onclick = importDialog;
+  const ex = el("button", null, "icon-text sm"); ex.append(icon("exportIcon"), " " + t("Export store")); ex.id = "store-export"; ex.onclick = exportDialog;
+  const im = el("button", null, "icon-text sm"); im.append(icon("importIcon"), " " + t("Import store")); im.id = "store-import"; im.onclick = importDialog;
   return box("div", "set-store", el("div", t("Firmware store"), "set-store-name"),
     el("p", t("Move the complete firmware store to another Home Assistant instance: export it as one ZIP file (sealed with a password) and import it there. The backups of the device settings are part of the export. Device passwords are not exported."), "hint"),
     box("div", "store-btns", ex, im));
@@ -284,7 +276,7 @@ function languageCard() {
 }
 /** Settings card that opens the dialog for passwords of several devices. */
 function passwordsCard() {
-  const pw = el("button"); pw.append(icon("lock"), " " + t("Device passwords")); pw.id = "set-passwords"; pw.onclick = bulkPasswords;
+  const pw = el("button", null, "icon-text sm"); pw.append(icon("lock"), " " + t("Device passwords")); pw.id = "set-passwords"; pw.onclick = bulkPasswords;
   return box("div", "card", box("div", "card-head", el("h2", t("Device Passwords"))), box("div", "card-body",
     el("p", t("Store the existing password or set a new one on several devices in one step (each device is set, verified and stored on its own)."), "hint"),
     box("div", "store-btns", pw)));
@@ -300,52 +292,47 @@ async function exportDialog() {
   let x;
   try { x = await api("api/firmware/export", {}); } catch (e) { message(EXPORT_TITLE, e.message, "error", "exportIcon"); return; }
   const prepared = Date.now();
-  const out = el("input"); out.type = "text"; out.readOnly = true; out.value = x.password; out.className = "mono";
-  out.setAttribute("aria-label", t("Export password"));
-  // Not copyable (browser refuses both ways): the password is selected for a manual copy
-  const copy = iconButton("copy", t("Copy password"), async () => { if (!await copyText(x.password)) { out.focus(); out.select(); } });
-  const ack = el("input"); ack.type = "checkbox";
+  const [out, copy] = passwordCopy(x.password, t("Export password"), "mono");
+  const [ack, ackLabel] = checkbox(t("I have saved the password"));
   const files = t("{files} ({downloads} downloaded, {uploads} uploaded, {imports} imported)", {files: x.files, downloads: x.downloads, uploads: x.uploads, imports: x.imports || 0});
   modal(EXPORT_TITLE, [
-    valueList([[t("Files"), files], [t("Backups"), x.backups ? t(x.backups === 1 ? "{n} backup of device settings" : "{n} backups of device settings", {n: x.backups}) : null],
+    valueList([[t("Files"), files], [t("Backups"), x.backups ? tn(x.backups, "{n} backup of device settings", "{n} backups of device settings") : null],
       [t("Size"), mb(x.size)], [t("File"), x.filename]]),
-    box("label", "field", t("Export password (generated, shown only now)"), box("div", "pw-row", out, copy)),
+    field(t("Export password (generated, shown only now)"), box("div", "pw-row", out, copy)),
     el("p", t("The password seals the file: the import checks that no file and no entry was changed. It is not stored anywhere – the file cannot be imported without it."), "hint"),
-    box("label", "check", ack, " " + t("I have saved the password"))],
+    ackLabel],
   [{text: t("Cancel")}, {text: t("Export"), kind: "primary", action: () => {
     // The server refuses the download of an expired export; a download through a link
     // cannot show that answer, so the dialog checks the time itself
     if (Date.now() - prepared > x.expires_in * 1000) { message(EXPORT_TITLE, t("Export expired – please start it again."), "error", "exportIcon"); return; }
-    // Download through a link: the file is streamed to disk by the browser, never held in memory
-    const a = el("a"); a.href = `api/firmware/export/${encodeURIComponent(x.token)}`; a.download = x.filename;
-    document.body.append(a); a.click(); a.remove();
+    startDownload(`api/firmware/export/${encodeURIComponent(x.token)}`, x.filename);
     modal(EXPORT_TITLE, [messageBody(t("The export is being created – your browser downloads it in a moment. Damaged stored files are left out (see the log)."), "success")],
       undefined, "exportIcon");
   }}], "exportIcon");
-  const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; };
+  ackGate(ack);
 }
 /** Import step 1: export file and its password; the file is uploaded and checked
- *  completely (seal, every file) before anything is stored. */
+ *  completely (seal, every file) before anything is stored. A refused file brings back
+ *  this step with the file, the password and the error. */
 export function importDialog() {
   const max = (ui.state && ui.state.import_max_mb) || 100;
-  const file = el("input"); file.type = "file"; file.accept = ".zip,application/zip";
-  const pw = el("input"); pw.type = "text"; pw.className = "mono"; pw.placeholder = t("XXXX-XXXX-XXXX-XXXX-XXXX");
-  pw.autocomplete = "off"; pw.spellcheck = false; pw.maxLength = 64;
-  modal(IMPORT_TITLE, [
+  const file = input("file", {accept: ".zip,application/zip"}), pw = filePassword(t("XXXX-XXXX-XXXX-XXXX-XXXX")), error = formError();
+  const content = [
     el("p", t("Choose a file created by “Export store” of this app and enter its export password. The file is checked completely before anything is stored."), "hint"),
-    box("label", "field", t("Export file (.zip, max. {max} MB – see “Max. import size”)", {max}), file),
-    box("label", "field", t("Export password"), pw),
-    el("div", IMPORT_OWN, "warnbox")],
-  [{text: t("Cancel")}, {text: t("Check file"), kind: "primary", action: async () => {
+    field(t("Export file (.zip, max. {max} MB – see “Max. import size”)", {max}), file),
+    field(t("Export password"), pw),
+    el("div", IMPORT_OWN, "warnbox"), error.line];
+  const form = () => modal(IMPORT_TITLE, content, [{text: t("Cancel")}, {text: t("Check file"), kind: "primary", action: async () => {
     const f = file.files[0];
-    if (!f) { message(IMPORT_TITLE, t("No file chosen."), "error", "importIcon"); return; }
-    if (f.size > max * 1048576) { message(IMPORT_TITLE, t("The file is larger than the maximum import size ({max} MB). Raise “Max. import size” in the settings first.", {max}), "error", "importIcon"); return; }
-    if (!pw.value.trim()) { message(IMPORT_TITLE, t("Enter the export password."), "error", "importIcon"); return; }
-    await checkImport(f, pw.value);
+    if (!f) { error.show(t("No file chosen.")); return; }
+    if (f.size > max * 1048576) { error.show(t("The file is larger than the maximum import size ({max} MB). Raise “Max. import size” in the settings first.", {max})); return; }
+    if (!pw.value.trim()) { error.show(t("Enter the export password.")); return; }
+    await checkImport(f, pw.value, text => { form(); error.show(text); });
   }}], "importIcon");
+  form();
 }
-/** Upload and check; shows the summary or the error (the staged file is discarded). */
-async function checkImport(f, password) {
+/** Upload and check; shows the summary, or refused(error) (the staged file is discarded). */
+async function checkImport(f, password, refused) {
   const status = el("p", t("Uploading {name} ({size}) …", {name: f.name, size: mb(f.size)}), "hint");
   modal(IMPORT_TITLE, [status], [], "importIcon");
   let token = null;
@@ -356,7 +343,7 @@ async function checkImport(f, password) {
     importSummary(token, f.name, await api("api/firmware/import/check", {token, password}));
   } catch (e) {
     if (token) api("api/firmware/import/cancel", {token}).catch(() => {});
-    message(IMPORT_TITLE, e.message, "error", "importIcon");
+    refused(e.message);
   }
 }
 const IMPORT_GROUPS = [["new", t("new – will be stored as “Imported”"), "p-uptodate"], ["same", t("already stored – data added if missing"), ""],
@@ -373,26 +360,24 @@ function importSummary(token, name, r) {
       rows.length ? box("ul", "imp-list", ...rows.map(e => el("li", line(e)))) : el("p", t("none"), "hint"));
     return d;
   });
-  const n = r.new.length, label = n ? t(n === 1 ? "Import 1 file" : "Import {n} files", {n}) : t("Finish import");
+  const n = r.new.length, label = n ? tn(n, "Import 1 file", "Import {n} files") : t("Finish import");
   const cancel = async () => { await api("api/firmware/import/cancel", {token}).catch(() => {}); closeModal(); };
-  const ack = el("input"); ack.type = "checkbox";
+  const [ack, ackLabel] = checkbox(t("I created this export myself or I trust its source"));
   modal(IMPORT_TITLE, [
-    messageBody(t(r.files === 1 ? "Seal and the file checked – nothing was changed since the export." : "Seal and all {n} files checked – nothing was changed since the export.", {n: r.files}), "success"),
+    messageBody(tn(r.files, "Seal and the file checked – nothing was changed since the export.", "Seal and all {n} files checked – nothing was changed since the export."), "success"),
     valueList([[t("File"), name], [t("Exported"), r.exported ? fmt(r.exported) : t("unknown")], [t("Size"), mb(r.size)],
       [t("Backups"), r.backups ? t("{n} in the file · {new} new", {n: r.backups, new: r.backups_new || 0}) : null]]),
     section(t("Result"), box("div", "imp-groups", ...groups)),
     el("p", IMPORT_MARK, "hint"),
-    box("label", "check", ack, " " + t("I created this export myself or I trust its source"))],
-  [{text: t("Cancel"), action: cancel}, {text: label, kind: "primary", action: async () => {
-    try {
-      const c = await api("api/firmware/import/confirm", {token, acknowledged: ack.checked});
-      const parts = [t(c.stored === 1 ? "1 new file stored as “Imported”" : "{n} new files stored as “Imported”", {n: c.stored})];
-      if (c.updated) parts.push(t(c.updated === 1 ? "data added to 1 stored file" : "data added to {n} stored files", {n: c.updated}));
-      if (c.conflicts) parts.push(t(c.conflicts === 1 ? "1 conflict – the stored files were kept" : "{n} conflicts – the stored files were kept", {n: c.conflicts}));
-      if (c.backups) parts.push(t(c.backups === 1 ? "{n} backup of device settings imported" : "{n} backups of device settings imported", {n: c.backups}));
-      message(IMPORT_TITLE, parts.join(", ") + ".", c.conflicts ? "warning" : "success", "importIcon");
-    } catch (e) { message(IMPORT_TITLE, e.message, "error", "importIcon"); }
-  }}], "importIcon");
+    ackLabel],
+  [{text: t("Cancel"), cancel: true, action: cancel}, {text: label, kind: "primary", action: () => guarded(IMPORT_TITLE, "importIcon", async () => {
+    const c = await api("api/firmware/import/confirm", {token, acknowledged: ack.checked});
+    const parts = [tn(c.stored, "1 new file stored as “Imported”", "{n} new files stored as “Imported”")];
+    if (c.updated) parts.push(tn(c.updated, "data added to 1 stored file", "data added to {n} stored files"));
+    if (c.conflicts) parts.push(tn(c.conflicts, "1 conflict – the stored files were kept", "{n} conflicts – the stored files were kept"));
+    if (c.backups) parts.push(tn(c.backups, "{n} backup of device settings imported", "{n} backups of device settings imported"));
+    message(IMPORT_TITLE, parts.join(", ") + ".", c.conflicts ? "warning" : "success", "importIcon");
+  })}], "importIcon");
   // Enabled once the user states to have created the export or to trust its source
-  const go = $("dlg-btns").lastChild; go.disabled = true; ack.onchange = () => { go.disabled = !ack.checked; };
+  ackGate(ack);
 }

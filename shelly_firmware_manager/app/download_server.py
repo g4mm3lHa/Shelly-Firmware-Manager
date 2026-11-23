@@ -16,7 +16,7 @@ import data_paths
 from aiohttp import web
 from aiohttp.typedefs import Handler
 from manager import Manager
-from shelly import FW_NAME_RE
+from shelly_cloud import FW_NAME_RE
 
 log = logging.getLogger("sfm.download")
 

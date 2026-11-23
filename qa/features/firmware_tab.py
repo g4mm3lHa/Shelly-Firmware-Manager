@@ -384,6 +384,10 @@ def _firmware_delete_and_upload(c, rows):
     # Upload: pre-filled form; wrong SHA shows an inline error (first case), store (last case)
     f.locator("#fw-upload").click()
     check(f"{case}: upload dialog with title icon", f.locator("#dlg-title svg.ti-upload").count() == 1)
+    f.locator("#dlg-btns button", has_text="Upload").click()   # no file chosen: the error stays in this step
+    err = f.locator("#dlg-body .bad")
+    check(f"{case}: upload without a file: error in the step", wait_until(err.is_visible) and "No file selected" in err.text_content()
+          and f.locator("#dlg-body input[type=file]").count() == 1)
     f.locator("#dlg-body input[type=file]").set_input_files(
         files=[{"name": "plüs1-1.1.0.zip", "mimeType": "application/zip", "buffer": firmware_zip()}])
     page.screenshot(path=out / f"{case}-upload-choose.png")

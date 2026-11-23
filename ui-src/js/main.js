@@ -1,5 +1,7 @@
 // Entry module: rendering, tabs and polling. Importing it loads all other modules.
-import {$, api, attachTip, box, closeModal, el, fmt, getState, hideTip, keepFocus, loadLocal, message, modal, saveLocal, setTip, t, ui} from "./core.js";
+import {
+  $, api, attachTip, box, closeModal, confirmDialog, el, fmt, getState, guarded, hideTip, keepFocus, loadLocal, message, modal, saveLocal, setTip, t, ui,
+} from "./core.js";
 import {lang} from "./i18n.js";
 import {buildChooser, closeRowMenu, loadPrefs, renderDevices, syncChooser} from "./devices.js";
 import {renderFirmware} from "./firmware.js";
@@ -17,7 +19,7 @@ export function render(force) {
   const s = ui.state;
   if (!s) return;
   renderMeta(s);
-  $("busy").textContent = s.storage_error ? t("Storage error: {error}", {error: s.storage_error}) : s.progress ? "" : s.busy || "";
+  $("busy").textContent = s.storage_error ? t("Storage error: {error}", {error: s.storage_error}) : s.busy_note || "";
   $("busy").classList.toggle("error", !!s.storage_error);
   renderProgress(s.progress);
   renderNotice(s.first_start_open ? {issue: "first_start"} : s.download_base || {});
@@ -118,17 +120,14 @@ const WELCOME_TITLE = t("Welcome – import a firmware store?");
 /** Answer the first-start question with "Skip": checks may run from now on. An error
  *  keeps the title of the welcome dialog when it was skipped there (title). */
 async function skipFirstStart(title) {
-  try { await api("api/first-start/skip", {}); closeModal(); }
-  catch (e) { message(title || t("First start"), e.message, "error", title ? "importIcon" : undefined); }
+  await guarded(title || t("First start"), title ? "importIcon" : undefined, async () => { await api("api/first-start/skip", {}); closeModal(); });
 }
 /** Confirm that the former example URL really is the address of Home Assistant. */
 function confirmDownloadBase(url) {
-  modal(t("Confirm download base URL"), [el("p", t("Is {url} really the LAN address of Home Assistant with the host port 8098?", {url})),
-    el("p", t("The Shellys download the firmware from this address. If it is wrong, every update fails. The confirmation ends when the address is changed."), "hint")],
-  [{text: t("Cancel")}, {text: t("Yes, this is correct"), kind: "primary", action: async () => {
-    try { await api("api/settings/download-base/confirm", {url}); closeModal(); }
-    catch (e) { message(t("Confirm download base URL"), e.message, "error"); }   // keeps the title of this dialog
-  }}]);
+  confirmDialog({title: t("Confirm download base URL"), button: t("Yes, this is correct"), kind: "primary",
+    content: [el("p", t("Is {url} really the LAN address of Home Assistant with the host port 8098?", {url})),
+      el("p", t("The Shellys download the firmware from this address. If it is wrong, every update fails. The confirmation ends when the address is changed."), "hint")],
+    action: async () => { await api("api/settings/download-base/confirm", {url}); closeModal(); }});
 }
 const PHASES = {queued: t("starting"), registry: t("reading the device list"), devices: t("checking devices"),
   download: t("downloading firmware"), changelog: t("checking firmware information")};
@@ -165,7 +164,7 @@ let timer = 0, inflight = false;
 // lasts longer is shown.
 const AUTH_RETRY_MS = [1000, 3000, 8000, 15000];
 let authRetry = 0;
-export let queued = false;   // read by devices.js
+let queued = false;   // a refresh asked for while one runs: true (forced) or "again"
 const POLL_IDLE_MS = 30000, POLL_BUSY_MS = 3000;
 // A schedule run or scheduled installation starts at its time: the page refreshes this
 // long after it, so the Devices, Schedules and Logs tabs show it at once

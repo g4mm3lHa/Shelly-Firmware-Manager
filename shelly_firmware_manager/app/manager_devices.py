@@ -1,4 +1,4 @@
-"""Manager, layer 3 of 8: reading and changing a single Shelly – identity, settings,
+"""Manager, layer 4 of 9: reading and changing a single Shelly – identity, settings,
 feature states, restart and the device password. The device password can also be
 stored or set on several devices in one step (set_passwords): each device is still
 set, verified, stored and logged on its own.
@@ -19,7 +19,7 @@ from manager_core import (
     ACTIVITY_CHECKING, ACTIVITY_DOWNLOADING, ACTIVITY_RELOADING, BATTERY_FROM_DEVICE, Device, STATUS_AVAILABLE,
     STATUS_CURRENT, STATUS_INSTALLING, STATUS_READY, STATUS_UNCLEAR, severity_of, unexpected_text,
 )
-from manager_store import FirmwareStore
+from manager_transfer import Transfers
 
 log = logging.getLogger("sfm.manager")
 
@@ -33,7 +33,7 @@ SETTINGS_ANSWER = (
 )
 
 
-class DeviceSettings(FirmwareStore):
+class DeviceSettings(Transfers):
     """Device settings and the per-device password."""
 
     # ---------------------------------------------------------------------------------- Reading the device

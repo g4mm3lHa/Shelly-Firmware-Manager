@@ -211,7 +211,9 @@ def anchor_for(clock: str, now: float, tz: tzinfo) -> str:
 
 
 def next_run(item: dict[str, Any], after: float, tz: tzinfo) -> float | None:
-    """Epoch of the first run of a schedule strictly after `after`; None while it is off."""
+    """Epoch of the first run of a schedule strictly after `after`; None while it is off.
+    Clock times follow the local time of Home Assistant across DST changes like the
+    check schedule (see the module text)."""
     if not item.get("on"):
         return None
     clock, repeat = str(item["time"]), item["repeat"]

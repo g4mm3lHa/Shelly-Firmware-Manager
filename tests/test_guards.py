@@ -19,6 +19,8 @@ import app_options
 import manager
 import pytest
 import shelly
+import shelly_cloud
+import shelly_net
 import store_transfer
 import tls
 from conftest import OPTIONS
@@ -34,7 +36,7 @@ from store_transfer import TransferError
 )
 def test_lan_addresses_accepted(address):
     """The private IPv4 ranges and the unique local IPv6 addresses are accepted."""
-    assert shelly.is_lan_address(ipaddress.ip_address(address))
+    assert shelly_net.is_lan_address(ipaddress.ip_address(address))
 
 
 @pytest.mark.parametrize(
@@ -55,14 +57,14 @@ def test_lan_addresses_accepted(address):
 def test_other_addresses_refused(address):
     """Everything outside the fixed list is refused – whatever the Python version in
     use counts as "private"."""
-    assert not shelly.is_lan_address(ipaddress.ip_address(address))
+    assert not shelly_net.is_lan_address(ipaddress.ip_address(address))
 
 
 async def test_device_origin_from_a_private_address():
     """An http URL with a private address becomes the origin; the port is kept."""
-    assert await shelly.resolve_device_origin("http://192.168.1.10/") == "http://192.168.1.10:80"
-    assert await shelly.resolve_device_origin("http://10.0.0.7:8080/path") == "http://10.0.0.7:8080"
-    assert await shelly.resolve_device_origin("http://[fd00::7]/") == "http://[fd00::7]:80"
+    assert await shelly_net.resolve_device_origin("http://192.168.1.10/") == "http://192.168.1.10:80"
+    assert await shelly_net.resolve_device_origin("http://10.0.0.7:8080/path") == "http://10.0.0.7:8080"
+    assert await shelly_net.resolve_device_origin("http://[fd00::7]/") == "http://[fd00::7]:80"
 
 
 @pytest.mark.parametrize(
@@ -78,7 +80,7 @@ async def test_device_origin_from_a_private_address():
 async def test_device_origin_refused(url):
     """No usable or no private address: the device is never contacted."""
     with pytest.raises(ShellyError):
-        await shelly.resolve_device_origin(url)
+        await shelly_net.resolve_device_origin(url)
 
 
 async def test_device_origin_needs_every_resolved_address_private(monkeypatch):
@@ -89,9 +91,9 @@ async def test_device_origin_needs_every_resolved_address_private(monkeypatch):
         return [(None, None, None, "", (address, port)) for address in answers[host]]
 
     monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", getaddrinfo)
-    assert await shelly.resolve_device_origin("http://good.lan/") == "http://10.0.0.20:80"
+    assert await shelly_net.resolve_device_origin("http://good.lan/") == "http://10.0.0.20:80"
     with pytest.raises(ShellyError, match=r"203\.0\.113\.5 is not in a private network"):
-        await shelly.resolve_device_origin("http://mixed.lan/")
+        await shelly_net.resolve_device_origin("http://mixed.lan/")
 
 
 # ---------------------------------------------------------------- Device authentication
@@ -220,7 +222,7 @@ def test_fingerprint_set_accepts_only_its_certificates():
 )
 def test_download_sources_accepted(url):
     """Only servers below shelly.cloud."""
-    shelly.check_download_url(url)
+    shelly_cloud.check_download_url(url)
 
 
 @pytest.mark.parametrize(
@@ -234,14 +236,14 @@ def test_download_sources_accepted(url):
 def test_download_sources_refused(url):
     """No other host, no credentials, no other scheme."""
     with pytest.raises(ShellyError):
-        shelly.check_download_url(url)
+        shelly_cloud.check_download_url(url)
 
 
 def test_gen2_downloads_are_https_only():
     """https_only (Gen2+ firmware) refuses plain http even from the manufacturer."""
-    shelly.check_download_url("https://fwcdn.shelly.cloud/x", https_only=True)
+    shelly_cloud.check_download_url("https://fwcdn.shelly.cloud/x", https_only=True)
     with pytest.raises(ShellyError):
-        shelly.check_download_url("http://fwcdn.shelly.cloud/x", https_only=True)
+        shelly_cloud.check_download_url("http://fwcdn.shelly.cloud/x", https_only=True)
 
 
 def test_version_order():
@@ -264,9 +266,9 @@ def test_file_names_and_options_take_no_trailing_line_break(tmp_path):
     and Gen1 types are compared as a whole."""
     name = "a" * 64 + ".zip"
     (tmp_path / name).write_bytes(b"x")
-    assert shelly.file_sha256(tmp_path, name) == hashlib.sha256(b"x").hexdigest()
+    assert shelly_cloud.file_sha256(tmp_path, name) == hashlib.sha256(b"x").hexdigest()
     with pytest.raises(ShellyError):
-        shelly.file_sha256(tmp_path, name + "\n")
+        shelly_cloud.file_sha256(tmp_path, name + "\n")
     for changes in ({"check_time": "02:45\n"}, {"download_base_url": "http://192.168.1.2:8098\n"}):
         with pytest.raises(ValueError):
             app_options.merge(OPTIONS, changes)
@@ -355,37 +357,37 @@ async def test_device_address_problems_have_a_reason(monkeypatch):
     """No usable address in the registry: AddressError with the reason (missing, a
     host name that does not resolve, an address outside the private networks)."""
     for url in (None, "", "https://192.168.1.5/", "http://user:pw@192.168.1.5/", "http://[::1"):
-        with pytest.raises(shelly.AddressError) as err:
-            await shelly.resolve_device_origin(url)
-        assert err.value.reason == shelly.ADDRESS_MISSING
-    with pytest.raises(shelly.AddressError) as err:
-        await shelly.resolve_device_origin("http://8.8.8.8/")
-    assert err.value.reason == shelly.ADDRESS_NOT_PRIVATE
+        with pytest.raises(shelly_net.AddressError) as err:
+            await shelly_net.resolve_device_origin(url)
+        assert err.value.reason == shelly_net.ADDRESS_MISSING
+    with pytest.raises(shelly_net.AddressError) as err:
+        await shelly_net.resolve_device_origin("http://8.8.8.8/")
+    assert err.value.reason == shelly_net.ADDRESS_NOT_PRIVATE
     loop = asyncio.get_running_loop()
 
     async def unresolved(*_args, **_kwargs):
         raise socket.gaierror(-2, "Name or service not known")
 
     monkeypatch.setattr(loop, "getaddrinfo", unresolved)
-    with pytest.raises(shelly.AddressError) as err:
-        await shelly.resolve_device_origin("http://garage.local/")
-    assert err.value.reason == shelly.ADDRESS_UNRESOLVED and "garage.local" in str(err.value)
+    with pytest.raises(shelly_net.AddressError) as err:
+        await shelly_net.resolve_device_origin("http://garage.local/")
+    assert err.value.reason == shelly_net.ADDRESS_UNRESOLVED and "garage.local" in str(err.value)
 
 
 def test_local_host_name_of_the_device_id():
     """<device id>.local only for an ID that is a valid host label (lower case)."""
-    assert shelly.local_host_name("shellyplus1pm-A0DD6C29C3E0") == "shellyplus1pm-a0dd6c29c3e0.local"
-    assert shelly.local_host_name("shelly1-B929CC") == "shelly1-b929cc.local"
+    assert shelly_net.local_host_name("shellyplus1pm-A0DD6C29C3E0") == "shellyplus1pm-a0dd6c29c3e0.local"
+    assert shelly_net.local_host_name("shelly1-B929CC") == "shelly1-b929cc.local"
     for bad in (None, "", "-x", "a.b", "a b", "x" * 64, "evil/..", "é"):
-        assert shelly.local_host_name(bad) is None
+        assert shelly_net.local_host_name(bad) is None
 
 
 def test_host_name_of_the_registry_entry():
     """Host name column: the host name of configuration_url, never an IP address."""
-    assert shelly.host_name_of("http://shellyplus1-abc.local/") == "shellyplus1-abc.local"
-    assert shelly.host_name_of("http://192.168.1.5:8080/") is None
-    assert shelly.host_name_of("http://[fd00::5]/") is None
-    assert shelly.host_name_of(None) is None and shelly.host_name_of("http://[::1") is None
+    assert shelly_net.host_name_of("http://shellyplus1-abc.local/") == "shellyplus1-abc.local"
+    assert shelly_net.host_name_of("http://192.168.1.5:8080/") is None
+    assert shelly_net.host_name_of("http://[fd00::5]/") is None
+    assert shelly_net.host_name_of(None) is None and shelly_net.host_name_of("http://[::1") is None
 
 
 async def test_battery_sensors_of_the_entity_registry(net):

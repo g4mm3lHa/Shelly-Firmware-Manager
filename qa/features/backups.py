@@ -246,7 +246,7 @@ def _download_import(c):
         f.locator("#dlg input[type=file]").set_input_files(str(path))
         f.locator("#dlg .bk-form input[type=text]").fill(secret)
         check_button.click()
-        wait_until(lambda: f.locator("#dlg .prechk, #dlg-body .msg, #dlg-btns button:text-is('Back')").count() > 0, timeout=15)
+        wait_until(lambda: f.locator("#dlg .prechk, #dlg-body .msg, #dlg-body p.bad:not([hidden])").count() > 0, timeout=15)
         return blocked
 
     blocked = import_file(password)
@@ -263,12 +263,13 @@ def _download_import(c):
     check(f"{case}: delete – the device has no backup left", "No backup" in dialog(f)["body"], dialog(f)["body"][:120])
     import_file("wrong-password")
     d = dialog(f)
-    check(f"{case}: import – wrong password refused, way back", "Wrong password" in d["body"] and d["buttons"] == [["Back", False]],
-          d["body"][:120])
-    f.locator("#dlg-btns button", has_text="Back").click()
-    f.wait_for_selector("#dlg input[type=file]")
-    f.locator("#dlg-btns button", has_text="Cancel").click()
-    f.wait_for_selector("#dlg-btns button:text-is('Import backup')")
+    kept = f.evaluate("""() => { const file = document.querySelector('#dlg input[type=file]'), pw = document.querySelector('#dlg .bk-form input[type=text]');
+      return !!file && file.files.length === 1 && !!pw && pw.value === 'wrong-password'; }""")
+    check(f"{case}: import – wrong password refused, the error stays in the step with file and password",
+          "Wrong password" in d["body"] and kept and d["buttons"] == [["Cancel", False], ["Check file", False]], d["body"][:120])
+    page.keyboard.press("Escape")   # Escape does what "Cancel" does: back to the device's backups
+    check(f"{case}: import – Escape returns to the device's backups", wait_until(
+        lambda: f.locator("#dlg[open] #dlg-btns button:text-is('Import backup')").count() == 1), dialog(f)["title"])
     import_file(password)
     d = dialog(f)
     check(f"{case}: import – check list and Import backup", "can be imported" in d["body"] and "Seal intact" in d["body"]
@@ -319,15 +320,22 @@ def _logs(c):
     f.locator("#tab-devices").click()
     refresh_state(page, f)
     mark = f.locator("#tab-logs .tab-unread")
+    # The run of "Back up now" before reached not every device that should answer: an error
+    check(f"{case}: Logs – mark for the backup run with a device not stored", mark.is_visible())
+
+    def state(error):
+        def answer(route):
+            headers = {k: v for k, v in route.request.headers.items() if k.lower() != "if-none-match"}
+            s = route.fetch(headers=headers).json()
+            s["log_latest_error"] = s["log_latest"] if error else None
+            route.fulfill(json=s)
+        return answer
+
+    page.route("**/api/state", state(False))
+    refresh_state(page, f)
     check(f"{case}: Logs – no mark for warnings and successes", mark.is_hidden())
-
-    def state(route):
-        headers = {k: v for k, v in route.request.headers.items() if k.lower() != "if-none-match"}
-        s = route.fetch(headers=headers).json()
-        s["log_latest_error"] = s["log_latest"]
-        route.fulfill(json=s)
-
-    page.route("**/api/state", state)
+    page.unroute("**/api/state")
+    page.route("**/api/state", state(True))
     refresh_state(page, f)
     check(f"{case}: Logs – mark for an unread error entry", mark.is_visible() and mark.inner_text().startswith("!"), mark.inner_text())
     red = f.evaluate("""() => { const probe = document.createElement('div'); probe.style.background = 'var(--error-color)';
@@ -407,11 +415,11 @@ def _keyboard(c):
     f.locator("#rowmenu button", has_text="Device password").click()
     f.wait_for_selector("#dlg[open]")
     named = f.evaluate("() => document.getElementById(document.getElementById('dlg').getAttribute('aria-labelledby')).textContent")
-    check(f"{case}: keyboard – dialog named by its title, focus on the title", "Device password" in named
-          and f.evaluate("() => document.activeElement.id") == "dlg-title", named)
-    f.locator("#dlg-btns button").last.click()  # next step without a password: the error replaces the content
-    f.wait_for_selector("#dlg [role=alert]")
-    check(f"{case}: keyboard – a new step keeps the focus in the dialog, the error is announced",
+    check(f"{case}: keyboard – dialog named by its title, focus on its first control", "Device password" in named
+          and f.evaluate("() => document.activeElement.id") == "dlg-x", named)
+    f.locator("#dlg-btns button").last.click()  # next step without a password: the error stays in the step
+    f.wait_for_selector("#dlg [role=alert]:visible")
+    check(f"{case}: keyboard – an input error keeps the focus in the dialog and is announced",
           f.evaluate("() => document.getElementById('dlg').contains(document.activeElement)")
           and "No password entered." in f.locator("#dlg [role=alert]").inner_text(), f.evaluate(ACTIVE_JS))
     page.keyboard.press("Escape")

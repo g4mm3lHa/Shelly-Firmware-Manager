@@ -10,13 +10,12 @@ Storage rules:
   Home Assistant backups (see README).
 """
 
-import contextlib
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
+import data_paths
 from shelly import DeviceAuth, ShellyError, gen2_ha1
 
 log = logging.getLogger("sfm.credentials")
@@ -104,17 +103,8 @@ class Credentials:
 
         A write error (e.g. full disk) keeps the previous file and raises ShellyError;
         the entries in memory stay as changed until the app restarts."""
-        temp = self.path.with_suffix(".tmp")
         try:
-            temp.unlink(missing_ok=True)
-            fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(fd, "w") as handle:
-                json.dump(self.entries, handle)
-                handle.flush()
-                os.fsync(handle.fileno())
-            temp.replace(self.path)
+            data_paths.write_atomic(self.path, json.dumps(self.entries).encode(), durable=True, private=True)
         except OSError as err:
-            with contextlib.suppress(OSError):
-                temp.unlink(missing_ok=True)
             log.error("Stored passwords could not be saved: %s", err)
             raise ShellyError(f"The stored passwords could not be saved ({err})") from None
