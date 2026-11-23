@@ -27,7 +27,7 @@ both servers in parallel (cancels checks/installations, saves the state), exit 0
 ## Backend modules (`shelly_firmware_manager/app/`) – module: purpose → test file
 
 - `main.py`: start, servers, scheduler loop → `test_lifecycle.py`
-- `manager_core.py` (1): state, persistence, options, check slots → `test_check.py`, `test_options.py`, `test_state.py`
+- `manager_core.py` (1): state, persistence, options, check slots → `test_check.py`, `test_options.py`, `test_state.py`, `test_ha_api.py`
 - `manager_store.py` (2): firmware store, upload, downgrade, export/import → `test_firmware_store.py`, `test_store_transfer.py`
 - `manager_devices.py` (3): device settings, passwords → `test_device_settings.py`
 - `manager_backups.py` (4): backups of device settings: store, restore, download, import → `test_backups.py`
@@ -37,7 +37,7 @@ both servers in parallel (cancels checks/installations, saves the state), exit 0
 - `manager.py` (8): `Manager`, `public_state` → `test_web.py`
 - `web_ui.py`: Ingress UI + JSON API, CSRF/size middleware → `test_web.py`, `test_security.py`
 - `download_server.py`: LAN download server for the Shellys → `test_security.py`
-- `shelly.py`: device and manufacturer access, SSRF/size guards → `test_check.py`, `test_device_settings.py`
+- `shelly.py`: device and manufacturer access, SSRF/size guards → `test_check.py`, `test_device_settings.py`, `test_device_transport.py`
 - `store_transfer.py`: export/import archive (pure functions) → `test_store_transfer.py`
 - `backup_store.py`: encrypted backup files and their list (no device access) → `test_backups.py`
 - `shelly_backup.py`: read, compare and restore the settings of one device → `test_backups.py`
