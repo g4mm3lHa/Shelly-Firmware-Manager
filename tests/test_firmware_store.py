@@ -12,6 +12,7 @@ import data_paths
 import manager
 import manager_core
 import manager_store
+import manager_transfer
 import pytest
 import shelly
 import shelly_cloud
@@ -43,7 +44,7 @@ async def test_housekeeping_keeps_temporary_files_and_drops_orphans(mgr, net):
     gone, _ = store(mgr, "Plus1", "1.2.0")
     (data_paths.FW_DIR / gone).unlink()
     (data_paths.FW_DIR / ("f" * 64 + ".zip")).write_bytes(b"x" * 2000)  # not in the store
-    part = data_paths.FW_DIR / (manager_store.UPLOAD_PREFIX + "abc")
+    part = data_paths.FW_DIR / (manager_transfer.UPLOAD_PREFIX + "abc")
     part.write_bytes(b"x")
     mgr.cleanup_firmware()
     assert name in mgr.firmware and gone not in mgr.firmware
@@ -295,7 +296,7 @@ async def test_upload_prefills_from_manifest_and_registers(mgr, net):
     assert [v["version"] for v in mgr.downgrade_versions(B)] == ["1.3.0"]
     log = mgr.events.entries[-1]
     assert log["kind"] == "upload" and log["user"] == "alice" and log["sha_checked"] is True
-    assert not list(data_paths.FW_DIR.glob(manager_store.UPLOAD_PREFIX + "*"))
+    assert not list(data_paths.FW_DIR.glob(manager_transfer.UPLOAD_PREFIX + "*"))
 
 
 async def test_upload_without_manifest_or_sha(mgr, net):
@@ -370,7 +371,7 @@ async def test_upload_token_expiry_and_cancel(mgr, net, monkeypatch):
     mgr.cancel_upload(staged["token"])
     assert mgr._upload is None and not list(data_paths.FW_DIR.glob(manager_core.PART_PREFIX + "*"))
     staged = await mgr.stage_upload(chunks(data), "fw.zip", len(data))
-    mgr._upload["created"] -= manager_store.UPLOAD_TTL_S + 1
+    mgr._upload["created"] -= manager_transfer.UPLOAD_TTL_S + 1
     with pytest.raises(shelly.ShellyError, match="upload the file again"):
         mgr.confirm_upload(staged["token"], "Plus1", "1.2.0")
 

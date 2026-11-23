@@ -32,20 +32,21 @@ cannot know: responsibility, layering, invariants and pitfalls.
 
 ## The manager
 
-One object built from eight layers: each module holds one class that extends the class of
+One object built from nine layers: each module holds one class that extends the class of
 the layer before, so a layer only uses what lies below it (no imports upward). Everything
 outside uses `manager.Manager` only. Constants live where they are used; tests patch them there.
 
 | Layer / module | Class | Content |
 |---|---|---|
 | 1 `manager_core.py` | `ManagerCore` | state, `__init__`, options, persistence (atomic save, `state.bak`, damaged file → `state.damaged` warning), Home Assistant registry/notification/Supervisor calls, check slots (`reserve_check`: "all" is exclusive, a device refused while checked/installed/reloaded, nothing while an import stores or a schedule runs), `STATUS_*`/`SECTION_*`/`SOURCE_*` constants, `severity_of`, `unexpected_text`, first-start state. |
-| 2 `manager_store.py` | `FirmwareStore` | firmware files and their metadata: registering, adopting unlisted files by content (never deleting), integrity, the rule when a stored file replaces a download (`_replaces_download`, `_stored_firmware`, `_store_offer`), downgrade candidates, upload (staged, then confirmed), store export/import in parts (`PART_MAX` 8 MiB: Ingress refuses 16 MiB), manual delete with locks. |
-| 3 `manager_devices.py` | `DeviceSettings` | device settings read/write with read-back (`not_applied`), reload, restart, ignore, remove from list, device passwords (single and several). |
-| 4 `manager_backups.py` | `Backups` | backup store and runs (before installation, manual, schedules), views, restore with preview and parts, password-sealed download, import per device. A failing backup before an installation stops that installation. |
-| 5 `manager_checks.py` | `Checks` | full check (global lock) and single checks (parallel); scanning removed and other Shellys, Home Assistant listing, per-device offer logic: Gen1 store first then the manufacturer list; Gen2+ server decides (`_step_offer`, intermediate versions), beta, store fallback on server error, reference request, hold-back (`offer_after_days`), `keep_installed`; one shared provision per type and version (`_provide`). |
-| 6 `manager_installs.py` | `Installs` | approved install (`approval_matches`), restart-and-install, Gen2+ WebSocket `Shelly.Update` / Gen1 HTTP, waiting for the exact target version via OTA events or polling, failure and retry, downgrade, step check after a confirmed intermediate version, download-server support. |
-| 7 `manager_schedules.py` | `Schedules` | "Install at" plans (run, lapse, missed – never made up) and schedules (create/update/delete, runs, left-out devices with reason), start-up clean-up (withdraw betas, strike unknown device IDs), notifications. |
-| 8 `manager.py` | `Manager` | `public_state`: the only fields the UI sees; add a field there when the UI needs one. |
+| 2 `manager_store.py` | `FirmwareStore` | firmware files and their metadata: registering, adopting unlisted files by content (never deleting), integrity, the rule when a stored file replaces a download (`_replaces_download`, `_stored_firmware`, `_store_offer`), downgrade candidates, manual delete with locks. |
+| 3 `manager_transfer.py` | `Transfers` | files into and out of the store: transfers in parts (`PART_MAX` 8 MiB: Ingress refuses 16 MiB), upload (staged, then confirmed), store export/import (single-use tokens, checked completely before anything is stored). |
+| 4 `manager_devices.py` | `DeviceSettings` | device settings read/write with read-back (`not_applied`), reload, restart, ignore, remove from list, device passwords (single and several). |
+| 5 `manager_backups.py` | `Backups` | backup store and runs (before installation, manual, schedules), views, restore with preview and parts, password-sealed download, import per device. A failing backup before an installation stops that installation. |
+| 6 `manager_checks.py` | `Checks` | full check (global lock) and single checks (parallel); scanning removed and other Shellys, Home Assistant listing, per-device offer logic: Gen1 store first then the manufacturer list; Gen2+ server decides (`_step_offer`, intermediate versions), beta, store fallback on server error, reference request, hold-back (`offer_after_days`), `keep_installed`; one shared provision per type and version (`_provide`). |
+| 7 `manager_installs.py` | `Installs` | approved install (`approval_matches`), restart-and-install, Gen2+ WebSocket `Shelly.Update` / Gen1 HTTP, waiting for the exact target version via OTA events or polling, failure and retry, downgrade, step check after a confirmed intermediate version, download-server support. |
+| 8 `manager_schedules.py` | `Schedules` | "Install at" plans (run, lapse, missed – never made up) and schedules (create/update/delete, runs, left-out devices with reason), start-up clean-up (withdraw betas, strike unknown device IDs), notifications. |
+| 9 `manager.py` | `Manager` | `public_state`: the only fields the UI sees; add a field there when the UI needs one. |
 
 ## Pitfalls
 - State fields not listed in `public_state` never reach the UI; stored fields are described in `data.md`.

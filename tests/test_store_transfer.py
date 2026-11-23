@@ -10,7 +10,7 @@ import zipfile
 
 import data_paths
 import manager_core
-import manager_store
+import manager_transfer
 import pytest
 import store_transfer
 from conftest import A
@@ -70,7 +70,7 @@ async def test_export_layout_and_roundtrip_keeps_date_and_marks_files_imported(m
     assert "Gen2+/Plus1/Plus1-1.2.0-upload.zip" in names
     assert "Gen2+/Plus1/Plus1-1.1.0-import.zip" in names
     assert any(n.startswith("Gen1/SHSW-1/SHSW-1-v1.13.0") for n in names)
-    assert all(not n.startswith(manager_store.EXPORT_PREFIX) for n in os_listdir())
+    assert all(not n.startswith(manager_transfer.EXPORT_PREFIX) for n in os_listdir())
 
     forget_store(mgr)
     token = await stage(mgr, data)
@@ -90,7 +90,7 @@ async def test_export_layout_and_roundtrip_keeps_date_and_marks_files_imported(m
         assert meta["source"] == manager_core.SOURCE_IMPORT and meta["https"] is None and "sha_checked" not in meta
     assert mgr.firmware[down]["changelog"]["entries"][0]["text"] == "Fix"
     assert [e for e in mgr.events.list() if e["kind"] == "import"][0]["user"] == "tester"
-    assert not any(n.startswith((manager_store.IMPORT_PREFIX, manager_store.EXPORT_PREFIX)) for n in os_listdir())
+    assert not any(n.startswith((manager_transfer.IMPORT_PREFIX, manager_transfer.EXPORT_PREFIX)) for n in os_listdir())
 
 
 def os_listdir():
@@ -284,7 +284,7 @@ async def test_export_token_is_single_use_and_expires(mgr, net, monkeypatch):
     with pytest.raises(ShellyError, match="expired"):
         await mgr.build_export(prepared["token"], "3.4.0")
     prepared = await mgr.prepare_export()
-    monkeypatch.setattr(manager_store, "EXPORT_TTL_S", -1)
+    monkeypatch.setattr(manager_transfer, "EXPORT_TTL_S", -1)
     with pytest.raises(ShellyError, match="expired"):
         await mgr.build_export(prepared["token"], "3.4.0")
 
@@ -305,7 +305,7 @@ async def test_import_limits(mgr, net, monkeypatch):
         await mgr.stage_import(chunks(b"x" * 500), 500)
     with pytest.raises(ShellyError, match="No pending import"):
         await mgr.check_import("0" * 32, "x")
-    assert not any(n.startswith(manager_store.IMPORT_PREFIX) for n in os_listdir())
+    assert not any(n.startswith(manager_transfer.IMPORT_PREFIX) for n in os_listdir())
 
 
 async def test_no_zip_export_or_foreign_zip(mgr, net):
@@ -387,7 +387,7 @@ async def send_parts(stage, data, size, **kwargs):
 async def test_import_in_parts(mgr, net, monkeypatch):
     """Files above the Ingress body limit arrive in parts: the import continues at the
     received size and is staged after the last part."""
-    monkeypatch.setattr(manager_store, "PART_MAX", 4096)
+    monkeypatch.setattr(manager_transfer, "PART_MAX", 4096)
     store(mgr, "Plus1", "1.3.0")
     data, password = await export_bytes(mgr)
     forget_store(mgr)
@@ -402,7 +402,7 @@ async def test_upload_in_parts(mgr, net, monkeypatch):
     """A firmware upload in parts gets the same SHA-256 and manifest data as in one piece."""
     from helpers import firmware_zip
 
-    monkeypatch.setattr(manager_store, "PART_MAX", 8192)
+    monkeypatch.setattr(manager_transfer, "PART_MAX", 8192)
     await mgr.scan()
     data = firmware_zip({"name": "Plus1", "version": "1.3.0"}, size=30000)
 
@@ -417,7 +417,7 @@ async def test_upload_in_parts(mgr, net, monkeypatch):
 async def test_parts_out_of_order_or_unknown(mgr, net, monkeypatch):
     """A part must name the transfer and continue exactly at the received size; any
     error drops the transfer and its temporary file."""
-    monkeypatch.setattr(manager_store, "PART_MAX", 100)
+    monkeypatch.setattr(manager_transfer, "PART_MAX", 100)
     data = b"x" * 300
     first = await mgr.stage_import_part(chunks(data[:100]), 100, 300, 0, None)
     with pytest.raises(ShellyError, match="interrupted"):
@@ -426,14 +426,14 @@ async def test_parts_out_of_order_or_unknown(mgr, net, monkeypatch):
         await mgr.stage_import_part(chunks(data[100:200]), 100, 400, 100, first["transfer"])
     with pytest.raises(ShellyError, match="out of order"):
         await mgr.stage_import_part(chunks(data[200:]), 100, 300, 200, first["transfer"])
-    assert not mgr._receiving and not any(n.startswith(manager_store.IMPORT_PREFIX) for n in os_listdir())
+    assert not mgr._receiving and not any(n.startswith(manager_transfer.IMPORT_PREFIX) for n in os_listdir())
     with pytest.raises(ValueError, match="Invalid part"):
         await mgr.stage_import_part(chunks(b"x" * 101), 101, 300, 0, None)
     first = await mgr.stage_import_part(chunks(data[:100]), 100, 300, 0, None)
-    monkeypatch.setattr(manager_store, "PART_TTL_S", -1)
+    monkeypatch.setattr(manager_transfer, "PART_TTL_S", -1)
     with pytest.raises(ShellyError, match="interrupted"):
         await mgr.stage_import_part(chunks(data[100:200]), 100, 300, 100, first["transfer"])
-    assert not any(n.startswith(manager_store.IMPORT_PREFIX) for n in os_listdir())
+    assert not any(n.startswith(manager_transfer.IMPORT_PREFIX) for n in os_listdir())
 
 
 async def test_no_check_starts_while_an_import_writes_its_files(mgr, net):
@@ -465,7 +465,7 @@ async def test_export_is_refused_where_the_dialog_can_show_it(mgr, net, monkeypa
     answer names how long the download stays possible."""
     store(mgr, "Plus1", "1.3.0")
     prepared = await mgr.prepare_export()
-    assert prepared["expires_in"] == manager_store.EXPORT_TTL_S
+    assert prepared["expires_in"] == manager_transfer.EXPORT_TTL_S
     monkeypatch.setattr(mgr, "_free_space", lambda: 0)
     with pytest.raises(ShellyError, match="Not enough free disk space"):
         await mgr.prepare_export()

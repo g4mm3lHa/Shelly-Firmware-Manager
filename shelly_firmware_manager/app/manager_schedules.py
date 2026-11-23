@@ -1,4 +1,4 @@
-"""Manager, layer 7 of 8: the Schedules tab – schedules (restart, cloud and Bluetooth
+"""Manager, layer 8 of 9: the Schedules tab – schedules (restart, cloud and Bluetooth
 on/off or a backup at a clock time) and scheduled installations ("Install at" of the installation
 dialog).
 

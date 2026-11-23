@@ -25,7 +25,7 @@ level or in one folder (an archive that was unpacked and packed again).
 The seal proves that the file is unchanged since its creator sealed it – not who that
 was: the manager stores every imported file as unverified (source "import").
 
-Pure functions without manager state; the manager (manager_store) decides what is
+Pure functions without manager state; the manager (manager_transfer) decides what is
 stored. All functions here block (file I/O, scrypt) and run in a worker thread.
 """
 

@@ -1,4 +1,4 @@
-"""Manager, layer 4 of 8: backups of the device settings – storing them (by hand, before
+"""Manager, layer 5 of 9: backups of the device settings – storing them (by hand, before
 an installation, by a schedule), listing, restoring, download and import.
 
 A backup belongs to a device by its MAC address (backup_store holds the encrypted

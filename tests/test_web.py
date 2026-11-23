@@ -449,9 +449,9 @@ async def test_http_first_start_and_bulk_passwords(client, mgr, net):
 async def test_http_upload_and_import_in_parts(client, mgr, net, monkeypatch):
     """Parts with X-Upload-Total/Offset/Transfer (Ingress refuses bodies above 16 MiB);
     invalid headers, oversized parts and totals are refused."""
-    import manager_store
+    import manager_transfer
 
-    monkeypatch.setattr(manager_store, "PART_MAX", 20000)
+    monkeypatch.setattr(manager_transfer, "PART_MAX", 20000)
     monkeypatch.setattr(web_ui, "PART_MAX", 20000)
     await mgr.scan()
     data = firmware_zip({"name": "Plus1", "version": "1.3.0"}, size=50000)

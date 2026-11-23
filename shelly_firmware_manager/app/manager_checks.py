@@ -1,4 +1,4 @@
-"""Manager, layer 5 of 8: checks – which firmware is installed, which one is provided.
+"""Manager, layer 6 of 9: checks – which firmware is installed, which one is provided.
 
 Within a check up to CHECK_PARALLEL devices are queried at the same time; offers and
 firmware downloads are shared (single flight), so parallelism never duplicates a

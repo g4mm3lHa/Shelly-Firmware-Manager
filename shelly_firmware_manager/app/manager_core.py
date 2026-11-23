@@ -1,11 +1,12 @@
-"""Manager, layer 1 of 8: state, persistence, Home Assistant access, app options and the
+"""Manager, layer 1 of 9: state, persistence, Home Assistant access, app options and the
 check slot.
 
 The manager is one object built from layers, each in its own module and each extending
 the one before: ManagerCore (this file) -> FirmwareStore (manager_store) ->
-DeviceSettings (manager_devices) -> Backups (manager_backups) -> Checks (manager_checks)
--> Installs (manager_installs) -> Schedules (manager_schedules) -> Manager (manager). A
-layer only uses what the layers below it provide; the complete object is manager.Manager.
+Transfers (manager_transfer) -> DeviceSettings (manager_devices) -> Backups
+(manager_backups) -> Checks (manager_checks) -> Installs (manager_installs) -> Schedules
+(manager_schedules) -> Manager (manager). A layer only uses what the layers below it
+provide; the complete object is manager.Manager.
 
 State lives in /data/state.json (with the previous save as backup state.bak, see
 ManagerCore.save and _load), firmware in /data/firmware, device passwords in
@@ -341,7 +342,7 @@ class ManagerCore:
         self._import_lock = asyncio.Lock()  # one import transfer / check / confirmation at a time
         self._import_storing = False  # confirm_import is writing its files to the store
         # File transfers in parts (upload, import) that are not complete yet, by kind;
-        # memory only (see FirmwareStore._receive_part)
+        # memory only (see Transfers._receive_part)
         self._receiving: dict[str, dict[str, Any]] = {}
         # First start of a fresh installation (no state.json): no check runs until the
         # user answered the import question (import a store or skip); persisted

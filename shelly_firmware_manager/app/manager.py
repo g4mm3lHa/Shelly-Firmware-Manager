@@ -1,4 +1,4 @@
-"""Manager, layer 8 of 8: the complete object and its view for the UI.
+"""Manager, layer 9 of 9: the complete object and its view for the UI.
 
 See manager_core for the layers. Everything outside the manager modules uses this
 class only.
