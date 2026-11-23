@@ -2,9 +2,11 @@
 # Assistant pulls it (the "image:" key of shelly_firmware_manager/config.yaml). The tag
 # is the version from config.yaml. Runs on the release branches, "beta" and "main", so
 # the image exists before a version becomes visible in the app store. An image that
-# already exists for the version is kept when the app content is identical (the same
-# version arrives again via beta or main); different content fails the run - bump the
-# version instead. A branch other than main that still carries the version of main is
+# already exists for the version is never replaced: with identical app content (the same
+# version arrives again via beta or main) there is nothing to do; with different content
+# (a push without a version bump) nothing is built or published and the run ends with a
+# warning instead of an error - bump the version to publish it. Build and start-test
+# errors still fail the run. A branch other than main that still carries the version of main is
 # work in progress before the version bump and builds nothing. "Run workflow" with
 # "force" replaces an existing image on purpose. A new image is started once before it
 # is pushed (tools/dev/image_test.py); an image that fails this start test is not published.
@@ -106,8 +108,11 @@ jobs:
             echo "$IMAGE:$VERSION exists with the same content - nothing to do."
             echo "build=false" >> "$GITHUB_OUTPUT"
           else
-            echo "::error::$IMAGE:$VERSION exists with different content. Bump the version, or run the workflow with force."
-            exit 1
+            # A push without a version bump: the published image stays as it is. Not an
+            # error (no failed run for every such push), but visible as a warning.
+            echo "::warning::$IMAGE:$VERSION exists with different content - not replaced, nothing published. Bump the version, or run the workflow with force."
+            echo "Not published: $IMAGE:$VERSION exists with different content. Bump the version to publish this state." >> "$GITHUB_STEP_SUMMARY"
+            echo "build=false" >> "$GITHUB_OUTPUT"
           fi
 
       # Built into the local image store first, so the start test runs on the image
