@@ -46,6 +46,7 @@ from changelog import Changelogs
 from credentials import Credentials
 from events import EventLog
 from shelly import AuthError, DeviceAuth, ShellyError, clip, error_text, plain, port_open, same_secret
+from shelly_net import resolve_lan_address
 from tls import CertificatePins
 
 
@@ -362,6 +363,7 @@ class ManagerCore:
         # Set at start if the state file was missing or unreadable although the app
         # was installed before (see _load); shown in the UI until the next restart
         self.state_warning: str | None = None
+        self.settings_warning: str | None = None  # settings file damaged or with invalid values (set by main)
         # Files in the firmware folder the store does not list (name -> size): never
         # deleted automatically, listed in the Firmware tab for a manual deletion
         # (see FirmwareStore.adopt_files and cleanup_firmware); the names are
@@ -841,7 +843,9 @@ class ManagerCore:
         maps the port before the app starts, so a port in use would stop the app from
         starting. The host of the download base URL (the LAN address of Home Assistant) is
         asked for a TCP connection (closed at once, nothing sent); one that is accepted
-        means another program listens there. Without a usable address nothing is checked."""
+        means another program listens there. Without a usable address nothing is checked;
+        a host name is resolved first and checked only if all its addresses lie in the LAN
+        (shelly_net.resolve_lan_address), so the check never reaches outside the LAN."""
         try:
             host = urlsplit(url).hostname if url else None
         except ValueError:
@@ -849,11 +853,15 @@ class ManagerCore:
         if not host:
             log.warning("Host port %d not checked: no download base URL", port)
             return
+        address = await resolve_lan_address(host)
+        if address is None:
+            log.warning("Host port %d not checked: %s is no address in the local network", port, plain(host, 100))
+            return
         try:
-            await port_open(host, port)
+            await port_open(address, port)
         except (TimeoutError, OSError):
             return  # refused or no answer: nothing listens on that port
-        raise ValueError(f"host_port: port {port} is already in use on {host} – choose another port")
+        raise ValueError(f"host_port: port {port} is already in use on {plain(host, 100)} – choose another port")
 
     # ----------------------------------------------------------------------------------------- App options
 

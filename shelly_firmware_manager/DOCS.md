@@ -91,7 +91,7 @@ change it there or with **Host port** in the **Settings** tab.
 | Check every (days) | 7 | 1–30 | Interval of the automatic check |
 | Check time | 02:45 | HH:MM | Time of day of the automatic check (Home Assistant time zone) |
 | Offer updates only after (days) | 0 | 0–60 | Holds a new firmware version back until it is this many days old, counted from its build date; 0 offers it at once (see [Offer delay](#offer-delay)) |
-| Host port | 8098 | 1–65535 | Port of the download server on the Home Assistant host. The app sets it in Home Assistant and restarts; it refuses a port another program already uses on the host, because the app could not start then. A download base URL with the old port follows the change |
+| Host port | 8098 | 1–65535 | Port of the download server on the Home Assistant host. The app sets it in Home Assistant and restarts; it refuses a port another program already uses on the host, because the app could not start then (checked only when the download base URL leads to an address in the local network). A download base URL with the old port follows the change |
 | Download base URL for the Shellys | – | rules below | LAN IP of Home Assistant + the host port, e.g. `http://192.168.1.20:8098`. Required for installations |
 | Serve downloads only to known Shellys | on | on / off | Firmware is only served to the device it is meant for. Switch off if downloads are rejected from a 172.30.x.x address |
 | Enable Gen1 updates | on | on / off | Gen1 support: all Gen1 devices of the Shelly integration are checked (see [Gen1 firmware](#gen1-firmware)) |
@@ -627,8 +627,9 @@ settings that are new with the firmware (they have Shelly's default value, colla
 and the scripts. **Seen** in that dialog removes the line; the comparison stays in the
 row menu until the next check of the device (the check right after an intermediate
 version keeps it). Counters that change with every update (`sys.cfg_rev`) are not
-compared. Nothing is changed on the device; the result is logged with the first changed
-values and the stopped scripts. Downgrades and
+compared. Nothing is changed on the device; the result is logged with the names of the
+first changed settings (without their values, which may hold e.g. a server address) and the
+stopped scripts. Downgrades and
 installations without a backup **Before update** get no comparison.
 
 ### Logs
@@ -822,6 +823,8 @@ Gen2+ firmware is downloaded over HTTPS only.
 | Another device answers at the address – no backup was stored | Another Shelly answers at the address the app knows for this device (e.g. after an address change in the router). Run **Check now** so the app reads the current addresses from Home Assistant, or correct the address in the Shelly integration |
 | A backup run is in progress / A backup is being restored | Wait for the end (bar in the **Backups** tab), then try again |
 | Storage error: The state file was unreadable – the backup of the previous save was loaded | The app's state file was damaged (e.g. by a power failure) and the copy of the save before was used. Check the devices again; the message disappears with the next restart |
+| Storage error: The settings file was unreadable (kept as settings.damaged) – the defaults apply | The app's settings file was damaged and was set aside; the app runs with the default settings. Check every setting in the **Settings** tab and save; the message disappears with the next restart |
+| Storage error: Invalid values in the settings file – the defaults apply for: … | The settings file holds a value the app does not accept (e.g. after a change by hand). The named settings use their defaults; check them in the **Settings** tab and save, then the message disappears |
 | Storage error: The state file was unreadable and no backup could be loaded | The device list starts empty and is filled by the next check. The firmware files stay on disk; at the start the app reads back those whose content names firmware ID and version, the others are listed as **Unknown Files** in the Firmware tab (see [Firmware](#firmware)) |
 
 An installation interrupted by a restart of the app is shown as "Unconfirmed" – check

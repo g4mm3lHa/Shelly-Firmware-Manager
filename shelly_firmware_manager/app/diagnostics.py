@@ -8,6 +8,7 @@ to their first two numbers ("192.168.x.x"), IPv6 addresses entirely, MAC address
 Shelly device IDs to their last four characters. Passwords never reach this module.
 """
 
+import ipaddress
 import re
 import time
 from collections.abc import Iterable
@@ -19,9 +20,11 @@ LOG_LINES = 5  # log lines of the device in the text
 
 LINE_MAX = 300  # characters of one log line
 
-# IPv4 address; IPv6 address (at least three groups, so a time like 20:14 stays)
+# IPv4 address
 IPV4_RE = re.compile(r"\b(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}\b")
-IPV6_RE = re.compile(r"\b(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}\b|\[[0-9a-fA-F:]+\]")
+# Candidate for an IPv6 address: a run of hex digits, colons and dots with at least one colon,
+# optionally in brackets; only a candidate that ipaddress accepts is masked (a time like 20:14 stays)
+IPV6_CANDIDATE_RE = re.compile(r"(?<![\w:.])(\[)?([0-9A-Fa-f.:]*:[0-9A-Fa-f.:]*)(?(1)\])(?!\w)")
 # MAC address with or without separators, also inside a Shelly ID (shellyplus1-a8032ab12345)
 MAC_RE = re.compile(r"\b[0-9A-Fa-f]{2}(?:[:-]?[0-9A-Fa-f]{2}){5}\b|(?<=-)[0-9A-Fa-f]{12}\b")
 
@@ -44,9 +47,23 @@ class Masker:
         out = plain(value, LINE_MAX)
         for name in sorted(self.names, key=len, reverse=True):  # longest first: no partial replacement
             out = out.replace(name, self.names[name])
+        # IPv6 first: the MAC pattern would otherwise take twelve hex digits out of an IPv6 address
+        out = IPV6_CANDIDATE_RE.sub(_mask_ipv6, out)
         out = MAC_RE.sub(lambda m: "****" + re.sub(r"[:-]", "", m.group(0))[-4:].upper(), out)
-        out = IPV6_RE.sub("[IPv6]", out)
         return IPV4_RE.sub(lambda m: f"{m.group(1)}.{m.group(2)}.x.x", out)
+
+
+def _mask_ipv6(match: re.Match[str]) -> str:
+    """Replacement of an IPv6 candidate: "[IPv6]" when it is an IPv6 address (a trailing "." or
+    ":" of the sentence stays), otherwise the candidate unchanged."""
+    candidate = match.group(2)
+    for core in (candidate, candidate.rstrip(".:")):
+        try:
+            ipaddress.IPv6Address(core)
+        except ValueError:
+            continue
+        return "[IPv6]" + candidate[len(core) :]
+    return match.group(0)
 
 
 def _when(ts: object) -> str:

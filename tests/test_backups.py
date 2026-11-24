@@ -1232,7 +1232,9 @@ async def test_comparison_after_a_confirmed_update(net, shellys, monkeypatch, qu
     assert view["after_update"]["changed_count"] == 1
     entry = backup_events(mgr, "compared")[-1]
     assert (entry["severity"], entry["changed"], entry["scripts_stopped"]) == ("warning", 1, ["auto-light.js"])
-    assert entry["changed_rows"] == [{"key": "switch:0 · initial_state", "before": "off", "now": "on"}]
+    # The log names the changed settings only, never their values
+    assert entry["changed_keys"] == ["switch:0 · initial_state"]
+    assert "changed_rows" not in entry and "off" not in json.dumps(entry)
     # "Seen" removes the line below the firmware; the comparison stays until the next check
     assert mgr.after_update_seen(A) is True and mgr.devices[A]["after_update"]["seen"] is True
     assert mgr.after_update_seen(B) is False
@@ -1266,3 +1268,47 @@ async def test_comparison_that_cannot_read_the_device(net, shellys, monkeypatch,
     assert await mgr.install(A, mgr.devices[A]["sha256"], "alice") is True
     assert "error" in mgr.devices[A]["after_update"]
     assert backup_events(mgr, "compared")[-1]["severity"] == "warning"
+
+
+async def test_comparison_with_an_unexpected_error(net, shellys, monkeypatch, quick_install):
+    """An unexpected error in the comparison: the update stays confirmed (install returns
+    True, the check after an intermediate version still runs) and the error is kept."""
+    mgr = manager_with(net, shellys, backup_before_install=True)
+
+    async def trigger(_session, _gen, origin, url, _auth=None):
+        device = net.by_origin(origin)
+        net.devices[device] = (*net.devices[device][:2], "1.5.0", "1.5.0")
+
+    def broken(*_args):
+        raise TypeError("odd answer")
+
+    monkeypatch.setattr(shelly, "trigger_update", trigger)
+    monkeypatch.setattr(shelly_backup, "after_update", broken)
+    await mgr.scan()
+    assert await mgr.install(A, mgr.devices[A]["sha256"], "alice") is True
+    assert "Unexpected error (TypeError" in mgr.devices[A]["after_update"]["error"]
+    assert backup_events(mgr, "compared")[-1]["severity"] == "warning"
+
+
+async def test_comparison_skipped_when_a_new_installation_starts(net, shellys, monkeypatch, quick_install):
+    """A new installation of the device starts while the comparison reads it: the old
+    comparison writes nothing (no result, no log entry)."""
+    mgr = manager_with(net, shellys, backup_before_install=True)
+    read = mgr._read_backup
+
+    async def read_then_install(device_id, dev):
+        result = await read(device_id, dev)
+        mgr.installing.add(device_id)  # the user starts the next installation meanwhile
+        return result
+
+    async def trigger(_session, _gen, origin, url, _auth=None):
+        device = net.by_origin(origin)
+        net.devices[device] = (*net.devices[device][:2], "1.5.0", "1.5.0")
+
+    monkeypatch.setattr(shelly, "trigger_update", trigger)
+    await mgr.scan()
+    ok = mgr.install(A, mgr.devices[A]["sha256"], "alice")
+    mgr._read_backup = read_then_install
+    assert await ok is True
+    assert "after_update" not in mgr.devices[A]
+    assert backup_events(mgr, "compared") == []

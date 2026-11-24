@@ -87,6 +87,15 @@ HOST_LABEL_RE = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?", re.IGNORECASE)
 DOWNLOAD_BASE_FORMAT = "download_base_url: http(s)://host:port expected"
 DOWNLOAD_BASE_PARTS = "download_base_url: http(s)://host:port expected, without user name, query or fragment"
 DOWNLOAD_BASE_NOT_PRIVATE = "download_base_url: the IP address is not in a private network"
+# Warnings about the settings file at the start (shown in the status strip of the UI for that run)
+SETTINGS_DAMAGED = (
+    "The settings file was unreadable (kept as settings.damaged) – the defaults apply. "
+    "Check and save the settings in the Settings tab."
+)
+SETTINGS_INVALID = (
+    "Invalid values in the settings file – the defaults apply for: {keys}. "
+    "Check and save the settings in the Settings tab."
+)
 
 
 def download_host_problem(host: str) -> str | None:
@@ -263,27 +272,35 @@ def take_over(options: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     return with_defaults(clean), sorted(dropped)
 
 
-def read_settings() -> dict[str, Any] | None:
-    """The stored options (settings.json), or None while the file does not exist.
+def read_settings() -> tuple[dict[str, Any] | None, str | None]:
+    """The stored options (settings.json) and a warning for the UI (None if the file is fine);
+    options None while the file does not exist.
 
-    A file that is no JSON object is kept as settings.damaged and None is returned, so the
-    app starts with the defaults instead of failing at every start (logged as error)."""
+    Every value is checked as at the take-over (take_over): an invalid one (e.g. changed by
+    hand) is left out, its default applies and the warning names it, until the Settings tab
+    is saved. A file that is no JSON object is kept as settings.damaged and None is returned,
+    so the app starts with the defaults instead of failing at every start (logged as error,
+    warning for this run)."""
     path = data_paths.SETTINGS_FILE
     try:
         data = json.loads(path.read_text())
     except FileNotFoundError:
-        return None
+        return None, None
     except (OSError, ValueError) as err:
         data = err
     if isinstance(data, dict):
-        return with_defaults(data)
+        options, dropped = take_over(data)
+        if not dropped:
+            return options, None
+        log.warning("%s: invalid values left out, defaults apply: %s", path.name, ", ".join(dropped))
+        return options, SETTINGS_INVALID.format(keys=", ".join(dropped))
     reason = data if isinstance(data, Exception) else "no object"
     log.error("%s is damaged (%s) – kept as settings.damaged, defaults apply", path.name, reason)
     try:
         path.replace(path.with_suffix(".damaged"))
     except OSError as err:
         log.error("%s could not be moved aside: %s", path.name, err)
-    return None
+    return None, SETTINGS_DAMAGED
 
 
 def write_settings(options: dict[str, Any]) -> None:

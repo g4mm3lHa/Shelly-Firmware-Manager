@@ -24,7 +24,7 @@ from manager import Manager
 from tls import CertificatePins
 from web_ui import build_ui_app
 
-VERSION = "3.12.0-rc5"  # must match config.yaml
+VERSION = "3.12.0-rc6"  # must match config.yaml
 
 OPTIONS_FILE = Path("/data/options.json")
 UI_PORT = 8099  # Ingress (internal)
@@ -83,26 +83,28 @@ async def supervisor_options(session: aiohttp.ClientSession, token: str) -> dict
     return options if isinstance(options, dict) else None
 
 
-async def load_settings(session: aiohttp.ClientSession, token: str) -> dict[str, Any]:
-    """The app options: settings.json, else taken over once from the options the Supervisor
-    keeps for this app (older versions stored them in the Configuration tab of the app page).
+async def load_settings(session: aiohttp.ClientSession, token: str) -> tuple[dict[str, Any], str | None]:
+    """The app options and a warning about the settings file for the UI (None if fine):
+    settings.json (see app_options.read_settings), else taken over once from the options
+    the Supervisor keeps for this app (older versions stored them in the Configuration tab
+    of the app page).
 
     After the take-over the Supervisor's copy is emptied, so the Configuration tab shows only
     its hint. If the Supervisor cannot be read, the defaults apply and nothing is stored, so
     the next start tries again; a save in the Settings tab meanwhile stores the shown values."""
-    stored = app_options.read_settings()
+    stored, warning = app_options.read_settings()
     if stored is not None:
-        return stored
+        return stored, warning
     kept = await supervisor_options(session, token)
     if kept is None:
         log.warning("Settings not taken over from the app configuration yet – defaults apply until the next start")
-        return app_options.with_defaults(load_options())
+        return app_options.with_defaults(load_options()), warning
     options, dropped = app_options.take_over({**load_options(), **kept})
     try:
         app_options.write_settings(options)
     except OSError as err:
         log.error("Settings could not be stored (%s) – the next start tries again", err)
-        return options
+        return options, warning
     log.info("Settings taken over from the app configuration of Home Assistant (now in the Settings tab only)")
     if dropped:
         log.warning("Invalid values left out, defaults apply: %s", ", ".join(dropped))
@@ -116,7 +118,7 @@ async def load_settings(session: aiohttp.ClientSession, token: str) -> dict[str,
             resp.raise_for_status()
     except (TimeoutError, aiohttp.ClientError) as err:
         log.warning("Former options could not be removed from the app configuration: %s", err or type(err).__name__)
-    return options
+    return options, warning
 
 
 async def main() -> None:
@@ -125,13 +127,14 @@ async def main() -> None:
     if not token:
         raise SystemExit("SUPERVISOR_TOKEN missing – homeassistant_api must be enabled")
     async with aiohttp.ClientSession(headers={"User-Agent": USER_AGENT}, trust_env=False) as session:
-        options = await load_settings(session, token)
+        options, settings_warning = await load_settings(session, token)
         # Certificate pins for Shelly servers with an in-house CA (see tls.py)
         try:
             pins = CertificatePins(options.get("pinned_certificates", []))
         except ValueError as err:
             raise SystemExit(f"Configuration error: {err}") from None
         mgr = Manager(options, session, token, pins)
+        mgr.settings_warning = settings_warning  # damaged or invalid settings file: shown in the UI
         await mgr.read_host_port()   # port of the download server on the host (texts of the UI)
         # Firmware files the store does not list (lost or older state): read back
         # from the disk before the UI lists the store (see FirmwareStore.adopt_files)
