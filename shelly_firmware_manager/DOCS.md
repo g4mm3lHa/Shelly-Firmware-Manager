@@ -234,8 +234,9 @@ nothing and starts no check; the status stays until the next check.
 **Details for a bug ticket** (bottom left in the device details) shows a text for a bug
 report or a forum question: app and Home Assistant version, model, firmware, status,
 the options that matter and the last log lines of the device. Names are replaced by
-"[Name 1]", IP addresses shortened to their first two numbers, MAC addresses and device
-IDs to their last four characters; passwords are never part of it. **Copy text** only
+"[Name 1]", IPv4 addresses shortened to their first two numbers, IPv6 addresses by
+"[IPv6]", MAC addresses and device IDs to their last four characters; passwords are never
+part of it. **Copy text** only
 fills the clipboard – nothing is sent.
 
 **No usable address:** if the address of a device cannot be used – the host name does
