@@ -76,6 +76,17 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
 - Phones (2026-11-19): `#dlg-body` top padding 12 px; warning toast as wide as its
   text, at most the width minus 16 px on each side.
 
+## Page head (3.12.0, approved 2026-11-24)
+- No status under the page title: running checks, installations, reloads, restores and
+  schedule runs show in their rows, the progress line, the dialogs or their tab. The line
+  under the title is only for errors (storage error, page could not load).
+
+## Logs tab (3.12.0, approved 2026-11-24)
+- Tick "Hide successful entries" (toolbar) hides every entry of severity success, not only
+  checks; warnings and errors stay.
+- The entry "compared after the update" opens like the other entries: the first changed
+  values ("key: before → now", shortened) and the scripts that stopped.
+
 ## Toolbar and card heads (3.5.0, variant B)
 - Same toolbar in all tabs: search, sort and filter only as small round icons (36 px
   desktop, 44 px phones); a click opens a popover under the icon (search field; sort:

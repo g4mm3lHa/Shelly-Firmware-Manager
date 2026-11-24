@@ -379,7 +379,8 @@ class Checks(Backups):
         check (last_scan) and the schedule stay unchanged. Raises ShellyError during
         the full check or while this device is checked, installed or reloaded;
         other devices may be checked or installed at the same time. trigger: log
-        value ("device", or "step" for the check after an intermediate version).
+        value ("device", or "step" for the check after an intermediate version, which
+        keeps the comparison after that update).
         A device that is no longer in the registry is marked removed and checked at
         its last address if it still answers there (finding in the log either way)."""
         if device_id not in self.devices:
@@ -389,7 +390,8 @@ class Checks(Backups):
         self.device_checks[device_id] = "running"
         dev = self.devices[device_id]
         dev.pop("updated", None)  # Checked again by the user, no longer "just updated"
-        dev.pop("after_update", None)  # nor its comparison after the update
+        if trigger != "step":  # the check after an intermediate version keeps the comparison
+            dev.pop("after_update", None)  # of that update; any other check ends it
         dev.pop("install_failed", None)  # nor a failed installation to retry
         self._check_users[device_id] = user or "unknown"
         started = time.monotonic()

@@ -91,6 +91,12 @@ const backupRunFindings = e => box("ul", null, ...(e.findings || []).map(f => el
   f.result === "stored" ? `${f.device}: stored · ${fmtSize(f.size)} · ${backupParts(f.parts)}`
     : `${f.device}: not backed up – ${f.result === "asleep" ? "battery device asleep" : f.detail || f.result}`,
   SEVERITY_COLOURS[f.severity] || "okc")));
+/** Opened entry of a comparison after an update: the changed values (before → now; the
+ *  first ones, the dialog of the device shows all) and the scripts that stopped. */
+const comparedDetails = e => box("ul", null,
+  ...(e.changed_rows || []).map(r => el("li", `${r.key}: ${arrow(r.before, r.now)}`, "warnc")),
+  e.changed > (e.changed_rows || []).length ? el("li", `… ${e.changed - e.changed_rows.length} more`, "neutral") : null,
+  ...(e.scripts_stopped || []).map(name => el("li", `Script “${name}”: ran before the update, not running now`, "bad")));
 /** Lines below a backup entry: the error, and for a restore what was not applied. */
 const backupDetails = e => [
   e.event === "restored" && e.confirmed === false ? el("div", "The device could not be read again – nothing is confirmed", "bad") : null,
@@ -193,12 +199,16 @@ function logContent(e) {
       return [keptDetails(`log-${e.ts}-sch`, scheduleLine(e), runFindings(e))];
     }
     case "backup":
+      if (e.event === "compared" && (e.changed_rows?.length || e.scripts_stopped?.length)) {
+        return [keptDetails(`log-${e.id}-cmp`, backupLine(e), comparedDetails(e))];
+      }
       if (e.event !== "run") return [el("div", backupLine(e)), ...backupDetails(e)];
       return e.findings?.length ? [keptDetails(`log-${e.ts}-bkrun`, backupRunLine(e), backupRunFindings(e))] : [el("div", backupRunLine(e))];
     case "log":
       return [el("div", `Log cleared · ${plural(e.entries ?? 0, "entry", "entries")} deleted`)];
     case "connection":   // connection test of the download server
-      return [el("div", connectionLine(e)), e.error ? el("div", e.error, "bad") : null].filter(Boolean);
+      return [el("div", connectionLine(e)), e.error ? el("div", e.error, "bad") : null,
+        e.detail ? el("div", `Device answer: ${e.detail}`, "sub") : null].filter(Boolean);
     default:
       return [el("div", e.kind)];
   }
@@ -297,7 +307,9 @@ function logTile(e, d, group, unread) {
     el("span", KIND_LABELS[e.kind] || e.kind, "tag"), el("span", SEVERITY_LABELS[sev], `tag sev-${sev}`), el("span", null, "spacer"), logDelete(e));
   const body = box("div", "log-details", ...(e.kind === "check" ? (e.findings?.length || e.ignored?.length ? [checkFindings(e)] : [el("div", checkCounts(e), "sub")]) :
     e.kind === "schedule" && e.event === "run" ? [runFindings(e)] :
-    e.kind === "backup" && e.event === "run" && e.findings?.length ? [backupRunFindings(e)] : logContent(e)));
+    e.kind === "backup" && e.event === "run" && e.findings?.length ? [backupRunFindings(e)] :
+    e.kind === "backup" && e.event === "compared" && (e.changed_rows?.length || e.scripts_stopped?.length) ? [el("div", backupLine(e)), comparedDetails(e)] :
+    logContent(e)));
   // The user stands top right, beside the first summary line
   const lines = () => summary.map((x, i) => i === 0 && e.user ? box("div", "first", el("span", x), el("span", e.user, "user")) : el("div", x));
   const same = [...body.children].map(c => c.textContent.trim()).join("\n") === summary.join("\n");
@@ -316,11 +328,12 @@ function logTile(e, d, group, unread) {
   tile.append(det);
   return tile;
 }
-/** Logs tab: grouped by day, filter, device search, quiet checks. */
+/** Logs tab: grouped by day, filter, device search, "Hide successful entries" (every entry
+ *  of severity success). */
 export function renderLogs() {
   const q = searchText($("log-search")), quiet = $("log-quiet").checked;
   const devMatch = e => matches(q, [e.device, ...(e.findings || []).map(f => f.device), ...(e.ignored || [])]);
-  const base = ui.logs.filter(e => devMatch(e) && !(quiet && e.kind === "check" && !(e.findings || []).length));
+  const base = ui.logs.filter(e => devMatch(e) && !(quiet && severity(e) === "success"));
   logFilter.set(ui.logFilter, Object.fromEntries(Object.entries(LOG_FILTERS).map(([key, [, fn]]) => [key, base.filter(fn).length])));
   const out = [], shown = base.filter(LOG_FILTERS[ui.logFilter][1]);
   const dayOf = e => { const d = new Date(e.ts * 1000); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };

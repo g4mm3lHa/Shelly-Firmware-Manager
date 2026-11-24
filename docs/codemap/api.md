@@ -44,6 +44,7 @@ Part of `docs/CODEMAP.md`; read when you change routes: the table and the middle
 | `POST /api/firmware/{name}/delete` | `delete_firmware` (`confirm` + `acknowledged`; also an unknown file of the folder) |
 | `GET /api/backups` | `backups_view` (`{rev, keep, totals, warning, devices, orphans}`) |
 | `POST /api/devices/{id}/backup` | `backup_now` (one device, answer: the new backup) |
+| `POST /api/devices/{id}/after-update/seen` | `after_update_seen` ("Seen" in the comparison after an update; 409 without one) |
 | `POST /api/backups/run` · `/run/clear` | `reserve_backup_run` (`devices`: "all" or IDs) + `run_backups` in the background · `clear_backup_run` |
 | `POST /api/backups/{bid}/keep` · `/delete` | `keep_backup` (`kept`) · `delete_backup` (`confirm`) |
 | `POST /api/backups/{bid}/preview` | `preview_restore` (reads the device, changes nothing) |

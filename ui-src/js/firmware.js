@@ -43,7 +43,7 @@ const unidentified = () => (ui.state?.devices || []).filter(d => !d.type);
 const unused = f => !(ui.state?.devices || []).some(d => !d.type || d.type === f.type);
 // Beta and RC versions of Shelly (option "Offer beta firmware"): violet "Beta" tag and filter
 const isBeta = v => /^\d{1,4}\.\d{1,4}\.\d{1,4}-(beta|rc)\d{1,3}$/.test(v || "");
-// "Installed": versions Gen2+ devices run now (kept as their way back, option keep_installed);
+// "Installed": versions Gen2+ devices run now (kept as their previous version, option keep_installed);
 // "Imported": files of an imported firmware store not confirmed by the Shelly update server
 const FW_FILTERS = {all: [t("All"), () => true], provided: [t("Provided"), f => f.devices.length > 0],
   installed: [t("Installed"), f => (f.installed || []).length > 0],
@@ -56,7 +56,7 @@ function unusedTip() {
   return tn(open, "Firmware ID of 1 device not known yet (never reached) – no file counts as unused until it is checked once",
     "Firmware ID of {n} devices not known yet (never reached) – no file counts as unused until they are checked once");
 }
-const FW_TIPS = {unused: unusedTip, beta: () => t("Beta versions of the Shelly update server (Settings → “Offer beta firmware”)"), installed: () => t("Versions that devices run at the moment – their way back after the next update"),
+const FW_TIPS = {unused: unusedTip, beta: () => t("Beta versions of the Shelly update server (Settings → “Offer beta firmware”)"), installed: () => t("Versions that devices run at the moment – their previous version after the next update"),
   imported: () => t("Files from an imported firmware store that the Shelly update server has not confirmed yet")};
 const fwFilter = filterControl(Object.entries(FW_FILTERS).map(([key, [label]]) => [key, label, FW_TIPS[key] || null]),
   key => { ui.fwFilter = key; render(true); });
@@ -165,9 +165,9 @@ function firmwareRow(f, latest, older) {
   // Class names only place the cells on phones (grid areas); the desktop grid is unchanged
   const uploaded = f.source === "upload" ? el("span", t("Uploaded"), "tag warn") : f.source === "import" ? el("span", t("Imported"), "tag warn") : null;
   if (uploaded) attachTip(uploaded, () => f.source === "import" ? IMPORTED_TIP : fwSource(f), true);
-  // Version a device runs now: kept as its way back after the next update
+  // Version a device runs now: kept as its previous version after the next update
   const users = f.installed || [], inst = users.length ? el("span", t("Installed"), "tag inst") : null;
-  if (inst) attachTip(inst, () => t("Installed on {devices}: {names}", {devices: devicesText(users), names: users.join(", ")}) + "\n" + t("Kept as their way back after the next update"), true);
+  if (inst) attachTip(inst, () => t("Installed on {devices}: {names}", {devices: devicesText(users), names: users.join(", ")}) + "\n" + t("Kept as their previous version after the next update"), true);
   // Once provided as an intermediate version by a check (permanent store marker)
   const step = f.intermediate ? el("span", t("Intermediate"), "tag step") : null;
   if (step) attachTip(step, () => INTERMEDIATE_TIP, true);
@@ -220,11 +220,11 @@ function deleteFirmware(f) {
   const title = t("Delete firmware?"), details = valueList([[t("Firmware ID"), f.type], [t("Version"), f.version], [t("Source"), fwSource(f)], shaRow(f.sha256)]);
   // A file provided to devices may be deleted: they lose the provided update
   const held = (f.devices || []).map(d => d.name);
-  // A version devices run now: without the file they have no way back after the next update
+  // A version devices run now: without the file they cannot return to it after the next update
   const users = f.installed || [];
   const names = `${users.slice(0, 3).join(", ")}${users.length > 3 ? ", …" : ""}`;
-  const wayBack = users.length ? el("div", tn(users.length, "Installed on 1 device ({names}): without this file it has no way back after the next update.",
-    "Installed on {n} devices ({names}): without this file they have no way back after the next update.", {names}), "warnbox") : null;
+  const wayBack = users.length ? el("div", tn(users.length, "Installed on 1 device ({names}): without this file it cannot return to its previous version after the next update.",
+    "Installed on {n} devices ({names}): without this file they cannot return to their previous version after the next update.", {names}), "warnbox") : null;
   const lose = tn(held.length, "Provided for {names}: this device loses the provided update and is shown as “Available” until it is checked again.",
     "Provided for {names}: these devices lose the provided update and are shown as “Available” until they are checked again.", {names: held.join(", ")});
   modal(title, [details, wayBack, held.length ? el("div", lose, "warnbox") : null,

@@ -101,7 +101,7 @@ const FILTERS = [
   ["unprotected", t("Unprotected"), d => d.auth_enabled === false],
   ["cloud", t("Cloud on"), d => d.cloud === true, t("Devices with the Shelly cloud switched on")],
   // Access point and websocket debug log on: also set by the strip "Security"
-  ...SECURITY_ITEMS.slice(2).map(([key, label, , fn, tip]) => [key, label, fn, tip]),
+  ...SECURITY_ITEMS.slice(2).map(([key, label, , , fn, tip]) => [key, label, fn, tip]),
   ["hold", t("On hold"), held, t("Devices with a new version that is not offered yet (Settings → Checks → “Offer updates only after”)")],
   ["asleep", t("Asleep"), inSection("asleep"), t("Battery devices that did not answer the last check")],
   ["ignored", t("Ignored"), inSection("ignored")],
@@ -151,7 +151,7 @@ function showStatus(d) {
         d.offer_version && d.beta ? t("{version} (beta)", {version: d.offer_version}) : d.offer_version],
       [t("Scheduled"), d.planned ? t("Install at {time} · approved {on} by {user}", {time: d.planned.at_text, on: d.planned.on_text, user: d.planned.by}) : null],
       [t("Build date"), held(d) ? d.hold.built : d.offer_version ? d.offer_date : null],
-      [t("Way back"), d.way_back ? (d.way_back.stored ? t("{version} is stored", {version: d.way_back.version}) : t("{version} is not stored", {version: d.way_back.version})) : null],
+      [t("Previous version"), d.way_back ? (d.way_back.stored ? t("{version} is stored", {version: d.way_back.version}) : t("{version} is not stored", {version: d.way_back.version})) : null],
       [t("Source"), provided ? OFFER_SOURCES[d.offer_source] : null]])),
     section(t("Device"), valueList([[t("Model"), modelGen(d)], [t("Firmware ID"), d.type], ["NTP", d.ntp]])),
     section(t("History"), valueList([[t("Last check"), fmt(d.last_check)], [t("Last success"), fmt(d.last_success)],
@@ -744,7 +744,8 @@ function openRowMenu(d, anchor) {
   // Group 2: the device itself
   items.push(el("hr"));
   add(t("Device details"), () => showStatus(d), true);
-  if (d.after_update && justUpdated(d)) add(t("Comparison after update"), () => openComparison(d), true);
+  // Until the next check of the device (the check after an intermediate version keeps it)
+  if (d.after_update) add(t("Comparison after update"), () => openComparison(d), true);
   add(t("Reload device info"), () => reloadDevice(d), !blocked && !!d.ip);
   if (blocked) items.push(el("div", t("Not available – {reason}", {reason: blocked}), "menu-hint"));   // reason, also for touch
   const url = webUrl(d);

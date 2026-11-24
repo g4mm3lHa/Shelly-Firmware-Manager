@@ -56,7 +56,7 @@ async def test_double_tap_gets_409(client, mgr, net):
     assert (r1.status, r2.status, r3.status, r4.status) == (200, 409, 409, 200)  # B: in parallel
     state = await (await client.get("/api/state")).json()
     assert not state["scanning"] and state["progress"] is None
-    assert state["busy"] == "Checking 2 devices" and state["busy_note"] is None
+    assert state["busy"] == "Checking 2 devices" and "busy_note" not in state
     net.gate.set()
     await wait_idle(mgr)
     checks = [e for e in mgr.events.entries if e["kind"] == "check" and e.get("trigger") == "device"]
@@ -570,3 +570,16 @@ async def test_http_wifi_signal_and_restart_flag(client, mgr, net, monkeypatch):
     assert r.status == 200
     await asyncio.sleep(0.01)
     assert started == [True]
+
+
+async def test_http_after_update_seen(client, mgr):
+    """"Seen" in the comparison after an update: marks it (the line below the firmware
+    goes away); 409 without a comparison, 404 for an unknown device."""
+    await mgr.scan()
+    r = await client.post(f"/api/devices/{A}/after-update/seen", json={}, headers=hdr(client))
+    assert r.status == 409
+    mgr.devices[A]["after_update"] = {"at": 1, "changed_count": 1, "changed": [], "new": [], "new_count": 0}
+    r = await client.post(f"/api/devices/{A}/after-update/seen", json={}, headers=hdr(client))
+    assert r.status == 200 and mgr.devices[A]["after_update"]["seen"] is True
+    r = await client.post("/api/devices/unknown/after-update/seen", json={}, headers=hdr(client))
+    assert r.status == 404

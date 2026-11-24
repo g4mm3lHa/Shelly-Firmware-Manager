@@ -19,7 +19,8 @@ export function render(force) {
   const s = ui.state;
   if (!s) return;
   renderMeta(s);
-  $("busy").textContent = s.storage_error ? t("Storage error: {error}", {error: s.storage_error}) : s.busy_note || "";
+  // The line under the page title shows errors only (storage, loading), never a status
+  $("busy").textContent = s.storage_error ? t("Storage error: {error}", {error: s.storage_error}) : "";
   $("busy").classList.toggle("error", !!s.storage_error);
   renderProgress(s.progress);
   renderNotice(s.first_start_open ? {issue: "first_start"} : s.download_base || {});

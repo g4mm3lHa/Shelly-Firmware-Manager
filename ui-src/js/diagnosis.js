@@ -3,7 +3,7 @@
 // installation, "Try again" for a device that did not answer, the text for a bug ticket
 // and the comparison after an update.
 import {
-  $, api, attachTip, box, checkLine, copyText, devUrl, el, field, fmt, guarded, icon, message, messageBody, modal, modelGen, section, t, tn,
+  $, api, attachTip, box, checkLine, closeModal, copyText, devUrl, el, field, fmt, guarded, icon, message, messageBody, modal, modelGen, section, t, tn,
   toast, ui, valueList,
 } from "./core.js";
 import {lang} from "./i18n.js";
@@ -15,11 +15,12 @@ import {load, render, showView} from "./main.js";
 // choice); the last result is part of the state (connection_test) while the download base
 // URL is unchanged.
 const TEST_TITLE = t("Test the connection to the download server");
-const TEST_CAUSES = [t("The IP address is not the LAN address of Home Assistant."),
-  t("The host port 8098 was changed or switched off in the app configuration (Network)."),
-  t("A firewall or a separate network (VLAN, guest Wi-Fi) lies between the Shelly and Home Assistant.")];
 /** Port of a URL (the default port of its scheme if it names none). */
 const urlPort = url => { try { const u = new URL(url); return u.port || (u.protocol === "https:" ? "443" : "80"); } catch (e) { return "8098"; } };
+/** Common causes of a failed test; the port is the one of the tested address. */
+const testCauses = url => [t("The IP address is not the LAN address of Home Assistant."),
+  t("Port {port} of the address does not match the host port in the app configuration (Network).", {port: urlPort(url)}),
+  t("A firewall or a separate network (VLAN, guest Wi-Fi) lies between the Shelly and Home Assistant.")];
 /** "Reachable · last tested <time> with <device>" (or not reachable, or not tested yet). */
 function testNote(test) {
   if (!test) return el("span", t("Not tested yet"), "conn-res");
@@ -87,7 +88,7 @@ async function runConnectionTest(device) {
     } else {
       modal(TEST_TITLE, [messageBody(t("The Shelly cannot reach the download server. An installation would fail like this."), "error"),
         section(t("Test"), testLines(url, "err", who, r.error || "–")),
-        section(t("Common causes"), box("ul", "causes", ...TEST_CAUSES.map(c => el("li", c)))),
+        section(t("Common causes"), box("ul", "causes", ...testCauses(url).map(c => el("li", c)))),
         el("p", t("Home Assistant itself reaches the device. Only the way from the Shelly to Home Assistant (port {port}) matters.", {port: urlPort(url)}), "hint")],
       [{text: t("Close")}, {text: t("Test again"), kind: "primary", action: () => runConnectionTest(device)}], "play");
     }
@@ -222,10 +223,10 @@ const COMPARE_TITLE = t("Comparison after update");
 /** True if the comparison found something to look at: changed values or stopped scripts. */
 const hasFindings = a => !!a && !a.error && (a.changed_count > 0 || (a.scripts && a.scripts.stopped.length > 0));
 /** Line below the firmware of an updated device: "n settings changed" (or the stopped
- *  scripts), opens the comparison; null without findings. */
+ *  scripts), opens the comparison; null without findings or once marked "Seen". */
 export function afterUpdateNote(d) {
   const a = d.after_update;
-  if (!hasFindings(a)) return null;
+  if (!hasFindings(a) || a.seen) return null;
   const b = el("button", null, "hold-note after-note"); b.type = "button";
   b.append(icon("alert"), el("span", a.changed_count ? tn(a.changed_count, "1 setting changed", "{n} settings changed")
     : tn(a.scripts.stopped.length, "1 script stopped", "{n} scripts stopped")));
@@ -244,6 +245,15 @@ function compareTable(heads, rows) {
     table.append(tr);
   }
   return table;
+}
+/** Buttons of the comparison: "Seen" while its line below the firmware is shown (removes
+ *  the line; the comparison stays in the row menu until the next check), and Close. */
+function compareButtons(d) {
+  if (!hasFindings(d.after_update) || d.after_update.seen) return undefined;
+  return [{text: t("Close")}, {text: t("Seen"), kind: "primary", action: () => guarded(COMPARE_TITLE, "backup", async () => {
+    await api(`${devUrl(d)}/after-update/seen`, {});
+    d.after_update.seen = true; closeModal(); render(true);
+  })}];
 }
 /** Dialog "Comparison after update" of a device. */
 export function openComparison(d) {
@@ -273,5 +283,5 @@ export function openComparison(d) {
     content.push(section(`${t("New with the firmware")} · ${a.new_count}`, fold, more(a.new.length, a.new_count)));
   }
   if (d.gen >= 2) content.push(el("p", t("Not compared: counters that change with every update (sys.cfg_rev)."), "hint"));
-  modal(COMPARE_TITLE, content, undefined, "backup");
+  modal(COMPARE_TITLE, content, compareButtons(d), "backup");
 }

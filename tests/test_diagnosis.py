@@ -60,7 +60,12 @@ async def test_connection_test_failures(mgr, monkeypatch):
     await mgr.scan()
     monkeypatch.setattr(shelly, "fetch_test", fetching(mgr, error=ShellyError("Device reports: -104 Deadline Exceeded")))
     result = await mgr.run_connection_test(A)
-    assert result["ok"] is False and "timeout after" in result["error"]
+    assert result["ok"] is False and "timeout after" in result["error"] and "Shelly code -104" in result["error"]
+    raw = "Device reports: {'code': -114, 'message': '-1: Connection error: -14'}"
+    monkeypatch.setattr(shelly, "fetch_test", fetching(mgr, error=ShellyError(raw)))
+    result = await mgr.run_connection_test(A)
+    assert result["error"] == f"No connection to {URL}: connection error (Shelly code -114 / -14)"
+    assert result["detail"] == raw and mgr.events.entries[-1]["detail"] == raw  # raw text: log only
 
     async def other_server(_session, _origin, _url, _auth=None):
         return {"code": 404, "message": "Not Found"}
@@ -71,6 +76,21 @@ async def test_connection_test_failures(mgr, monkeypatch):
     result = await mgr.run_connection_test(A)
     assert result["ok"] is False and "from 192.168.1.250" in result["error"]
     assert mgr.events.entries[-1]["severity"] == "error"
+
+
+def test_fetch_error_texts():
+    """The device's raw error object becomes a readable text with its codes; other texts stay."""
+    url = "http://192.168.1.20:8098"
+    assert shelly.fetch_error("Device reports: {'code': -114, 'message': '-1: Connection error: -14'}", url) == (
+        f"No connection to {url}: connection error (Shelly code -114 / -14)"
+    )
+    assert shelly.fetch_error("Device reports: -104 Deadline Exceeded", url) == (
+        f"No connection to {url}: timeout after {shelly.FETCH_TEST_TIMEOUT_S} s (Shelly code -104)"
+    )
+    assert shelly.fetch_error("Device reports: {'code': -103, 'message': 'Invalid argument'}", url) == (
+        f"The device could not fetch {url} (Shelly code -103)"
+    )
+    assert shelly.fetch_error("Password required", url) == "Password required"
 
 
 async def test_connection_test_tries_the_next_device(mgr, monkeypatch):
@@ -228,6 +248,9 @@ async def test_report_of_a_device(mgr, net, monkeypatch):
     assert "Kitchen" not in text and "192.168.1.10" not in text and "192.168.x.x" in text
     assert "secret-pw" not in text and "Log (last" in text
     assert "Hall" not in text  # other devices stay out
+    mgr.connection_test = {"ok": False, "at": 1, "url": URL, "error": "No connection", "detail": "Device reports: -104 x"}
+    text = await mgr.device_report(A, "3.12.0")
+    assert "connection test: not reachable" in text and "device answer: Device reports: -104 x" in text
 
 
 async def test_report_over_http(client, mgr, monkeypatch):
