@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.12.1
+
+Release candidate. A device that needs a password the app does not have is shown as an
+error again.
+
+Changes in rc1
+
+Fixed
+- Check of a device that needs a password the app does not have (or refuses the stored
+  one): the row shows "Error" with the reason like the log, no longer "Up-To-Date".
+
 ## 3.12.0
 
 Released 2026-11-24. Connection test of the download server, help for devices that do

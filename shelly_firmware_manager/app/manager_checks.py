@@ -763,7 +763,9 @@ class Checks(Backups):
             lambda gen, sid: dev.update(gen=gen, shelly_id=sid),
         )
         self._apply_info(dev, info)
-        await self._read_settings(device_id, dev, extended=True)
+        # A device that needs a password the app does not have (or refuses the stored
+        # one) fails the check: the row shows the error the log shows
+        await self._read_settings(device_id, dev, extended=True, raise_auth=True)
 
         if info["gen"] == 1 and not self.gen1_enabled:
             dev.update(

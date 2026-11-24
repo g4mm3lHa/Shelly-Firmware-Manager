@@ -46,14 +46,18 @@ class DeviceSettings(Transfers):
             dev["last_update"] = int(time.time())
         dev.update(**info)
 
-    async def _read_settings(self, device_id: str, dev: Device, extended: bool = False) -> bool:
+    async def _read_settings(
+        self, device_id: str, dev: Device, extended: bool = False, raise_auth: bool = False
+    ) -> bool:
         """Read settings and feature states (see shelly.read_settings). True on success.
 
         A failure must not stop the firmware check: the old values stay, but
         settings_error marks them as unknown (shown as such, logged as warning or
-        error) – a failed read-back is never reported as confirmed. A battery state
-        reported by the device replaces one derived from Home Assistant
-        (battery_source)."""
+        error) – a failed read-back is never reported as confirmed. Exception
+        raise_auth: a missing or refused password (AuthError) is raised after
+        settings_error is set, so the check fails as an error of the device. A
+        battery state reported by the device replaces one derived from Home
+        Assistant (battery_source)."""
         try:
             answer = await shelly.read_settings(
                 self.session, dev["gen"], dev["origin"], dev["type"], self._auth(device_id, dev), extended
@@ -65,6 +69,8 @@ class DeviceSettings(Transfers):
             log.warning("%s: reading settings failed: %s", dev.get("name"), err)
             message = error_text(err, 300) or type(err).__name__
             dev["settings_error"] = {"message": message, "severity": severity_of(err)}
+            if raise_auth and isinstance(err, AuthError):
+                raise
             return False
         except Exception as err:
             # An answer of an unexpected shape: the values stay unknown as well
