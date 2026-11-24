@@ -143,7 +143,7 @@ class Manager(Schedules):
             },
             "scanning": self.checking,
             "progress": dict(self.progress) if self.progress else None,
-            "storage_error": self.storage_error or self.state_warning,
+            "storage_error": self.storage_error or self.state_warning or self.settings_warning,
             "gen1_enabled": self.gen1_enabled,
             "allow_downgrade": self.allow_downgrade,
             "beta_firmware": self.beta_firmware,

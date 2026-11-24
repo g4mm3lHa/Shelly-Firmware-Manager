@@ -5,6 +5,24 @@
 Release candidate. Connection test of the download server, help for devices that do not
 answer, Home Assistant areas, a security overview and six more languages.
 
+Changes in rc6
+
+Fixed
+- Details for a bug ticket: shortened IPv6 addresses (with "::", e.g. `fd12::5`) are
+  masked too.
+- Comparison after an update: an unexpected error no longer skips the Home Assistant
+  notification of "Install at" or the check after an intermediate version.
+- Comparison after an update: a new installation started meanwhile gets no result of
+  the previous one.
+- Settings: an invalid value in the settings file gets its default and is named in the
+  status strip; invalid certificate pins no longer stop the app from starting.
+
+Security
+- Logs: the entry of a comparison after an update names the changed settings without
+  their values (they may hold e.g. a server address with a token).
+- Host port check: a host name in the download base URL is resolved first; outside the
+  local network nothing is checked.
+
 Changes in rc5
 - Faster app start (standard library precompiled in the image); after saving the
   settings the page reloads as soon as the restarted app answers (before: 2 s steps).

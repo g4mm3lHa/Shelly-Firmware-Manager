@@ -233,6 +233,27 @@ def test_masking():
     assert text.count("[Name 1]") == 2
 
 
+@pytest.mark.parametrize(
+    ("raw", "masked"),
+    [
+        ("at fd12::5 now", "at [IPv6] now"),
+        ("fd00::abcd", "[IPv6]"),
+        ("fd12:3456::1:2", "[IPv6]"),
+        ("fd12:3456:789a::1", "[IPv6]"),
+        ("fd12:3456:789a:1:2:3:4:5", "[IPv6]"),
+        ("url http://[fd12::5]:8098/x", "url http://[IPv6]:8098/x"),
+        ("::ffff:192.168.1.10", "[IPv6]"),
+        ("reached fd12::5.", "reached [IPv6]."),
+        ("address fd12::5: refused", "address [IPv6]: refused"),
+        ("at 20:14:05 and 20:14", "at 20:14:05 and 20:14"),
+        ("Error: abc:def", "Error: abc:def"),
+    ],
+)
+def test_masking_of_ipv6_forms(raw, masked):
+    """Every form of an IPv6 address, also shortened with "::", is masked; times stay."""
+    assert diagnostics.Masker([]).text(raw) == masked
+
+
 async def test_report_of_a_device(mgr, net, monkeypatch):
     """Versions, device, status, masked log lines of this device only; no password."""
     net.unreachable.add(A)

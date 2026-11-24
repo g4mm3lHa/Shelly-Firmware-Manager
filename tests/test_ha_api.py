@@ -262,14 +262,15 @@ async def test_settings_are_taken_over_once_from_the_supervisor(net, monkeypatch
         kept = {**OPTIONS, "log_entry_limit": 500, "check_time": "25:00", "gen1_allowed_types": ["SHSW-1"],
                 "download_base_url": "http://203.0.113.10:8098", "settings": "typed"}
         sup.info = {"result": "ok", "data": {"slug": "x", "options": kept}}
-        options = await main.load_settings(session, TOKEN)
+        options, warning = await main.load_settings(session, TOKEN)
+        assert warning is None
         assert options["log_entry_limit"] == 500 and options["check_time"] == "02:45"
         assert options["download_base_url"] == "http://203.0.113.10:8098"   # kept; the app shows its notice
         assert "gen1_allowed_types" not in options and "settings" not in options
         assert options["pinned_certificates"] == app_options.DEFAULTS["pinned_certificates"]
         assert json.loads(data_paths.SETTINGS_FILE.read_text()) == options
         assert sup.posts == [("/addons/self/options", f"Bearer {TOKEN}", {"options": {}})]
-        assert await main.load_settings(session, TOKEN) == options
+        assert await main.load_settings(session, TOKEN) == (options, None)
         assert sup.info_requests == 1 and len(sup.posts) == 1
 
 
@@ -282,12 +283,32 @@ async def test_settings_take_over_waits_for_the_supervisor(net, monkeypatch, tmp
     async with FakeSupervisor() as sup, aiohttp.ClientSession() as session:
         monkeypatch.setattr(manager_core, "SUPERVISOR", sup.url)
         sup.info_status = 500
-        assert await main.load_settings(session, TOKEN) == app_options.with_defaults({})
+        assert await main.load_settings(session, TOKEN) == (app_options.with_defaults({}), None)
         assert not data_paths.SETTINGS_FILE.exists() and sup.posts == []
         data_paths.SETTINGS_FILE.write_text("[1")
         sup.info_status, sup.info = 200, {"result": "ok", "data": {"options": {"backup_keep": 20}}}
-        assert (await main.load_settings(session, TOKEN))["backup_keep"] == 20
+        options, warning = await main.load_settings(session, TOKEN)
+        assert options["backup_keep"] == 20 and warning == app_options.SETTINGS_DAMAGED
         assert data_paths.SETTINGS_FILE.with_suffix(".damaged").read_text() == "[1"
+
+
+async def test_invalid_values_in_the_settings_file(net, monkeypatch, tmp_path):
+    """Every value of settings.json is checked at the start: an invalid one (e.g. edited by
+    hand) gets its default and is named in a warning for the UI; invalid certificate pins
+    no longer stop the start; unknown keys are ignored silently."""
+    stored = {**app_options.with_defaults({}), "backup_keep": 20, "check_time": "25:00", "pinned_certificates": "x",
+              "download_base_url": "http://192.168.1.5:8098", "removed_option": True}
+    data_paths.SETTINGS_FILE.write_text(json.dumps(stored))
+    async with aiohttp.ClientSession() as session:
+        options, warning = await main.load_settings(session, TOKEN)
+    assert options["backup_keep"] == 20 and options["download_base_url"] == "http://192.168.1.5:8098"
+    assert options["check_time"] == "02:45"
+    assert options["pinned_certificates"] == app_options.DEFAULTS["pinned_certificates"]
+    assert "removed_option" not in options
+    assert warning == app_options.SETTINGS_INVALID.format(keys="check_time, pinned_certificates")
+    m = manager.Manager(options, None, TOKEN)
+    m.settings_warning = warning
+    assert m.public_state()["storage_error"] == warning
 
 
 async def test_host_port_is_read_and_set_through_the_supervisor(ha, monkeypatch):
@@ -314,6 +335,19 @@ async def test_host_port_is_read_and_set_through_the_supervisor(ha, monkeypatch)
     with pytest.raises(ValueError, match="already in use"):
         await m.save_options({"host_port": 8123})
     assert asked == [("192.168.1.2", 8123)] and not any(p[0] == "/addons/self/options" for p in sup.posts)
+    # A host name in the download base URL: checked at its LAN address, never outside the LAN
+    lan = {"ha.lan": "192.168.1.3", "ha.example": None}
+
+    async def resolve(host):
+        return lan.get(host, host)   # an IP address stays
+
+    monkeypatch.setattr(manager_core, "resolve_lan_address", resolve)
+    asked.clear()
+    await m._check_port_free(8123, "http://ha.example:8123")   # public name: not checked, not refused
+    assert asked == []
+    with pytest.raises(ValueError, match="already in use on ha.lan"):
+        await m._check_port_free(8123, "http://ha.lan:8123")
+    assert asked == [("192.168.1.3", 8123)]
     assert await m.save_options({"host_port": 8099, "log_entry_limit": 600}, user="Admin") == ["log_entry_limit", "host_port"]
     assert sup.posts[-1] == ("/addons/self/options", f"Bearer {TOKEN}", {"network": {"8098/tcp": 8099}})
     assert m.host_port == 8099 and m.options["log_entry_limit"] == 600

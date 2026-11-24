@@ -91,11 +91,11 @@ const backupRunFindings = e => box("ul", null, ...(e.findings || []).map(f => el
   f.result === "stored" ? `${f.device}: stored · ${fmtSize(f.size)} · ${backupParts(f.parts)}`
     : `${f.device}: not backed up – ${f.result === "asleep" ? "battery device asleep" : f.detail || f.result}`,
   SEVERITY_COLOURS[f.severity] || "okc")));
-/** Opened entry of a comparison after an update: the changed values (before → now; the
- *  first ones, the dialog of the device shows all) and the scripts that stopped. */
+/** Opened entry of a comparison after an update: the names of the changed settings (the
+ *  first ones, without values – the dialog of the device shows them) and the scripts that stopped. */
 const comparedDetails = e => box("ul", null,
-  ...(e.changed_rows || []).map(r => el("li", `${r.key}: ${arrow(r.before, r.now)}`, "warnc")),
-  e.changed > (e.changed_rows || []).length ? el("li", `… ${e.changed - e.changed_rows.length} more`, "neutral") : null,
+  ...(e.changed_keys || []).map(key => el("li", `${key}: changed`, "warnc")),
+  e.changed > (e.changed_keys || []).length ? el("li", `… ${e.changed - (e.changed_keys || []).length} more`, "neutral") : null,
   ...(e.scripts_stopped || []).map(name => el("li", `Script “${name}”: ran before the update, not running now`, "bad")));
 /** Lines below a backup entry: the error, and for a restore what was not applied. */
 const backupDetails = e => [
@@ -201,7 +201,7 @@ function logContent(e) {
       return [keptDetails(`log-${e.ts}-sch`, scheduleLine(e), runFindings(e))];
     }
     case "backup":
-      if (e.event === "compared" && (e.changed_rows?.length || e.scripts_stopped?.length)) {
+      if (e.event === "compared" && (e.changed_keys?.length || e.scripts_stopped?.length)) {
         return [keptDetails(`log-${e.id}-cmp`, backupLine(e), comparedDetails(e))];
       }
       if (e.event !== "run") return [el("div", backupLine(e)), ...backupDetails(e)];
@@ -309,7 +309,7 @@ function logTile(e, d, group, unread) {
   const body = box("div", "log-details", ...(e.kind === "check" ? (e.findings?.length || e.ignored?.length ? [checkFindings(e)] : [el("div", checkCounts(e), "sub")]) :
     e.kind === "schedule" && e.event === "run" ? [runFindings(e)] :
     e.kind === "backup" && e.event === "run" && e.findings?.length ? [backupRunFindings(e)] :
-    e.kind === "backup" && e.event === "compared" && (e.changed_rows?.length || e.scripts_stopped?.length) ? [el("div", backupLine(e)), comparedDetails(e)] :
+    e.kind === "backup" && e.event === "compared" && (e.changed_keys?.length || e.scripts_stopped?.length) ? [el("div", backupLine(e)), comparedDetails(e)] :
     e.kind === "connection" && e.error ? [el("div", connectionLine(e)), connectionDetails(e)] :
     logContent(e)));
   // The user stands top right, beside the first summary line
