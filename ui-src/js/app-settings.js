@@ -278,6 +278,9 @@ function optionChanges() {
   }
   return changes;
 }
+// Waiting for the restart after "Save settings": poll interval, time after which any
+// answer reloads the page (restart not noticed), poll interval after that time (ms)
+const RESTART_POLL = 500, RESTART_GIVE_UP = 60000, RESTART_SLOW_POLL = 2000;
 /** Collect changed options, confirm, save and wait for the app restart. */
 function saveOptions() {
   const changes = optionChanges();
@@ -292,18 +295,23 @@ function saveOptions() {
       waitForRestart();
     })}]);
 }
-/** Poll until the restarted app answers again, then reload the page on the Settings tab
- *  (marker "#settings" in the address, removed again at the start, see main.js). */
+/** Poll until the restarted app answers with a new start mark ("start_id" of the state),
+ *  then reload the page on the Settings tab (marker "#settings" in the address, removed
+ *  again at the start, see main.js). After 60 s without a new mark the page reloads as
+ *  soon as the app answers at all, and asks less often. */
 function waitForRestart() {
   try { history.replaceState(null, "", "#settings"); } catch (e) { /* page opens on Devices */ }
-  let wentDown = false;
+  const before = ui.state && ui.state.start_id;
   const started = Date.now();
   const probe = async () => {
-    try { await api("api/state"); if (wentDown || Date.now() - started > 60000) { location.reload(); return; } }
-    catch (e) { wentDown = true; }
-    setTimeout(probe, 2000);
+    const late = Date.now() - started > RESTART_GIVE_UP;
+    try {
+      const s = await api("api/state");
+      if (s.start_id !== before || late) { location.reload(); return; }
+    } catch (e) { /* restarting: no answer yet */ }
+    setTimeout(probe, late ? RESTART_SLOW_POLL : RESTART_POLL);
   };
-  setTimeout(probe, 2000);
+  setTimeout(probe, RESTART_POLL);
 }
 
 // ---------------------------------------------------------------- Firmware store: export / import
