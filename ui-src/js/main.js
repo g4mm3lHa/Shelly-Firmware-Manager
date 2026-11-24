@@ -226,4 +226,8 @@ export async function load(force) {
   }
 }
 loadPrefs(); buildChooser(); syncChooser();
-load();
+// Reloaded after saving the settings (app restart): open the Settings tab again
+if (location.hash === "#settings") {
+  try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { /* marker stays */ }
+  showView("settings");
+} else load();

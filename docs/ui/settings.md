@@ -112,6 +112,13 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
   or "could not be read" (field disabled, pointer to the Configuration tab). Typing a new
   port changes the port of the download base URL while it uses the previous port. The save
   dialog adds a yellow box "The app restarts with port …"; a port in use is refused.
+- **Port warning (live test 3.12.0-rc3, 2a):** yellow line under the download base URL
+  (with the other live hints) while its port – typed, or 80/443 by the scheme – differs from
+  the host port field; live while typing in either field, saving stays possible; none while
+  the host port is unknown or empty.
+- **After saving (live test 3.12.0-rc3, 1a):** the page reloads after the app restart on the
+  Settings tab (marker `#settings` in the address, removed at the start); a normal reload
+  opens Devices.
 - **Texts with the port:** help of the download base URL ("+ the host port above"), Getting
   started and the confirmation of the former example address name the real host port; the
   connection test names the port cause only while the address port differs from it.

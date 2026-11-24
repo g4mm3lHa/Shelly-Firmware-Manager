@@ -116,7 +116,8 @@ server of the app (port 8098) and be reachable from every Shelly.
   for a reverse proxy; the file name is appended to it.
 - The port is the **Host port** of the app (default 8098, same card). Changing it there
   changes the address too; after a change in the **Network** section of the app page,
-  change the address yourself.
+  change the address yourself. A yellow line under the address warns while its port is
+  not the host port.
 - Use the IP address of Home Assistant, not a host name: Shellys often cannot resolve
   names, the update then fails with a connection error. A host name is accepted, but
   the Settings tab warns while you type.
