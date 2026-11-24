@@ -2,10 +2,8 @@
 
 ## 3.12.1
 
-Release candidate. A device that needs a password the app does not have is shown as an
-error again.
-
-Changes in rc1
+Released 2026-11-24. A device that needs a password the app does not have is shown as
+an error again.
 
 Fixed
 - Check of a device that needs a password the app does not have (or refuses the stored
