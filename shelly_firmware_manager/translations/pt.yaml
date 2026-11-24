@@ -1,0 +1,9 @@
+# Configuration tab of the app page in Portuguese: only the hint field "settings" (config.yaml);
+# all options are in the Settings tab of the app.
+configuration:
+  settings:
+    name: "Todas as definições: abra a app → separador “Definições”"
+    description: >-
+      Esta página não tem mais opções. Abra a app com “Shelly Firmware” na barra lateral e escolha o separador “Definições”. O que for escrito neste campo não tem efeito.
+network:
+  8098/tcp: Transferências de firmware para os Shelly

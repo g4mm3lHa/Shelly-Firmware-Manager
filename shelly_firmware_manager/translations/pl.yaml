@@ -1,0 +1,9 @@
+# Configuration tab of the app page in Polish: only the hint field "settings" (config.yaml);
+# all options are in the Settings tab of the app.
+configuration:
+  settings:
+    name: "Wszystkie ustawienia: otwórz aplikację → karta „Ustawienia”"
+    description: >-
+      Ta strona nie ma innych opcji. Otwórz aplikację przez „Shelly Firmware” na pasku bocznym i wybierz kartę „Ustawienia”. Wpisy w tym polu nie mają żadnego skutku.
+network:
+  8098/tcp: Pobieranie firmware przez Shelly

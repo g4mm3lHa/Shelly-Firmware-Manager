@@ -1,0 +1,9 @@
+# Configuration tab of the app page in Spanish: only the hint field "settings" (config.yaml);
+# all options are in the Settings tab of the app.
+configuration:
+  settings:
+    name: "Todos los ajustes: abre la app → pestaña “Ajustes”"
+    description: >-
+      Esta página no tiene más opciones. Abre la app con “Shelly Firmware” en la barra lateral y elige la pestaña “Ajustes”. Lo que se escriba en este campo no tiene efecto.
+network:
+  8098/tcp: Descargas de firmware para los Shelly

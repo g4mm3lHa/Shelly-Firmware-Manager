@@ -270,7 +270,7 @@ def _battery(c):
 
 SECTION_TITLES = ["Updates Available", "Beta Updates", "Attention", "Not Checked", "Up-To-Date", "Asleep", "Ignored", "Removed", "Other Shellys"]
 FILTER_LABELS = ["All", "Updates", "Beta updates", "Scheduled", "Attention", "Not checked", "Up-To-Date", "Unprotected", "Cloud on",
-                 "On hold", "Asleep", "Ignored", "Removed", "Other Shellys"]
+                 "Access point on", "Debug log on", "On hold", "Asleep", "Ignored", "Removed", "Other Shellys"]
 
 
 def _host_names(c):

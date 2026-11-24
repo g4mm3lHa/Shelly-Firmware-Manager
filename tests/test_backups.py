@@ -801,7 +801,7 @@ async def test_backup_before_the_installation(net, shellys, monkeypatch, quick_i
     entry = mgr.backups.of("AABBCC00000A")[0]
     assert entry["reason"] == "update" and entry["note"] == "1.4.0 → 1.5.0" and entry["fw"] == "1.4.0"
     kinds = [(e["kind"], e.get("event")) for e in mgr.events.entries if e["kind"] in ("backup", "install")]
-    assert kinds == [("backup", "stored"), ("install", "started"), ("install", "confirmed")]
+    assert kinds == [("backup", "stored"), ("install", "started"), ("install", "confirmed"), ("backup", "compared")]
     fake(shellys, net, C).down = True
     assert await mgr.install(C, mgr.devices[C]["sha256"], "alice") is False
     assert triggered == ["http://192.168.1.10"]
@@ -1170,3 +1170,92 @@ async def test_error_mark_of_the_log_and_unreachable_devices(mgr, net):
     mgr.events.add("setting", device="x")
     assert mgr.events.latest("error") == mark < mgr.events.latest()
     assert manager_backups.NONE_ASLEEP == "asleep"
+
+
+# ---------------------------------------------------------------- Comparison after an update
+
+
+def test_after_update_splits_changed_and_new_settings():
+    """Changed values and settings the backup did not have are listed apart; counters
+    such as sys.cfg_rev are never compared; scripts that ran before and stopped are named."""
+    before = FakeShelly()
+    now = FakeShelly()
+    now.config["switch:0"]["initial_state"] = "restore_last"
+    now.config["switch:0"]["reverse"] = False  # new field of the firmware
+    now.config["sys"]["cfg_rev"] = 9
+    del now.config["mqtt"]["server"]
+    data_before = {"config": before.config, "scripts": [{"id": 1, "name": "a", "running": True}, {"id": 2, "name": "b", "running": True}]}
+    data_now = {"config": now.config, "scripts": [{"id": 1, "name": "a", "running": True}, {"id": 2, "name": "b", "running": False}]}
+    result = shelly_backup.after_update(2, data_before, data_now)
+    assert result["changed"] == [
+        {"key": "mqtt · server", "before": "–", "now": "–"},
+        {"key": "switch:0 · initial_state", "before": "off", "now": "restore_last"},
+    ]
+    assert result["new"] == [{"key": "switch:0 · reverse", "value": "false"}]
+    assert (result["changed_count"], result["new_count"]) == (2, 1)
+    assert result["scripts"] == {"before": 2, "again": 1, "stopped": ["b"]}
+
+
+def test_after_update_of_a_gen1_device():
+    """Gen1: the settings are compared, there are no scripts."""
+    before = {"settings": {"relays": [{"default_state": "off"}], "mode": "relay"}, "actions": None}
+    now = {"settings": {"relays": [{"default_state": "on", "schedule": False}], "mode": "relay"}, "actions": None}
+    result = shelly_backup.after_update(1, before, now)
+    assert result["changed"] == [{"key": "relays.0 · default_state", "before": "off", "now": "on"}]
+    assert result["new"] == [{"key": "relays.0 · schedule", "value": "false"}]
+    assert result["scripts"] == {"before": 0, "again": 0, "stopped": []}
+
+
+async def test_comparison_after_a_confirmed_update(net, shellys, monkeypatch, quick_install):
+    """A confirmed update with a backup right before it: the device is read again and the
+    result is kept on the device (state, log) until its next check; without the option
+    there is no comparison."""
+    mgr = manager_with(net, shellys, backup_before_install=True)
+
+    async def trigger(_session, _gen, origin, url, _auth=None):
+        device = net.by_origin(origin)
+        net.devices[device] = (*net.devices[device][:2], "1.5.0", "1.5.0")
+        fake_device = shellys[origin]
+        fake_device.config["switch:0"]["initial_state"] = "on"
+        fake_device.config["switch:0"]["reverse"] = False
+        fake_device.scripts[1]["running"] = False
+
+    monkeypatch.setattr(shelly, "trigger_update", trigger)
+    await mgr.scan()
+    assert await mgr.install(A, mgr.devices[A]["sha256"], "alice") is True
+    after = mgr.devices[A]["after_update"]
+    assert after["changed"] == [{"key": "switch:0 · initial_state", "before": "off", "now": "on"}]
+    assert after["new"] == [{"key": "switch:0 · reverse", "value": "false"}]
+    assert after["scripts"] == {"before": 1, "again": 0, "stopped": ["auto-light.js"]}
+    assert after["from_version"] == "1.4.0" and after["to_version"] == mgr.devices[A]["version"] and after["backup_at"]
+    view = next(d for d in mgr.public_state()["devices"] if d["id"] == A)
+    assert view["after_update"]["changed_count"] == 1
+    entry = backup_events(mgr, "compared")[-1]
+    assert (entry["severity"], entry["changed"], entry["scripts_stopped"]) == ("warning", 1, ["auto-light.js"])
+    await mgr.check_device(A)
+    assert "after_update" not in mgr.devices[A]
+    plain_mgr = manager_with(net, shellys, backup_before_install=False)
+    await plain_mgr.scan()
+    assert await plain_mgr.install(C, plain_mgr.devices[C]["sha256"], "alice") is True
+    assert "after_update" not in plain_mgr.devices[C]
+
+
+async def test_comparison_that_cannot_read_the_device(net, shellys, monkeypatch, quick_install):
+    """The device does not answer after the update: the result names the error."""
+    mgr = manager_with(net, shellys, backup_before_install=True)
+    compare = mgr.compare_after_update
+
+    async def down_first(device_id, backup_id, user):
+        fake(shellys, net, device_id).down = True
+        await compare(device_id, backup_id, user)
+
+    async def trigger(_session, _gen, origin, url, _auth=None):
+        device = net.by_origin(origin)
+        net.devices[device] = (*net.devices[device][:2], "1.5.0", "1.5.0")
+
+    monkeypatch.setattr(shelly, "trigger_update", trigger)
+    mgr.compare_after_update = down_first
+    await mgr.scan()
+    assert await mgr.install(A, mgr.devices[A]["sha256"], "alice") is True
+    assert "error" in mgr.devices[A]["after_update"]
+    assert backup_events(mgr, "compared")[-1]["severity"] == "warning"

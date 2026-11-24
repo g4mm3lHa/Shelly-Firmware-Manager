@@ -1,0 +1,9 @@
+# Configuration tab of the app page in French: only the hint field "settings" (config.yaml);
+# all options are in the Settings tab of the app.
+configuration:
+  settings:
+    name: "Tous les réglages : ouvrez l’app → onglet « Réglages »"
+    description: >-
+      Cette page n’a pas d’autres options. Ouvrez l’app via « Shelly Firmware » dans la barre latérale et choisissez l’onglet « Réglages ». Une saisie dans ce champ n’a aucun effet.
+network:
+  8098/tcp: Téléchargements de firmware pour les Shelly

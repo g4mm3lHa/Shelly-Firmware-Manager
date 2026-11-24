@@ -256,6 +256,7 @@ async def test_no_readable_state_never_deletes_firmware(mgr, net):
     m._registry, m.notify, m.changelogs.refresh = mgr._registry, mgr.notify, net.refresh
     m._ha_setup_state = mgr._ha_setup_state
     m._battery_devices = mgr._battery_devices
+    m._area_registry = net.area_registry
     assert await m.scan() is True  # downloads the offered version again: listed once more
     assert firmware_files() == files and set(m.firmware) == set(files) and not m.unknown_files
     restarted = manager.Manager(dict(OPTIONS), session=None, token="t")

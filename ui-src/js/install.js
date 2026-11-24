@@ -4,6 +4,7 @@ import {
   shaRow, t, tn, toast, ui, valueList,
 } from "./core.js";
 import {load} from "./main.js";
+import {connectionCheckLine} from "./diagnosis.js";
 
 // ---------------------------------------------------------------- Installation
 /** Changelog versions as nodes: category tags, security highlighted, model entries marked. */
@@ -79,7 +80,8 @@ async function readSignals(devs) {
  *  fails. [] while the option is off. */
 const backupCheck = one => ui.state && ui.state.backup_before_install ? [checkLine("ok", t("Backup"),
   one ? t("The settings of the device are backed up right before the installation.") : t("The settings of every device are backed up right before its installation."))] : [];
-/** Section "Before installing": way back, backup and Wi-Fi signal; for several devices only
+/** Section "Before installing": download server (while its connection was never tested
+ *  successfully), way back, backup and Wi-Fi signal; for several devices only
  *  the findings per device (or one line "every device" without findings). The signal is
  *  read when the dialog opens ("Reading …"); devices on the cable have no signal line, a
  *  value that could not be read is shown as "unknown" (yellow, a finding). */
@@ -103,7 +105,10 @@ function beforeInstalling(devs) {
       : [checkLine("ok", t("Wi-Fi signal"), t("Good or fair on every device."))];
   };
   const block = section(t("Before installing"), list);
-  const fill = values => { list.replaceChildren(...back(), ...backupCheck(one), ...signal(values)); block.hidden = !list.children.length; };
+  const fill = values => {
+    list.replaceChildren(...[connectionCheckLine()].filter(Boolean), ...back(), ...backupCheck(one), ...signal(values));
+    block.hidden = !list.children.length;
+  };
   fill(null);
   readSignals(devs).then(fill);
   return block;
