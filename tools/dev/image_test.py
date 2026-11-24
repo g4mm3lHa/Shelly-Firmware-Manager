@@ -11,7 +11,8 @@ what only the image shows:
 
 - the app starts and reports "ready", both servers answer, nothing is logged as an error
 - the C extensions of the bundled packages are loaded (wheels fit the image)
-- the bytecode compiled at build time is used, and no package tooling (pip) is left
+- the bytecode compiled at build time is used (app, packages and the standard library
+  modules of a start), and no package tooling (pip) is left
 - a stop ends the app cleanly with exit code 0 within the stop time of the Supervisor
 
 Nothing leaves the machine: the container gets no published port and the app only
@@ -134,8 +135,12 @@ def main() -> int:
             check("UI server and download server answer", result.returncode == 0, result.stderr)
             result = in_container("python3", "-c", EXTENSIONS)
             check("C extensions of the packages are loaded", result.returncode == 0, result.stderr)
-            result = in_container("python3", "-v", "-c", "import aiohttp, manager")
-            compiled = ("/app/__pycache__/manager.cpython-312.pyc", "/deps/aiohttp/__pycache__/__init__.cpython-312.pyc")
+            result = in_container("python3", "-v", "-c", "import aiohttp, asyncio, manager")
+            compiled = (
+                "/app/__pycache__/manager.cpython-312.pyc",
+                "/deps/aiohttp/__pycache__/__init__.cpython-312.pyc",
+                "/usr/local/lib/python3.12/asyncio/__pycache__/__init__.cpython-312.pyc",
+            )
             used = all(f"{file} matches" in result.stderr for file in compiled)
             check("bytecode compiled at build time is used", result.returncode == 0 and used)
             check("no package tooling in the image", in_container("python3", "-c", "import pip").returncode != 0)

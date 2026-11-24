@@ -22,6 +22,7 @@ Security:
 
 import asyncio
 import base64
+import contextlib
 import datetime
 import hashlib
 import hmac
@@ -993,3 +994,72 @@ async def restart(session: aiohttp.ClientSession, gen: int, origin: str, auth: D
         await _device_json(session, origin, "/reboot", auth)
 
 
+# ------------------------------------------------------------------------ Diagnosis of the connections
+
+FETCH_TEST_TIMEOUT_S = 8  # seconds the device waits for the download server (HTTP.GET timeout)
+
+PORT_TIMEOUT_S = 5  # seconds for opening the TCP connection to a device
+
+
+async def fetch_test(
+    session: aiohttp.ClientSession, origin: str, url: str, auth: DeviceAuth | None = None
+) -> dict[str, Any]:
+    """Gen2+: let the device fetch url itself (HTTP.GET) and return its answer
+    {"code": HTTP status, "message": text}. The body is not taken over. A request the
+    device could not make (timeout, no connection, refused) is a ShellyError with the
+    device's message, e.g. "-104 Deadline exceeded"."""
+    answer = await _rpc(session, origin, "HTTP.GET", {"url": url, "timeout": FETCH_TEST_TIMEOUT_S}, auth)
+    code = answer.get("code")
+    return {
+        "code": code if isinstance(code, int) and not isinstance(code, bool) else None,
+        "message": clip(answer.get("message"), 80),
+    }
+
+
+# Error code of a device answer: "'code': -114" (RPC error object) or a leading "-104 …"
+_FETCH_CODE_RE = re.compile(r"'code':\s*(-?\d+)|^Device reports:\s*(-\d+)\b")
+# Low-level code at the end of the device's message, e.g. "-1: Connection error: -14"
+_FETCH_DETAIL_RE = re.compile(r"error:\s*(-\d+)")
+
+
+def fetch_error(text: str, url: str) -> str:
+    """Readable text of a failed fetch of the connection test (fetch_test): the codes of
+    the device's answer instead of its raw error object, e.g. "No connection to <url>:
+    connection error (Shelly code -114 / -14)". Texts without a device code (password,
+    unsupported …) stay as they are; the raw text is kept by the caller for the log."""
+    match = _FETCH_CODE_RE.search(text)
+    if not match:
+        return text
+    code = match.group(1) or match.group(2)
+    detail = _FETCH_DETAIL_RE.search(text)
+    codes = f"{code} / {detail.group(1)}" if detail and detail.group(1) != code else code
+    if code == "-104":
+        return f"No connection to {url}: timeout after {FETCH_TEST_TIMEOUT_S} s (Shelly code {codes})"
+    if code == "-114":
+        return f"No connection to {url}: connection error (Shelly code {codes})"
+    return f"The device could not fetch {url} (Shelly code {codes})"
+
+
+async def port_open(ip: str, port: int) -> float:
+    """Seconds needed to open a TCP connection to ip:port (closed at once, nothing is
+    sent). TimeoutError or OSError if the device does not accept it within
+    PORT_TIMEOUT_S."""
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    _reader, writer = await asyncio.wait_for(asyncio.open_connection(ip, port), PORT_TIMEOUT_S)
+    elapsed = loop.time() - started
+    writer.close()
+    with contextlib.suppress(OSError):  # the device closed first: the connection was made all the same
+        await writer.wait_closed()
+    return elapsed
+
+
+async def answers(session: aiohttp.ClientSession, origin: str) -> float:
+    """Seconds until the device answered GET /shelly (no authentication needed);
+    ShellyError if the answer is no device information."""
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    status, data = await _call(session, origin, "/shelly", None)
+    if status >= 400 or not isinstance(data, dict):
+        raise ShellyError(f"No device information (HTTP {status})")
+    return loop.time() - started

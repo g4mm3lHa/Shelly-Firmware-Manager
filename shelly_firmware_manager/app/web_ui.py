@@ -158,7 +158,7 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
             return web.Response(status=304, headers={"ETag": etag})
         return web.Response(text=body, content_type="application/json", headers={"ETag": etag})
 
-    devices = DeviceRoutes(mgr, background)
+    devices = DeviceRoutes(mgr, background, app_version)
     schedules = ScheduleRoutes(mgr, background)
     firmware = FirmwareRoutes(mgr, background, app_version)
     backups = BackupRoutes(mgr, background)
@@ -188,6 +188,9 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
     app.router.add_post("/api/devices/{id}/ignore", devices.ignore)
     app.router.add_post("/api/devices/{id}/reload", devices.reload_device)
     app.router.add_post("/api/devices/{id}/forget", devices.forget_device)
+    app.router.add_post("/api/devices/{id}/probe", devices.probe)
+    app.router.add_get("/api/devices/{id}/report", devices.report)
+    app.router.add_post("/api/getting-started/hide", devices.hide_getting_started)
     app.router.add_get("/api/firmware", firmware.firmware_list)
     app.router.add_post("/api/firmware/upload", firmware.firmware_upload, name=UPLOAD_ROUTE)
     app.router.add_post("/api/firmware/upload/confirm", firmware.firmware_upload_confirm)
@@ -217,6 +220,7 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
     app.router.add_post("/api/backups/{bid}/restore", backups.backup_restore)
     app.router.add_post("/api/backups/{bid}/download", backups.backup_download)
     app.router.add_post("/api/devices/{id}/backup", backups.backup_device)
+    app.router.add_post("/api/devices/{id}/after-update/seen", backups.after_update_seen)
     app.router.add_post("/api/devices/{id}/backups/import", backups.backup_import, name=BACKUP_IMPORT_ROUTE)
     app.router.add_get("/api/logs", settings.logs)
     app.router.add_post("/api/logs/clear", settings.logs_clear)
@@ -225,5 +229,6 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
     app.router.add_get("/api/settings/app-page", settings.app_page)
     app.router.add_post("/api/settings", settings.options_save)
     app.router.add_post("/api/settings/download-base/confirm", settings.confirm_download_base)
+    app.router.add_post("/api/settings/connection-test", settings.connection_test)
     app.router.add_static("/static/", STATIC_DIR, show_index=False, follow_symlinks=False, name="static")
     return app

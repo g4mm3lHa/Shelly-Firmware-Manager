@@ -262,7 +262,7 @@ def _sorting_and_downgrade(c):
     f.locator("#tab-devices").click()
     labels = [e[0] for e in filter_entries(f, "devices")]
     check(f"{case}: Devices filter entries", labels == ["All", "Updates", "Beta updates", "Scheduled", "Attention", "Not checked", "Up-To-Date", "Unprotected",
-          "Cloud on", "On hold", "Asleep", "Ignored", "Removed", "Other Shellys"], str(labels))
+          "Cloud on", "Access point on", "Debug log on", "On hold", "Asleep", "Ignored", "Removed", "Other Shellys"], str(labels))
     pick_filter(f, "devices", "Unprotected")
     shown = f.evaluate("() => [...document.querySelectorAll('#dev-cards tbody tr')].length")
     expected = next(n for label, n, _ in filter_entries(f, "devices") if label == "Unprotected")
@@ -291,7 +291,7 @@ def _sorting_and_downgrade(c):
           f"{before} / {inside}")
     f.locator("#tab-devices").click()
     check(f"{case}: Devices tab – Check now visible again", f.evaluate(head_js)["vis"] == "visible")
-    tools = f.locator("#view-devices .tb-main .tool-btn")
+    tools = f.locator("#view-devices .tb-main .tool-btn:visible")  # the area tool only while a device has an area
     size = tools.first.evaluate("b => Math.round(b.getBoundingClientRect().width)")
     check(f"{case}: search, sort and filter icons in the Devices toolbar", tools.count() == 3 and size == (44 if width < 700 else 36),
           f"{tools.count()} / {size}")

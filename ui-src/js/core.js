@@ -107,7 +107,7 @@ export function box(tag, cls, ...children) { const e = el(tag, null, cls); e.app
 export const pad = n => String(n).padStart(2, "0");
 /** YYYY-MM-DD HH:MM in local time. */
 export function fmt(ts) {
-  if (!ts) return t("never");
+  if (!ts) return t("never");   // every time without a value; other empty values show "–"
   const d = new Date(ts * 1000);
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
@@ -121,6 +121,8 @@ export const collator = new Intl.Collator("en", {numeric: true, sensitivity: "ba
 
 // Inline icons: Material Design Icons (Apache 2.0)
 const ICONS = {
+  // Area of Home Assistant (MDI "texture-box"): area filter of the Devices tab
+  area: "M20 2H4C2.9 2 2 2.9 2 4V20C2 21.11 2.9 22 4 22H20C21.11 22 22 21.11 22 20V4C22 2.9 21.11 2 20 2M4 6L6 4H10.9L4 10.9V6M4 13.7L13.7 4H18.6L4 18.6V13.7M20 18L18 20H13.1L20 13.1V18M20 10.3L10.3 20H5.4L20 5.4V10.3Z",
   cloud: "M19.35,10.03C18.67,6.59 15.64,4 12,4C9.11,4 6.6,5.64 5.35,8.03C2.34,8.36 0,10.9 0,14A6,6 0 0,0 6,20H19A5,5 0 0,0 24,15C24,12.36 21.95,10.22 19.35,10.03Z",
   clock: "M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z",
   info: "M11,9H13V7H11M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,17H13V11H11V17Z",
@@ -608,21 +610,22 @@ export function checkLine(state, title, text) {
 }
 /** Choice "all devices" or a list of devices to tick (schedules, "Back up now"): radios
  *  of the group name, the list below them (shown for "selected" only) with the count
- *  "(n)" behind "Selected devices". selected: "all" or a set of device IDs; tags(d):
- *  nodes after a name, read at every refresh(). Returns {nodes, all (its radio), list,
+ *  "(n)" behind "Selected devices". selected: "all", a set of device IDs or null (another
+ *  radio of the group is chosen, e.g. areas); tags(d): nodes after a name, read at every
+ *  refresh(). Returns {nodes, all (its radio), some (the radio "Selected devices"), list,
  *  ticked() (the ticked devices), refresh()}. */
 export function deviceChoice(name, devices, allText, selected, tags) {
-  const ids = selected === "all" ? new Set() : selected;
+  const ids = selected instanceof Set ? selected : new Set();
   const picks = devices.map(d => [d, input("checkbox", {checked: ids.has(d.id), value: d.id})]);
   const list = box("div", "sch-pick"), count = el("span", "", "sub");
-  const [all, allRow] = radio(name, allText, selected === "all"), [, someRow] = radio(name, [el("span", t("Selected devices"))], selected !== "all");
+  const [all, allRow] = radio(name, allText, selected === "all"), [some, someRow] = radio(name, [el("span", t("Selected devices"))], selected instanceof Set);
   someRow.append(" ", count);
   const ticked = () => picks.filter(([, c]) => c.checked).map(([d]) => d);
   const refresh = () => {
-    list.hidden = all.checked;
+    list.hidden = !some.checked;
     list.replaceChildren(...picks.map(([d, c]) => box("label", "check", c, " ", el("span", d.name), ...tags(d))));
-    count.textContent = all.checked ? "" : `(${ticked().length})`;
+    count.textContent = some.checked ? `(${ticked().length})` : "";
   };
   refresh();
-  return {nodes: [allRow, someRow, list], all, list, ticked, refresh};
+  return {nodes: [allRow, someRow, list], all, some, list, ticked, refresh};
 }

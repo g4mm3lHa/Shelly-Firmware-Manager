@@ -42,6 +42,8 @@ as the UI change). Read when you change the Backups tab, a backup dialog or the 
   the devices done so far; then the result per device as check list (green stored, yellow
   stored with a gap or battery device asleep, red not stored). One device: check line
   with spinner, then a success message.
+- **Back up now with areas (3.12.0, C1 8 c, approved 2026-11-24):** third choice "Areas"
+  as in the schedule dialog, resolved to the devices when the run starts.
 - **Log (F9 a, approved 2026-11-23):** "Back up now" for several devices writes one log
   entry per run ("Backup run · manual · n devices · duration · result"); it opens to one
   line per device (stored with size and parts, asleep, not backed up with the reason) and

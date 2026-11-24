@@ -32,6 +32,7 @@ import re
 import secrets
 import time
 from collections.abc import Callable
+from urllib.parse import urlsplit
 from pathlib import Path
 from typing import Any
 
@@ -44,7 +45,8 @@ from backup_store import BackupStore
 from changelog import Changelogs
 from credentials import Credentials
 from events import EventLog
-from shelly import AuthError, DeviceAuth, ShellyError, clip, error_text, plain, same_secret
+from shelly import AuthError, DeviceAuth, ShellyError, clip, error_text, plain, port_open, same_secret
+from shelly_net import resolve_lan_address
 from tls import CertificatePins
 
 
@@ -150,6 +152,7 @@ REGISTRY_MAX = 32 * 1024 * 1024  # bytes
 HA_REQUEST_NAMES = {
     "config/device_registry/list": "device registry",
     "config/entity_registry/list": "entity registry",
+    "config/area_registry/list": "area registry",
     "config_entries/get": "config entries",
     "config_entries/flow/progress": "discovery flows",
 }
@@ -159,6 +162,8 @@ HA_REQUEST_NAMES = {
 APP_PAGE = "/config/app/{slug}/info"
 APP_LIST_PAGE = "/config/apps"
 APP_SLUG_RE = re.compile(r"^[a-z0-9_]{1,64}$")  # slug as the Supervisor reports it
+DOWNLOAD_PORT_KEY = "8098/tcp"  # container port of the download server (config.yaml "ports")
+MAX_PORT = 65535  # highest TCP port
 
 # Per-device activity during a check (memory only, shown in the device row)
 ACTIVITY_WAITING = "waiting"  # part of the running check, not yet reached
@@ -312,6 +317,8 @@ class ManagerCore:
         """Apply the options and load the stored state, passwords, changelogs and log."""
         options = app_options.with_defaults(options)
         self.options = options  # complete option set, needed to save changes
+        # Random mark of this app start: the Settings tab reloads once it changes (restart done)
+        self.start_id = secrets.token_hex(8)
         self.check_days = int(options["check_interval_days"])
         self.check_time = options["check_time"]
         self.tz, self.tz_name = schedule.local_zone()
@@ -338,6 +345,10 @@ class ManagerCore:
         self.token = token
         self.pins = pins  # certificate pins for shelly.cloud
         self.app_slug: str | None = None  # slug of this app (Supervisor), read on first use
+        # Host port of the download server as the Supervisor maps it (None: switched off in
+        # Home Assistant); host_port_known is False while the Supervisor could not be read
+        self.host_port: int | None = None
+        self.host_port_known = False
         self.lock = asyncio.Lock()  # check (exclusive)
         self.install_slots = asyncio.Semaphore(int(options.get("max_parallel_installs", 5)))
         self.installing: set[str] = set()  # device IDs: running or waiting
@@ -352,6 +363,7 @@ class ManagerCore:
         # Set at start if the state file was missing or unreadable although the app
         # was installed before (see _load); shown in the UI until the next restart
         self.state_warning: str | None = None
+        self.settings_warning: str | None = None  # settings file damaged or with invalid values (set by main)
         # Files in the firmware folder the store does not list (name -> size): never
         # deleted automatically, listed in the Firmware tab for a manual deletion
         # (see FirmwareStore.adopt_files and cleanup_firmware); the names are
@@ -410,6 +422,9 @@ class ManagerCore:
         self._header_got = ""  # version the reference request was answered with
         # Devices that installed an intermediate version: checked again at once
         self._step_checks: set[str] = set()
+        # Backup made right before the running installation of a device (ID), for the
+        # comparison after the update (see Backups.compare_after_update)
+        self._before_backups: dict[str, str] = {}
         self._upload = Pending()  # staged manual upload (see stage_upload)
         self._upload_lock = asyncio.Lock()  # one upload transfer at a time
         self._export = Pending()  # prepared store export (see prepare_export)
@@ -423,6 +438,15 @@ class ManagerCore:
         # user answered the import question (import a store or skip); persisted
         self.first_start_open = False
         self.first_start_notified = False  # the HA notification about the question was sent
+        # Card "Getting started" of the Devices tab: shown on a fresh installation until
+        # the user hides it; persisted (missing in older states = not shown)
+        self.getting_started = False
+        # Result of the last connection test of the download server (see
+        # Installs.run_connection_test): {"at", "ok", "url", "device", "ip", "seconds", "error"};
+        # persisted, valid only while "url" is the current download base URL
+        self.connection_test: dict[str, Any] | None = None
+        # Running connection test (memory only): {"token", "ip", "fetched", "from"}
+        self._test: dict[str, Any] | None = None
         # Set whenever the schedule changes (check finished): wakes the scheduler in
         # main.py instead of letting it poll every minute.
         self.schedule_changed = asyncio.Event()
@@ -462,6 +486,7 @@ class ManagerCore:
         except FileNotFoundError:
             if not backup.is_file():
                 self.first_start_open = True  # fresh installation (also after an uninstall)
+                self.getting_started = True
                 return
             log.error("State file missing, loading the backup")
             self._load_backup(backup)
@@ -524,6 +549,9 @@ class ManagerCore:
         self.first_start_open = data.get("first_start_open") is True
         self.first_start_notified = data.get("first_start_notified") is True
         self.gen1_marking_due = data.get("gen1_imports_marked") is not True
+        self.getting_started = data.get("getting_started") is True
+        test = data.get("connection_test")
+        self.connection_test = test if isinstance(test, dict) and isinstance(test.get("url"), str) else None
         unknown = data.get("unknown_files")
         if isinstance(unknown, list):
             self.unknown_files = {str(n): 0 for n in unknown if isinstance(n, str)}
@@ -580,6 +608,8 @@ class ManagerCore:
             "first_start_open": self.first_start_open,
             "first_start_notified": self.first_start_notified,
             "gen1_imports_marked": not self.gen1_marking_due,
+            "getting_started": self.getting_started,
+            "connection_test": self.connection_test,
             "unknown_files": sorted(self.unknown_files),
             "others": self.others,
             "listing": self.listing,
@@ -621,6 +651,10 @@ class ManagerCore:
         """Device registry via the Core WebSocket API (through the Supervisor proxy).
         The registry of all integrations arrives as one message (REGISTRY_MAX)."""
         return await self._ha_list("config/device_registry/list")
+
+    async def _area_registry(self) -> list[Any]:
+        """Area registry via the Core WebSocket API: [{"area_id", "name", …}]."""
+        return await self._ha_list("config/area_registry/list")
 
     async def _battery_devices(self) -> set[str]:
         """HA device IDs with a battery sensor of the Shelly integration (entity
@@ -712,6 +746,22 @@ class ManagerCore:
             return False
         return True
 
+    async def ha_version(self) -> str | None:
+        """Version of Home Assistant (Core API /config), None if it cannot be read
+        (only for "Details for a bug ticket")."""
+        try:
+            async with self.session.get(
+                f"{SUPERVISOR}/core/api/config",
+                headers={"Authorization": f"Bearer {self.token}"},
+                timeout=SUPERVISOR_TIMEOUT,
+            ) as resp:
+                resp.raise_for_status()
+                version = (await resp.json(content_type=None)).get("version")
+        except (TimeoutError, aiohttp.ClientError, ValueError, AttributeError) as err:
+            log.warning("Version of Home Assistant not available: %s", err or type(err).__name__)
+            return None
+        return clip(version, 40) if isinstance(version, str) else None
+
     async def _supervisor_post(self, path: str, body: dict[str, Any] | None) -> None:
         """POST to the Supervisor API (only /addons/self/* is used); errors -> ShellyError."""
         try:
@@ -752,6 +802,67 @@ class ManagerCore:
             self.app_slug = slug
         return APP_PAGE.format(slug=self.app_slug)
 
+    async def read_host_port(self) -> None:
+        """Read the host port of the download server from the Supervisor (/addons/self/info,
+        "network": {"8098/tcp": port or null}, open to every app). Sets host_port and
+        host_port_known; a failure is logged and leaves the port unknown."""
+        try:
+            async with self.session.get(
+                f"{SUPERVISOR}/addons/self/info",
+                headers={"Authorization": f"Bearer {self.token}"},
+                timeout=SUPERVISOR_TIMEOUT,
+            ) as resp:
+                resp.raise_for_status()
+                network = ((await resp.json(content_type=None)).get("data") or {}).get("network")
+        except (TimeoutError, aiohttp.ClientError, ValueError, AttributeError) as err:
+            log.warning("Host port not readable from the Supervisor: %s", err or type(err).__name__)
+            self.host_port_known = False
+            return
+        port = network.get(DOWNLOAD_PORT_KEY, False) if isinstance(network, dict) else False
+        if port is None or (isinstance(port, int) and not isinstance(port, bool) and 1 <= port <= MAX_PORT):
+            self.host_port, self.host_port_known = port, True
+        else:
+            log.warning("Supervisor reports no valid host port for %s", DOWNLOAD_PORT_KEY)
+            self.host_port_known = False
+
+    def _host_port_change(self, value: object) -> int | None:
+        """Validated new host port of the Settings tab; None if it equals the current one.
+        ValueError if it is no port or the current port is unknown (Supervisor not read)."""
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= MAX_PORT:
+            raise ValueError(f"host_port: whole number between 1 and {MAX_PORT} expected")
+        if not self.host_port_known:
+            raise ValueError(
+                "host_port: the current port could not be read from Home Assistant – change it in the "
+                "Configuration tab of the app (Network)"
+            )
+        return None if value == self.host_port else value
+
+    @staticmethod
+    async def _check_port_free(port: int, url: str) -> None:
+        """Refuse a new host port that is already in use on the Home Assistant host: Docker
+        maps the port before the app starts, so a port in use would stop the app from
+        starting. The host of the download base URL (the LAN address of Home Assistant) is
+        asked for a TCP connection (closed at once, nothing sent); one that is accepted
+        means another program listens there. Without a usable address nothing is checked;
+        a host name is resolved first and checked only if all its addresses lie in the LAN
+        (shelly_net.resolve_lan_address), so the check never reaches outside the LAN."""
+        try:
+            host = urlsplit(url).hostname if url else None
+        except ValueError:
+            host = None
+        if not host:
+            log.warning("Host port %d not checked: no download base URL", port)
+            return
+        address = await resolve_lan_address(host)
+        if address is None:
+            log.warning("Host port %d not checked: %s is no address in the local network", port, plain(host, 100))
+            return
+        try:
+            await port_open(address, port)
+        except (TimeoutError, OSError):
+            return  # refused or no answer: nothing listens on that port
+        raise ValueError(f"host_port: port {port} is already in use on {plain(host, 100)} – choose another port")
+
     # ----------------------------------------------------------------------------------------- App options
 
     def options_view(self) -> dict[str, Any]:
@@ -759,23 +870,41 @@ class ManagerCore:
         return app_options.public_view(self.options)
 
     async def save_options(self, changes: object, user: str | None = None) -> list[str]:
-        """Validate and save via the Supervisor; the caller restarts the app.
+        """Validate and store in settings.json; the caller restarts the app.
 
-        The attempt is written to the activity log with the changed keys – values
-        only for non-secret options. Returns the list of changed keys (empty:
-        nothing saved, no restart)."""
+        "host_port" is no option of settings.json: a new host port of the download server
+        is set in Home Assistant (POST /addons/self/options {"network": …}, open to every
+        app) and applies with the restart. The attempt is written to the activity log with
+        the changed keys and values. Returns the list of changed keys (empty: nothing
+        saved, no restart)."""
+        port = None
+        if isinstance(changes, dict) and "host_port" in changes:
+            port = self._host_port_change(changes["host_port"])
+            changes = {k: v for k, v in changes.items() if k != "host_port"}
         new, changed = app_options.merge(self.options, changes)
-        if not changed:
+        if not changed and port is None:
             return []
         busy = self.busy or (f"Schedule “{self.schedule_running}” is running" if self.schedule_running else None)
         if busy:
             raise ShellyError(f"Not possible – {busy}")
         diff = app_options.change_list(self.options, new, changed)
-        try:
-            await self._supervisor_post("/addons/self/options", {"options": new})
-        except ShellyError as err:
-            self.events.add("options", ok=False, changes=diff, user=user, error=error_text(err, 300))
-            raise
+        if port is not None:
+            await self._check_port_free(port, str(new.get("download_base_url") or ""))
+            diff.append({"option": "host_port", "old": str(self.host_port or "off"), "new": str(port)})
+            try:
+                await self._supervisor_post("/addons/self/options", {"network": {DOWNLOAD_PORT_KEY: port}})
+            except ShellyError as err:
+                self.events.add("options", ok=False, changes=diff, user=user, error=str(err))
+                raise
+            self.host_port = port
+            changed = [*changed, "host_port"]
+        if new != self.options:
+            try:
+                app_options.write_settings(new)
+            except OSError as err:
+                error = f"Settings could not be stored: {err.strerror or type(err).__name__}"
+                self.events.add("options", ok=False, changes=diff, user=user, error=error)
+                raise ShellyError(error) from None
         log.info("App options changed by %s (%s) – restarting", user, ", ".join(changed))
         self.events.add("options", changes=diff, user=user)
         self.options = new
@@ -882,26 +1011,17 @@ class ManagerCore:
 
     @property
     def busy(self) -> str | None:
-        """Text for the UI while a check or installations are running (the full
-        check button is blocked while this is set). A schedule run is not named here:
-        the Schedules tab shows it under "Last run", the UI blocks the button by
-        schedule_running."""
+        """Text of the busy state while a check, installations, reloading or a restore is
+        running (the full check button is blocked while this is set). It is not shown
+        under the page title: the rows, the progress line and the dialogs show what runs.
+        A schedule run is not named here: the Schedules tab shows it under "Last run",
+        the UI blocks the button by schedule_running."""
         if self.checking:
             return "Check in progress"
         parts = []
         if self.device_checks:
             names = [str(self.devices.get(i, {}).get("name") or "device") for i in self.device_checks]
             parts.append(f"Checking {names[0]}" if len(names) == 1 else f"Checking {len(names)} devices")
-        if note := self.busy_note:
-            parts.append(note)
-        return " · ".join(parts) or None
-
-    @property
-    def busy_note(self) -> str | None:
-        """The line under the page title: what busy names except checks – a check
-        shows "Checking …" in the row of its device (a full check in the progress
-        line), not under the title."""
-        parts = []
         if self.installing:
             parts.append(f"Installations running: {len(self.installing)}")
         if self.reloading:

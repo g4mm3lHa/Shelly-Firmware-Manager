@@ -49,6 +49,17 @@ async def test_save_failure_keeps_previous_state(mgr, net, monkeypatch):
     assert mgr.save() and mgr.storage_error is None
 
 
+async def test_start_id_new_with_every_start(net):
+    """The state carries a random mark of the app start (Settings tab: reload once the
+    restarted app answers with a new one); it is not stored."""
+    first = manager.Manager(dict(OPTIONS), session=None, token="t")
+    second = manager.Manager(dict(OPTIONS), session=None, token="t")
+    mark = first.public_state()["start_id"]
+    assert len(mark) == 16 and mark != second.public_state()["start_id"]
+    first.save()
+    assert mark not in data_paths.STATE_FILE.read_text()
+
+
 async def test_state_file_compact_and_no_runtime_state(mgr, net):
     """state.json is compact JSON and does not persist activity/progress."""
     await mgr.scan()
@@ -256,6 +267,7 @@ async def test_no_readable_state_never_deletes_firmware(mgr, net):
     m._registry, m.notify, m.changelogs.refresh = mgr._registry, mgr.notify, net.refresh
     m._ha_setup_state = mgr._ha_setup_state
     m._battery_devices = mgr._battery_devices
+    m._area_registry = net.area_registry
     assert await m.scan() is True  # downloads the offered version again: listed once more
     assert firmware_files() == files and set(m.firmware) == set(files) and not m.unknown_files
     restarted = manager.Manager(dict(OPTIONS), session=None, token="t")

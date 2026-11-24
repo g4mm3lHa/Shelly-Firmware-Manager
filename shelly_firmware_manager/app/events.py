@@ -42,10 +42,11 @@ log = logging.getLogger("sfm.events")
 # back from the disk at the start (FirmwareStore.adopt_files); "device": a removed
 # device was removed from the list (DeviceSettings.forget_device) or its beta version
 # withdrawn; "schedule": schedules of the Schedules tab (see manager_schedules); "backup":
-# backups of the device settings (stored, removed, restored, downloaded, imported)
+# backups of the device settings (stored, removed, restored, downloaded, imported);
+# "connection": a connection test of the download server (see manager_installs)
 KINDS = (
     "check", "download", "upload", "install", "delete", "setting", "password", "options", "log", "export", "import",
-    "setup", "store", "device", "schedule", "backup",
+    "setup", "store", "device", "schedule", "backup", "connection",
 )
 ENTRY_ID_RE = re.compile(r"^[0-9a-f]{12}$")  # "id" of an entry, also checked for IDs from the URL
 SEVERITIES = ("success", "warning", "error")  # ordered from lowest to highest

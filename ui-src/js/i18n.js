@@ -1,16 +1,23 @@
 // Language of the UI: English texts are the keys, other languages are dictionaries
-// keyed by the English text (i18n-de.js). The language is chosen per browser in the
+// keyed by the English text (i18n-<code>.js). The language is chosen per browser in the
 // Settings tab (card "Display"): "Same as Home Assistant" (default) follows the language
 // of the Home Assistant page around this panel, else the browser's; anything without a
 // dictionary falls back to English. A change reloads the page.
 // Texts from the server or a Shelly (messages, log entries) stay English; dates and
 // times keep the form "2026-11-23 03:00" in every language.
 import DE from "./i18n-de.js";
+import NL from "./i18n-nl.js";
+import FR from "./i18n-fr.js";
+import IT from "./i18n-it.js";
+import ES from "./i18n-es.js";
+import PL from "./i18n-pl.js";
+import PT from "./i18n-pt.js";
 
-const DICTIONARIES = {de: DE};
+const DICTIONARIES = {de: DE, nl: NL, fr: FR, it: IT, es: ES, pl: PL, pt: PT};
 const STORE_KEY = "shelly-firmware-manager:language";
 /** Choices of the language field: [value, label]; labels of the languages in their own language. */
-export const LANGUAGES = [["auto", "Same as Home Assistant"], ["en", "English"], ["de", "Deutsch"]];
+export const LANGUAGES = [["auto", "Same as Home Assistant"], ["en", "English"], ["de", "Deutsch"],
+  ["nl", "Nederlands"], ["fr", "Français"], ["it", "Italiano"], ["es", "Español"], ["pl", "Polski"], ["pt", "Português"]];
 
 /** Language code of the Home Assistant page (Ingress iframe on the same origin), else
  *  of the browser; "" if neither is readable. */
@@ -19,7 +26,7 @@ function hostLanguage() {
   try { if (window.parent !== window) code = window.parent.document.documentElement.lang || ""; } catch (e) { code = ""; }
   return (code || navigator.language || "").toLowerCase().split("-")[0];
 }
-/** Stored choice of this browser: "auto", "en" or "de". */
+/** Stored choice of this browser: "auto", "en" or a language code of LANGUAGES. */
 export function languageChoice() {
   let value = null;
   try { value = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) { value = null; }

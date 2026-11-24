@@ -607,7 +607,8 @@ class Schedules(Installs):
     def _targets(self, item: dict[str, Any]) -> tuple[list[str], list[dict[str, str]]]:
         """Devices of a run and those left out (with the reason)."""
         action = str(item["action"])
-        chosen = list(self.devices) if item.get("devices") == "all" else list(item.get("devices") or [])
+        areas = {device_id: dev.get("area") for device_id, dev in self.devices.items()}
+        chosen = timetable.chosen_devices(item.get("devices"), areas)
         setting = timetable.SETTING_ACTIONS.get(action, (None, None))[0]
         targets: list[str] = []
         left: list[dict[str, str]] = []

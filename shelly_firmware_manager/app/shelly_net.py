@@ -93,6 +93,31 @@ async def host_resolves(host: str) -> bool:
     return bool(infos)
 
 
+async def resolve_lan_address(host: str) -> str | None:
+    """The IP address to contact for host (an IP address or a host name) if it lies inside
+    LAN_NETWORKS, else None. A host name counts only if it resolves within
+    HOST_RESOLVE_TIMEOUT_S and every address it resolves to is a LAN address (rule:
+    nothing outside the LAN is contacted); the lowest of them is returned. Only a lookup:
+    nothing is sent to the address."""
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        return str(ip) if is_lan_address(ip) else None
+    loop = asyncio.get_running_loop()
+    try:
+        infos = await asyncio.wait_for(
+            loop.getaddrinfo(host, None, type=socket.SOCK_STREAM), HOST_RESOLVE_TIMEOUT_S
+        )
+        addresses = sorted({ipaddress.ip_address(str(info[4][0]).split("%")[0]) for info in infos}, key=str)
+    except (OSError, UnicodeError, TimeoutError, ValueError):  # socket.gaierror is an OSError
+        return None
+    if not addresses or not all(is_lan_address(address) for address in addresses):
+        return None
+    return str(addresses[0])
+
+
 async def resolve_device_origin(configuration_url: str | None) -> str:
     """Returns 'http://<private-ip>:<port>' from the integration's configuration_url.
 

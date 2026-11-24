@@ -1,0 +1,9 @@
+# Configuration tab of the app page in Dutch: only the hint field "settings" (config.yaml);
+# all options are in the Settings tab of the app.
+configuration:
+  settings:
+    name: "Alle instellingen: open de app → tabblad “Instellingen”"
+    description: >-
+      Deze pagina heeft geen verdere opties. Open de app via “Shelly Firmware” in de zijbalk en kies het tabblad “Instellingen”. Invoer in dit veld heeft geen effect.
+network:
+  8098/tcp: Firmware-downloads voor de Shelly’s

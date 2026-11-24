@@ -5,10 +5,12 @@ class only.
 """
 
 import logging
+import platform
 import shelly_net
 import time
 from typing import Any
 
+import diagnostics
 import schedule
 from backup_store import normalize_mac
 
@@ -75,6 +77,9 @@ class Manager(Schedules):
             "hold",
             "offer_date",
             "beta",
+            "area",
+            "unreachable",
+            "after_update",
         )
         devices: list[dict[str, Any]] = []
         stored = self._downgrade_candidates()
@@ -109,6 +114,7 @@ class Manager(Schedules):
                 }
             )
         return {
+            "start_id": self.start_id,  # changes with every app start (Settings tab: restart done)
             "devices": devices,
             "others": self.others,
             # Shellys Home Assistant knows but the app does not list (with the reason)
@@ -116,7 +122,6 @@ class Manager(Schedules):
             "offer_after_days": self.offer_after_days,
             "last_scan": self.last_scan,
             "busy": self.busy,
-            "busy_note": self.busy_note,  # line under the page title (no checks, see busy_note)
             "schedule_running": self.schedule_running,  # name of the schedule whose run is going on
             # mark of the newest log entry (EventLog.latest): the Logs tab reloads and marks unread
             # entries; the "!" of the tab follows the newest error entry
@@ -138,7 +143,7 @@ class Manager(Schedules):
             },
             "scanning": self.checking,
             "progress": dict(self.progress) if self.progress else None,
-            "storage_error": self.storage_error or self.state_warning,
+            "storage_error": self.storage_error or self.state_warning or self.settings_warning,
             "gen1_enabled": self.gen1_enabled,
             "allow_downgrade": self.allow_downgrade,
             "beta_firmware": self.beta_firmware,
@@ -146,9 +151,50 @@ class Manager(Schedules):
             "host_names": self.resolve_host_names,  # option "Resolve host names" (Host name column)
             "first_start_open": self.first_start_open,  # import question of a fresh installation
             "import_max_mb": self.import_max // 1048576,
+            # Card "Getting started" (fresh installation) and the last connection test of the
+            # download server, only while it was made with the current download base URL
+            "getting_started": self.getting_started,
+            "connection_test": self.current_connection_test(),
+            "test_devices": self.test_devices(),  # devices that can run the connection test
+            # host port of the download server (None: switched off or not read from the Supervisor)
+            "host_port": self.host_port if self.host_port_known else None,
             "download_base": {
                 "url": self.download_base,
                 "issue": self.download_base_issue,
                 "message": DOWNLOAD_BASE_MESSAGES.get(self.download_base_issue or ""),
             },
         }
+
+    def current_connection_test(self) -> dict[str, Any] | None:
+        """The last connection test, if it was made with the current download base URL."""
+        test = self.connection_test
+        return test if test is not None and test.get("url") == self.download_base else None
+
+    def hide_getting_started(self) -> None:
+        """"Hide" on the card "Getting started": it does not come back."""
+        self.getting_started = False
+        self.save()
+
+    async def device_report(self, device_id: str, app_version: str) -> str:
+        """Text of "Details for a bug ticket" for one device (see diagnostics): names and
+        addresses masked, no passwords. Nothing is sent anywhere."""
+        dev = self.devices[device_id]
+        origin = dev.get("origin")
+        values = {
+            "app": app_version,
+            "home_assistant": await self.ha_version(),
+            "arch": platform.machine(),
+            "device": {**dev, "ip": shelly_net.origin_ip(origin) if origin else None},
+            "password_stored": self.credentials.has_device_password(device_id),
+            "download_base": self.download_base,
+            "connection_test": self.current_connection_test(),
+            "options": {
+                "restrict_downloads": "on" if self.restrict_downloads else "off",
+                "backup_before_install": "on" if self.backup_before_install else "off",
+                "offer_after_days": self.offer_after_days,
+                "beta_firmware": "on" if self.beta_firmware else "off",
+                "gen1_updates": "on" if self.gen1_enabled else "off",
+            },
+        }
+        return diagnostics.report(values, self.events.list())
+

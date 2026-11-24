@@ -1,7 +1,7 @@
 // Devices tab: status and action icons, the device table / phone tiles and the row menu.
 import {
   $, api, attachTip, box, closeModal, collator, confirmDialog, devUrl, el, filterControl, fmt, hideTip, icon, iconButton, input, loadLocal,
-  matches, message, modal, modelGen, openDetails, saveLocal, searchText, searchTool, section, selected, setTip, sortControl, t, toast, toolButton,
+  matches, message, modal, modelGen, openDetails, pad, saveLocal, searchText, searchTool, section, selected, setTip, sortControl, t, toast, toolButton,
   ui, valueList, webUrl,
 } from "./core.js";
 import {OFFER_SOURCES, cancelPlan, daysAgo, openDowngrade, openInstall} from "./install.js";
@@ -11,6 +11,8 @@ import {
 } from "./device-settings.js";
 import {load, render} from "./main.js";
 import {openDeviceBackups, reasonLabel} from "./backups.js";
+import {afterUpdateNote, gettingStartedCard, openComparison, openReport, unreachableBlock} from "./diagnosis.js";
+import {SECURITY_ITEMS, anyArea, areaFilterNode, areaMatch, saveCsv, securityStrip, syncAreaFilter} from "./overview.js";
 
 // ---------------------------------------------------------------- Devices
 // Never checked (status of older versions "unregistered") and Gen1 devices skipped while
@@ -32,8 +34,8 @@ const justUpdated = d => installedRecently(d) && d.status === "up-to-date";
 // An approved installation waiting for its time ("Install at") shows "Scheduled" in place of "Ready"
 const shownStatus = d => d.planned && d.status === "ready" && !d.installing ? "scheduled" :
   d.installing && d.status === "ready" ? "queued" : justUpdated(d) ? "updated" : d.status;
-// A running downgrade is no offered update: the device stays in its section (named by the
-// server), the row shows "installed → target" with the tag "Downgrade"
+// A running downgrade is no offered update: the device stays in its section (the updates
+// card too, see listedUpdate), the row shows "installed → target" with the tag "Downgrade"
 const downgrading = d => !!d.downgrade && d.status === "installing";
 const hasUpdate = d => !downgrading(d) && ["available", "ready", "installing"].includes(d.status);
 // Ignored devices are not installable until they are resumed; nothing is installable
@@ -66,9 +68,9 @@ const SECTIONS = [["updates", t("Updates Available")], ["beta", t("Beta Updates"
 // Devices shown in "Updates available" at the last render (kept there while checked)
 const shownUpdates = new Set();
 // A device listed in the updates card stays there while it is checked again (its markers
-// are reset by the check); the result of the check decides at the next render without activity
+// are reset by the check) or downgraded; the result decides at the next render without activity
 const listedUpdate = d => hasUpdate(d) || shownStatus(d) === "queued" || installedRecently(d) || failedInstall(d) ||
-  (!!d.activity && shownUpdates.has(d.id));
+  ((!!d.activity || downgrading(d)) && shownUpdates.has(d.id));
 /** Section of a device: removed and ignored by their marker, then the updates card – or
  *  the beta card for a beta version – (also while checked, see listedUpdate), else the
  *  section named by the server. */
@@ -98,6 +100,8 @@ const FILTERS = [
   ["up_to_date", t("Up-To-Date"), inSection("up_to_date")],
   ["unprotected", t("Unprotected"), d => d.auth_enabled === false],
   ["cloud", t("Cloud on"), d => d.cloud === true, t("Devices with the Shelly cloud switched on")],
+  // Access point and websocket debug log on: also set by the strip "Security"
+  ...SECURITY_ITEMS.slice(2).map(([key, label, , , fn, tip]) => [key, label, fn, tip]),
   ["hold", t("On hold"), held, t("Devices with a new version that is not offered yet (Settings → Checks → “Offer updates only after”)")],
   ["asleep", t("Asleep"), inSection("asleep"), t("Battery devices that did not answer the last check")],
   ["ignored", t("Ignored"), inSection("ignored")],
@@ -108,6 +112,7 @@ const filterFn = key => (FILTERS.find(f => f[0] === key) || FILTERS[0])[2];
 const devFilter = filterControl(FILTERS.map(([key, label, , tip]) => [key, label, tip ? () => tip : null]),
   key => { ui.devFilter = key; render(true); });
 $("dev-filter").replaceWith(devFilter.node);
+devFilter.node.after(areaFilterNode);   // area filter tool, shown while a device has an area
 
 // Running check of a device (server-side state, in memory only)
 const ACTIVITY_LABELS = {waiting: t("Waiting"), checking: t("Checking …"), downloading: t("Downloading …"), reloading: t("Reloading …")};
@@ -127,31 +132,35 @@ function statusText(d) {
  *  ("n of N", the kept ones do not count) and the button to the device's backups. */
 function backupsSection(d) {
   const b = d.backups, show = el("button", t("Show backups"), "small"); show.onclick = () => openDeviceBackups(d.id);
-  return section(t("Backups"), valueList([[t("Last backup"), b ? `${fmt(b.last)} · ${reasonLabel(b.reason)}` : t("none")],
+  return section(t("Backups"), valueList([[t("Last backup"), b ? `${fmt(b.last)} · ${reasonLabel(b.reason)}` : t("never")],
     [t("Stored"), b ? t("{n} of {keep}", {n: b.count - b.kept, keep: ui.state.backup_keep}) + (b.kept ? " " + t("+ {n} kept", {n: b.kept}) : "") : null]]),
   box("div", "bk-more", show));
 }
-/** "Device details" popup: message left, status right on one line, then the sections
- *  Firmware, Device (model, generation, firmware ID, NTP), History and Backups. */
+/** "Device details" popup: message left, status right on one line (a device that did not
+ *  answer: "Not reachable", the causes and "Try again" below), then the sections Firmware,
+ *  Device (model, generation, firmware ID, NTP), History and Backups; "Details for a bug
+ *  ticket" bottom left. */
 function showStatus(d) {
-  const key = shownStatus(d), bad = ["error", "unconfirmed"].includes(d.status);
-  const head = box("div", "dstatus", el("p", d.message || "", "dmsg" + (bad ? " bad" : "")),
+  const key = shownStatus(d), bad = ["error", "unconfirmed"].includes(d.status), unreachable = !!d.unreachable && !asleep(d);
+  const head = box("div", "dstatus", el("p", unreachable ? t("Not reachable") : d.message || "", "dmsg" + (bad ? " bad" : "")),
     el("span", STATUS_LABELS[key] || d.status, "pill p-" + (key || "").replace(/[^a-z]/g, "")));
   const provided = hasUpdate(d) || failedInstall(d);
-  modal(d.name, [head,
+  modal(d.name, [head, unreachable ? unreachableBlock(d) : null,
     section(t("Firmware"), valueList([[t("Installed"), d.version],
       [t("Available"), held(d) ? t("{version} · on hold until {until}", {version: d.hold.version, until: d.hold.until}) :
         d.offer_version && d.beta ? t("{version} (beta)", {version: d.offer_version}) : d.offer_version],
       [t("Scheduled"), d.planned ? t("Install at {time} · approved {on} by {user}", {time: d.planned.at_text, on: d.planned.on_text, user: d.planned.by}) : null],
       [t("Build date"), held(d) ? d.hold.built : d.offer_version ? d.offer_date : null],
-      [t("Way back"), d.way_back ? (d.way_back.stored ? t("{version} is stored", {version: d.way_back.version}) : t("{version} is not stored", {version: d.way_back.version})) : null],
+      [t("Previous version"), d.way_back ? (d.way_back.stored ? t("{version} is stored", {version: d.way_back.version}) : t("{version} is not stored", {version: d.way_back.version})) : null],
       [t("Source"), provided ? OFFER_SOURCES[d.offer_source] : null]])),
     section(t("Device"), valueList([[t("Model"), modelGen(d)], [t("Firmware ID"), d.type], ["NTP", d.ntp]])),
     section(t("History"), valueList([[t("Last check"), fmt(d.last_check)], [t("Last success"), fmt(d.last_success)],
-      [t("Last update"), d.last_update ? fmt(d.last_update) : "–"]])),
-    backupsSection(d)],
+      [t("Last update"), fmt(d.last_update)]])),
+    backupsSection(d)].filter(Boolean),
     // Ready (and installable): red button right of Close opens the existing install dialog
-    installable(d, ui.state) ? [{text: t("Close")}, {text: t("Install update"), kind: "danger", action: () => openInstall([d])}] : undefined);
+    [{text: t("Details for a bug ticket"), action: () => openReport(d)}, {text: t("Close")},
+      ...(installable(d, ui.state) ? [{text: t("Install update"), kind: "danger", action: () => openInstall([d])}] : [])]);
+  $("dlg-btns").firstChild.classList.add("dlg-left");
 }
 const AOP_NOTE = t("Power-on action: not available – this device has no switchable output.");
 /** Popup of a greyed-out action icon: status strip with the reason as pill, explanation below. */
@@ -315,10 +324,10 @@ function detailsCell(d) {
   const key = "dev:" + d.id, det = el("details");
   const fill = () => {
     const controls = box("div", "detail-actions", actionStrip(d, true));
-    const list = valueList([[t("Model"), modelGen(d)], [t("Firmware ID"), d.type],
+    const list = valueList([...(anyArea(ui.state.devices) ? [[t("Area"), d.area || "–"]] : []), [t("Model"), modelGen(d)], [t("Firmware ID"), d.type],
       ...(ui.state.host_names ? [[t("Host name"), d.host_name]] : []), ["NTP", d.ntp],
       [t("Last check"), fmt(d.last_check)], [t("Last success"), fmt(d.last_success)],
-      [t("Last update"), d.last_update ? fmt(d.last_update) : "–"]], "tile-kv");
+      [t("Last update"), fmt(d.last_update)]], "tile-kv");
     det.replaceChildren(det.firstChild, box("div", "detail-body", controls, list));
   };
   det.append(el("summary", t("Details")));
@@ -368,6 +377,8 @@ const COLUMNS = {
     const reason = d.address_issue ? box("div", "sub addr-reason", icon("warn"), el("span", addressReason(d))) : null;
     return [head, box("div", "sub shelly-name", shellyName, pen), reason].filter(Boolean);
   }},
+  // Area of Home Assistant: offered while a device has one (phones: first row of the details)
+  area: {label: t("Area"), sort: d => d.area, cell: d => [el("span", d.area || "–", d.area ? "" : "sub")]},
   ip: {label: "IP", sort: d => (d.ip || "").split(".").map(n => n.padStart(3, "0")).join("."), cell: d => {
     if (d.address_issue) {   // instead of the (outdated) IP: the message, details as tooltip
       const issue = box("span", "addr-issue", icon("warn"), el("span", NO_ADDRESS)); issue.tabIndex = 0;
@@ -403,12 +414,13 @@ const COLUMNS = {
       down ? el("span", t("Downgrade"), "tag") : null);
     // Scheduled installation: clock line with its time under the version
     if (d.planned) return [line, sub, box("div", "hold-note plan-note", icon("clock"), el("span", t("Install at {time}", {time: d.planned.at_text})))];
-    return [line, sub];
+    // Updated: what the comparison with the backup before the update found
+    return [line, sub, justUpdated(d) ? afterUpdateNote(d) : null].filter(Boolean);
   }},
   status: {label: t("Status"), sort: d => STATUS_LABELS[shownStatus(d)] || d.status, cell: d => [box("div", "status-cell", statusCell(d), installButton(d), ignoredPill(d), removedPill(d))]},
   action: {label: t("Action"), cell: d => [actionStrip(d)]},
-  last_update: {label: t("Last update"), optional: true, sort: d => d.last_update, cell: d => [el("span", d.last_update ? fmt(d.last_update) : "–", "nowrap")]},
-  host_name: {label: t("Host name"), optional: true, sort: d => d.host_name, cell: d => [el("span", d.host_name || "–", "mono")]},
+  last_update: {label: t("Last update"), optional: true, sort: d => d.last_update, cell: d => [el("span", fmt(d.last_update), "nowrap")]},
+  host_name: {label: t("Host name"), optional: true, sort: d => d.host_name, cell: d => [el("span", d.host_name || "–", "num")]},
   ntp: {label: "NTP", optional: true, sort: d => d.ntp, cell: d => [d.ntp || "–"]},
   menu: {label: "", fixed: true, cell: d => [iconButton("dots", t("Actions for {name}", {name: d.name}), e => openRowMenu(d, e.currentTarget))]},
   // Mobile card only (hidden on wide screens by CSS, not offered in the column chooser)
@@ -428,13 +440,14 @@ const savePrefs = () => saveLocal("devices", prefs.devices);
 export function loadPrefs() {
   const raw = loadLocal("devices"), stored = raw && typeof raw === "object" ? raw : {};
   const known = k => DATA_COLUMNS.includes(k), base = defaultPrefs();
-  const order = (Array.isArray(stored.order) ? stored.order : []).filter(known);
+  const order = [...new Set((Array.isArray(stored.order) ? stored.order : []).filter(known))];
   const sort = Array.isArray(stored.sort) && COLUMNS[stored.sort[0]] && COLUMNS[stored.sort[0]].sort ? stored.sort : base.sort;
   // Optional columns added since the prefs were stored start hidden like on a new device
   const added = order.length ? DATA_COLUMNS.filter(k => !order.includes(k) && COLUMNS[k].optional) : [];
+  // Columns added since then take their default place: after the column they follow by default
+  for (const [i, k] of DATA_COLUMNS.entries()) if (!order.includes(k)) order.splice(i ? order.indexOf(DATA_COLUMNS[i - 1]) + 1 : 0, 0, k);
   prefs.devices = {sort: sort[1] === "desc" ? sort : [sort[0], "asc"],
-    hidden: Array.isArray(stored.hidden) ? [...stored.hidden.filter(known), ...added] : base.hidden,
-    order: [...new Set(order), ...DATA_COLUMNS.filter(k => !order.includes(k))]};
+    hidden: Array.isArray(stored.hidden) ? [...stored.hidden.filter(known), ...added] : base.hidden, order};
 }
 /** Change the sort order (toolbar control and column heads share it). */
 function setSort(value) { prefs.devices.sort = value; savePrefs(); render(true); }
@@ -442,11 +455,12 @@ function setSort(value) { prefs.devices.sort = value; savePrefs(); render(true);
 const devSort = sortControl(DATA_COLUMNS.filter(k => COLUMNS[k].sort).map(k => [k, COLUMNS[k].label]), setSort);
 $("dev-sort").replaceWith(devSort.node);
 /** All column keys in display order; without the option "Resolve host names" there is no
- *  Host name column. */
+ *  Host name column, without a device in an area of Home Assistant no Area column. */
 const columnKeys = () => ["select", ...prefs.devices.order.filter(offered),
   ...Object.keys(COLUMNS).filter(k => COLUMNS[k].fixed && k !== "select")];
-/** False for a column the app does not offer right now (Host name while the option is off). */
-const offered = key => key !== "host_name" || !!(ui.state && ui.state.host_names);
+/** False for a column the app does not offer right now (Host name while the option is off,
+ *  Area while no device has an area). */
+const offered = key => key === "host_name" ? !!(ui.state && ui.state.host_names) : key === "area" ? !!(ui.state && anyArea(ui.state.devices)) : true;
 // The option "Resolve host names" as last seen by this end device: switching it on shows
 // the Host name column once (the user may hide it again)
 function followHostNames() {
@@ -457,6 +471,10 @@ function followHostNames() {
   if (loadLocal("hostNamesSeen") !== on) saveLocal("hostNamesSeen", on);
   for (const n of document.querySelectorAll('#cols-devices .sort-item[data-col="host_name"], .sort-menu .sort-item[data-value="host_name"]')) n.hidden = !on;
   if (!on && prefs.devices.sort[0] === "host_name") prefs.devices.sort = ["device", prefs.devices.sort[1]];
+  // The same for the Area column while no device has an area
+  const areas = offered("area");
+  for (const n of document.querySelectorAll('#cols-devices .sort-item[data-col="area"], .sort-menu .sort-item[data-value="area"]')) n.hidden = !areas;
+  if (!areas && prefs.devices.sort[0] === "area") prefs.devices.sort = ["device", prefs.devices.sort[1]];
 }
 /** Move a data column before another one (drag & drop) or by one step (keyboard). */
 function moveColumn(key, target) {
@@ -563,7 +581,9 @@ export function renderDevices() {
   const ok = new Set(s.devices.filter(d => installable(d, s)).map(d => d.id));
   for (const id of [...selected]) if (!ok.has(id)) selected.delete(id);
   followHostNames(); syncChooser();
-  const found = s.devices.filter(d => matches(q, [d.name, d.shelly_name, d.ip, d.host_name, d.model, d.type]));
+  const searched = s.devices.filter(d => matches(q, [d.name, d.shelly_name, d.ip, d.host_name, d.model, d.type, d.area]));
+  syncAreaFilter(searched);
+  const found = searched.filter(areaMatch);
   const others = (s.others || []).filter(o => matches(q, [o.name, o.model, o.firmware, OTHER_KINDS[o.kind]]));
   if (!FILTERS.some(f => f[0] === ui.devFilter)) ui.devFilter = "all";
   // Counts of the filter entries respect the search
@@ -574,6 +594,7 @@ export function renderDevices() {
   devFilter.set(ui.devFilter, Object.fromEntries(FILTERS.map(([key, , fn]) => [key, key === "others" ? others.length : found.filter(fn).length])));
   devSort.set(prefs.devices.sort);
   const rows = found.filter(filterFn(ui.devFilter)), bySection = new Map(SECTIONS.map(([key]) => [key, []]));
+  shownRows = rows;
   for (const d of rows) bySection.get(sectionOf(d)).push(d);
   for (const d of s.devices) if (["updates", "beta"].includes(sectionOf(d))) shownUpdates.add(d.id); else shownUpdates.delete(d.id);
   const cards = [];
@@ -586,18 +607,37 @@ export function renderDevices() {
     const sel = list.filter(d => ok.has(d.id)), mine = sel.filter(d => selected.has(d.id));
     const all = input("checkbox");
     all.setAttribute("aria-label", key === "beta" ? t("Select all installable beta updates") : t("Select all installable updates"));
+    // Without an installable device the box is hidden (its place is kept, like a row without checkbox)
     all.disabled = !sel.length; all.checked = sel.length > 0 && sel.every(d => selected.has(d.id));
+    if (!sel.length) all.classList.add("ghost");
     all.onchange = () => { for (const d of sel) all.checked ? selected.add(d.id) : selected.delete(d.id); render(true); };
     const go = el("button", t("Review & install ({n})", {n: mine.length}), "primary"); go.disabled = !mine.length;
     go.onclick = () => openInstall(mine);
     cards.push(deviceCard(title, list, [all], [go]));
   }
   if (others.length && ["all", "others"].includes(ui.devFilter)) cards.push(othersCard(others));
-  listingLine(s, cards);
   if (!cards.length) cards.push(box("div", "card", el("div", s.devices.length || (s.others || []).length ? t("No devices match.") :
     s.first_start_open ? t("No devices yet – they are found by the first check.") : t("No devices yet – run “Check now”."), "empty")));
+  // Above the cards: the strip "Security" (while devices are known), above it the card
+  // "Getting started" of a fresh installation, on phones the line of the missing Shellys first
+  if (s.devices.length) cards.unshift(securityStrip(found));
+  const start = gettingStartedCard(); if (start) cards.unshift(start);
+  listingLine(s, cards);
   $("dev-cards").replaceChildren(...cards);
 }
+// ---- CSV export
+// Toolbar icon (wide screens, before "Columns"): saves the list as shown – search, filter
+// and area filter applied, in the chosen sort order – at once, without a dialog.
+let shownRows = [];
+/** Save the shown devices as CSV file. */
+function exportCsv() {
+  const heads = [t("Name"), t("Shelly name"), t("Area"), t("Model"), t("Generation"), "IP", t("Firmware"), t("Available"), t("Status"), t("Last check")];
+  const lines = sortRows(shownRows).map(d => [d.name, d.shelly_name, d.area, d.model, d.gen, d.ip, d.version, hasUpdate(d) ? d.offer_version : "",
+    STATUS_LABELS[shownStatus(d)] || d.status, d.last_check ? fmt(d.last_check) : ""]);
+  const now = new Date();
+  saveCsv([heads, ...lines], `shelly-devices-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}.csv`);
+}
+$("cols").before(iconButton("download", t("Save the list as CSV file"), exportCsv, "tool-btn csv-btn"));
 // ---- Shellys not listed
 // Shellys of the Shelly integration that Home Assistant knows but the app does not list
 // (state field listing {listed, missing: [{name, model, reason}]}, updated by full checks)
@@ -706,6 +746,8 @@ function openRowMenu(d, anchor) {
   // Group 2: the device itself
   items.push(el("hr"));
   add(t("Device details"), () => showStatus(d), true);
+  // Until the next check of the device (the check after an intermediate version keeps it)
+  if (d.after_update) add(t("Comparison after update"), () => openComparison(d), true);
   add(t("Reload device info"), () => reloadDevice(d), !blocked && !!d.ip);
   if (blocked) items.push(el("div", t("Not available – {reason}", {reason: blocked}), "menu-hint"));   // reason, also for touch
   const url = webUrl(d);

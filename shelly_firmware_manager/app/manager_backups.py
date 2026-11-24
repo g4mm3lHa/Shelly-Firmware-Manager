@@ -46,6 +46,9 @@ DOWNLOAD_TTL_S = 600  # a prepared download must be fetched within 10 min
 
 IMPORT_TTL_S = 900  # a staged backup file that is not imported within 15 min is dropped
 
+AFTER_UPDATE_WAIT_S = 15  # comparison after an update: wait until the scripts of the device run again
+LOG_CHANGED_ROWS = 10  # comparison after an update: names of changed settings kept in its log entry
+
 APP_USER = "App"  # user of what the app does by itself (retention), in the log
 
 # Why a device has no backup (shown in the card "No Backup"; see Backups._no_backup)
@@ -244,17 +247,105 @@ class Backups(DeviceSettings):
 
     async def backup_before_installation(self, device_id: str, dev: Device, user: str) -> None:
         """The backup right before an update or downgrade is installed (option
-        backup_before_install). ShellyError if it fails: nothing is installed then."""
+        backup_before_install); its ID is kept for the comparison after the update
+        (_before_backups). ShellyError if it fails: nothing is installed then."""
+        self._before_backups.pop(device_id, None)
         if not self.backup_before_install:
             return
         dev["message"] = "Backing up the settings before the installation"
         reason = "downgrade" if dev.get("downgrade") else "update"
         try:
-            await self._backup(device_id, dev, reason, f"{dev.get('version')} → {dev.get('pending_version')}", user)
+            entry = await self._backup(
+                device_id, dev, reason, f"{dev.get('version')} → {dev.get('pending_version')}", user
+            )
+            if entry is not None and reason == "update":
+                self._before_backups[device_id] = entry["id"]
         except (TimeoutError, ShellyError, aiohttp.ClientError, OSError, KeyError, ValueError) as err:
             raise ShellyError(
                 f"Backup before the installation failed – nothing was installed: {_failure_text(err)}"
             ) from None
+
+    async def compare_after_update(self, device_id: str, backup_id: str, user: str) -> None:
+        """Comparison after a confirmed update: the device is read again (after
+        AFTER_UPDATE_WAIT_S, so its scripts have started) and compared with the backup
+        made right before the installation (shelly_backup.after_update). The result is
+        kept on the device as after_update ({"at", "backup_at", "from_version",
+        "to_version", ...}, or {"at", "error"}) until the next check of the device (the
+        check after an intermediate version keeps it) or its next installation, and
+        logged with the names of the changed settings (no values) and the stopped
+        scripts. Nothing is changed on the device. Never raises: an unexpected error is
+        logged and kept as the error of the comparison, so the caller goes on."""
+        await asyncio.sleep(AFTER_UPDATE_WAIT_S)
+        dev = self.devices.get(device_id)
+        if dev is None or not self._comparison_current(device_id, dev):
+            return
+        try:
+            await self._compare(device_id, dev, backup_id, user)
+        except Exception as err:
+            # An answer of an unexpected shape: the update stays confirmed, only the comparison is missing
+            log.exception("%s: unexpected error in the comparison after the update", dev.get("name"))
+            if self._comparison_current(device_id, dev):
+                self._comparison_failed(dev, unexpected_text(err), user)
+
+    def _comparison_current(self, device_id: str, dev: Device) -> bool:
+        """The comparison still belongs to the update that started it: the device is
+        known as this entry, still marked "Updated" and not installing again (a new
+        installation started during the wait or the read would get an old result)."""
+        return self.devices.get(device_id) is dev and bool(dev.get("updated")) and device_id not in self.installing
+
+    def _comparison_failed(self, dev: Device, text: str, user: str) -> None:
+        """Keep and log a failed comparison after an update."""
+        log.warning("%s: comparison after the update failed: %s", dev.get("name"), text)
+        dev["after_update"] = {"at": int(time.time()), "error": clip(text, 300)}
+        self.events.add(
+            "backup", severity="warning", event="compared", device=dev.get("name"), error=clip(text, 300), user=user
+        )
+        self.save()
+
+    async def _compare(self, device_id: str, dev: Device, backup_id: str, user: str) -> None:
+        """Read the device, compare it with the backup and keep the result (see
+        compare_after_update); nothing is written if the device started another
+        installation meanwhile."""
+        name = dev.get("name")
+        try:
+            entry = self._stored(backup_id)
+            _meta, before = self.backups.load(backup_id)
+            _meta_now, now = await self._read_backup(device_id, dev)
+        except (TimeoutError, ShellyError, BackupError, aiohttp.ClientError, OSError, KeyError, ValueError) as err:
+            if self._comparison_current(device_id, dev):
+                self._comparison_failed(dev, _failure_text(err), user)
+            return
+        if not self._comparison_current(device_id, dev):
+            return
+        result = shelly_backup.after_update(int(entry["gen"]), before, now)
+        dev["after_update"] = {
+            "at": int(time.time()), "backup_at": entry["at"],
+            "from_version": entry.get("fw"), "to_version": dev.get("version"), **result,
+        }  # fmt: skip
+        scripts = result["scripts"]
+        severity = "warning" if result["changed_count"] or scripts["stopped"] else "success"
+        # The log entry keeps the names of the first changed settings, never their values
+        # (they may hold e.g. a server address with a token); the dialog of the device shows the values
+        changed_keys = [row["key"] for row in result["changed"][:LOG_CHANGED_ROWS]]
+        self.events.add(
+            "backup", severity=severity, event="compared", device=name, changed=result["changed_count"],
+            new_fields=result["new_count"], scripts_before=scripts["before"], scripts_stopped=scripts["stopped"],
+            changed_keys=changed_keys or None, user=user,
+        )  # fmt: skip
+        log.info(
+            "%s: compared after the update: %d changed, %d new", name, result["changed_count"], result["new_count"]
+        )
+        self.save()
+
+    def after_update_seen(self, device_id: str) -> bool:
+        """"Seen" in the comparison after an update: the line below the firmware of the
+        device goes away, the comparison stays in its row menu. False without one."""
+        comparison = self.devices[device_id].get("after_update")
+        if not isinstance(comparison, dict):
+            return False
+        comparison["seen"] = True
+        self.save()
+        return True
 
     async def _backup_result(
         self,

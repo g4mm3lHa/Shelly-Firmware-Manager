@@ -21,9 +21,10 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
   the Save area: hint "What changed in each version: open the app page in Home
   Assistant and choose “Changelog” next to the version." – the link opens the info
   page of the app in the whole window (`/config/app/<slug>/info`, slug from the
-  Supervisor; the list of apps until it is known). The Configuration tab of the app
-  page has the same names, help texts and order as the Settings tab, without the
-  changelog hint (HA does not show it there, 2026-11-19).
+  Supervisor; the list of apps until it is known). The Configuration tab of the app page holds
+  only the hint field "settings" (name "All settings: open the app → tab “Settings”",
+  help text that this page has no further options; no effect – HA shows no links there,
+  3.11.1, approved 2026-11-23); all options are in the Settings tab.
 
 ## Firmware store and device passwords (approved 2026-11-19, 3.4.0)
 - **Entry points (8a B, 7a B; places changed in 3.5.0):** Settings tab: block
@@ -66,7 +67,7 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
 - **Upload progress (3.4.1):** firmware upload and store import send the file in parts
   and show "Uploading <file> … n %" in the dialog, then "Checking <file> …" (import).
 
-## Offer delay, way back, import (3.9.0, mockups `3.9.0`, approved 2026-11-22)
+## Offer delay, previous version, import (3.9.0, mockups `3.9.0`, approved 2026-11-22)
 - **Options (F1):** "Offer updates only after (days)" in "Checks" after "Check time";
   "Keep installed versions" in "Firmware & Storage" after "Allow downgrades", below it
   the line "n installed versions: x are stored (MB), y are downloaded at the next check
@@ -103,3 +104,38 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
   unsaved change ("Unsaved changes" shows); nothing is saved until the user clicks Save. Grey note under
   the field while it holds the suggestion: "Suggestion from the address of this page – please check it
   before saving." (approved 2026-11-21); it disappears when the user edits the field.
+
+## Connection test of the download server (3.12.0, mockups `3.12.0-ui` A1, approved 2026-11-24)
+- **Host port (2026-11-24, `reports/3.12.0/FRAGEN-rc3.md` 1a 2a 3 4 5):** first field of the
+  card "Download Server" (number, default 8098), read from Home Assistant each time the tab
+  loads. Line below: the port check on saving; "switched off in Home Assistant" (empty field)
+  or "could not be read" (field disabled, pointer to the Configuration tab). Typing a new
+  port changes the port of the download base URL while it uses the previous port. The save
+  dialog adds a yellow box "The app restarts with port …"; a port in use is refused.
+- **Port warning (live test 3.12.0-rc3, 2a):** yellow line under the download base URL
+  (with the other live hints) while its port – typed, or 80/443 by the scheme – differs from
+  the host port field; live while typing in either field, saving stays possible; none while
+  the host port is unknown or empty.
+- **After saving (live test 3.12.0-rc3, 1a):** the page reloads after the app restart on the
+  Settings tab (marker `#settings` in the address, removed at the start); a normal reload
+  opens Devices.
+- **Texts with the port:** help of the download base URL ("+ the host port above"), Getting
+  started and the confirmation of the former example address name the real host port; the
+  connection test names the port cause only while the address port differs from it.
+- **Row (1 a):** below the download base URL: "Test connection" (play icon) and the last
+  result: green "Reachable · last tested <time> with <device>", red "Not reachable · …" or
+  grey "Not tested yet"; shown while the result belongs to the saved address. The button is
+  disabled with the tooltip "Save first" while the field holds an unsaved change, and with
+  the notice text while installations are disabled by the address.
+- **Dialog (play icon):** intro, section Test (Download base URL, select "Test device":
+  "Automatic (first reachable device of Gen 2 or newer)" and the devices that can test),
+  hint about Gen 1 and the one-time test address; Cancel / blue "Start test". Running and
+  result: check lines Download base URL, Download server, "Fetch by <device> (<ip>)";
+  reachable: green message; not reachable: red message, the error (English server text;
+  a device error as readable text with its codes, e.g. "connection error (Shelly code -114 /
+  -14)", the raw answer only in the log entry and the bug ticket text), "Common causes" (the
+  port cause names the port of the saved address) and the hint about the port; Close / blue
+  "Test again". Without a Gen2+
+  device: yellow message "No Shelly of Gen 2 or newer is known yet …".
+- **Installation dialog (1 a):** yellow check line "Download server" with "Test now" at the
+  top of "Before installing" while no test with the current address succeeded.

@@ -12,7 +12,9 @@ A schedule does one action on a set of Shellys at a local clock time of Home Ass
 - repeat: {"kind": "daily"} | {"kind": "weekdays", "days": [0..6]} (Monday = 0) |
   {"kind": "every", "n": days}; "every" counts from its anchor, the date of the first run
   after the schedule was saved with this repeat and time.
-- devices: "all" (every listed Shelly, new ones included) or a list of HA device IDs.
+- devices: "all" (every listed Shelly, new ones included), a list of HA device IDs or
+  {"areas": [area names]} (the Shellys in these Home Assistant areas at the time of a
+  run, new ones included; "" = the Shellys without an area).
 - next: epoch of the next run (None while the schedule is off); last: result of the
   last run {"at", "severity", "text"} with "counts" {done, total, unchanged, unreachable,
   refused, left} of a run, or severity "missed" with the "reason" for a run the app missed.
@@ -55,6 +57,8 @@ EVERY_MAX_DAYS = 365  # "Every n days": 1–365
 NAME_MAX = 64  # characters of a schedule name
 MAX_SCHEDULES = 50  # schedules kept at most
 MAX_DEVICES = 500  # devices of one schedule
+MAX_AREAS = 100  # areas of one schedule
+AREA_MAX = 64  # characters of an area name
 INSTALL_AHEAD_S = 7 * 86400  # "Install at": at most 7 days ahead
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -141,11 +145,14 @@ def _repeat(value: object) -> dict[str, Any]:
     return {"kind": kind}
 
 
-def _devices(value: object, known: set[str] | None) -> str | list[str]:
-    """"all" or a non-empty list of listed device IDs (unknown IDs are refused; known
-    None: any ID of the right form)."""
+def _devices(value: object, known: set[str] | None) -> str | list[str] | dict[str, list[str]]:
+    """"all", a non-empty list of listed device IDs (unknown IDs are refused; known
+    None: any ID of the right form) or {"areas": [names]} (at least one area; an area
+    is not checked against Home Assistant: it may be renamed or empty for a while)."""
     if value == "all":
         return "all"
+    if isinstance(value, dict):
+        return {"areas": _areas(value.get("areas"))}
     if not isinstance(value, list) or not value or len(value) > MAX_DEVICES:
         raise ValueError("Devices: “All Shellys” or at least one device expected")
     ids = []
@@ -155,6 +162,31 @@ def _devices(value: object, known: set[str] | None) -> str | list[str]:
         if item not in ids:
             ids.append(item)
     return ids
+
+
+def _areas(value: object) -> list[str]:
+    """Area names of a schedule: at least one, each at most AREA_MAX characters, no
+    duplicates ("" = the Shellys without an area)."""
+    if not isinstance(value, list) or not value or len(value) > MAX_AREAS:
+        raise ValueError("Devices: choose at least one area")
+    names: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or len(item) > AREA_MAX or plain(item, AREA_MAX + 1) != item:
+            raise ValueError("Devices: unknown area")
+        if item not in names:
+            names.append(item)
+    return names
+
+
+def chosen_devices(devices: object, areas: dict[str, str | None]) -> list[str]:
+    """Device IDs a schedule names now: every listed device ("all"), the listed IDs, or
+    the devices whose area (areas: device ID -> area name or None) is one of its areas."""
+    if devices == "all":
+        return list(areas)
+    if isinstance(devices, dict):
+        wanted = set(devices.get("areas") or [])
+        return [device_id for device_id, area in areas.items() if (area or "") in wanted]
+    return list(devices) if isinstance(devices, list) else []
 
 
 def _epoch(value: object) -> bool:
@@ -269,9 +301,13 @@ def changes(old: dict[str, Any], new: dict[str, Any], names: dict[str, str]) -> 
 
 
 def devices_text(devices: object, names: dict[str, str]) -> str:
-    """"All Shellys", the device names (at most three, then the count) or "No device"."""
+    """"All Shellys", "Areas: …", the device names (at most three, then the count) or
+    "No device"."""
     if devices == "all":
         return "All Shellys"
+    if isinstance(devices, dict):
+        areas = [a or "Without area" for a in devices.get("areas") or []]
+        return "Areas: " + ", ".join(areas[:3]) + (f" and {len(areas) - 3} more" if len(areas) > 3 else "")
     ids = devices if isinstance(devices, list) else []
     if not ids:
         return "No device"  # all devices of the schedule were removed from the list

@@ -1,5 +1,68 @@
 # Changelog
 
+## 3.12.0
+
+Released 2026-11-24. Connection test of the download server, help for devices that do
+not answer, Home Assistant areas, a security overview and six more languages.
+
+Added
+- Settings: "Test connection" lets a Shelly fetch a test address from the download
+  server and names the likely cause, with the real port, when it cannot.
+- Settings → Download Server: "Host port" sets the port of the download server in Home
+  Assistant (app restarts); a port already in use on the host is refused.
+- Card "Getting started" on a fresh installation: download address, first check,
+  connection test; it can be hidden.
+- Devices that did not answer: device details name the likely causes; "Try again" checks
+  address, port and answer without a full check.
+- Device details: "Details for a bug ticket" with app, device and settings data; names,
+  IP (also IPv6) and MAC addresses masked, no passwords, nothing is sent.
+- After an update with a "Before update" backup the app compares the settings and marks
+  what changed and which scripts no longer run (row menu "Comparison after update").
+- Comparison after an update: "Seen" removes the line below the firmware; it stays in
+  the row menu until the next check (the check after an intermediate version keeps it).
+- Logs: the entry of a comparison after an update opens with the changed settings and
+  the scripts that stopped.
+- Home Assistant areas: column Area and area filter in the Devices tab, also found by
+  the search; schedules and "Back up now" can choose devices by area.
+- Strip "Security" above the device list: devices without password, with cloud, access
+  point or debug log on; a click filters the list (phones: symbol and number).
+- Devices tab (desktop): the list as shown can be saved as CSV file.
+- User interface in Dutch, French, Italian, Spanish, Polish and Portuguese (machine
+  translation); the language picker offers them.
+
+Changed
+- App options are stored by the app and changed only in the Settings tab; the app's
+  Configuration tab keeps a hint. The options set there before are taken over once.
+- Settings file: an invalid value gets its default and is named in the status strip, so
+  the app also starts with e.g. invalid certificate pins.
+- Settings: after saving, the page comes back on the Settings tab as soon as the
+  restarted app answers.
+- The download base URL follows a new host port; help texts, "Getting started" and the
+  connection test name the real host port; a yellow line warns while they differ.
+- "Before installing" in the install dialog names a missing or failed connection test.
+- "Way back" is now called "Previous version" in the device details, the install dialog
+  and the Firmware tab.
+- No status line under the page title any more; running work shows in the rows,
+  dialogs and tabs. The line remains for storage and loading errors.
+- Logs: "Hide successful entries" hides every successful entry, not only checks; times
+  and host names in the normal font with equal-width digits.
+- Times without a value read "never", other empty values "–"; warning boxes in dialogs
+  with the tint of the notice bar; red trash icon at "Delete all logs".
+- Firmware tab: the tooltip of "Installed" names only the devices.
+- Devices: a device in "Updates available" stays there during a downgrade until the
+  next check (before: it moved to its section and back after the installation).
+- Devices: the "Select all" box of "Updates available" is hidden while the card has no
+  installable device.
+- Faster app start: the standard library is precompiled in the image.
+
+Security
+- Connection test: the test address of the download server is valid once, only for the
+  chosen device, and serves no firmware.
+- Logs: the comparison after an update keeps only the names of changed settings, never
+  their values (they may hold e.g. a server address with a token).
+- Host port check: a host name in the download base URL is resolved first; outside the
+  local network nothing is checked.
+
 ## 3.11.1
 
 Released 2026-11-23. Stronger downgrade warning with a risk tick, and no downgrade

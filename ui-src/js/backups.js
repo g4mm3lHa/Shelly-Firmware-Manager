@@ -9,6 +9,7 @@ import {
   passwordCopy, searchText, searchTool, section, setTip, startDownload, t, tn, toast, ui, uploadFile, valueList,
 } from "./core.js";
 import {render} from "./main.js";
+import {areaChoice} from "./overview.js";
 
 // ---------------------------------------------------------------- Texts and small parts
 // Reason of a backup: [label, tag class]; the automatic ones before a change are coloured
@@ -351,18 +352,19 @@ function openBackupNow() {
   const devs = ((s && s.devices) || []).filter(d => !d.removed).sort((a, b) => collator.compare(String(a.name), String(b.name)));
   const pick = deviceChoice("bk-dev", devs, [el("span", t("All Shellys ({n})", {n: devs.length}))], "all",
     d => [d.ignored ? el("span", t("Ignored"), "tag warn") : null, d.battery ? el("span", t("Battery"), "tag") : null].filter(Boolean));
-  const modes = box("div", "modes", ...pick.nodes);
+  const areas = areaChoice("bk-dev", devs, t("Areas"), null);
+  const modes = box("div", "modes", ...(areas ? [pick.nodes[0], ...areas.nodes, pick.nodes[1], pick.nodes[2]] : pick.nodes));
   modal(title, [
     section(t("Devices"), modes),
     el("p", t("Stores the settings, scripts, schedules and webhooks of each device (Gen 1: settings and actions) encrypted in this app. Passwords (Wi-Fi, device, MQTT) are not part of a backup – a Shelly never gives them out. Nothing is changed on the devices."), "hint")],
   [{text: t("Cancel")}, {text: "", kind: "primary", action: async () => {
-    const ids = pick.all.checked ? "all" : pick.ticked().map(d => d.id);
+    const ids = pick.all.checked ? "all" : (areas && areas.radio.checked ? areas.devices() : pick.ticked()).map(d => d.id);
     if (Array.isArray(ids) && ids.length === 1) { backupOne(devs.find(d => d.id === ids[0]), toTab); return; }
     await guarded(title, "backup", async () => { await api("api/backups/run", {devices: ids}); openRun(); });
   }}], "backup");
-  const count = () => pick.all.checked ? devs.length : pick.ticked().length;
+  const count = () => pick.all.checked ? devs.length : areas && areas.radio.checked ? areas.devices().length : pick.ticked().length;
   const go = gateButton(() => count() > 0, modes);
-  const sync = () => { pick.refresh(); go.textContent = tn(count(), "Back up 1 device", "Back up {n} devices"); };
+  const sync = () => { pick.refresh(); if (areas) areas.refresh(); go.textContent = tn(count(), "Back up 1 device", "Back up {n} devices"); };
   modes.addEventListener("change", sync);
   sync();
 }

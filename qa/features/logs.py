@@ -43,6 +43,12 @@ def _logs(c):
     check(f"{case}: three consecutive entries of one device grouped", f.locator("#log-list .grp").count() == 3
           and f.locator("#log-list .grp-first").count() == 1 and f.locator("#log-list .grp-last").count() == 1)
     check(f"{case}: delete icon per entry", f.locator("#log-list .log-del").count() == total, str(total))
+    f.locator("#log-quiet").check()   # "Hide successful entries": warnings and errors stay
+    sev = f.evaluate("[...document.querySelectorAll('#log-list .tag[class*=sev-]')].map(t => t.className)")
+    check(f"{case}: Hide successful entries leaves warnings and errors only",
+          sev and len(sev) < total and not any("sev-success" in s for s in sev), f"{len(sev)} / {total}")
+    f.locator("#log-quiet").uncheck()
+    wait_until(lambda: entries.count() == total)
     if c.width > 700:   # new log texts: check after an intermediate version, unverified installation
         text = f.locator("#log-list").inner_text()
         check(f"{case}: check after an intermediate version and unverified installation in the log",

@@ -1,5 +1,6 @@
-"""Routes of the Logs and Settings tabs: the activity log (list, delete one, delete all)
-and the app options (read, save with a restart of the app, confirm the download URL).
+"""Routes of the Logs and Settings tabs: the activity log (list, delete one, delete all),
+the app options (read, save with a restart of the app, confirm the download URL) and the
+connection test of the download server.
 """
 
 import asyncio
@@ -8,7 +9,7 @@ import logging
 from aiohttp import web
 from events import ENTRY_ID_RE, user_from
 from shelly import ShellyError
-from web_base import Handlers, guarded, json_body, translated
+from web_base import DEVICE_ID_RE, Handlers, guarded, json_body, translated
 
 log = logging.getLogger("sfm.ui")
 
@@ -17,6 +18,14 @@ RESTART_DELAY_S = 1  # let the answer reach the browser before the app restarts
 
 class SettingsRoutes(Handlers):
     """Handlers of the Logs and Settings tabs."""
+
+    async def connection_test(self, request: web.Request) -> web.StreamResponse:
+        """Connection test of the download server ({"device": ID or null = automatic});
+        answers with the result once the device has tried (409 if it cannot start)."""
+        device = (await json_body(request)).get("device")
+        if device is not None and (not isinstance(device, str) or not DEVICE_ID_RE.fullmatch(device)):
+            raise web.HTTPBadRequest(text="Unknown device")
+        return web.json_response(await guarded(self.mgr.run_connection_test(device, user_from(request.headers))))
 
     async def logs(self, _request: web.Request) -> web.StreamResponse:
         """Activity log, newest first."""
@@ -42,9 +51,14 @@ class SettingsRoutes(Handlers):
         return web.json_response({"deleted": count})
 
     async def options_get(self, _request: web.Request) -> web.StreamResponse:
-        """App options (there are no secret options)."""
+        """App options (there are no secret options) and the host port of the download
+        server, read from the Supervisor each time (it can be changed in Home Assistant)."""
+        await self.mgr.read_host_port()
         # installed_versions: storage of the option "Keep installed versions" (not an option)
-        return web.json_response({**self.mgr.options_view(), "installed_versions": self.mgr.installed_versions()})
+        return web.json_response({
+            **self.mgr.options_view(), "installed_versions": self.mgr.installed_versions(),
+            "host_port": self.mgr.host_port, "host_port_known": self.mgr.host_port_known,
+        })  # fmt: skip
 
     async def app_page(self, _request: web.Request) -> web.StreamResponse:
         """Path of this app's page in the Home Assistant frontend (changelog link)."""

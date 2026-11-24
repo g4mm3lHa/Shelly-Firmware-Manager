@@ -1,5 +1,5 @@
-"""Translations of the UI: every English text the UI translates has a German entry, and
-the German entries keep the {placeholders} of their English text."""
+"""Translations of the UI: every English text the UI translates has an entry in every
+dictionary (i18n-<code>.js), and the entries keep the {placeholders} of their English text."""
 
 import json
 import re
@@ -95,31 +95,50 @@ def html_keys() -> set[str]:
     return parser.texts
 
 
+def dictionaries() -> dict[str, dict[str, str]]:
+    """{language code: dictionary} of every ui-src/js/i18n-<code>.js."""
+    out: dict[str, dict[str, str]] = {}
+    for path in sorted(JS_DIR.glob("i18n-*.js")):
+        src = path.read_text()
+        body = src[src.index("export default ") + len("export default ") :].strip().rstrip(";")
+        data = json.loads(body)
+        assert isinstance(data, dict)
+        out[path.stem.removeprefix("i18n-")] = data
+    return out
+
+
 def german() -> dict[str, str]:
-    src = (JS_DIR / "i18n-de.js").read_text()
-    body = src[src.index("export default ") + len("export default ") :].strip().rstrip(";")
-    data = json.loads(body)
-    assert isinstance(data, dict)
-    return data
+    return dictionaries()["de"]
 
 
 # Texts of index.html that are names, not words (the same in every language)
 NAMES = {"Firmware Manager for Shelly", "__BETA__"}  # __BETA__: filled by the server
 
 
-def test_every_ui_text_has_a_german_translation():
-    de = german()
-    missing = sorted((js_keys() | html_keys()) - NAMES - set(de))
-    assert not missing, missing
+def test_languages_match_the_dictionaries():
+    """The language field offers exactly the dictionaries (plus English and "auto")."""
+    src = (JS_DIR / "i18n.js").read_text()
+    offered = set(re.findall(r'\["(\w+)", "[^"]+"\]', src[src.index("export const LANGUAGES") :].split("\n\n")[0]))
+    assert offered == {"auto", "en"} | set(dictionaries())
 
 
-def test_german_texts_keep_the_placeholders():
-    for en, text in german().items():
-        assert sorted(re.findall(r"\{\w+\}", en)) == sorted(re.findall(r"\{\w+\}", text)), en
-        assert text.strip(), en
+def test_every_ui_text_has_a_translation():
+    needed = (js_keys() | html_keys()) - NAMES
+    for code, dictionary in dictionaries().items():
+        missing = sorted(needed - set(dictionary))
+        assert not missing, (code, missing)
 
 
-def test_dictionary_has_no_unused_entries():
+def test_translations_keep_the_placeholders():
+    for code, dictionary in dictionaries().items():
+        for en, text in dictionary.items():
+            assert sorted(re.findall(r"\{\w+\}", en)) == sorted(re.findall(r"\{\w+\}", text)), (code, en)
+            assert text.strip(), (code, en)
+
+
+def test_dictionaries_have_no_unused_entries():
     """Every entry belongs to an English text the UI still uses."""
-    unused = sorted(set(german()) - js_keys() - html_keys())
-    assert not unused, unused
+    used = js_keys() | html_keys()
+    for code, dictionary in dictionaries().items():
+        unused = sorted(set(dictionary) - used)
+        assert not unused, (code, unused)

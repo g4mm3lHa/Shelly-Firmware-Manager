@@ -96,6 +96,24 @@ async def test_device_origin_needs_every_resolved_address_private(monkeypatch):
         await shelly_net.resolve_device_origin("http://mixed.lan/")
 
 
+async def test_lan_address_of_a_host(monkeypatch):
+    """resolve_lan_address: a LAN IP stays; a host name counts only if every address it
+    resolves to is a LAN address; public, loopback and unresolved hosts give None."""
+    answers = {"ha.lan": ["192.168.1.2", "fd00::2"], "mixed.lan": ["192.168.1.2", "203.0.113.5"], "out.example": ["203.0.113.5"]}
+
+    async def getaddrinfo(host, port, **_kwargs):
+        if host not in answers:
+            raise socket.gaierror("unknown")
+        return [(None, None, None, "", (address, port)) for address in answers[host]]
+
+    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", getaddrinfo)
+    assert await shelly_net.resolve_lan_address("192.168.1.2") == "192.168.1.2"
+    assert await shelly_net.resolve_lan_address("fd12::5") == "fd12::5"
+    assert await shelly_net.resolve_lan_address("ha.lan") == "192.168.1.2"
+    for host in ("203.0.113.5", "127.0.0.1", "mixed.lan", "out.example", "missing.lan"):
+        assert await shelly_net.resolve_lan_address(host) is None
+
+
 # ---------------------------------------------------------------- Device authentication
 
 

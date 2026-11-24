@@ -1,66 +1,9 @@
-# Names and help texts of the Configuration tab of the app page: the same as the
-# Settings tab (OPTION_FIELDS in ui-src/js/app-settings.js), in the same order.
+# Configuration tab of the app page: only the hint field "settings" (config.yaml); all
+# options are in the Settings tab of the app (ui-src/js/app-settings.js).
 configuration:
-  check_interval_days:
-    name: Check every (days)
-    description: 1–30 days
-  check_time:
-    name: Check time
-    description: Local time of Home Assistant
-  offer_after_days:
-    name: Offer updates only after (days)
+  settings:
+    name: "All settings: open the app → tab “Settings”"
     description: >-
-      Holds a new firmware version back until it is this many days old (age from its build date); 0 = offer at once. 0–60, default 0
-  download_base_url:
-    name: Download base URL for the Shellys
-    description: >-
-      LAN IP address of Home Assistant + host port 8098, e.g. http://192.168.1.20:8098 (no host name; IP addresses only in private networks). Required for installations
-  restrict_downloads_to_devices:
-    name: Serve downloads only to known Shellys
-    description: Switch off if downloads are rejected from 172.30.x.x
-  gen1_updates_enabled:
-    name: Enable Gen1 updates
-    description: Gen1 firmware is only available via plain HTTP without a checksum
-  allow_downgrade:
-    name: Allow downgrades
-    description: >-
-      Installing an older stored firmware on Gen2+ devices (device menu and Firmware tab); off by default
-  beta_firmware:
-    name: Offer beta firmware
-    description: >-
-      Also offers beta versions of the Shelly update server – Gen2+ only, Gen1 devices get no beta versions. They are marked “Beta”, listed under “Beta Updates” and installed only after your approval and an extra confirmation; the offer delay does not apply to them. Off by default
-  keep_installed:
-    name: Keep installed versions
-    description: >-
-      Also stores the firmware a device already runs while Shelly still offers it (Gen2+ only), so that a downgrade stays possible after a bad update; on by default
-  import_max_mb:
-    name: Max. import size (MB)
-    description: >-
-      Largest file accepted by “Import store” (Settings → Firmware & Storage); 1–2048, default 100
-  backup_before_install:
-    name: Back up before every installation
-    description: >-
-      Stores the settings of a device right before an update or downgrade is installed on it; on by default
-  backup_keep:
-    name: Keep backups per device
-    description: >-
-      The newest backups of each device are kept, older ones are removed automatically; a backup marked “Kept” stays. 1–50, default 10
-  log_entry_limit:
-    name: Max. log size (entries)
-    description: 100–3000
-  log_retention_days:
-    name: Log retention (days)
-    description: 1–365
-  max_parallel_installs:
-    name: Max. parallel installations
-    description: 1–20; further approvals wait
-  resolve_host_names:
-    name: Resolve host names
-    description: >-
-      Looks up each device's host name (<device id>.local) at every check and shows the column “Host name”; off by default
-  pinned_certificates:
-    name: Pinned certificates
-    description: >-
-      Host below shelly.cloud + SHA-256 fingerprint; several entries per host allowed
+      This page has no further options. Open the app with “Shelly Firmware” in the sidebar and choose the tab “Settings”. Entries in this field have no effect.
 network:
   8098/tcp: Firmware downloads for the Shellys

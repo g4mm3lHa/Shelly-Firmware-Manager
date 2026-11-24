@@ -19,7 +19,8 @@ export function render(force) {
   const s = ui.state;
   if (!s) return;
   renderMeta(s);
-  $("busy").textContent = s.storage_error ? t("Storage error: {error}", {error: s.storage_error}) : s.busy_note || "";
+  // The line under the page title shows errors only (storage, loading), never a status
+  $("busy").textContent = s.storage_error ? t("Storage error: {error}", {error: s.storage_error}) : "";
   $("busy").classList.toggle("error", !!s.storage_error);
   renderProgress(s.progress);
   renderNotice(s.first_start_open ? {issue: "first_start"} : s.download_base || {});
@@ -125,7 +126,7 @@ async function skipFirstStart(title) {
 /** Confirm that the former example URL really is the address of Home Assistant. */
 function confirmDownloadBase(url) {
   confirmDialog({title: t("Confirm download base URL"), button: t("Yes, this is correct"), kind: "primary",
-    content: [el("p", t("Is {url} really the LAN address of Home Assistant with the host port 8098?", {url})),
+    content: [el("p", t("Is {url} really the LAN address of Home Assistant with the host port {port}?", {url, port: (ui.state && ui.state.host_port) || 8098})),
       el("p", t("The Shellys download the firmware from this address. If it is wrong, every update fails. The confirmation ends when the address is changed."), "hint")],
     action: async () => { await api("api/settings/download-base/confirm", {url}); closeModal(); }});
 }
@@ -146,7 +147,7 @@ function renderProgress(p) {
 }
 const VIEWS = ["devices", "firmware", "schedules", "backups", "logs", "settings"];
 /** Switch tab and load its data. */
-function showView(v) {
+export function showView(v) {
   ui.view = v; closeRowMenu();
   for (const k of VIEWS) { $("view-" + k).hidden = k !== v; $("tab-" + k).classList.toggle("active", k === v); $("tab-" + k).setAttribute("aria-selected", k === v); }
   // "Check now" belongs to the device data, not to the settings: hidden there, its place
@@ -225,4 +226,8 @@ export async function load(force) {
   }
 }
 loadPrefs(); buildChooser(); syncChooser();
-load();
+// Reloaded after saving the settings (app restart): open the Settings tab again
+if (location.hash === "#settings") {
+  try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { /* marker stays */ }
+  showView("settings");
+} else load();

@@ -8,6 +8,7 @@ import {
   toast, ui,
 } from "./core.js";
 import {cancelPlan} from "./install.js";
+import {areaChoice} from "./overview.js";
 
 const ACTIONS = {restart: t("Restart"), cloud_on: t("Cloud on"), cloud_off: t("Cloud off"), ble_on: t("Bluetooth on"), ble_off: t("Bluetooth off"),
   backup: t("Backup")};
@@ -24,6 +25,10 @@ const repeatText = s => (s.repeat.kind === "daily" ? t("Daily") : s.repeat.kind 
 /** Devices of a schedule: "All Shellys (n)" or the names (at most three, then the count). */
 function devicesText(s) {
   if (s.devices === "all") return t("All Shellys ({n})", {n: s.count});
+  if (s.devices && Array.isArray(s.devices.areas)) {   // areas: resolved at every run, new devices included
+    const areas = s.devices.areas.map(a => a || t("Without area"));
+    return t("Areas: {names}", {names: areas.slice(0, 3).join(", ") + (areas.length > 3 ? " " + t("and {n} more", {n: areas.length - 3}) : "")}) + ` (${s.count})`;
+  }
   const names = new Map(ui.state.devices.map(d => [d.id, d.name]));
   const ids = Array.isArray(s.devices) ? s.devices : [], shown = ids.slice(0, 3).map(id => names.get(id) || "?");
   if (!ids.length) return t("No device");   // all its devices were removed from the list: switched off, choose again
@@ -150,14 +155,15 @@ function openSchedule(s) {
   const n = input("number", {min: 1, max: EVERY_MAX, value: (s.repeat.kind === "every" && s.repeat.n) || 14, className: "sch-n"});
   n.setAttribute("aria-label", t("Number of days"));
   const [everyR, every] = radio("sch-rep", [el("span", t("Every")), " ", n, " ", el("span", t("days"))], s.repeat.kind === "every");
-  // Devices: all or a list (removed devices cannot be chosen)
-  const chosen = new Set(Array.isArray(s.devices) ? s.devices : []);
+  // Devices: all, areas of Home Assistant or a list (removed devices cannot be chosen)
+  const chosen = new Set(Array.isArray(s.devices) ? s.devices : []), byArea = s.devices && Array.isArray(s.devices.areas) ? s.devices.areas : null;
   const devices = ui.state.devices.filter(d => !d.removed || chosen.has(d.id)).sort((a, b) => collator.compare(String(a.name), String(b.name)));
   const tagsOf = d => [d.ignored ? el("span", t("Ignored"), "tag warn") : null, d.battery ? el("span", t("Battery"), "tag") : null,
     d.removed ? el("span", t("Removed"), "tag warn") : null,
     isBle(action.value) && (d.gen === 1 || d.ble === "unsupported") ? el("span", t("No Bluetooth"), "tag") : null,
     isCloud(action.value) && d.cloud === "unsupported" ? el("span", t("No cloud"), "tag") : null];
-  const choice = deviceChoice("sch-dev", devices, [el("span", t("All Shellys (new ones are included automatically)"))], s.devices === "all" ? "all" : chosen, tagsOf);
+  const choice = deviceChoice("sch-dev", devices, [el("span", t("All Shellys (new ones are included automatically)"))], s.devices === "all" ? "all" : byArea ? null : chosen, tagsOf);
+  const areas = areaChoice("sch-dev", devices.filter(d => !d.removed), t("Areas (new devices of an area are included automatically)"), byArea);
   const proxyBox = el("div", "", "warnbox");
   const leftHint = el("p", "", "hint");
   const [on, onLabel] = checkbox(t("Schedule is on"), s.on);
@@ -165,9 +171,9 @@ function openSchedule(s) {
     const kind = action.value;
     pauseField.hidden = kind !== "restart";
     days.hidden = !weekdaysR.checked;
-    choice.refresh();
+    choice.refresh(); if (areas) areas.refresh();
     // Bluetooth off on a Bluetooth proxy of Home Assistant: HA switches it on again
-    const targets = choice.all.checked ? devices.filter(d => !d.removed) : choice.ticked();
+    const targets = choice.all.checked ? devices.filter(d => !d.removed) : areas && areas.radio.checked ? areas.devices() : choice.ticked();
     const proxies = kind === "ble_off" ? targets.filter(d => d.ble_proxy).map(d => d.name) : [];
     proxyBox.textContent = proxies.length ? t("{names}: Home Assistant uses this Shelly as Bluetooth proxy and turns Bluetooth on again.", {names: proxies.join(", ")}) : "";
     proxyBox.hidden = !proxies.length;
@@ -177,12 +183,13 @@ function openSchedule(s) {
           : t("Not included in a run: ignored and removed devices, battery devices (usually asleep).")) + " " +
       t("Every run is written to the log; Home Assistant notifies only about errors. A run the app misses is skipped.");
   };
-  for (const node of [action, daily, weekdays, every, ...choice.nodes]) node.addEventListener("change", sync);
+  const deviceNodes = areas ? [choice.nodes[0], ...areas.nodes, choice.nodes[1], choice.nodes[2]] : choice.nodes;
+  for (const node of [action, daily, weekdays, every, ...deviceNodes]) node.addEventListener("change", sync);
   sync();
   const content = [
     box("div", "sch-form", field(t("Name"), name), field(t("Action"), action), pauseField, field(t("Time"), time, t("Local time of Home Assistant"))),
     section(t("Repeat"), box("div", "modes", daily, weekdays, days, every)),
-    section(t("Devices"), box("div", "modes", ...choice.nodes)),
+    section(t("Devices"), box("div", "modes", ...deviceNodes)),
     proxyBox, leftHint,
     onLabel,
   ];
@@ -197,7 +204,7 @@ function openSchedule(s) {
     const seconds = pause.value === "" ? NaN : Number(pause.value);
     const body = {name: name.value.trim(), on: on.checked, action: action.value, time: time.value, repeat,
       pause: action.value === "restart" || Number.isInteger(seconds) ? seconds : PAUSE_DEFAULT,
-      devices: choice.all.checked ? "all" : choice.ticked().map(d => d.id)};
+      devices: choice.all.checked ? "all" : areas && areas.radio.checked ? {areas: areas.picked()} : choice.ticked().map(d => d.id)};
     try { await saveSchedule(edit ? s.id : null, body); closeModal(); }
     catch (e) { error.show(e.message); }
   }}], "schedules");

@@ -32,11 +32,11 @@ as the UI change). Read when you change the Firmware tab.
   cannot be reached; an older one allows a downgrade.
 - **Installed, Imported (mockups `3.9.0/02`, F2, F3, F17, approved 2026-11-22):** green
   label "Installed" (after "Latest") on versions that devices run now, tooltip with the
-  device names and "Kept as their way back after the next update"; yellow label
+  device names (approved 2026-11-24: no second line); yellow label
   "Imported" (like "Uploaded") with its tooltip, gone once the Shelly update server names
   the same SHA-256. Filters "Installed" (after "Provided") and "Imported" (after
   "Uploaded") with tooltips. Delete dialog: yellow box "Installed on n devices (names):
-  without this file they have no way back after the next update."; an imported file
+  without this file they cannot return to their previous version after the next update."; an imported file
   "can only be restored by importing its export again". Downgrade dialog of an imported
   file: yellow box (not confirmed by the Shelly update server).
 - Delete dialog: step 1 "Continue" in blue, step 2 red "Delete" (dialog rule b,

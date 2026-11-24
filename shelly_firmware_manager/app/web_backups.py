@@ -35,6 +35,14 @@ class BackupRoutes(Handlers):
         await json_body(request)
         return web.json_response({"backup": await guarded(self.mgr.backup_now(device_id, user_from(request.headers)))})
 
+    async def after_update_seen(self, request: web.Request) -> web.StreamResponse:
+        """"Seen" in the comparison after an update of a device (see Backups.after_update_seen)."""
+        device_id = self.device_id_from(request)
+        await json_body(request)  # no parameters, but the JSON/CSRF rules apply
+        if not self.mgr.after_update_seen(device_id):
+            raise web.HTTPConflict(text="This device has no comparison after an update (anymore)")
+        return web.json_response({"seen": True})
+
     async def backups_run(self, request: web.Request) -> web.StreamResponse:
         """"Back up now" for several devices ({"devices": "all" or [IDs]}): runs in
         the background, progress and result per device are part of the state."""

@@ -27,12 +27,17 @@ COPY --from=deps /deps /deps
 COPY app /app
 # Bytecode of the packages and the app is compiled once here, so a start does not compile
 # them again (nothing is written at runtime: PYTHONDONTWRITEBYTECODE). A file that fails
-# to compile fails the build.
-RUN python3 -m compileall -q /deps /app
+# to compile fails the build. The base image ships the standard library without bytecode:
+# importing the entry point once (bytecode writing switched on for this command only)
+# writes it for exactly the modules a start loads, which saves most of the start time.
+RUN python3 -m compileall -q /deps /app \
+    && cd /app && PYTHONDONTWRITEBYTECODE= python3 -c "import main"
 WORKDIR /app
 # Container health: with the Watchdog switch of the app page on, the Supervisor
 # restarts the app if the download server stops accepting connections. TCP check
-# only - nothing is requested or logged.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+# only - nothing is requested or logged. During the start period the check runs every
+# second, so the container counts as healthy right after the start (Docker 25 and
+# later; older versions keep the 30 s interval).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --start-interval=1s --retries=3 \
     CMD ["python3", "-c", "import socket; socket.create_connection(('127.0.0.1', 8098), 3).close()"]
 CMD ["python3", "/app/main.py"]

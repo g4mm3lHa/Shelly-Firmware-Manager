@@ -1,6 +1,7 @@
 """Routes of the Devices tab: checks, installations (also scheduled and downgrades),
-device settings, restart, passwords (single and several devices), ignore, reload and
-remove from list.
+device settings, restart, passwords (single and several devices), ignore, reload,
+remove from list, the diagnosis of a device that did not answer ("Try again"), the text
+for a bug ticket and hiding the card "Getting started".
 
 An installation is bound to the SHA-256 shown to the user and needs the confirmation
 flags (confirm; a downgrade or a store fallback also acknowledged; a beta version
@@ -12,15 +13,39 @@ import re
 
 from aiohttp import web
 from events import user_from
+from manager import Manager
 from manager_core import DOWNLOAD_BASE_MESSAGES
 from shelly import ShellyError
-from web_base import Handlers, guarded, json_body, translated
+from web_base import Background, Handlers, guarded, json_body, translated
 
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 class DeviceRoutes(Handlers):
     """Handlers of the Devices tab and the device dialogs."""
+
+    def __init__(self, mgr: Manager, background: Background, app_version: str) -> None:
+        """app_version: named in the text for a bug ticket."""
+        super().__init__(mgr, background)
+        self.app_version = app_version
+
+    async def probe(self, request: web.Request) -> web.StreamResponse:
+        """"Try again" of a device that did not answer: address, port and answer, with
+        the times (nothing stored, no check started)."""
+        device_id = self.device_id_from(request)
+        await json_body(request)  # no parameters, but the JSON/CSRF rules apply
+        return web.json_response(await guarded(self.mgr.probe_device(device_id)))
+
+    async def report(self, request: web.Request) -> web.StreamResponse:
+        """Text of "Details for a bug ticket" (names and addresses masked, no passwords)."""
+        device_id = self.device_id_from(request)
+        return web.json_response({"text": await self.mgr.device_report(device_id, self.app_version)})
+
+    async def hide_getting_started(self, request: web.Request) -> web.StreamResponse:
+        """"Hide" on the card "Getting started"."""
+        await json_body(request)  # no parameters, but the JSON/CSRF rules apply
+        self.mgr.hide_getting_started()
+        return web.json_response({"hidden": True})
 
     async def scan(self, request: web.Request) -> web.StreamResponse:
         """Start a manual check in the background."""

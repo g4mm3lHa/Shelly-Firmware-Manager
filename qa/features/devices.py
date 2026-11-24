@@ -62,6 +62,19 @@ LIVE = {"shelly_name": "shelly-2", "ntp": "time.local", "eco": True, "ap": False
         "outputs": [{"key": "switch:0", "name": "switch:0", "aop": "restore_last", "options": ["off", "on", "restore_last"]}]}
 
 
+def _security_strip(c):
+    """Strip "Security": only counts above 0 with their short names; phones: symbol and number only."""
+    case, f = c.case, c.f
+    tiles = f.evaluate("""() => [...document.querySelectorAll('.sec-strip .sec-tile')].map(t => ({
+      n: (t.querySelector('.sec-n') || {}).textContent || null, label: t.querySelector('.sec-label').textContent,
+      shown: getComputedStyle(t.querySelector('.sec-label')).display !== 'none', zero: t.classList.contains('zero')}))""")
+    counts = [t for t in tiles if not t["zero"]]
+    check(f"{case}: security strip – only counts above 0, short names",
+          counts and all(t["n"] and int(t["n"]) > 0 for t in counts)
+          and {t["label"] for t in counts} <= {"Unprotected", "Cloud", "Access point", "Debug log"}, str(tiles))
+    check(f"{case}: security strip – names hidden on phones only", all(t["shown"] == (c.width > 700) for t in counts), str(tiles))
+
+
 def _popup(f, opener):
     """Open an action popup; returns (title, strip, body, buttons)."""
     opener.click(force=True)   # greyed-out icons are aria-disabled but open their note
@@ -270,7 +283,7 @@ def _battery(c):
 
 SECTION_TITLES = ["Updates Available", "Beta Updates", "Attention", "Not Checked", "Up-To-Date", "Asleep", "Ignored", "Removed", "Other Shellys"]
 FILTER_LABELS = ["All", "Updates", "Beta updates", "Scheduled", "Attention", "Not checked", "Up-To-Date", "Unprotected", "Cloud on",
-                 "On hold", "Asleep", "Ignored", "Removed", "Other Shellys"]
+                 "Access point on", "Debug log on", "On hold", "Asleep", "Ignored", "Removed", "Other Shellys"]
 
 
 def _host_names(c):
