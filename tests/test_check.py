@@ -504,6 +504,24 @@ async def test_check_severity_levels(mgr, net):
     assert "0 warning(s), 3 error(s)" in entry["result"]
 
 
+async def test_missing_password_fails_the_check_of_the_device(mgr, net):
+    """A device that needs a password the app does not have: the row shows the error
+    the log shows (not "up to date"), and the log names it once per device."""
+    net.settings_error = shelly.AuthError("The Shelly requires a password")
+    assert await mgr.scan()
+    dev = mgr.devices[A]
+    assert dev["status"] == manager_core.STATUS_ERROR and dev["error_level"] == "error"
+    assert "requires a password" in dev["message"] and dev["settings_error"]["severity"] == "error"
+    assert not dev["unreachable"] and "last_success" not in dev and dev.get("file") is None
+    entry = [e for e in mgr.events.entries if e["kind"] == "check"][-1]
+    assert {f["device"] for f in entry["findings"] if f["severity"] == "error"} == {"Kitchen", "Hall", "Garage"}
+    assert not any(str(f.get("error", "")).startswith("Device status") for f in entry["findings"])
+    # Password stored, next check: the update is provided again
+    net.settings_error = None
+    assert await mgr.scan()
+    assert dev["status"] == manager_core.STATUS_READY and "settings_error" not in dev
+
+
 # ---------------------------------------------------------------- Unexpected errors stay with their device
 
 
