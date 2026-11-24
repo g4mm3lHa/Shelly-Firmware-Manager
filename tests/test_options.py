@@ -212,11 +212,13 @@ async def test_app_page_link(net):
 
 def test_app_configuration_holds_only_the_hint():
     """Configuration tab of the app page: only the hint field "settings" (no effect),
-    named in English and German; every option lives in the Settings tab, and every option
-    without a default there is an optional switch or the optional download base URL."""
+    named in every language of translations/; every option lives in the Settings tab, and
+    every option without a default there is an optional switch or the optional download base URL."""
     config = (APP_DIR / "config.yaml").read_text()
     assert config.endswith('\noptions:\n  settings: ""\nschema:\n  settings: "str?"\n')
-    for lang in ("en", "de"):
+    langs = sorted(p.stem for p in (APP_DIR / "translations").glob("*.yaml"))
+    assert {"en", "de", "nl", "fr", "it", "es", "pl", "pt"} <= set(langs)
+    for lang in langs:
         text = (APP_DIR / "translations" / f"{lang}.yaml").read_text()
         block = text[text.index("\nconfiguration:\n"):text.index("\nnetwork:")]
         assert re.findall(r"^  (\w+):", block, re.M) == ["settings"] and "    name: " in block and "    description: " in block
