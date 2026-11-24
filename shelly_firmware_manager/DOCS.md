@@ -142,7 +142,7 @@ correct the address.
 **Test connection** below the field checks the saved address before the first
 installation: a Shelly of Gen 2 or newer fetches a test address from the download
 server (choose a device or let the app take the first reachable one). The result stays
-below the field until the address changes. On failure the dialog names the error and
+below the field until the address or the host port changes. On failure the dialog names the error and
 the common causes: a wrong IP address, a changed or switched-off host port, or a
 firewall or separate network (VLAN, guest Wi-Fi) between the Shellys and Home Assistant.
 Save a changed address first; Gen1 devices cannot run the test. While no test succeeded,
@@ -216,6 +216,13 @@ is above 0), each with its count. A dot on the icon shows that a filter other th
 | Not checked | The device was never checked, or it is a Gen1 device skipped while Gen1 updates are off |
 | Removed | Device is no longer in the Home Assistant Shelly integration; see **Removed** above |
 
+While a check runs, the status shows what it does: **Waiting**, **Checking …**,
+**Downloading …** and **Shelly server …** while the app waits for the answer of the Shelly
+update server. The last one turns yellow after 5 seconds: the server answers slowly or
+not at all, and the check goes on until it answers or fails. **Restarting …** shows after
+**Restart** until the device answers again (at most two minutes); a device that does not
+answer in time shows the error.
+
 **Removed devices** keep their data and stored password; both are matched by MAC
 address, also when Home Assistant gives the device a new ID. Set the device up in Home
 Assistant again and the mark disappears with the next check. A full check does not check
@@ -266,6 +273,8 @@ while the name does not resolve. It is for display only: the app always reaches 
 device at its address in Home Assistant. The Columns chooser can hide it; on a phone it
 is a row in the details.
 
+**NTP server:** a click on the entry in the column (desktop) opens the dialog to change it.
+
 **Action icons** show and change power-on action, eco mode, password protection,
 access point, Bluetooth, cloud, actions and schedules and the websocket debug log, and
 restart the device. The popup of an icon starts with the current state; "?" means the
@@ -275,6 +284,16 @@ accepted but did not apply is reported as a warning and logged as failed. The lo
 green if the device is protected and its password is stored in the app, yellow if the
 password is not stored here.
 
+- **Access point** (Gen2+): one form for the access point of the Shelly – on or off,
+  the network name (empty = the default name, the device ID; up to 29 characters) and
+  the protection: a password, or open after you accept the risk (anyone in Wi-Fi range
+  could then change the device without a device password). A running protected access
+  point keeps its password unless you set a new one, because the Shelly never reveals it.
+  The password goes to the Shelly only; the app does not store or log it. The Shelly
+  decides whether it accepts a password or an open access point; its refusal is shown in
+  the form. **Range extender** is offered if the device has it. Only the access point is
+  changed; the Wi-Fi connection to your network stays as it is. Gen1 devices cannot
+  change it here: turning on their access point turns off their Wi-Fi client mode.
 - **Cloud** (cloud icon): yellow while the Shelly cloud is on, with the connection in
   the tooltip. With the cloud off, the Shelly app and other Shelly cloud services no
   longer reach the device from outside your network; Home Assistant and this app keep
@@ -670,7 +689,9 @@ passwords on several devices at once (see [Device passwords](#device-passwords))
 card **Display** chooses the language of this page: **Same as Home Assistant** (default;
 English where no translation exists), English, Deutsch, Nederlands, Français, Italiano,
 Español, Polski or Português. The translations other than English are machine translated. It applies at once, only in this
-browser, and needs no save. Logs, messages of the app and this documentation stay English.
+browser, and needs no save. The status messages of the devices and the errors the app
+reports are translated as well; the activity log, texts the Shelly itself sends and this
+documentation stay English.
 The last line links to the app page in Home Assistant, where **Changelog** next to the
 version lists what changed in each version.
 
@@ -908,7 +929,8 @@ in the firmware store and **Allow downgrades** is switched on (see
 - Only original Shelly firmware is supported; beta versions only for Gen2+ and only while
   **Offer beta firmware** is on.
 - Home Assistant OS or Supervised is required. The user interface is in English and seven
-  machine-translated languages; logs, messages and this documentation are English only.
+  machine-translated languages; the activity log, texts of the Shelly itself and this
+  documentation are English only.
 - The connection test of the download server needs a Shelly of Gen 2 or newer; Gen1
   devices cannot fetch a test address.
 - Scheduled installations: at most 7 days ahead, once; schedules have one action each.

@@ -1,5 +1,37 @@
 # Changelog
 
+## 3.13.0
+
+Release candidate. New look with tinted cards, an access point form, translated status
+messages and a faster start.
+
+Changes in rc1
+
+Added
+- Access point (Gen2+): one form for on/off, network name, password or open (after an
+  accepted risk) and range extender; the password goes to the Shelly only, never stored.
+- Status "Shelly server …" while a check waits for the Shelly update server; it turns
+  yellow after 5 s.
+- Status "Restarting …" after "Restart" until the Shelly answers again (at most 2
+  minutes); without an answer the device shows the error.
+- Devices table (desktop): a click on the NTP server opens its dialog.
+- Status messages of the devices and errors of the app are shown in the page language.
+
+Changed
+- New look: cards and rows on a tint of the theme colour, softer corners, tonal buttons,
+  segmented tabs, own checkboxes and radio buttons, more compact phone tiles.
+- Dialogs: one warning box per colour; install dialog in two columns (desktop), the
+  changelog folded, several devices per finding in a folded list.
+- Several devices in the password dialog: devices that cannot take part folded at the
+  end; long device lists scroll inside the dialog.
+- Logs: new entries marked by a bar on the left, no grouping by device.
+- Faster start: backups are verified in the background; the page loads only the
+  dictionary of its language.
+
+Fixed
+- Settings: "Test connection" drops the old result after a change of the address or the
+  host port.
+
 ## 3.12.1
 
 Released 2026-11-24. A device that needs a password the app does not have is shown as

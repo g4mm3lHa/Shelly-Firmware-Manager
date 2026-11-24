@@ -286,6 +286,30 @@ def test_a_read_error_at_the_start_keeps_the_row_and_its_marks(tmp_path, monkeyp
     assert [e["id"] for e in back.entries] == [META["id"]] and back.entries[0]["kept"] and back.warning is None
 
 
+async def test_the_files_are_checked_after_the_start(tmp_path):
+    """The tags of the listed files are checked after the start, in steps (the servers do not
+    wait for it); a file the key does not fit leaves the list then, keeps its row and is
+    counted in the warning; the first read of the list finishes the check before it answers."""
+    folder = tmp_path / "b"
+    store = BackupStore(folder)
+    for i in range(3):
+        store.add({**META, "id": f"{i:016x}", "at": META["at"] + i}, {"config": {"n": i}})
+    (folder / f"{1:016x}.sfmb").write_bytes((folder / f"{1:016x}.sfmb").read_bytes()[:-1] + b"x")   # changed file
+    started = BackupStore(folder)
+    assert len(started._pending) == 3 and [e["id"] for e in started._entries] == [f"{i:016x}" for i in (2, 1, 0)]
+    rev = started.rev
+    started.verify_pending(1)   # one step: the newest file is fine
+    assert len(started._pending) == 2 and len(started._entries) == 3 and started._warning is None
+    await started.verify_in_background()
+    assert not started._pending and [e["id"] for e in started._entries] == [f"{i:016x}" for i in (2, 0)]
+    assert "1 backup file(s) cannot be read" in started._warning and started.rev == rev + 1
+    assert [row["id"] for row in json.loads((folder / "index.json").read_text())["backups"]][-1] == f"{1:016x}"
+    # Without the background step: any read of the list finishes the check first
+    again = BackupStore(folder)
+    assert [e["id"] for e in again.entries] == [f"{i:016x}" for i in (2, 0)] and not again._pending
+    assert "1 backup file(s)" in again.warning
+
+
 def test_an_unreadable_key_turns_the_backups_off(tmp_path):
     """A key file that cannot be read (here: a folder) is never replaced: no backup is
     listed, stored or read until the next start, and the list stays as it is."""

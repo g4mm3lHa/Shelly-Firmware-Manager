@@ -155,7 +155,7 @@ async def test_static_cache_only_for_current_version(client):
     page = await client.get("/")
     html = await page.text()
     assert page.headers["Cache-Control"] == "no-store"
-    version = re.search(r'static/app\.js\?v=([0-9a-f]{16})"', html).group(1)
+    version = re.search(r'static/start\.js\?v=([0-9a-f]{16})"', html).group(1)
     assert f"static/style.css?v={version}" in html and "__ASSET_VERSION__" not in html
     r = await client.get(f"/static/app.js?v={version}")
     assert r.status == 200 and r.headers["Cache-Control"] == web_ui.STATIC_CACHE

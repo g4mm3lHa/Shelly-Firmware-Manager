@@ -3,11 +3,16 @@
 
   ui-src/js/*.js                            readable, commented ES modules (edit these;
                                             entry module: main.js)
+  ui-src/js/i18n-<code>.js                  dictionaries, one file each (not part of app.js)
+  ui-src/start.js                           loader: language, its dictionary, then app.js
   ui-src/style.css                          readable, commented styles (edit this)
-  shelly_firmware_manager/app/static/{app.js,style.css}  minified build output (shipped)
+  shelly_firmware_manager/app/static/{start.js,app.js,i18n-<code>.js,style.css}
+                                            minified build output (shipped)
 
 Runs esbuild locally (pinned version, via npx; nothing is uploaded, the image needs no
-Node): the modules are bundled into one classic script (IIFE), the styles are minified.
+Node): the modules are bundled into one classic script (IIFE), every dictionary into a
+classic script of its own (global SFM_TEXTS) that the loader adds only for the language
+in use, and the styles are minified.
 Every output starts with a comment holding the SHA-256 of its sources; the test suite
 fails if an output is older than its sources (tests/test_build.py).
 
@@ -25,15 +30,22 @@ REPO = Path(__file__).resolve().parents[1]
 ROOT = REPO / "shelly_firmware_manager"
 SRC = REPO / "ui-src"
 OUT = ROOT / "app" / "static"
-FILES = ("app.js", "style.css")
 JS_DIR = SRC / "js"  # ES modules bundled into app.js
 JS_ENTRY = JS_DIR / "main.js"
+LOADER = SRC / "start.js"  # entry of start.js (imports js/lang.js)
+DICTIONARIES = tuple(path.name for path in sorted(JS_DIR.glob("i18n-*.js")))  # i18n-<code>.js
+FILES = ("start.js", "app.js", *DICTIONARIES, "style.css")
 HEADER = "/* Built from ui-src/{source} sha256:{sha} – do not edit, run tools/build_ui.py */\n"
 
 
 def sources(name):
-    """Source files of an output: all modules for app.js, the one file otherwise."""
-    return sorted(JS_DIR.glob("*.js")) if name == "app.js" else [SRC / name]
+    """Source files of an output: the modules of app.js (all but the dictionaries), the
+    loader with the language module, or the one file (dictionary, style sheet)."""
+    if name == "app.js":
+        return sorted(path for path in JS_DIR.glob("*.js") if path.name not in DICTIONARIES)
+    if name == "start.js":
+        return [LOADER, JS_DIR / "lang.js"]
+    return [JS_DIR / name] if name in DICTIONARIES else [SRC / name]
 
 
 def source_sha(name):
@@ -46,7 +58,8 @@ def source_sha(name):
 
 def header(name):
     """First line of the built file."""
-    return HEADER.format(source="js/*.js" if name == "app.js" else name, sha=source_sha(name))
+    label = "js/*.js" if name == "app.js" else f"js/{name}" if name in DICTIONARIES else name
+    return HEADER.format(source=label, sha=source_sha(name))
 
 
 def is_current(name):
@@ -58,7 +71,14 @@ def is_current(name):
 def build(name):
     """Bundle the modules / minify the styles with esbuild (syntax kept as is: no
     target lowering)."""
-    source = [str(JS_ENTRY), "--bundle", "--format=iife"] if name == "app.js" else [str(SRC / name)]
+    if name == "app.js":
+        source = [str(JS_ENTRY), "--bundle", "--format=iife"]
+    elif name == "start.js":
+        source = [str(LOADER), "--bundle", "--format=iife"]
+    elif name in DICTIONARIES:  # var SFM_TEXTS = {default: {...}}
+        source = [str(JS_DIR / name), "--format=iife", "--global-name=SFM_TEXTS"]
+    else:
+        source = [str(SRC / name)]
     result = subprocess.run(  # nosec B603 B607  # fixed arguments, no shell, developer tool
         ["npx", "--yes", ESBUILD, *source, "--minify", "--log-level=warning"],
         check=True,

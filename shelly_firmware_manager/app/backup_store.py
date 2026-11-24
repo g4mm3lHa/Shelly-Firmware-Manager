@@ -9,7 +9,9 @@ An existing key file is never overwritten: one of the wrong size is renamed to
 `key.damaged-<time>` before a new key is created, and one that cannot be read leaves the
 backups off until the next start. At every start the tag of every file is checked
 against the key, so a file the key cannot open is never listed (a schedule would
-otherwise compare with a backup that cannot be restored).
+otherwise compare with a backup that cannot be restored). The check runs right after the
+start in the background (verify_in_background), so the servers do not wait for it; the
+first read of the list (entries, warning) or any change finishes it before it answers.
 
 File format (all backups, also downloaded and exported ones):
 
@@ -37,6 +39,7 @@ No device or network access here (see shelly_backup and manager_backups). Scrypt
 for a moment: callers derive password keys in a worker thread.
 """
 
+import asyncio
 import contextlib
 import hashlib
 import hmac
@@ -46,6 +49,7 @@ import re
 import secrets
 import time
 import zlib
+from collections import deque
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -55,6 +59,10 @@ import shelly_backup
 from shelly import clip, parse_json
 
 log = logging.getLogger("sfm.backups")
+# Files whose tag is checked per step of the check after the start (then the event loop runs on)
+VERIFY_BATCH = 32
+# Error text of a file whose tag does not fit the key of this app
+WRONG_KEY = "not readable with the key of this app"
 
 MAGIC = b"SFMB1\n"  # start of every backup file
 
@@ -295,9 +303,13 @@ class BackupStore:
         """Load the key (created at the first start) and the index; a missing or
         damaged index is built again from the files."""
         self.folder = folder
-        self.entries: list[dict[str, Any]] = []
+        self._entries: list[dict[str, Any]] = []  # listed backups, newest first (read: entries)
         # Set if the files could not be read with the key of this app (key lost): shown in the tab
-        self.warning: str | None = None
+        self._warning: str | None = None
+        # Listed files whose tag is not checked yet (the check after the start) and the
+        # number of files that could not be read so far (for the warning)
+        self._pending: deque[str] = deque()
+        self._unreadable = 0
         self.rev = 0  # grows with every change of the list (the UI reloads the tab)
         # Index rows of files the key cannot open: not listed, but kept in the index, so
         # with the matching key file they come back with their marks (a "Kept" backup
@@ -327,7 +339,7 @@ class BackupStore:
                 log.error("Backup key missing – stored backups cannot be read, a new key is used")
         except OSError as err:
             log.error("Backup key unreadable (%s) – backups are off until the next start", err)
-            self.warning = KEY_UNREADABLE
+            self._warning = KEY_UNREADABLE
             return None
         else:
             if len(key) == KEY_BYTES:
@@ -339,7 +351,7 @@ class BackupStore:
                 path.rename(damaged)
             except OSError as err:
                 log.error("Backup key has the wrong size and cannot be renamed (%s) – backups are off", err)
-                self.warning = KEY_UNREADABLE
+                self._warning = KEY_UNREADABLE
                 return None
             log.error(
                 "Backup key has the wrong size – kept as %s, stored backups cannot be read, a new key is used",
@@ -368,12 +380,24 @@ class BackupStore:
             raise BackupError("Unknown backup")
         return self.folder / f"{backup_id}{EXTENSION}"
 
+    @property
+    def entries(self) -> list[dict[str, Any]]:
+        """The listed backups, newest first; finishes the check of the files first."""
+        self.verify_pending()
+        return self._entries
+
+    @property
+    def warning(self) -> str | None:
+        """Why backups are not listed or are off (shown in the tab); finishes the check first."""
+        self.verify_pending()
+        return self._warning
+
     def _load(self) -> None:
         """Read the index; entries without a file are dropped, files without an entry
-        (or all files, if the index is unreadable) are read again. The tag of every
-        listed file is checked against the key (nothing is decrypted): a file it does
-        not fit, or a listed file that cannot be read, is not listed, counted in the
-        warning and keeps its row (_hidden)."""
+        (or all files, if the index is unreadable) are read and opened now. The tag of
+        every listed file is checked against the key afterwards (verify_pending, nothing
+        is decrypted): a file it does not fit, or a listed file that cannot be read, is
+        then taken off the list, counted in the warning and keeps its row (_hidden)."""
         listed: dict[str, dict[str, Any]] = {}
         try:
             stored = json.loads((self.folder / INDEX).read_text())
@@ -392,56 +416,84 @@ class BackupStore:
         }
         kept: list[dict[str, Any]] = []
         found: list[dict[str, Any]] = []
-        unreadable = 0
         key = self._key()
-        wrong_key = "not readable with the key of this app"
         for backup_id, path in files.items():
             row = listed.get(backup_id)
             try:
-                try:
-                    blob = path.read_bytes()
-                except OSError:
-                    if row is not None:  # a read error (disk) keeps the row and its marks, as a wrong key does
-                        self._hidden.append(self._entry(row))
-                    raise
                 if row is None:
-                    meta, _data = open_sealed(key, blob, wrong_key)
+                    blob = path.read_bytes()
+                    meta, _data = open_sealed(key, blob, WRONG_KEY)
                     row = {**clean_meta({**meta, "id": backup_id}), "kept": False, "imported": False}
                     log.warning("Backup %s was not listed – read again from its file", backup_id)
                     found.append(self._entry({**row, "size": len(blob)}))
                     continue
-                entry = self._entry({**row, "size": len(blob)})
                 try:
-                    _verified(key, blob, wrong_key)
-                except BackupError:
-                    self._hidden.append(entry)
+                    size = path.stat().st_size
+                except OSError:  # a read error (disk) keeps the row and its marks, as a wrong key does
+                    self._hidden.append(self._entry(row))
                     raise
-                kept.append(entry)
+                kept.append(self._entry({**row, "size": size}))
+                self._pending.append(backup_id)  # its tag is checked after the start
             except (OSError, BackupError) as err:
-                unreadable += 1
+                self._unreadable += 1
                 log.error("Backup file %s unreadable: %s", path.name, err)
-        if unreadable:
-            self.warning = (
-                f"{unreadable} backup file(s) cannot be read with the key of this app and are not listed. "
-                "The files are kept in the app data."
-            )
+        self._set_warning()
         # The listed backups keep their order (newest first, the one stored last first
         # within a second); the stable sort only repairs a list that is out of order
         order = {backup_id: place for place, backup_id in enumerate(listed)}
         kept.sort(key=lambda e: order[e["id"]])
-        self.entries = sorted(kept, key=lambda e: -e["at"])
+        self._entries = sorted(kept, key=lambda e: -e["at"])
         for entry in found:
             self._insert(entry)
-        if [e["id"] for e in self.entries + self._hidden] != list(listed):  # files were added or are gone
+        if [e["id"] for e in self._entries + self._hidden] != list(listed):  # files were added or are gone
             self._save()
+
+    def _set_warning(self) -> None:
+        """Warning of the tab while files cannot be read with the key of this app."""
+        if self._unreadable:
+            self._warning = (
+                f"{self._unreadable} backup file(s) cannot be read with the key of this app and are not listed. "
+                "The files are kept in the app data."
+            )
+
+    def verify_pending(self, limit: int | None = None) -> None:
+        """Check the tag of listed files that are not checked yet (at most `limit`, all
+        if None): a file the key does not fit, or one that cannot be read, is taken off
+        the list, keeps its row (_hidden) and is counted in the warning."""
+        failed = False
+        checked = 0
+        while self._pending and (limit is None or checked < limit):
+            backup_id = self._pending.popleft()
+            checked += 1
+            entry = next((e for e in self._entries if e["id"] == backup_id), None)
+            if entry is None or self.key is None:  # deleted meanwhile
+                continue
+            try:
+                _verified(self.key, self._path(backup_id).read_bytes(), WRONG_KEY)
+            except (OSError, BackupError) as err:
+                log.error("Backup file %s unreadable: %s", f"{backup_id}{EXTENSION}", err)
+                self._entries.remove(entry)
+                self._hidden.append(entry)
+                self._unreadable += 1
+                failed = True
+        if failed:
+            self._set_warning()
+            self._save()  # also a new list revision: the tab is read again
+
+    async def verify_in_background(self) -> None:
+        """Check the files of the list after the start, VERIFY_BATCH at a time, so that the
+        event loop (UI, download server) keeps running in between."""
+        while self._pending:
+            self.verify_pending(VERIFY_BATCH)
+            await asyncio.sleep(0)
 
     def _insert(self, entry: dict[str, Any]) -> None:
         """Put an entry at its place in the list: newest first, and before the
         entries of the same second (the one stored last is the newest). A hidden row
         of the same ID goes: its file was just replaced by a readable one (import)."""
         self._hidden = [row for row in self._hidden if row["id"] != entry["id"]]
-        place = next((i for i, e in enumerate(self.entries) if e["at"] <= entry["at"]), len(self.entries))
-        self.entries.insert(place, entry)
+        place = next((i for i, e in enumerate(self._entries) if e["at"] <= entry["at"]), len(self._entries))
+        self._entries.insert(place, entry)
 
     @staticmethod
     def _entry(row: dict[str, Any]) -> dict[str, Any]:
@@ -460,7 +512,7 @@ class BackupStore:
         and are read again at the next start)."""
         self.rev += 1
         try:
-            rows = self.entries + self._hidden
+            rows = self._entries + self._hidden
             self._write(self.folder / INDEX, json.dumps({"backups": rows}, separators=(",", ":")).encode())
         except OSError as err:
             log.error("Backup list could not be written: %s", err)

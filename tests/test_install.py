@@ -676,3 +676,21 @@ async def test_restart_first_without_answer_installs_nothing(mgr, monkeypatch):
     with pytest.raises(shelly.ShellyError, match="did not answer within 2 minutes"):
         await mgr._install(A, dict(RESTART_DEV), "s", restart_first=True)
     assert "restart" in calls and "trigger" not in calls
+
+
+async def test_restart_from_the_row_shows_restarting(mgr, monkeypatch):
+    """Restart of the device row: "restarting" until the device answers again, then the
+    status from before; no answer within RESTART_WAIT_S: the device shows the error."""
+    calls = restart_fakes(monkeypatch, [shelly.ShellyError("down"), {"version": "1.4.0"}])
+    mgr.devices[A] = dict(RESTART_DEV, status="ready", message="Provided, not installed")
+    await mgr.restart_watched(A)
+    assert calls == ["restart"] and mgr.activity[A] == "restarting"
+    await mgr.watch_restart(A)
+    assert A not in mgr.activity and mgr.devices[A]["status"] == "ready"
+    calls = restart_fakes(monkeypatch, [shelly.ShellyError("down")])
+    monkeypatch.setattr(manager_installs, "RESTART_WAIT_S", 0.05)
+    await mgr.restart_watched(A)
+    await mgr.watch_restart(A)
+    dev = mgr.devices[A]
+    assert A not in mgr.activity and dev["status"] == "error" and dev["unreachable"] is True
+    assert "after the restart" in dev["message"]

@@ -24,7 +24,7 @@ from manager import Manager
 from tls import CertificatePins
 from web_ui import build_ui_app
 
-VERSION = "3.12.1"  # must match config.yaml
+VERSION = "3.13.0-rc1"  # must match config.yaml
 
 OPTIONS_FILE = Path("/data/options.json")
 UI_PORT = 8099  # Ingress (internal)
@@ -145,6 +145,9 @@ async def main() -> None:
             await start_site(build_ui_app(mgr, app_version=VERSION), UI_PORT),
             await start_site(build_download_app(mgr), DOWNLOAD_PORT),
         ]
+        # The tags of the stored backups are checked now, after the servers started
+        # (the first read of the backup list finishes the check before it answers)
+        verifier = asyncio.create_task(mgr.backups.verify_in_background())
         log.info(
             "Firmware Manager for Shelly %s ready – check every %s day(s) at %s (%s), next %s, downloads at %s",
             VERSION,
@@ -178,9 +181,9 @@ async def main() -> None:
             await asyncio.wait({scheduler, timetable, stopper}, return_when=asyncio.FIRST_COMPLETED)
         finally:
             log.info("Stopping – cancelling running work and saving the state")
-            for task in (scheduler, timetable, stopper):
+            for task in (scheduler, timetable, stopper, verifier):
                 task.cancel()
-            results = await asyncio.gather(scheduler, timetable, stopper, return_exceptions=True)
+            results = await asyncio.gather(scheduler, timetable, stopper, verifier, return_exceptions=True)
             # Both servers in parallel: the stop needs at most one
             # SHUTDOWN_TIMEOUT_S, not one per server – well inside the 10 s of the Supervisor
             await asyncio.gather(*(runner.cleanup() for runner in runners))

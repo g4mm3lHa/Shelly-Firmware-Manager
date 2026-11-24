@@ -58,8 +58,9 @@ both servers in parallel (cancels checks/installations, saves the state), exit 0
 
 ## UI (`ui-src/js/*.js`, `ui-src/style.css`; built into `app/static/` – never read the build)
 
-`core.js` shared state and helpers · `i18n.js` language and `t()` (`i18n-<lang>.js` texts of
-de, nl, fr, it, es, pl, pt) · `devices.js` Devices tab · `diagnosis.js` connection test,
+`start.js` loader (language, its dictionary, then `app.js`) · `core.js` shared state and
+helpers · `lang.js` language choice · `i18n.js` `t()` (`i18n-<lang>.js` texts of de, nl, fr, it,
+es, pl, pt; loaded one at a time) · `server-texts.js` translation of server texts · `devices.js` Devices tab · `diagnosis.js` connection test,
 Getting started, Try again, bug ticket text, comparison after an update · `overview.js`
 areas, Security strip, CSV export · `install.js` install and downgrade dialogs ·
 `device-settings.js` device dialogs · `firmware.js` Firmware tab · `schedules.js`

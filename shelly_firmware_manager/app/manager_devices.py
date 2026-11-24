@@ -29,7 +29,8 @@ BULK_MODES = ("store", "set")  # several devices: store the existing password, o
 
 # Settings returned after a change (the device dialogs show what the device stored)
 SETTINGS_ANSWER = (
-    "shelly_name", "ntp", "eco", "ap", "ble", "ble_proxy", "cloud", "cloud_connected", "debug_ws", "outputs",
+    "shelly_name", "ntp", "eco", "ap", "ap_config", "ble", "ble_proxy", "cloud", "cloud_connected", "debug_ws",
+    "outputs",
 )
 
 
@@ -202,8 +203,13 @@ class DeviceSettings(Transfers):
         schedule writes one entry for all its devices)."""
         dev = self._settings_device(device_id)
         clean = shelly.validate_settings(changes, dev.get("outputs") or [])
-        if "ap" in clean and dev.get("gen") == 1:
+        if ("ap" in clean or "ap_config" in clean) and dev.get("gen") == 1:
             raise ValueError(shelly.GEN1_AP_NOTE)
+        if "ap_config" in clean:
+            if dev.get("ap") == UNSUPPORTED:
+                raise ValueError("This device/firmware has no access point switch")
+            if "range_extender" in clean["ap_config"] and (dev.get("ap_config") or {}).get("range_extender") is None:
+                raise ValueError("This device/firmware has no range extender")
         for key, label in (
             ("ap", "an access point switch"),
             ("ble", "a global Bluetooth switch"),
@@ -259,6 +265,7 @@ class DeviceSettings(Transfers):
                 stored = stored or ""  # no name reported = empty name
             if stored != wanted:
                 labels.append(label)
+        labels += DeviceSettings._ap_not_applied(dev, clean.get("ap_config"))
         outputs = {o["key"]: o for o in dev.get("outputs") or []}
         for key, value in clean.get("aop", {}).items():
             output = outputs.get(key, {})
@@ -266,6 +273,43 @@ class DeviceSettings(Transfers):
                 name = output.get("name") if output.get("name") not in (None, key) else key
                 labels.append(f"Power-on action {clip(name, 64)}")
         return labels
+
+    @staticmethod
+    def _ap_not_applied(dev: Device, wanted: dict[str, Any] | None) -> list[str]:
+        """Labels of the access point form the read-back does not show (an unknown value,
+        None, counts as applied: the device does not report it)."""
+        if wanted is None:
+            return []
+        stored = dev.get("ap_config") or {}
+        labels = ["Access point"] if dev.get("ap") != wanted["enable"] else []
+        if wanted.get("ssid") and stored.get("ssid") not in (None, wanted["ssid"]):
+            labels.append("Access point name")
+        is_open = {"password": False, "open": True}.get(wanted.get("security", "keep"))
+        if is_open is not None and stored.get("open") not in (None, is_open):
+            labels.append("Access point security")
+        if "range_extender" in wanted and stored.get("range_extender") not in (None, wanted["range_extender"]):
+            labels.append("Range extender")
+        return labels
+
+    @staticmethod
+    def _ap_diff(dev: Device, wanted: dict[str, Any]) -> list[dict[str, Any]]:
+        """Old -> new of the access point form for the log – never the password itself,
+        only that one was set."""
+        onoff: dict[object, str] = {True: "on", False: "off"}
+        stored = dev.get("ap_config") or {}
+        diff = [{"setting": "Access point", "old": onoff.get(dev.get("ap")), "new": onoff[wanted["enable"]]}]
+        if "ssid" in wanted and wanted["ssid"] != stored.get("ssid"):
+            diff.append({"setting": "Access point name", "old": stored.get("ssid") or "default",
+                         "new": wanted["ssid"] or "default"})
+        security = wanted.get("security", "keep")
+        if security != "keep":
+            old = "open" if stored.get("open") is True else "password" if stored.get("open") is False else None
+            diff.append({"setting": "Access point security", "old": old,
+                         "new": "open" if security == "open" else "new password"})
+        if "range_extender" in wanted:
+            diff.append({"setting": "Range extender", "old": onoff.get(stored.get("range_extender")),
+                         "new": onoff[wanted["range_extender"]]})
+        return diff
 
     @staticmethod
     def _settings_diff(dev: Device, clean: dict[str, Any]) -> list[dict[str, Any]]:
@@ -285,6 +329,8 @@ class DeviceSettings(Transfers):
         ):
             if key in clean:
                 diff.append({"setting": label, "old": onoff.get(dev.get(key)), "new": onoff[clean[key]]})
+        if "ap_config" in clean:
+            diff += DeviceSettings._ap_diff(dev, clean["ap_config"])
         outputs = {o["key"]: o for o in dev.get("outputs") or []}
         for key, value in clean.get("aop", {}).items():
             old = outputs.get(key, {})

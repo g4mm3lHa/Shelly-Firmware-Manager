@@ -25,8 +25,9 @@ from shelly import DeviceAuth, ShellyError, error_text
 
 from manager_checks import Checks
 from manager_core import (
-    DOWNLOAD_BASE_MESSAGES, PENDING, Device, STATUS_ASLEEP, STATUS_AVAILABLE, STATUS_CURRENT, STATUS_ERROR,
-    STATUS_INSTALLING, STATUS_READY, STATUS_UNCLEAR, holds_file, markdown_text, section_of, unexpected_text,
+    ACTIVITY_RESTARTING, DOWNLOAD_BASE_MESSAGES, PENDING, Device, STATUS_ASLEEP, STATUS_AVAILABLE, STATUS_CURRENT,
+    STATUS_ERROR, STATUS_INSTALLING, STATUS_READY, STATUS_UNCLEAR, holds_file, markdown_text, section_of,
+    unexpected_text,
 )
 
 log = logging.getLogger("sfm.manager")
@@ -269,24 +270,51 @@ class Installs(Checks):
         installed then."""
         dev["message"] = "Restarting the device before the installation"
         await shelly.restart(self.session, dev["gen"], dev["origin"], auth)
-        started = time.monotonic()
+        if not await self._back_after_restart(device_id, dev, time.monotonic()):
+            raise ShellyError("The device did not answer within 2 minutes after its restart – nothing was installed")
+
+    async def _back_after_restart(self, device_id: str, dev: Device, started: float) -> bool:
+        """Wait after a restart command sent at started (monotonic) until the device
+        answers again (see _restart_and_wait). False if it did not answer within
+        RESTART_WAIT_S."""
         went_down = False
         await asyncio.sleep(RESTART_SETTLE_S)
         while True:
             try:
                 await shelly.device_info(self.session, dev["origin"], self._auth_for(device_id))
                 if went_down:
-                    return
+                    return True
                 if time.monotonic() - started >= RESTART_DOWN_S:
-                    log.info("%s: no pause seen after the restart command – installing", dev["name"])
-                    return
-            except (TimeoutError, ShellyError, aiohttp.ClientError, OSError) as err:
+                    log.info("%s: no pause seen after the restart command", dev["name"])
+                    return True
+            except (TimeoutError, ShellyError, aiohttp.ClientError, OSError):
                 went_down = True
                 if time.monotonic() - started >= RESTART_WAIT_S:
-                    raise ShellyError(
-                        "The device did not answer within 2 minutes after its restart – nothing was installed"
-                    ) from err
+                    return False
             await asyncio.sleep(RESTART_POLL_S if went_down else RESTART_DOWN_POLL_S)
+
+    async def restart_watched(self, device_id: str) -> None:
+        """Restart from the device row: send the command (an error is raised for the
+        dialog), then the row shows "Restarting" (ACTIVITY_RESTARTING) until the device
+        answers again – see watch_restart, run in the background by the caller."""
+        await self.restart_device(device_id)
+        self.activity[device_id] = ACTIVITY_RESTARTING
+
+    async def watch_restart(self, device_id: str) -> None:
+        """Wait for the device after restart_watched. Back in time: the row shows its
+        status from before again. No answer within RESTART_WAIT_S: the device shows the
+        error (the next check replaces it)."""
+        started = time.monotonic()
+        dev = self.devices.get(device_id)
+        try:
+            if dev is not None and not await self._back_after_restart(device_id, dev, started):
+                log.warning("%s: no answer within %d s after the restart", dev.get("name"), RESTART_WAIT_S)
+                dev.update(status=STATUS_ERROR, error_level="error", unreachable=True,
+                           message=f"No answer from the Shelly within {RESTART_WAIT_S} s after the restart")
+                self.save()
+        finally:
+            if self.activity.get(device_id) == ACTIVITY_RESTARTING:
+                self.activity.pop(device_id, None)
 
     async def _install(
         self, device_id: str, dev: Device, sha: str, restart_first: bool = False

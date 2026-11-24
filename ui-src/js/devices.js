@@ -6,7 +6,7 @@ import {
 } from "./core.js";
 import {OFFER_SOURCES, cancelPlan, daysAgo, openDowngrade, openInstall} from "./install.js";
 import {
-  aopLabel, aopSummary, aopTone, editAop, editCloud, editDebug, editEco, editPassword, editSwitch, editValue, featureStrip,
+  aopLabel, aopSummary, aopTone, editAccessPoint, editAop, editCloud, editDebug, editEco, editPassword, editSwitch, editValue, featureStrip,
   restartDevice,
 } from "./device-settings.js";
 import {load, render} from "./main.js";
@@ -48,7 +48,7 @@ export function installBlocker(d, s) {
   if (!d) return t("Device is not known anymore");
   if (d.installing || d.status === "installing") return t("Installation is running");
   if (s.scanning) return t("Check in progress");
-  if (d.activity) return t("Device is being checked");
+  if (d.activity) return d.activity === "restarting" ? t("The Shelly is restarting") : t("Device is being checked");
   if (d.ignored) return t("Device is ignored");
   if (s.download_base && s.download_base.issue) return s.download_base.message || t("Download base URL is not set");
   return d.status === "ready" || failedInstall(d) ? null : t("Not provided for this device anymore");
@@ -58,7 +58,8 @@ export function installBlocker(d, s) {
 const downgradable = (d, s) => d.gen >= 2 && !!d.ip && !d.planned && !d.installing && d.status !== "installing" && !s.scanning &&
   d.activity !== "reloading" && !(s.download_base && s.download_base.issue);
 // Settings can be read/changed once the device was reached and while it is not updating or reloading
-const editable = d => !!d.ip && !!d.gen && !d.installing && d.status !== "installing" && d.activity !== "reloading";
+const editable = d => !!d.ip && !!d.gen && !d.installing && d.status !== "installing" && d.activity !== "reloading" &&
+  d.activity !== "restarting";
 
 // ---- Sections and filters
 // Sections of the device list in their order; the server names the section of every
@@ -115,7 +116,13 @@ $("dev-filter").replaceWith(devFilter.node);
 devFilter.node.after(areaFilterNode);   // area filter tool, shown while a device has an area
 
 // Running check of a device (server-side state, in memory only)
-const ACTIVITY_LABELS = {waiting: t("Waiting"), checking: t("Checking …"), downloading: t("Downloading …"), reloading: t("Reloading …")};
+const ACTIVITY_LABELS = {waiting: t("Waiting"), checking: t("Checking …"), downloading: t("Downloading …"), reloading: t("Reloading …"),
+  server: t("Shelly server …"), restarting: t("Restarting …")};
+// Waiting for the Shelly update server: blue at first, yellow after SERVER_SLOW_MS (the
+// server answers slowly or not at all). The time counts from the first state that showed
+// the wait; the colour changes by a CSS animation at that moment, also between refreshes.
+const SERVER_SLOW_MS = 5000;
+const serverSince = new Map();   // device ID -> time the page first saw the wait
 // The last successful check differs from the last attempt only after a failed attempt
 const lastSuccess = d => d.last_success && d.last_success !== d.last_check ? fmt(d.last_success) : null;
 
@@ -209,7 +216,7 @@ const GEN1_DEBUG_NOTE = t("Gen1 devices have no websocket debug log.");
 const ACTION_ITEMS = [
   {key: "eco", icon: "eco", label: t("Eco mode"), on: t("on"), off: t("off"), edit: d => editEco(d)},
   {key: "auth_enabled", icon: "lock", label: t("Password protection"), on: t("protected"), off: t("not protected"), edit: d => editPassword(d), always: true},
-  {key: "ap", icon: "ap", label: t("Access point"), on: t("on"), off: t("off"), alert: true, edit: d => editSwitch(d, "ap")},
+  {key: "ap", icon: "ap", label: t("Access point"), on: t("on"), off: t("off"), alert: true, edit: d => editAccessPoint(d)},
   {key: "ble", icon: "ble", label: t("Bluetooth"), on: t("on"), off: t("off"), edit: d => editSwitch(d, "ble")},
   // Shelly cloud: yellow while on (the device is reachable from outside the network)
   {key: "cloud", icon: "cloud", label: t("Cloud"), on: t("on"), off: t("off"), warn: true, edit: d => editCloud(d)},
@@ -289,10 +296,16 @@ const ADDRESS_REASONS = {missing: t("No address in Home Assistant"), unresolved:
 const addressReason = d => ADDRESS_REASONS[d.address_issue.reason] || d.address_issue.message || NO_ADDRESS;
 /** Status cell: while a check runs the activity replaces the (then outdated) status. */
 function statusCell(d) {
+  if (d.activity !== "server") serverSince.delete(d.id);
   if (d.activity) {
     const chip = el("span", null, "pill p-activity"); chip.setAttribute("role", "status");
     if (d.activity !== "waiting") chip.append(el("span", null, "spinner"));
     chip.append(ACTIVITY_LABELS[d.activity] || d.activity);
+    if (d.activity === "server") {
+      if (!serverSince.has(d.id)) serverSince.set(d.id, Date.now());
+      chip.classList.add("p-server");
+      chip.style.animationDelay = `${Math.max(0, SERVER_SLOW_MS - (Date.now() - serverSince.get(d.id)))}ms`;
+    }
     return chip;
   }
   const key = shownStatus(d);
@@ -421,7 +434,12 @@ const COLUMNS = {
   action: {label: t("Action"), cell: d => [actionStrip(d)]},
   last_update: {label: t("Last update"), optional: true, sort: d => d.last_update, cell: d => [el("span", fmt(d.last_update), "nowrap")]},
   host_name: {label: t("Host name"), optional: true, sort: d => d.host_name, cell: d => [el("span", d.host_name || "–", "num")]},
-  ntp: {label: "NTP", optional: true, sort: d => d.ntp, cell: d => [d.ntp || "–"]},
+  // NTP server: a click opens the NTP dialog of the device (like "NTP server" of the row menu)
+  ntp: {label: "NTP", optional: true, sort: d => d.ntp, cell: d => {
+    const b = el("button", d.ntp || "–", "cell-link"), label = t("Edit NTP server of {name}", {name: d.name});
+    setTip(b, label); b.setAttribute("aria-label", label); b.disabled = !editable(d); b.onclick = () => editValue(d, "ntp");
+    return [b];
+  }},
   menu: {label: "", fixed: true, cell: d => [iconButton("dots", t("Actions for {name}", {name: d.name}), e => openRowMenu(d, e.currentTarget))]},
   // Mobile card only (hidden on wide screens by CSS, not offered in the column chooser)
   details: {label: "", fixed: true, cell: d => [detailsCell(d)]},
@@ -726,7 +744,8 @@ function openRowMenu(d, anchor) {
   // The full check blocks everything; otherwise only work on this device itself
   const s = ui.state || {}, running = d.installing || d.status === "installing";
   const blocked = s.scanning ? s.busy || t("Check in progress") : running ? t("Installation is running") :
-    d.activity ? (d.activity === "reloading" ? t("Device info is being reloaded") : t("Device is being checked")) : null;
+    d.activity ? (d.activity === "reloading" ? t("Device info is being reloaded") :
+      d.activity === "restarting" ? t("The Shelly is restarting") : t("Device is being checked")) : null;
   // Group 1: updates
   add(t("Check for updates"), () => checkDevice(d), !blocked);
   if (installable(d, ui.state)) add(t("Install update"), () => openInstall([d]), true);   // only for Ready

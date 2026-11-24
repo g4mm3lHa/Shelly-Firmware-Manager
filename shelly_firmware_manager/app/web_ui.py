@@ -69,10 +69,11 @@ STATIC_CACHE = "private, max-age=31536000, immutable"
 
 
 def asset_version() -> str:
-    """Short content hash of app.js and style.css – part of their URLs in index.html."""
+    """Short content hash of the scripts (loader, app, dictionaries) and style.css – part
+    of their URLs (index.html; the loader passes it on to the scripts it adds)."""
     digest = hashlib.sha256()
-    for name in ("app.js", "style.css"):
-        digest.update((STATIC_DIR / name).read_bytes())
+    for path in [*sorted(STATIC_DIR.glob("*.js")), STATIC_DIR / "style.css"]:
+        digest.update(path.read_bytes())
     return digest.hexdigest()[:16]
 
 

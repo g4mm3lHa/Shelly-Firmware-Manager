@@ -5,7 +5,8 @@ import {
   $, ackGate, api, attachTip, box, checkbox, closeModal, el, field, filePassword, fmt, fmtSize, formError, guarded, icon, iconButton, input,
   mb, message, messageBody, modal, passwordCopy, section, startDownload, t, tn, ui, uploadFile, valueList,
 } from "./core.js";
-import {autoLanguage, languageChoice, LANGUAGES, setLanguage} from "./i18n.js";
+import {autoLanguage, setLanguage} from "./i18n.js";
+import {languageChoice, LANGUAGES} from "./lang.js";
 import {bulkPasswords} from "./device-settings.js";
 import {downgradeWarning} from "./install.js";
 import {connectionRow} from "./diagnosis.js";
