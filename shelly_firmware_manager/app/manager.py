@@ -114,6 +114,7 @@ class Manager(Schedules):
                 }
             )
         return {
+            "start_id": self.start_id,  # changes with every app start (Settings tab: restart done)
             "devices": devices,
             "others": self.others,
             # Shellys Home Assistant knows but the app does not list (with the reason)

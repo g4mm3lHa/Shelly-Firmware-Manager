@@ -9,7 +9,7 @@ Part of `docs/CODEMAP.md`; read when you change routes: the table and the middle
 | Route | Handler → Manager |
 |---|---|
 | `GET /` | page (CSRF token, asset version) |
-| `GET /api/state` | `public_state` (ETag / 304) |
+| `GET /api/state` | `public_state` (ETag / 304; `start_id` is new with every app start) |
 | `POST /api/scan` | `reserve_check` + `scan` (background) |
 | `POST /api/devices/{id}/check` | `reserve_check("device")` + `check_device` |
 | `POST /api/devices/{id}/install` | `approval_matches` / `downgrade_*` + `install` (`confirm`, `sha256`, `restart`: restart the device first; downgrade: `downgrade` + `acknowledged`; a beta needs `beta_acknowledged`; `at` "YYYY-MM-DDTHH:MM" → `plan_install` instead, answer `{scheduled, at}`; without `at` a scheduled installation is dropped – `cancel_plan("installed_now")`; 409 while a schedule runs; an update also 409 for an ignored device or while its info is reloaded) |

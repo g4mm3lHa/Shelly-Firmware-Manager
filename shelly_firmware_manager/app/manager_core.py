@@ -316,6 +316,8 @@ class ManagerCore:
         """Apply the options and load the stored state, passwords, changelogs and log."""
         options = app_options.with_defaults(options)
         self.options = options  # complete option set, needed to save changes
+        # Random mark of this app start: the Settings tab reloads once it changes (restart done)
+        self.start_id = secrets.token_hex(8)
         self.check_days = int(options["check_interval_days"])
         self.check_time = options["check_time"]
         self.tz, self.tz_name = schedule.local_zone()

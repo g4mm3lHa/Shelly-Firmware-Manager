@@ -5,6 +5,10 @@
 Release candidate. Connection test of the download server, help for devices that do not
 answer, Home Assistant areas, a security overview and six more languages.
 
+Changes in rc5
+- Faster app start (standard library precompiled in the image); after saving the
+  settings the page reloads as soon as the restarted app answers (before: 2 s steps).
+
 Changes in rc4
 - Settings: a yellow line under the download base URL warns while its port is not the
   host port (live while typing; saving stays possible).
