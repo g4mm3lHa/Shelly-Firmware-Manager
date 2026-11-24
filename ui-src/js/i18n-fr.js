@@ -616,6 +616,7 @@ export default {
   "Port {port}": "Port {port}",
   "Port {port} of the address does not match the host port of this app (Settings → Download Server).": "Le port {port} de l’adresse ne correspond pas au port hôte de cette app (Réglages → Serveur de téléchargement).",
   "Port {port} of the address is not the host port {host} of this app (Settings → Download Server).": "Le port {port} de l’adresse n’est pas le port hôte {host} de cette app (Réglages → Serveur de téléchargement).",
+  "Port {port} of the address is not the host port {host} – the Shellys cannot reach the download server this way.": "Le port {port} de l’adresse n’est pas le port hôte {host} – les Shelly ne peuvent pas joindre ainsi le serveur de téléchargement.",
   "Power-on action": "Action à la mise sous tension",
   "Power-on action – {detail}": "Action à la mise sous tension – {detail}",
   "Power-on action: not available – this device has no switchable output.": "Action à la mise sous tension : non disponible – cet appareil n’a pas de sortie commutable.",

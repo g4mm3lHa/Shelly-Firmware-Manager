@@ -107,6 +107,17 @@ function hostPortNote(o) {
   if (o.host_port == null) return t("The download server is switched off in Home Assistant. Enter a port to switch it on.");
   return t("Saving checks that no other program on the Home Assistant host uses the new port – a port in use would stop the app from starting.");
 }
+/** Warning under the download base URL while its port is not the host port typed above
+ *  (live, saving stays possible); "" without a readable host port or a parsable address. */
+function portHint(value, portInput) {
+  const host = portInput && !portInput.disabled ? portInput.value.trim() : "";
+  if (!/^\d{1,5}$/.test(host)) return "";
+  let url = null;
+  try { url = new URL(value); } catch (e) { return ""; }
+  if (!/^https?:$/.test(url.protocol)) return "";
+  const port = url.port || (url.protocol === "https:" ? "443" : "80");
+  return Number(port) === Number(host) ? "" : t("Port {port} of the address is not the host port {host} – the Shellys cannot reach the download server this way.", {port, host: Number(host)});
+}
 // Address part "scheme://host:port" of a download base URL
 const URL_PORT = /^(https?:\/\/[^/?#]*):(\d+)(?=$|[/?#])/i;
 /** The download base URL follows a changed host port while it uses the previous port
@@ -159,16 +170,18 @@ export function renderSettings() {
       info.setAttribute("aria-label", t("Help: {name}", {name: label})); info.setAttribute("aria-describedby", help.id);
       attachTip(lab, () => desc, true); attachTip(info, () => desc, true);
       let warn = null, suggest = null;
-      if (key === "download_base_url") {   // live hint while typing, no blocking
+      if (key === "download_base_url") {   // live hints while typing (address, port), no blocking
         warn = el("div", null, "desc warnc"); warn.id = id + "-warn"; warn.setAttribute("role", "status");
         // Note under the field while it still holds the suggested address
         const suggested = !o[key] && control.value;
         suggest = el("div", SUGGESTION_NOTE, "desc"); suggest.id = id + "-suggest";
+        const portInput = settingsInputs.host_port;   // its field comes first in the card
         const update = () => {
-          warn.textContent = lanHint(control.value.trim()); warn.hidden = !warn.textContent;
+          warn.textContent = [lanHint(control.value.trim()), portHint(control.value.trim(), portInput)].filter(Boolean).join(" ");
+          warn.hidden = !warn.textContent;
           suggest.hidden = !(suggested && control.value === suggested);
         };
-        control.addEventListener("input", update); update();
+        control.addEventListener("input", update); if (portInput) portInput.addEventListener("input", update); update();
         control.setAttribute("aria-describedby", `${help.id} ${warn.id} ${suggest.id}`);
       }
       const note = key === "host_port" ? el("div", hostPortNote(o), "desc set-note")
@@ -279,8 +292,10 @@ function saveOptions() {
       waitForRestart();
     })}]);
 }
-/** Poll until the restarted app answers again, then reload the page. */
+/** Poll until the restarted app answers again, then reload the page on the Settings tab
+ *  (marker "#settings" in the address, removed again at the start, see main.js). */
 function waitForRestart() {
+  try { history.replaceState(null, "", "#settings"); } catch (e) { /* page opens on Devices */ }
   let wentDown = false;
   const started = Date.now();
   const probe = async () => {

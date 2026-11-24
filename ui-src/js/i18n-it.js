@@ -616,6 +616,7 @@ export default {
   "Port {port}": "Porta {port}",
   "Port {port} of the address does not match the host port of this app (Settings → Download Server).": "La porta {port} dell'indirizzo non corrisponde alla porta host di questa app (Impostazioni → Server di download).",
   "Port {port} of the address is not the host port {host} of this app (Settings → Download Server).": "La porta {port} dell'indirizzo non è la porta host {host} di questa app (Impostazioni → Server di download).",
+  "Port {port} of the address is not the host port {host} – the Shellys cannot reach the download server this way.": "La porta {port} dell'indirizzo non è la porta host {host} – così gli Shelly non raggiungono il server di download.",
   "Power-on action": "Azione all'accensione",
   "Power-on action – {detail}": "Azione all'accensione – {detail}",
   "Power-on action: not available – this device has no switchable output.": "Azione all'accensione: non disponibile – questo dispositivo non ha uscite commutabili.",

@@ -5,6 +5,12 @@
 Release candidate. Connection test of the download server, help for devices that do not
 answer, Home Assistant areas, a security overview and six more languages.
 
+Changes in rc4
+- Settings: a yellow line under the download base URL warns while its port is not the
+  host port (live while typing; saving stays possible).
+- Settings: after saving, the page comes back on the Settings tab once the app has
+  restarted (before: Devices).
+
 Changes in rc3
 
 Added
