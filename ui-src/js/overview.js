@@ -8,7 +8,7 @@ import {render} from "./main.js";
 // The area of a device comes from the area registry of Home Assistant (device field area,
 // null: none). "" stands for "Without area" in a choice of areas.
 /** Area of a device as a choice value ("" = without area). */
-export const areaKey = d => d.area || "";
+const areaKey = d => d.area || "";
 /** Sorted area names of the devices (without the empty one). */
 const areaNames = devices => [...new Set(devices.map(d => d.area).filter(Boolean))].sort(collator.compare);
 /** True if at least one device has an area (area column, filter tool, area choices). */

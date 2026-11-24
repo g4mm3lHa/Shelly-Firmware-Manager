@@ -2,97 +2,30 @@
 
 ## 3.12.0
 
-Release candidate. Connection test of the download server, help for devices that do not
-answer, Home Assistant areas, a security overview and six more languages.
-
-Changes in rc6
-
-Fixed
-- Details for a bug ticket: shortened IPv6 addresses (with "::", e.g. `fd12::5`) are
-  masked too.
-- Comparison after an update: an unexpected error no longer skips the Home Assistant
-  notification of "Install at" or the check after an intermediate version.
-- Comparison after an update: a new installation started meanwhile gets no result of
-  the previous one.
-- Settings: an invalid value in the settings file gets its default and is named in the
-  status strip; invalid certificate pins no longer stop the app from starting.
-
-Security
-- Logs: the entry of a comparison after an update names the changed settings without
-  their values (they may hold e.g. a server address with a token).
-- Host port check: a host name in the download base URL is resolved first; outside the
-  local network nothing is checked.
-
-Changes in rc5
-- Faster app start (standard library precompiled in the image); after saving the
-  settings the page reloads as soon as the restarted app answers (before: 2 s steps).
-
-Changes in rc4
-- Settings: a yellow line under the download base URL warns while its port is not the
-  host port (live while typing; saving stays possible).
-- Settings: after saving, the page comes back on the Settings tab once the app has
-  restarted (before: Devices).
-
-Changes in rc3
-
-Added
-- Settings → Download Server: "Host port" sets the port of the download server in Home
-  Assistant (app restarts); a port already in use on the host is refused.
-
-Changed
-- The download base URL follows a new host port; help texts, "Getting started" and the
-  connection test name the real host port instead of 8098.
-- Logs: a failed connection test shows one short line; error and device answer open
-  below it.
-- Firmware tab: the tooltip of "Installed" names only the devices.
-- Devices: a device in "Updates available" stays there during a downgrade until the
-  next check (before: it moved to its section and back after the installation).
-- Devices: the "Select all" box of "Updates available" is hidden while the card has no
-  installable device.
-
-Changes in rc2
-
-Added
-- Comparison after an update: "Seen" removes the line below the firmware; the
-  comparison stays in the row menu until the next check of the device.
-- Logs: the entry of a comparison after an update opens with the changed values
-  (before → now, shortened) and the scripts that stopped.
-
-Changed
-- Strip "Security": only counts above 0, otherwise "No findings"; shorter names; phones
-  show symbol and number only, the name is in the tooltip.
-- "Way back" is now called "Previous version" in the device details, the install dialog
-  and the Firmware tab.
-- Logs: "Hide successful entries" hides every successful entry, not only checks.
-- No status line under the page title any more; running work shows in the rows,
-  dialogs and tabs. The line remains for storage and loading errors.
-- Help of the download base URL: the host port is set in the app's Configuration tab
-  (Network).
-
-Fixed
-- Connection test: the cause names the port of the saved address instead of 8098; a
-  device error reads "connection error (Shelly code -114 / -14)", the raw answer is in
-  the log and the bug ticket text.
-- The comparison after an update is kept when the device installs an intermediate
-  version and is checked again right after it.
-
-Changes in rc1
+Released 2026-11-24. Connection test of the download server, help for devices that do
+not answer, Home Assistant areas, a security overview and six more languages.
 
 Added
 - Settings: "Test connection" lets a Shelly fetch a test address from the download
-  server (port 8098) and names the likely cause when it cannot.
+  server and names the likely cause, with the real port, when it cannot.
+- Settings → Download Server: "Host port" sets the port of the download server in Home
+  Assistant (app restarts); a port already in use on the host is refused.
 - Card "Getting started" on a fresh installation: download address, first check,
   connection test; it can be hidden.
 - Devices that did not answer: device details name the likely causes; "Try again" checks
   address, port and answer without a full check.
 - Device details: "Details for a bug ticket" with app, device and settings data; names,
-  IP and MAC addresses masked, no passwords, nothing is sent.
+  IP (also IPv6) and MAC addresses masked, no passwords, nothing is sent.
 - After an update with a "Before update" backup the app compares the settings and marks
   what changed and which scripts no longer run (row menu "Comparison after update").
+- Comparison after an update: "Seen" removes the line below the firmware; it stays in
+  the row menu until the next check (the check after an intermediate version keeps it).
+- Logs: the entry of a comparison after an update opens with the changed settings and
+  the scripts that stopped.
 - Home Assistant areas: column Area and area filter in the Devices tab, also found by
   the search; schedules and "Back up now" can choose devices by area.
-- Strip "Security" above the device list: counts of devices without password, with
-  cloud, access point or debug log on; a click filters the list.
+- Strip "Security" above the device list: devices without password, with cloud, access
+  point or debug log on; a click filters the list (phones: symbol and number).
 - Devices tab (desktop): the list as shown can be saved as CSV file.
 - User interface in Dutch, French, Italian, Spanish, Polish and Portuguese (machine
   translation); the language picker offers them.
@@ -100,10 +33,35 @@ Added
 Changed
 - App options are stored by the app and changed only in the Settings tab; the app's
   Configuration tab keeps a hint. The options set there before are taken over once.
+- Settings file: an invalid value gets its default and is named in the status strip, so
+  the app also starts with e.g. invalid certificate pins.
+- Settings: after saving, the page comes back on the Settings tab as soon as the
+  restarted app answers.
+- The download base URL follows a new host port; help texts, "Getting started" and the
+  connection test name the real host port; a yellow line warns while they differ.
 - "Before installing" in the install dialog names a missing or failed connection test.
+- "Way back" is now called "Previous version" in the device details, the install dialog
+  and the Firmware tab.
+- No status line under the page title any more; running work shows in the rows,
+  dialogs and tabs. The line remains for storage and loading errors.
+- Logs: "Hide successful entries" hides every successful entry, not only checks; times
+  and host names in the normal font with equal-width digits.
 - Times without a value read "never", other empty values "–"; warning boxes in dialogs
   with the tint of the notice bar; red trash icon at "Delete all logs".
-- Logs: times and host names in the normal font with equal-width digits.
+- Firmware tab: the tooltip of "Installed" names only the devices.
+- Devices: a device in "Updates available" stays there during a downgrade until the
+  next check (before: it moved to its section and back after the installation).
+- Devices: the "Select all" box of "Updates available" is hidden while the card has no
+  installable device.
+- Faster app start: the standard library is precompiled in the image.
+
+Security
+- Connection test: the test address of the download server is valid once, only for the
+  chosen device, and serves no firmware.
+- Logs: the comparison after an update keeps only the names of changed settings, never
+  their values (they may hold e.g. a server address with a token).
+- Host port check: a host name in the download base URL is resolved first; outside the
+  local network nothing is checked.
 
 ## 3.11.1
 

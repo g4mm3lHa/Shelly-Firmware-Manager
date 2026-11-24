@@ -54,7 +54,7 @@ export function connectionRow(urlInput) {
 function syncConnNote() { if (connNote) connNote.replaceChildren(testNote(ui.state && ui.state.connection_test)); }
 /** Dialog of the connection test: the address, the choice of the test device and "Start
  *  test"; without a device of Gen 2 or newer only the hint to run a check first. */
-export function openConnectionTest(device = "") {
+function openConnectionTest(device = "") {
   const s = ui.state, url = s.download_base.url;
   const intro = el("p", t("A Shelly fetches a test address from the download server of this app. This shows before the first installation whether the address, the port and the firewall are right. Nothing is changed or installed on the device."));
   const ids = s.test_devices || [];
