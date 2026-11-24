@@ -167,7 +167,7 @@ function firmwareRow(f, latest, older) {
   if (uploaded) attachTip(uploaded, () => f.source === "import" ? IMPORTED_TIP : fwSource(f), true);
   // Version a device runs now: kept as its previous version after the next update
   const users = f.installed || [], inst = users.length ? el("span", t("Installed"), "tag inst") : null;
-  if (inst) attachTip(inst, () => t("Installed on {devices}: {names}", {devices: devicesText(users), names: users.join(", ")}) + "\n" + t("Kept as their previous version after the next update"), true);
+  if (inst) attachTip(inst, () => t("Installed on {devices}: {names}", {devices: devicesText(users), names: users.join(", ")}), true);
   // Once provided as an intermediate version by a check (permanent store marker)
   const step = f.intermediate ? el("span", t("Intermediate"), "tag step") : null;
   if (step) attachTip(step, () => INTERMEDIATE_TIP, true);

@@ -5,6 +5,23 @@
 Release candidate. Connection test of the download server, help for devices that do not
 answer, Home Assistant areas, a security overview and six more languages.
 
+Changes in rc3
+
+Added
+- Settings → Download Server: "Host port" sets the port of the download server in Home
+  Assistant (app restarts); a port already in use on the host is refused.
+
+Changed
+- The download base URL follows a new host port; help texts, "Getting started" and the
+  connection test name the real host port instead of 8098.
+- Logs: a failed connection test shows one short line; error and device answer open
+  below it.
+- Firmware tab: the tooltip of "Installed" names only the devices.
+- Devices: a device in "Updates available" stays there during a downgrade until the
+  next check (before: it moved to its section and back after the installation).
+- Devices: the "Select all" box of "Updates available" is hidden while the card has no
+  installable device.
+
 Changes in rc2
 
 Added

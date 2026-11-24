@@ -83,14 +83,16 @@ Only original Shelly firmware is supported; see [Known limitations](#known-limit
 All options are in the app's **Settings** tab; the app stores them itself. Saving restarts
 the app. The **Configuration** tab of the app page in Home Assistant only points to the
 **Settings** tab: Home Assistant shows no links there, and the one field you see has no
-effect. Its **Network** section still sets the host port of the download server.
+effect. Its **Network** section shows the host port of the download server; you can
+change it there or with **Host port** in the **Settings** tab.
 
 | Option | Default | Allowed | Meaning |
 |---|---|---|---|
 | Check every (days) | 7 | 1–30 | Interval of the automatic check |
 | Check time | 02:45 | HH:MM | Time of day of the automatic check (Home Assistant time zone) |
 | Offer updates only after (days) | 0 | 0–60 | Holds a new firmware version back until it is this many days old, counted from its build date; 0 offers it at once (see [Offer delay](#offer-delay)) |
-| Download base URL for the Shellys | – | rules below | LAN IP of Home Assistant + port 8098, e.g. `http://192.168.1.20:8098`. Required for installations |
+| Host port | 8098 | 1–65535 | Port of the download server on the Home Assistant host. The app sets it in Home Assistant and restarts; it refuses a port another program already uses on the host, because the app could not start then. A download base URL with the old port follows the change |
+| Download base URL for the Shellys | – | rules below | LAN IP of Home Assistant + the host port, e.g. `http://192.168.1.20:8098`. Required for installations |
 | Serve downloads only to known Shellys | on | on / off | Firmware is only served to the device it is meant for. Switch off if downloads are rejected from a 172.30.x.x address |
 | Enable Gen1 updates | on | on / off | Gen1 support: all Gen1 devices of the Shelly integration are checked (see [Gen1 firmware](#gen1-firmware)) |
 | Allow downgrades | off | on / off | Installing an older stored firmware on Gen2+ devices (see [Downgrade](#downgrade-gen2)). Stays off until you switch it on, also after an update of the app |
@@ -112,9 +114,9 @@ server of the app (port 8098) and be reachable from every Shelly.
 
 - Form: `http://<address>:<port>` or `https://<address>:<port>`. A path may follow, e.g.
   for a reverse proxy; the file name is appended to it.
-- The port is the host port of the app: it is set on the app page in Home Assistant,
-  tab **Configuration**, section **Network** (default 8098). If you change it there,
-  change the address too.
+- The port is the **Host port** of the app (default 8098, same card). Changing it there
+  changes the address too; after a change in the **Network** section of the app page,
+  change the address yourself.
 - Use the IP address of Home Assistant, not a host name: Shellys often cannot resolve
   names, the update then fails with a connection error. A host name is accepted, but
   the Settings tab warns while you type.
@@ -769,8 +771,10 @@ Gen2+ firmware is downloaded over HTTPS only.
 | Installations are disabled: the download base URL is not a valid address | The saved address contains characters or a host name that are not allowed – correct it in the Settings tab (see [Download base URL](#download-base-url)) |
 | Installations are disabled: the IP address of the download base URL is not in a private network | The saved address was accepted by an older version of the app – correct it in the Settings tab; installations stay disabled until then |
 | Download rejected: request came from 172.30.x.x | Docker hides the device address – turn off "Serve downloads only to known Shellys" |
-| Not reachable (connection test) – No connection to …: timeout after 8 s (Shelly code -104) | The Shelly gets no answer from the download base URL: check the IP address, the host port of the app (**Network** on the app page) and firewalls or separate networks (VLAN, guest Wi-Fi) between the Shelly and Home Assistant |
-| Not reachable (connection test) – No connection to …: connection error (Shelly code -114 / …) | The Shelly could not open a connection, usually because nothing listens on that port: check that the port of the address is the host port of the app (**Network** on the app page) and the IP address. The log entry shows the device's own answer |
+| Not reachable (connection test) – No connection to …: timeout after 8 s (Shelly code -104) | The Shelly gets no answer from the download base URL: check the IP address, the **Host port** of the app (Settings tab) and firewalls or separate networks (VLAN, guest Wi-Fi) between the Shelly and Home Assistant |
+| Not reachable (connection test) – No connection to …: connection error (Shelly code -114 / …) | The Shelly could not open a connection, usually because nothing listens on that port: check that the port of the address is the **Host port** of the app (Settings tab) and the IP address. The log entry shows the device's own answer when you open it |
+| host_port: port … is already in use on … – choose another port | Another program on the Home Assistant host listens on that port; the app would not start with it. Choose another port |
+| The app does not come back after a new host port | Set the port back in the **Network** section of the app page (tab **Configuration**) and start the app |
 | Another web server answered at … (connection test) | The address and port lead to another server, not to the download server of this app – check the IP address and the port |
 | The request reached the download server from …, not from the device address (connection test) | Network address translation (NAT, e.g. Docker or a router between networks) hides the device address – turn off **Serve downloads only to known Shellys** or route without NAT |
 | No Shelly of Gen 2 or newer is known yet – run a check first (connection test) | Only Gen2+ Shellys can run the test. Run **Check now** first; Gen1 devices cannot test the connection |
@@ -962,8 +966,12 @@ The app connects only to:
   your devices or Home Assistant is sent.
 - **Home Assistant** via the Supervisor – device registry, area registry (for the
   **Area** column), the Shelly config entries and discovery flows (for **Shellys not
-  listed**), notifications, the app's own settings and its slug (for the link to the app
-  page), and the Home Assistant version (only for **Details for a bug ticket**).
+  listed**), notifications, the app's own settings, its slug (for the link to the app
+  page) and its host port (read for the **Settings** tab, set when you change **Host
+  port**), and the Home Assistant version (only for **Details for a bug ticket**).
+  Before a new host port is set, the app opens a TCP connection to that port on the
+  address of the download base URL and closes it at once, to see whether the port is
+  in use.
 
 While **Resolve host names** is on, the app looks up each device's host name (for
 example `shellyplus1pm-a0dd6c29c3e0.local`) through the name resolution of Home

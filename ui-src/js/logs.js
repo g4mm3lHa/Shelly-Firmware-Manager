@@ -104,6 +104,8 @@ const backupDetails = e => [
   e.error ? el("div", e.error, "bad") : null,
   e.scripts_stopped?.length ? el("div", `Not running after the update: ${e.scripts_stopped.join(", ")}`, "bad") : null,
   e.findings?.length ? box("ul", null, ...e.findings.map(f => el("li", `${f.part} · ${f.key}${f.error ? `: ${f.error}` : ""}`, "warnc"))) : null].filter(Boolean);
+/** Opened entry of a failed connection test: the error and the device's own answer. */
+const connectionDetails = e => box("div", null, el("div", e.error, "bad"), e.detail ? el("div", `Device answer: ${e.detail}`, "sub") : null);
 /** Main line of a connection test of the download server. */
 const connectionLine = e => `Download server ${e.ok ? "reachable" : "not reachable"} · tested with ${e.device || "–"} · ${e.url || "–"}`;
 /** Main line of a schedule entry. */
@@ -206,9 +208,8 @@ function logContent(e) {
       return e.findings?.length ? [keptDetails(`log-${e.ts}-bkrun`, backupRunLine(e), backupRunFindings(e))] : [el("div", backupRunLine(e))];
     case "log":
       return [el("div", `Log cleared · ${plural(e.entries ?? 0, "entry", "entries")} deleted`)];
-    case "connection":   // connection test of the download server
-      return [el("div", connectionLine(e)), e.error ? el("div", e.error, "bad") : null,
-        e.detail ? el("div", `Device answer: ${e.detail}`, "sub") : null].filter(Boolean);
+    case "connection":   // connection test of the download server: a failed one opens with its error
+      return e.error ? [keptDetails(`log-${e.id}-conn`, connectionLine(e), connectionDetails(e))] : [el("div", connectionLine(e))];
     default:
       return [el("div", e.kind)];
   }
@@ -309,6 +310,7 @@ function logTile(e, d, group, unread) {
     e.kind === "schedule" && e.event === "run" ? [runFindings(e)] :
     e.kind === "backup" && e.event === "run" && e.findings?.length ? [backupRunFindings(e)] :
     e.kind === "backup" && e.event === "compared" && (e.changed_rows?.length || e.scripts_stopped?.length) ? [el("div", backupLine(e)), comparedDetails(e)] :
+    e.kind === "connection" && e.error ? [el("div", connectionLine(e)), connectionDetails(e)] :
     logContent(e)));
   // The user stands top right, beside the first summary line
   const lines = () => summary.map((x, i) => i === 0 && e.user ? box("div", "first", el("span", x), el("span", e.user, "user")) : el("div", x));

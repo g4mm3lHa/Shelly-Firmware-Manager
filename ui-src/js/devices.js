@@ -34,8 +34,8 @@ const justUpdated = d => installedRecently(d) && d.status === "up-to-date";
 // An approved installation waiting for its time ("Install at") shows "Scheduled" in place of "Ready"
 const shownStatus = d => d.planned && d.status === "ready" && !d.installing ? "scheduled" :
   d.installing && d.status === "ready" ? "queued" : justUpdated(d) ? "updated" : d.status;
-// A running downgrade is no offered update: the device stays in its section (named by the
-// server), the row shows "installed → target" with the tag "Downgrade"
+// A running downgrade is no offered update: the device stays in its section (the updates
+// card too, see listedUpdate), the row shows "installed → target" with the tag "Downgrade"
 const downgrading = d => !!d.downgrade && d.status === "installing";
 const hasUpdate = d => !downgrading(d) && ["available", "ready", "installing"].includes(d.status);
 // Ignored devices are not installable until they are resumed; nothing is installable
@@ -68,9 +68,9 @@ const SECTIONS = [["updates", t("Updates Available")], ["beta", t("Beta Updates"
 // Devices shown in "Updates available" at the last render (kept there while checked)
 const shownUpdates = new Set();
 // A device listed in the updates card stays there while it is checked again (its markers
-// are reset by the check); the result of the check decides at the next render without activity
+// are reset by the check) or downgraded; the result decides at the next render without activity
 const listedUpdate = d => hasUpdate(d) || shownStatus(d) === "queued" || installedRecently(d) || failedInstall(d) ||
-  (!!d.activity && shownUpdates.has(d.id));
+  ((!!d.activity || downgrading(d)) && shownUpdates.has(d.id));
 /** Section of a device: removed and ignored by their marker, then the updates card – or
  *  the beta card for a beta version – (also while checked, see listedUpdate), else the
  *  section named by the server. */
@@ -607,7 +607,9 @@ export function renderDevices() {
     const sel = list.filter(d => ok.has(d.id)), mine = sel.filter(d => selected.has(d.id));
     const all = input("checkbox");
     all.setAttribute("aria-label", key === "beta" ? t("Select all installable beta updates") : t("Select all installable updates"));
+    // Without an installable device the box is hidden (its place is kept, like a row without checkbox)
     all.disabled = !sel.length; all.checked = sel.length > 0 && sel.every(d => selected.has(d.id));
+    if (!sel.length) all.classList.add("ghost");
     all.onchange = () => { for (const d of sel) all.checked ? selected.add(d.id) : selected.delete(d.id); render(true); };
     const go = el("button", t("Review & install ({n})", {n: mine.length}), "primary"); go.disabled = !mine.length;
     go.onclick = () => openInstall(mine);

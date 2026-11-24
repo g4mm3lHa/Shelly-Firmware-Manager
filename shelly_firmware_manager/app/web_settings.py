@@ -51,9 +51,14 @@ class SettingsRoutes(Handlers):
         return web.json_response({"deleted": count})
 
     async def options_get(self, _request: web.Request) -> web.StreamResponse:
-        """App options (there are no secret options)."""
+        """App options (there are no secret options) and the host port of the download
+        server, read from the Supervisor each time (it can be changed in Home Assistant)."""
+        await self.mgr.read_host_port()
         # installed_versions: storage of the option "Keep installed versions" (not an option)
-        return web.json_response({**self.mgr.options_view(), "installed_versions": self.mgr.installed_versions()})
+        return web.json_response({
+            **self.mgr.options_view(), "installed_versions": self.mgr.installed_versions(),
+            "host_port": self.mgr.host_port, "host_port_known": self.mgr.host_port_known,
+        })  # fmt: skip
 
     async def app_page(self, _request: web.Request) -> web.StreamResponse:
         """Path of this app's page in the Home Assistant frontend (changelog link)."""

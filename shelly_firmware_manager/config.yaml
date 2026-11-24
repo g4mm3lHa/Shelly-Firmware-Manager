@@ -5,7 +5,7 @@ description: >-
   Keeps Shelly devices (Gen1 to Gen4) up to date locally: checks, stores and
   installs firmware after your approval.
 # Not next to "name": the beta branch changes the name, every release the version
-version: "3.12.0-rc2"
+version: "3.12.0-rc3"
 arch:
   - aarch64
   - amd64
@@ -16,9 +16,10 @@ image: ghcr.io/g4mm3lha/{arch}-shelly-firmware-manager
 homeassistant: "2026.10.0"
 
 # Core API proxy (device registry, notifications). Of the Supervisor API only
-# /addons/self/info (slug for the link to the app page; options of older versions, taken
-# over once), /addons/self/options (emptied after that take-over) and /addons/self/restart
-# are used (no hassio_api, no host access).
+# /addons/self/info (slug for the link to the app page, host port of the download server;
+# options of older versions, taken over once), /addons/self/options (emptied after that
+# take-over; "network" when the host port is changed in the Settings tab) and
+# /addons/self/restart are used (no hassio_api, no host access).
 homeassistant_api: true
 
 # Management UI via Ingress only (HA login, admins only).

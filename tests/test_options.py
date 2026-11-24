@@ -224,7 +224,8 @@ def test_app_configuration_holds_only_the_hint():
         assert re.findall(r"^  (\w+):", block, re.M) == ["settings"] and "    name: " in block and "    description: " in block
     js = (ROOT / "ui-src" / "js" / "app-settings.js").read_text()
     fields = re.findall(r'^  \["(\w+)", "([^"]+)", "\w+", "([^"]*)", ', js, re.M)
-    assert {f[0] for f in fields} == app_options.KEYS
+    # host_port: not stored by the app, set in Home Assistant (Manager.save_options)
+    assert {f[0] for f in fields} == app_options.KEYS | {"host_port"}
     assert app_options.KEYS - set(app_options.DEFAULTS) == {"download_base_url", "allow_downgrade", "beta_firmware"}
     assert "settings" not in app_options.with_defaults({"settings": "typed"})
 

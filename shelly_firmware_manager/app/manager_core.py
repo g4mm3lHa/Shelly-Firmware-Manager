@@ -32,6 +32,7 @@ import re
 import secrets
 import time
 from collections.abc import Callable
+from urllib.parse import urlsplit
 from pathlib import Path
 from typing import Any
 
@@ -44,7 +45,7 @@ from backup_store import BackupStore
 from changelog import Changelogs
 from credentials import Credentials
 from events import EventLog
-from shelly import AuthError, DeviceAuth, ShellyError, clip, error_text, plain, same_secret
+from shelly import AuthError, DeviceAuth, ShellyError, clip, error_text, plain, port_open, same_secret
 from tls import CertificatePins
 
 
@@ -160,6 +161,8 @@ HA_REQUEST_NAMES = {
 APP_PAGE = "/config/app/{slug}/info"
 APP_LIST_PAGE = "/config/apps"
 APP_SLUG_RE = re.compile(r"^[a-z0-9_]{1,64}$")  # slug as the Supervisor reports it
+DOWNLOAD_PORT_KEY = "8098/tcp"  # container port of the download server (config.yaml "ports")
+MAX_PORT = 65535  # highest TCP port
 
 # Per-device activity during a check (memory only, shown in the device row)
 ACTIVITY_WAITING = "waiting"  # part of the running check, not yet reached
@@ -339,6 +342,10 @@ class ManagerCore:
         self.token = token
         self.pins = pins  # certificate pins for shelly.cloud
         self.app_slug: str | None = None  # slug of this app (Supervisor), read on first use
+        # Host port of the download server as the Supervisor maps it (None: switched off in
+        # Home Assistant); host_port_known is False while the Supervisor could not be read
+        self.host_port: int | None = None
+        self.host_port_known = False
         self.lock = asyncio.Lock()  # check (exclusive)
         self.install_slots = asyncio.Semaphore(int(options.get("max_parallel_installs", 5)))
         self.installing: set[str] = set()  # device IDs: running or waiting
@@ -791,6 +798,61 @@ class ManagerCore:
             self.app_slug = slug
         return APP_PAGE.format(slug=self.app_slug)
 
+    async def read_host_port(self) -> None:
+        """Read the host port of the download server from the Supervisor (/addons/self/info,
+        "network": {"8098/tcp": port or null}, open to every app). Sets host_port and
+        host_port_known; a failure is logged and leaves the port unknown."""
+        try:
+            async with self.session.get(
+                f"{SUPERVISOR}/addons/self/info",
+                headers={"Authorization": f"Bearer {self.token}"},
+                timeout=SUPERVISOR_TIMEOUT,
+            ) as resp:
+                resp.raise_for_status()
+                network = ((await resp.json(content_type=None)).get("data") or {}).get("network")
+        except (TimeoutError, aiohttp.ClientError, ValueError, AttributeError) as err:
+            log.warning("Host port not readable from the Supervisor: %s", err or type(err).__name__)
+            self.host_port_known = False
+            return
+        port = network.get(DOWNLOAD_PORT_KEY, False) if isinstance(network, dict) else False
+        if port is None or (isinstance(port, int) and not isinstance(port, bool) and 1 <= port <= MAX_PORT):
+            self.host_port, self.host_port_known = port, True
+        else:
+            log.warning("Supervisor reports no valid host port for %s", DOWNLOAD_PORT_KEY)
+            self.host_port_known = False
+
+    def _host_port_change(self, value: object) -> int | None:
+        """Validated new host port of the Settings tab; None if it equals the current one.
+        ValueError if it is no port or the current port is unknown (Supervisor not read)."""
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= MAX_PORT:
+            raise ValueError(f"host_port: whole number between 1 and {MAX_PORT} expected")
+        if not self.host_port_known:
+            raise ValueError(
+                "host_port: the current port could not be read from Home Assistant – change it in the "
+                "Configuration tab of the app (Network)"
+            )
+        return None if value == self.host_port else value
+
+    @staticmethod
+    async def _check_port_free(port: int, url: str) -> None:
+        """Refuse a new host port that is already in use on the Home Assistant host: Docker
+        maps the port before the app starts, so a port in use would stop the app from
+        starting. The host of the download base URL (the LAN address of Home Assistant) is
+        asked for a TCP connection (closed at once, nothing sent); one that is accepted
+        means another program listens there. Without a usable address nothing is checked."""
+        try:
+            host = urlsplit(url).hostname if url else None
+        except ValueError:
+            host = None
+        if not host:
+            log.warning("Host port %d not checked: no download base URL", port)
+            return
+        try:
+            await port_open(host, port)
+        except (TimeoutError, OSError):
+            return  # refused or no answer: nothing listens on that port
+        raise ValueError(f"host_port: port {port} is already in use on {host} – choose another port")
+
     # ----------------------------------------------------------------------------------------- App options
 
     def options_view(self) -> dict[str, Any]:
@@ -800,22 +862,39 @@ class ManagerCore:
     async def save_options(self, changes: object, user: str | None = None) -> list[str]:
         """Validate and store in settings.json; the caller restarts the app.
 
-        The attempt is written to the activity log with the changed keys – values
-        only for non-secret options. Returns the list of changed keys (empty:
-        nothing saved, no restart)."""
+        "host_port" is no option of settings.json: a new host port of the download server
+        is set in Home Assistant (POST /addons/self/options {"network": …}, open to every
+        app) and applies with the restart. The attempt is written to the activity log with
+        the changed keys and values. Returns the list of changed keys (empty: nothing
+        saved, no restart)."""
+        port = None
+        if isinstance(changes, dict) and "host_port" in changes:
+            port = self._host_port_change(changes["host_port"])
+            changes = {k: v for k, v in changes.items() if k != "host_port"}
         new, changed = app_options.merge(self.options, changes)
-        if not changed:
+        if not changed and port is None:
             return []
         busy = self.busy or (f"Schedule “{self.schedule_running}” is running" if self.schedule_running else None)
         if busy:
             raise ShellyError(f"Not possible – {busy}")
         diff = app_options.change_list(self.options, new, changed)
-        try:
-            app_options.write_settings(new)
-        except OSError as err:
-            error = f"Settings could not be stored: {err.strerror or type(err).__name__}"
-            self.events.add("options", ok=False, changes=diff, user=user, error=error)
-            raise ShellyError(error) from None
+        if port is not None:
+            await self._check_port_free(port, str(new.get("download_base_url") or ""))
+            diff.append({"option": "host_port", "old": str(self.host_port or "off"), "new": str(port)})
+            try:
+                await self._supervisor_post("/addons/self/options", {"network": {DOWNLOAD_PORT_KEY: port}})
+            except ShellyError as err:
+                self.events.add("options", ok=False, changes=diff, user=user, error=str(err))
+                raise
+            self.host_port = port
+            changed = [*changed, "host_port"]
+        if new != self.options:
+            try:
+                app_options.write_settings(new)
+            except OSError as err:
+                error = f"Settings could not be stored: {err.strerror or type(err).__name__}"
+                self.events.add("options", ok=False, changes=diff, user=user, error=error)
+                raise ShellyError(error) from None
         log.info("App options changed by %s (%s) – restarting", user, ", ".join(changed))
         self.events.add("options", changes=diff, user=user)
         self.options = new
