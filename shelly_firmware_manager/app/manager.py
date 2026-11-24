@@ -155,6 +155,8 @@ class Manager(Schedules):
             "getting_started": self.getting_started,
             "connection_test": self.current_connection_test(),
             "test_devices": self.test_devices(),  # devices that can run the connection test
+            # host port of the download server (None: switched off or not read from the Supervisor)
+            "host_port": self.host_port if self.host_port_known else None,
             "download_base": {
                 "url": self.download_base,
                 "issue": self.download_base_issue,

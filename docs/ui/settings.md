@@ -106,8 +106,15 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
   before saving." (approved 2026-11-21); it disappears when the user edits the field.
 
 ## Connection test of the download server (3.12.0, mockups `3.12.0-ui` A1, approved 2026-11-24)
-- **Help text of the download base URL (2026-11-24):** ends with the hint that the host port
-  is set in the Configuration tab of the app (Network) and the address must use it.
+- **Host port (2026-11-24, `reports/3.12.0/FRAGEN-rc3.md` 1a 2a 3 4 5):** first field of the
+  card "Download Server" (number, default 8098), read from Home Assistant each time the tab
+  loads. Line below: the port check on saving; "switched off in Home Assistant" (empty field)
+  or "could not be read" (field disabled, pointer to the Configuration tab). Typing a new
+  port changes the port of the download base URL while it uses the previous port. The save
+  dialog adds a yellow box "The app restarts with port …"; a port in use is refused.
+- **Texts with the port:** help of the download base URL ("+ the host port above"), Getting
+  started and the confirmation of the former example address name the real host port; the
+  connection test names the port cause only while the address port differs from it.
 - **Row (1 a):** below the download base URL: "Test connection" (play icon) and the last
   result: green "Reachable · last tested <time> with <device>", red "Not reachable · …" or
   grey "Not tested yet"; shown while the result belongs to the saved address. The button is

@@ -126,7 +126,7 @@ async function skipFirstStart(title) {
 /** Confirm that the former example URL really is the address of Home Assistant. */
 function confirmDownloadBase(url) {
   confirmDialog({title: t("Confirm download base URL"), button: t("Yes, this is correct"), kind: "primary",
-    content: [el("p", t("Is {url} really the LAN address of Home Assistant with the host port 8098?", {url})),
+    content: [el("p", t("Is {url} really the LAN address of Home Assistant with the host port {port}?", {url, port: (ui.state && ui.state.host_port) || 8098})),
       el("p", t("The Shellys download the firmware from this address. If it is wrong, every update fails. The confirmation ends when the address is changed."), "hint")],
     action: async () => { await api("api/settings/download-base/confirm", {url}); closeModal(); }});
 }

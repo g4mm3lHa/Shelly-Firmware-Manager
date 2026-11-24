@@ -17,10 +17,15 @@ import {load, render, showView} from "./main.js";
 const TEST_TITLE = t("Test the connection to the download server");
 /** Port of a URL (the default port of its scheme if it names none). */
 const urlPort = url => { try { const u = new URL(url); return u.port || (u.protocol === "https:" ? "443" : "80"); } catch (e) { return "8098"; } };
-/** Common causes of a failed test; the port is the one of the tested address. */
-const testCauses = url => [t("The IP address is not the LAN address of Home Assistant."),
-  t("Port {port} of the address does not match the host port in the app configuration (Network).", {port: urlPort(url)}),
-  t("A firewall or a separate network (VLAN, guest Wi-Fi) lies between the Shelly and Home Assistant.")];
+/** Common causes of a failed test. The port cause names the port of the tested address and
+ *  the host port of the app; it is left out while both are the same. */
+function testCauses(url) {
+  const port = urlPort(url), host = ui.state.host_port;
+  const portCause = host == null ? t("Port {port} of the address does not match the host port of this app (Settings → Download Server).", {port})
+    : String(host) !== port ? t("Port {port} of the address is not the host port {host} of this app (Settings → Download Server).", {port, host}) : null;
+  return [t("The IP address is not the LAN address of Home Assistant."), portCause,
+    t("A firewall or a separate network (VLAN, guest Wi-Fi) lies between the Shelly and Home Assistant.")].filter(Boolean);
+}
 /** "Reachable · last tested <time> with <device>" (or not reachable, or not tested yet). */
 function testNote(test) {
   if (!test) return el("span", t("Not tested yet"), "conn-res");
@@ -120,7 +125,7 @@ export function gettingStartedCard() {
   if (!s.getting_started) return null;
   const devices = s.devices.filter(d => !d.removed), updates = devices.filter(d => ["available", "ready"].includes(d.status)).length;
   const steps = [
-    {title: t("Set the download address"), text: t("The Shellys load the firmware from Home Assistant: LAN IP and port 8098."),
+    {title: t("Set the download address"), text: t("The Shellys load the firmware from Home Assistant: LAN IP and port {port}.", {port: s.host_port || 8098}),
       done: !!(s.download_base.url && !s.download_base.issue), result: s.download_base.url, action: t("Open settings"), run: () => showView("settings")},
     {title: t("Start the first check"), text: t("Reads the Shellys from Home Assistant and asks for new firmware. Nothing is installed."),
       done: !!s.last_scan, result: tn(devices.length, "1 Shelly found", "{n} Shellys found") + " · " + tn(updates, "1 update", "{n} updates"),

@@ -20,7 +20,8 @@ export const OPTION_FIELDS = [
   ["check_interval_days", "Check every (days)", "number", "1–30 days", "Checks"],
   ["check_time", "Check time", "time", "Local time of Home Assistant", "Checks"],
   ["offer_after_days", "Offer updates only after (days)", "number", "Holds a new firmware version back until it is this many days old (age from its build date); 0 = offer at once. 0–60, default 0", "Checks"],
-  ["download_base_url", "Download base URL for the Shellys", "text", "LAN IP address of Home Assistant + host port 8098, e.g. http://192.168.1.20:8098 (no host name; IP addresses only in private networks). Required for installations. The host port is set in the Configuration tab of this app (Network); the address must use the same port.", "Download Server"],
+  ["host_port", "Host port", "port", "Port of the download server on the Home Assistant host; the Shellys fetch the firmware there. Default 8098. Saving sets it in Home Assistant and restarts the app.", "Download Server"],
+  ["download_base_url", "Download base URL for the Shellys", "text", "LAN IP address of Home Assistant + the host port above, e.g. http://192.168.1.20:8098 (no host name; IP addresses only in private networks). Required for installations", "Download Server"],
   ["restrict_downloads_to_devices", "Serve downloads only to known Shellys", "bool", "Switch off if downloads are rejected from 172.30.x.x", "Download Server"],
   ["gen1_updates_enabled", "Enable Gen1 updates", "bool", "Gen1 firmware is only available via plain HTTP without a checksum", STORAGE],
   ["allow_downgrade", "Allow downgrades", "bool", "Installing an older stored firmware on Gen2+ devices (device menu and Firmware tab); off by default", STORAGE],
@@ -94,9 +95,34 @@ function lanHint(value) {
 function suggestedBaseUrl() {
   const host = location.hostname;
   const lan = IPV4.test(host) ? LAN_IPV4.test(host) : LAN_IPV6.test(host);
-  return lan ? `http://${host}:8098` : "";
+  return lan ? `http://${host}:${(ui.options && ui.options.host_port) || 8098}` : "";
 }
 
+// ---- Host port of the download server
+// Not an option of settings.json: the server reads it from the Supervisor ("network" of
+// this app) and sets it there when it is saved; it applies with the restart of the app.
+/** Line under "Host port": not readable, switched off, or the risk of a port in use. */
+function hostPortNote(o) {
+  if (!o.host_port_known) return t("Could not be read from Home Assistant – change it in the Configuration tab of the app (Network).");
+  if (o.host_port == null) return t("The download server is switched off in Home Assistant. Enter a port to switch it on.");
+  return t("Saving checks that no other program on the Home Assistant host uses the new port – a port in use would stop the app from starting.");
+}
+// Address part "scheme://host:port" of a download base URL
+const URL_PORT = /^(https?:\/\/[^/?#]*):(\d+)(?=$|[/?#])/i;
+/** The download base URL follows a changed host port while it uses the previous port
+ *  (visible in the field before saving; another port in the address stays). */
+function followPort(portInput, urlInput) {
+  if (!portInput || !urlInput) return;
+  let previous = portInput.value.trim();
+  portInput.addEventListener("input", () => {
+    const next = portInput.value.trim(), m = URL_PORT.exec(urlInput.value.trim());
+    if (m && previous && m[2] === previous && /^\d{1,5}$/.test(next)) {
+      urlInput.value = urlInput.value.trim().replace(URL_PORT, `$1:${next}`);
+      urlInput.dispatchEvent(new Event("input", {bubbles: true}));
+    }
+    if (/^\d{1,5}$/.test(next)) previous = next;
+  });
+}
 /** Line under "Keep backups per device": what is stored now and where it is managed. */
 function backupsNote(totals) {
   const where = t("Manage them in the Backups tab; a schedule with the action “Backup” stores them regularly.");
@@ -118,6 +144,7 @@ export function renderSettings() {
       const label = t(english), desc = t(descEn);
       const id = "opt-" + key, lab = el("label", label); lab.htmlFor = id;
       const control = type === "bool" ? input("checkbox", {checked: !!o[key]}) : type === "number" ? input("number", {value: o[key]})
+        : type === "port" ? input("number", {value: o[key] ?? "", min: 1, max: 65535, disabled: !o.host_port_known})
         : type === "time" ? input("time", {step: 60, value: o[key] || ""}) : type === "pins" ? pinsEditor(o[key] || []) : input("text", {value: o[key] ?? ""});
       if (key === "download_base_url" && !control.value) control.value = suggestedBaseUrl();   // only a suggestion: counts as unsaved
       control.id = id; settingsInputs[key] = control;
@@ -144,13 +171,15 @@ export function renderSettings() {
         control.addEventListener("input", update); update();
         control.setAttribute("aria-describedby", `${help.id} ${warn.id} ${suggest.id}`);
       }
-      const note = key === "keep_installed" ? el("div", installedNote(o.installed_versions), "desc set-note")
+      const note = key === "host_port" ? el("div", hostPortNote(o), "desc set-note")
+        : key === "keep_installed" ? el("div", installedNote(o.installed_versions), "desc set-note")
         : key === "backup_keep" ? el("div", backupsNote(ui.state && ui.state.backup_totals), "desc set-note") : null;
       form.append(box("div", `set-field t-${type}`, box("div", "set-name", lab, info), box("div", "set-control", control), help, warn, suggest, note));
       if (key === "download_base_url") form.append(connectionRow(control));   // "Test connection" and the last result
     }
     return box("div", "card", box("div", "card-head", el("h2", t(group))), box("div", "card-body", form));
   });
+  followPort(settingsInputs.host_port, settingsInputs.download_base_url);
   cards.unshift(passwordsCard());   // Device Passwords first
   cards.push(languageCard());       // Display last
   const save = el("button", t("Save settings"), "primary"); save.onclick = saveOptions;
@@ -223,12 +252,14 @@ function optionChanges() {
   for (const [key, , type] of OPTION_FIELDS) {
     const input = settingsInputs[key];
     let value;
+    if (type === "port" && !o.host_port_known) continue;   // not readable: cannot be changed here
     if (type === "bool") value = input.checked;
     else if (type === "number") value = Number(input.value);
+    else if (type === "port") value = input.value.trim() === "" ? null : Number(input.value);
     else if (type === "pins") value = input.values();
     else value = input.value.trim();
     // A missing optional switch (allow_downgrade, beta_firmware) counts as off
-    const old = type === "pins" ? o[key] || [] : type === "text" ? o[key] ?? "" :
+    const old = type === "pins" ? o[key] || [] : type === "text" || type === "port" ? o[key] ?? (type === "port" ? null : "") :
       type === "bool" ? !!o[key] : o[key];
     if (JSON.stringify(value) !== JSON.stringify(old)) changes[key] = value;
   }
@@ -239,7 +270,8 @@ function saveOptions() {
   const changes = optionChanges();
   if (!Object.keys(changes).length) { message(t("Settings"), t("Nothing changed.")); return; }
   const names = Object.keys(changes).map(k => t(OPTION_FIELDS.find(f => f[0] === k)[1]));
-  modal(t("Save settings?"), [el("p", t("Changed: ") + names.join(", ")), el("p", t("The app restarts to apply the settings; this page reconnects automatically."), "hint")],
+  const port = "host_port" in changes ? el("p", t("The app restarts with port {port}. Before that it checks that no other program on the Home Assistant host uses this port. If the app does not come back, reset the port in the Configuration tab of the app (Network).", {port: changes.host_port}), "warnbox") : null;
+  modal(t("Save settings?"), [el("p", t("Changed: ") + names.join(", ")), port, el("p", t("The app restarts to apply the settings; this page reconnects automatically."), "hint")].filter(Boolean),
     [{text: t("Cancel")}, {text: t("Save & restart"), kind: "primary", action: () => guarded(t("Save settings?"), undefined, async () => {
       const r = await api("api/settings", changes);
       if (!r.restarting) { message(t("Settings"), t("Nothing changed.")); return; }

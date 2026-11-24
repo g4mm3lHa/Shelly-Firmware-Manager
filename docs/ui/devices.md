@@ -20,7 +20,8 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
   Removed, then the read-only card "Other Shellys". The server names the section
   (`section`); the UI keeps its rule that a device stays in the updates card while it
   is checked. Card titles in Title Case ("Not Checked"); the header checkbox and
-  "Review & install" only in the updates card.
+  "Review & install" only in the updates card; the header checkbox is hidden (place
+  kept) while the card has no installable device (live test 3.12.0-rc2).
 - **Removed (3.8.0, mockup `3.8.0/04`):** yellow "Removed" pill next to the status (like
   "Ignored", which a removed device loses); tooltip also on touch: still reachable →
   "Removed from Home Assistant / the Shelly integration, but still reachable at its last
@@ -210,7 +211,8 @@ Wordings: `mockups/3.9.0/TEXTE.md`.
   after the tick). Cancel, the X and Escape take the tick back; "Enable" keeps it (saved
   with "Save settings"). Unticking needs no popup.
 - **Running downgrade (review 3.10.0, F1 a, approved 2026-11-22):** the device stays in the
-  section it had before (usually "Up-To-Date"); Firmware column "installed → target" with
+  section it had before (usually "Up-To-Date"; "Updates available" too, until the result
+  of the next check, live test 3.12.0-rc2); Firmware column "installed → target" with
   the tag "Downgrade" beside the firmware ID; status pill "Downgrading n %".
 
 ## Diagnosis and overview (3.12.0, mockups `3.12.0-ui`, approved 2026-11-24)

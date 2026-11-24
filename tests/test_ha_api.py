@@ -288,3 +288,46 @@ async def test_settings_take_over_waits_for_the_supervisor(net, monkeypatch, tmp
         sup.info_status, sup.info = 200, {"result": "ok", "data": {"options": {"backup_keep": 20}}}
         assert (await main.load_settings(session, TOKEN))["backup_keep"] == 20
         assert data_paths.SETTINGS_FILE.with_suffix(".damaged").read_text() == "[1"
+
+
+async def test_host_port_is_read_and_set_through_the_supervisor(ha, monkeypatch):
+    """The host port of the download server comes from /addons/self/info ("network");
+    a new one is set with POST /addons/self/options {"network": …} and logged; unknown
+    (Supervisor not readable), invalid ports and ports in use are refused."""
+    m, sup = ha
+    sup.info = {"result": "ok", "data": {"network": {"8098/tcp": 8097}}}
+    await m.read_host_port()
+    assert (m.host_port, m.host_port_known) == (8097, True)
+    assert await m.save_options({"host_port": 8097}) == []   # unchanged: nothing saved, no restart
+    with pytest.raises(ValueError, match="host_port"):
+        await m.save_options({"host_port": 70000})
+    # A port that accepts a connection on the address of Home Assistant is in use: refused
+    asked = []
+
+    async def port_open(host, port):
+        asked.append((host, port))
+        if port == 8123:
+            return 0.01
+        raise ConnectionRefusedError
+
+    monkeypatch.setattr(manager_core, "port_open", port_open)
+    with pytest.raises(ValueError, match="already in use"):
+        await m.save_options({"host_port": 8123})
+    assert asked == [("192.168.1.2", 8123)] and not any(p[0] == "/addons/self/options" for p in sup.posts)
+    assert await m.save_options({"host_port": 8099, "log_entry_limit": 600}, user="Admin") == ["log_entry_limit", "host_port"]
+    assert sup.posts[-1] == ("/addons/self/options", f"Bearer {TOKEN}", {"network": {"8098/tcp": 8099}})
+    assert m.host_port == 8099 and m.options["log_entry_limit"] == 600
+    entry = [e for e in m.events.entries if e["kind"] == "options"][-1]
+    assert {"option": "host_port", "old": "8097", "new": "8099"} in entry["changes"]
+    sup.post_status, sup.post_answer = 400, {"result": "error", "message": "bad"}
+    with pytest.raises(shelly.ShellyError, match="Supervisor rejected"):
+        await m.save_options({"host_port": 8100})
+    assert m.host_port == 8099 and [e for e in m.events.entries if e["kind"] == "options"][-1]["ok"] is False
+    sup.info = {"result": "ok", "data": {"network": {"8098/tcp": None}}}   # switched off in Home Assistant
+    await m.read_host_port()
+    assert (m.host_port, m.host_port_known) == (None, True)
+    sup.info_status = 500
+    await m.read_host_port()
+    assert m.host_port_known is False
+    with pytest.raises(ValueError, match="Configuration tab"):
+        await m.save_options({"host_port": 8098})

@@ -24,7 +24,7 @@ from manager import Manager
 from tls import CertificatePins
 from web_ui import build_ui_app
 
-VERSION = "3.12.0-rc2"  # must match config.yaml
+VERSION = "3.12.0-rc3"  # must match config.yaml
 
 OPTIONS_FILE = Path("/data/options.json")
 UI_PORT = 8099  # Ingress (internal)
@@ -132,6 +132,7 @@ async def main() -> None:
         except ValueError as err:
             raise SystemExit(f"Configuration error: {err}") from None
         mgr = Manager(options, session, token, pins)
+        await mgr.read_host_port()   # port of the download server on the host (texts of the UI)
         # Firmware files the store does not list (lost or older state): read back
         # from the disk before the UI lists the store (see FirmwareStore.adopt_files)
         await mgr.adopt_files()
