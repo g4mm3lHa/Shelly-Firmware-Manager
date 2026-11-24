@@ -33,6 +33,7 @@ import logging
 import time
 from collections.abc import Iterable
 from typing import Any
+from urllib.parse import urlsplit
 
 import aiohttp
 import data_paths
@@ -41,7 +42,7 @@ import shelly
 import shelly_cloud
 import shelly_net
 from events import worst
-from shelly import AuthError, ShellyError, clip, error_text
+from shelly import AuthError, ShellyError, clip, error_text, plain
 from shelly_net import AddressError
 
 from manager_core import (
@@ -94,6 +95,8 @@ OTHER_MQTT = "mqtt"  # other device of the MQTT integration
 OTHER_MATTER = "matter"  # Matter device
 
 OTHER_MAX = 500  # entries of the list kept at most
+
+AREA_NAME_MAX = 64  # characters of an area name taken over from Home Assistant
 
 # Why a Shelly that Home Assistant knows is not listed (see _update_listing)
 MISSING_DISABLED = "disabled"  # device (or its config entry) disabled in Home Assistant
@@ -386,6 +389,7 @@ class Checks(Backups):
         self.device_checks[device_id] = "running"
         dev = self.devices[device_id]
         dev.pop("updated", None)  # Checked again by the user, no longer "just updated"
+        dev.pop("after_update", None)  # nor its comparison after the update
         dev.pop("install_failed", None)  # nor a failed installation to retry
         self._check_users[device_id] = user or "unknown"
         started = time.monotonic()
@@ -408,6 +412,7 @@ class Checks(Backups):
                 dev.pop("removed", None)
                 dev.pop("removed_reachable", None)
                 self._apply_ha_battery(dev, device_id in await self._battery_devices())
+                await self._apply_areas({device_id: entry})
                 await self._check_entry(device_id, self._entry_name(entry), entry.get("configuration_url"), {})
                 checked = True
             if checked:
@@ -444,8 +449,10 @@ class Checks(Backups):
         self.others = other_shellys(registry, (d.get("mac") for d in self.devices.values()))
         batteries = await self._battery_devices()
         self._readopt_removed(entries)
+        await self._apply_areas(entries)
         for dev in self.devices.values():  # A full check ends the "just updated" display
             dev.pop("updated", None)  # and the retry of a failed installation
+            dev.pop("after_update", None)  # and the comparison after the update
             dev.pop("install_failed", None)
         # Ignored devices count as registered (seen) but are not contacted
         seen = set(entries)
@@ -539,6 +546,24 @@ class Checks(Backups):
         order = (MISSING_DISABLED, MISSING_DISCOVERED, MISSING_IGNORED)
         missing.sort(key=lambda m: (order.index(m["reason"]), str(m["name"]).lower()))
         self.listing = {"listed": listed, "missing": missing[:OTHER_MAX]}
+
+    async def _apply_areas(self, entries: dict[str, dict[str, Any]]) -> None:
+        """Area of Home Assistant per device of these registry entries ("area": its
+        name, None without area). If the area registry cannot be read, the areas of
+        the last check stay (logged)."""
+        try:
+            listed = await self._area_registry()
+        except (TimeoutError, ShellyError, aiohttp.ClientError, OSError) as err:
+            log.warning("Area registry of Home Assistant not available: %s", err or type(err).__name__)
+            return
+        names = {
+            a.get("area_id"): plain(a.get("name"), AREA_NAME_MAX)
+            for a in listed
+            if isinstance(a, dict) and isinstance(a.get("name"), str) and a.get("name")
+        }
+        for device_id, entry in entries.items():
+            dev = self.devices.setdefault(device_id, {})
+            dev["area"] = names.get(entry.get("area_id")) or None
 
     @staticmethod
     def _entry_name(entry: dict[str, Any]) -> str:
@@ -691,15 +716,18 @@ class Checks(Backups):
             else:
                 level = "error" if unreachable(err) else severity_of(err)
                 dev.update(status=STATUS_ERROR, message=text, error_level=level)
+            # No answer at all: the device details explain the usual causes
+            dev["unreachable"] = unreachable(err) and dev.get("status") == STATUS_ERROR
             return False
         except Exception as err:
             # Anything else (e.g. an answer of an unexpected shape) stays an error of
             # this device: the other devices of the check are not affected
             log.exception("%s: unexpected error during the check", dev["name"])
-            dev.update(status=STATUS_ERROR, message=unexpected_text(err), error_level="error")
+            dev.update(status=STATUS_ERROR, message=unexpected_text(err), error_level="error", unreachable=False)
             return False
         else:
             dev["last_success"] = dev["last_check"]
+            dev.pop("unreachable", None)
             return True
 
     async def _update_host_name(self, dev: Device, configuration_url: str | None) -> None:
@@ -1168,6 +1196,48 @@ class Checks(Backups):
         return name, sha, size
 
     # -------------------------------------------------------------- Results: log, changelogs, notification
+
+    # ------------------------------------------------------------- Diagnosis of a device that did not answer
+
+    async def probe_device(self, device_id: str) -> dict[str, Any]:
+        """"Try again" in the details of a device that did not answer: the address Home
+        Assistant reports now, whether its port accepts a connection and whether the
+        device answers, with the times. Nothing is stored or logged and no check is
+        started; the device keeps its status until the next check. Each step:
+        {"state": "ok" | "error" | "skipped", "text"}."""
+        dev = self.devices[device_id]
+        if device_id in self.installing or device_id in self.restoring or device_id in self.device_checks:
+            raise ShellyError("The device is busy – please try again afterwards")
+        steps: dict[str, dict[str, Any]] = {}
+        skipped = {"state": "skipped", "text": "Not tested"}
+        origin = None
+        try:
+            registry = await self._registry()
+            entry = next((e for e in registry if isinstance(e, dict) and e.get("id") == device_id), None)
+            if entry is None:
+                raise ShellyError("The device is no longer in the device registry of Home Assistant")
+            origin = await shelly_net.resolve_device_origin(entry.get("configuration_url"))
+        except (TimeoutError, ShellyError, aiohttp.ClientError, OSError) as err:
+            steps["address"] = {"state": "error", "text": error_text(err, 200) or type(err).__name__}
+            return {"address": steps["address"], "port": skipped, "device": skipped}
+        ip = shelly_net.origin_ip(origin) or ""
+        port = urlsplit(origin).port or 80
+        moved = dev.get("origin") not in (None, origin)
+        steps["address"] = {"state": "ok", "ip": ip, "moved": moved}
+        try:
+            seconds = await shelly.port_open(ip, port)
+            steps["port"] = {"state": "ok", "port": port, "seconds": round(seconds, 2)}
+        except (TimeoutError, OSError) as err:
+            timeout = isinstance(err, TimeoutError)
+            reason = f"no answer after {shelly.PORT_TIMEOUT_S} s" if timeout else error_text(err, 120)
+            steps["port"] = {"state": "error", "port": port, "text": reason or type(err).__name__}
+            return {**steps, "device": skipped}
+        try:
+            seconds = await shelly.answers(self.session, origin)
+            steps["device"] = {"state": "ok", "seconds": round(seconds, 2)}
+        except (TimeoutError, ShellyError, aiohttp.ClientError, OSError, ValueError) as err:
+            steps["device"] = {"state": "error", "text": error_text(err, 200) or type(err).__name__}
+        return steps
 
     def _log_check(
         self,

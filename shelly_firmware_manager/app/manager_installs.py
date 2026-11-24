@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import hmac
 import logging
+import secrets
 import time
 from typing import Any
 
@@ -24,8 +25,8 @@ from shelly import DeviceAuth, ShellyError, error_text
 
 from manager_checks import Checks
 from manager_core import (
-    PENDING, Device, STATUS_AVAILABLE, STATUS_CURRENT, STATUS_ERROR, STATUS_INSTALLING, STATUS_READY,
-    STATUS_UNCLEAR, holds_file, markdown_text, section_of, unexpected_text,
+    DOWNLOAD_BASE_MESSAGES, PENDING, Device, STATUS_ASLEEP, STATUS_AVAILABLE, STATUS_CURRENT, STATUS_ERROR,
+    STATUS_INSTALLING, STATUS_READY, STATUS_UNCLEAR, holds_file, markdown_text, section_of, unexpected_text,
 )
 
 log = logging.getLogger("sfm.manager")
@@ -59,6 +60,11 @@ RESTART_POLL_S = 3  # query interval while waiting for its answer
 
 MAX_SERVED_IPS = 16  # download diagnosis: client addresses recorded per file
 
+TEST_PATH = "/connection-test/"  # path of the test address on the download server (download_server)
+
+TEST_TRIES = 3  # connection test without a chosen device: devices tried at most while none answers
+
+TEST_FROM_MAX = 8  # connection test: other client addresses recorded at most
 
 class Installs(Checks):
     """Approved installations, their verification and the download diagnosis."""
@@ -82,10 +88,15 @@ class Installs(Checks):
         """Install an approved update or downgrade (see _install_approved). True only
         if the target version is confirmed. Normally no check follows: the device
         keeps its result until the next full check or a single check of the device.
-        After a confirmed intermediate version the device is checked again at once
-        (see _check_step). restart_first: restart the device and wait until it answers
-        again before the installation starts (see _restart_and_wait)."""
+        After a confirmed update with a backup right before it, the device is compared
+        with that backup (compare_after_update); after a confirmed intermediate version
+        the device is checked again at once (see _check_step). restart_first: restart the
+        device and wait until it answers again before the installation starts (see
+        _restart_and_wait)."""
         ok = await self._install_approved(device_id, sha, approved_by, downgrade, restart_first)
+        before = self._before_backups.pop(device_id, None)
+        if ok and before is not None and not downgrade:
+            await self.compare_after_update(device_id, before, approved_by)
         await self._check_step(device_id, approved_by)
         return ok
 
@@ -137,6 +148,7 @@ class Installs(Checks):
         dev = self.devices[device_id]
         self.installing.add(device_id)  # no await before this: no double starts possible
         dev.pop("updated", None)  # a new installation: the former "just updated" mark is obsolete
+        dev.pop("after_update", None)  # and so is the comparison of the last update
         retry = dev.pop("install_failed", None) or dev.get("store_fallback")
         if retry and not downgrade:
             dev["status"] = STATUS_READY  # retry / manual option: the file is provided again (download server)
@@ -633,3 +645,118 @@ class Installs(Checks):
             f"The Shelly never requested the firmware – is {self.download_base} reachable "
             "from the Shelly (IP of Home Assistant, port from the Network section)?"
         )
+
+    # ----------------------------------------------------------------------- Connection test of the server
+
+    def test_devices(self) -> list[str]:
+        """Devices that can run a connection test (Gen2+ with a checked address, not
+        removed, ignored or busy), the ones that answered last first. A sleeping battery
+        device is left out: it would not answer."""
+        found = [
+            (device_id, dev)
+            for device_id, dev in self.devices.items()
+            if (dev.get("gen") or 0) >= 2
+            and dev.get("origin")
+            and not dev.get("removed")
+            and not dev.get("ignored")
+            and dev.get("battery") is not True
+            and dev.get("status") != STATUS_ASLEEP
+            and device_id not in self.installing
+            and device_id not in self.restoring
+        ]
+        found.sort(key=lambda item: (item[1].get("status") == STATUS_ERROR, -(item[1].get("last_success") or 0)))
+        return [device_id for device_id, _dev in found]
+
+    def test_fetched(self, token: str, client_ip: str, consume: bool) -> bool:
+        """Download server: may client_ip fetch the test address with token? Only the
+        device of the running test, and only once (consume: a GET; HEAD does not count).
+        Requests with the right token from another address are recorded for the result."""
+        test = self._test
+        if test is None or not hmac.compare_digest(token, test["token"]):
+            return False
+        if client_ip != test["ip"]:
+            if len(test["from"]) < TEST_FROM_MAX:
+                test["from"].add(client_ip)
+            return False
+        if test["fetched"]:
+            return False
+        if consume:
+            test["fetched"] = True
+        return True
+
+    async def run_connection_test(self, device_id: str | None, user: str = "unknown") -> dict[str, Any]:
+        """Connection test of the download server: a Gen2+ Shelly fetches a test address
+        of the download server (HTTP.GET), which answers only during this test, only to
+        that device and only once, with a short text (never a file). Nothing is changed
+        on the device. device_id None: the first device of test_devices that answers
+        (at most TEST_TRIES are tried). The result is stored (connection_test), logged
+        and returned; ShellyError if the test cannot start."""
+        if self.download_base_issue:
+            raise ShellyError(DOWNLOAD_BASE_MESSAGES[self.download_base_issue])
+        if self._test is not None:
+            raise ShellyError("A connection test is already running")
+        candidates = self.test_devices()
+        if device_id is not None:
+            if device_id not in candidates:
+                raise ShellyError("This device cannot run the test now (Gen 2 or newer, checked, not busy)")
+            candidates = [device_id]
+        if not candidates:
+            raise ShellyError("No Shelly of Gen 2 or newer is known yet – run a check first")
+        url = str(self.download_base)
+        result: dict[str, Any] = {}
+        for tried in candidates[:TEST_TRIES]:
+            result = await self._test_with(tried, url)
+            if not result.pop("silent", False):
+                break  # the device answered: its result counts
+        result.update(at=int(time.time()), url=url)
+        self.connection_test = result
+        self.save()
+        log.info("Connection test with %s: %s", result.get("device"), "reachable" if result["ok"] else result["error"])
+        self.events.add(
+            "connection", ok=result["ok"], severity="success" if result["ok"] else "error", device=result.get("device"),
+            url=url, error=result.get("error"), user=user,
+        )  # fmt: skip
+        return result
+
+    async def _test_with(self, device_id: str, url: str) -> dict[str, Any]:
+        """One device of the connection test: {"ok", "device", "ip", "seconds", "error"};
+        "silent" if the device itself did not answer (another one may be tried)."""
+        dev = self.devices[device_id]
+        ip = shelly_net.origin_ip(str(dev["origin"])) or ""
+        result: dict[str, Any] = {"ok": False, "device": dev.get("name"), "ip": ip, "seconds": None, "error": None}
+        token = secrets.token_hex(16)
+        self._test = {"token": token, "ip": ip, "fetched": False, "from": set()}
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        try:
+            origin, auth = str(dev["origin"]), self._auth(device_id, dev)
+            answer = await shelly.fetch_test(self.session, origin, url + TEST_PATH + token, auth)
+            seconds = round(loop.time() - started, 1)
+            test = self._test
+            if test["fetched"] and answer["code"] == 200:
+                result.update(ok=True, seconds=seconds)
+            elif test["from"]:
+                others = ", ".join(sorted(test["from"]))
+                result["error"] = (
+                    f"The request reached the download server from {others}, not from the device address {ip} – "
+                    "switch off the option “Serve downloads only to known Shellys” or check the network (NAT)"
+                )
+            elif answer["code"] is not None:
+                result["error"] = (
+                    f"Another web server answered at {url} (HTTP {answer['code']}) – check the IP address and the port"
+                )
+            else:
+                result["error"] = "The device gave no answer code"
+        except (TimeoutError, aiohttp.ClientError, OSError) as err:
+            log.warning("Connection test: %s did not answer", dev.get("name"))
+            result.update(error=f"Device not reachable: {error_text(err, 200) or type(err).__name__}", silent=True)
+        except ShellyError as err:
+            text = error_text(err, 300)
+            if "-104" in text:
+                text = f"No connection to {url} (timeout after {shelly.FETCH_TEST_TIMEOUT_S} s): {text}"
+            elif "-114" in text:
+                text = f"No connection to {url}: {text}"
+            result["error"] = text
+        finally:
+            self._test = None
+        return result

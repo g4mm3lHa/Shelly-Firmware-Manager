@@ -23,8 +23,8 @@ from aiohttp.test_utils import TestServer
 from conftest import OPTIONS, A, B, C
 
 TOKEN = "supervisor-token-1"
-REQUESTS = ("config/device_registry/list", "config/entity_registry/list", "config_entries/get",
-            "config_entries/flow/progress")
+REQUESTS = ("config/device_registry/list", "config/entity_registry/list", "config/area_registry/list",
+            "config_entries/get", "config_entries/flow/progress")
 
 
 class FakeSupervisor:
@@ -126,7 +126,7 @@ async def test_check_reads_home_assistant_over_the_websocket(ha):
     assert last_check(m)["severity"] != "error" and m.devices[A]["status"] == manager_core.STATUS_READY
     assert [r["type"] for r in sup.requests] == list(REQUESTS)
     assert {r["id"] for r in sup.requests} == {1}
-    assert sup.requests[2]["domain"] == "shelly"
+    assert sup.requests[3]["domain"] == "shelly"
     assert sup.tokens == [TOKEN] * len(REQUESTS)
 
 
@@ -204,8 +204,8 @@ async def test_token_only_after_the_greeting(ha):
 
 
 async def test_failed_side_requests_do_not_stop_the_check(ha):
-    """Entity registry, config entries and flows are hints: their failure leaves the
-    check as it is."""
+    """Entity registry, area registry, config entries and flows are hints: their failure
+    leaves the check as it is."""
     m, sup = ha
     sup.failures = {name: {"code": "unknown_command", "message": "Unknown command."} for name in REQUESTS[1:]}
     await m.scan()

@@ -16,6 +16,7 @@ sys.path.insert(0, str(APP))
 
 import data_paths
 import manager
+import manager_backups
 import manager_installs
 import shelly
 import shelly_cloud
@@ -82,6 +83,9 @@ class FakeNet:
         self.removed = set()  # devices removed from the HA registry (still answering unless unreachable)
         self.ha_battery = set()  # devices with a Shelly battery sensor in Home Assistant
         self.extra_registry = []  # further registry entries (other integrations, sub-devices)
+        self.areas = {}  # area registry of Home Assistant: area ID -> name
+        self.device_areas = {}  # device ID -> area ID (registry field area_id)
+        self.area_error = None  # exception raised by the request of the area registry
         self.resolvable = set()  # host names that resolve (Host name column)
         self.ha_entries = []  # config entries of the Shelly integration (config_entries/get)
         self.ha_flows = []  # flows in progress (config_entries/flow/progress)
@@ -92,10 +96,17 @@ class FakeNet:
         """Registry entries as delivered by HA."""
         return [
             {"id": i, "name": n, "identifiers": [["shelly", i]], "configuration_url": f"http://{ip}/",
-             "connections": [["mac", f"aa:bb:cc:00:00:0{i[-1]}"]]}
+             "connections": [["mac", f"aa:bb:cc:00:00:0{i[-1]}"]], "area_id": self.device_areas.get(i)}
             for i, (n, ip, _v, _o) in self.devices.items()
             if i not in self.removed
         ] + list(self.extra_registry)
+
+    async def area_registry(self):
+        """Area registry as delivered by HA."""
+        await asyncio.sleep(0)
+        if self.area_error is not None:
+            raise self.area_error
+        return [{"area_id": a, "name": n} for a, n in self.areas.items()]
 
     def by_origin(self, origin):
         """Device ID for an origin URL."""
@@ -214,6 +225,7 @@ def net(monkeypatch, tmp_path):
     monkeypatch.setattr(shelly_cloud, "download_firmware", download_firmware)
     monkeypatch.setattr(shelly, "OtaChannel", NoWebSocket)
     monkeypatch.setattr(shelly_net, "host_resolves", host_resolves)
+    monkeypatch.setattr(manager_backups, "AFTER_UPDATE_WAIT_S", 0)
     fake.refresh = refresh
     fake.data = data
     return fake
@@ -274,6 +286,7 @@ async def mgr(net):
     m._registry = registry
     m._ha_setup_state = setup_state
     m._battery_devices = battery_devices
+    m._area_registry = net.area_registry
     m.notify = notify
     m.changelogs.refresh = net.refresh
     return m

@@ -22,6 +22,7 @@ Security:
 
 import asyncio
 import base64
+import contextlib
 import datetime
 import hashlib
 import hmac
@@ -993,3 +994,48 @@ async def restart(session: aiohttp.ClientSession, gen: int, origin: str, auth: D
         await _device_json(session, origin, "/reboot", auth)
 
 
+# ------------------------------------------------------------------------ Diagnosis of the connections
+
+FETCH_TEST_TIMEOUT_S = 8  # seconds the device waits for the download server (HTTP.GET timeout)
+
+PORT_TIMEOUT_S = 5  # seconds for opening the TCP connection to a device
+
+
+async def fetch_test(
+    session: aiohttp.ClientSession, origin: str, url: str, auth: DeviceAuth | None = None
+) -> dict[str, Any]:
+    """Gen2+: let the device fetch url itself (HTTP.GET) and return its answer
+    {"code": HTTP status, "message": text}. The body is not taken over. A request the
+    device could not make (timeout, no connection, refused) is a ShellyError with the
+    device's message, e.g. "-104 Deadline exceeded"."""
+    answer = await _rpc(session, origin, "HTTP.GET", {"url": url, "timeout": FETCH_TEST_TIMEOUT_S}, auth)
+    code = answer.get("code")
+    return {
+        "code": code if isinstance(code, int) and not isinstance(code, bool) else None,
+        "message": clip(answer.get("message"), 80),
+    }
+
+
+async def port_open(ip: str, port: int) -> float:
+    """Seconds needed to open a TCP connection to ip:port (closed at once, nothing is
+    sent). TimeoutError or OSError if the device does not accept it within
+    PORT_TIMEOUT_S."""
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    _reader, writer = await asyncio.wait_for(asyncio.open_connection(ip, port), PORT_TIMEOUT_S)
+    elapsed = loop.time() - started
+    writer.close()
+    with contextlib.suppress(OSError):  # the device closed first: the connection was made all the same
+        await writer.wait_closed()
+    return elapsed
+
+
+async def answers(session: aiohttp.ClientSession, origin: str) -> float:
+    """Seconds until the device answered GET /shelly (no authentication needed);
+    ShellyError if the answer is no device information."""
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    status, data = await _call(session, origin, "/shelly", None)
+    if status >= 400 or not isinstance(data, dict):
+        raise ShellyError(f"No device information (HTTP {status})")
+    return loop.time() - started

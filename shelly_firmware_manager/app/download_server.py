@@ -1,9 +1,12 @@
 """Download server for the Shellys (port 8098, no authentication).
 
 Deliberately minimal:
-- Exactly one route: GET/HEAD /<sha256>.<zip|bin|gbl>. Everything else -> 404/405.
+- Two routes: GET/HEAD /<sha256>.<zip|bin|gbl> and the address of the connection test,
+  GET/HEAD /connection-test/<32 hex>. Everything else -> 404/405.
 - Only a file currently provided for an update is served, and (by default)
   only to the IP address of the Shelly concerned.
+- The test address answers only during a connection test the user started, only to
+  the device chosen for it and only once; its answer is a short text, never a file.
 - The path is checked against the strict file name regex instead of being built
   from user input -> no path traversal, no directory listing.
 - No request body, no cookies, no redirects, no server banner.
@@ -25,6 +28,8 @@ REJECT_WINDOW_S = 600  # one warning per client address and window (10 min)
 REJECT_MAX_CLIENTS = 64  # client addresses tracked; more are counted as "other clients"
 
 OTHER_CLIENTS = "other clients"
+
+TEST_ANSWER = "Shelly Firmware Manager: connection test\n"  # body of the test address
 
 
 class RejectLog:
@@ -98,6 +103,15 @@ def build_download_app(mgr: Manager) -> web.Application:
         log.info("Download %s to %s", name, client)
         return web.FileResponse(path, headers=headers)
 
+    async def connection_test(request: web.Request) -> web.StreamResponse:
+        """Answer the device of a running connection test (see Installs.run_connection_test)."""
+        token = request.match_info["token"]
+        client = request.remote or "?"
+        if not mgr.test_fetched(token, client, request.method == "GET"):
+            rejects.rejected("connection-test", client)
+            raise web.HTTPNotFound
+        return web.Response(text=TEST_ANSWER, content_type="text/plain")
+
     @web.middleware
     async def harden(request: web.Request, handler: Handler) -> web.StreamResponse:
         """Security headers for every response, errors included."""
@@ -114,4 +128,5 @@ def build_download_app(mgr: Manager) -> web.Application:
     app.on_response_prepare.append(strip_server_header)
     # add_get registers HEAD as well
     app.router.add_get(r"/{name:[0-9a-f]{64}\.(?:zip|bin|gbl)}", firmware)
+    app.router.add_get(r"/connection-test/{token:[0-9a-f]{32}}", connection_test)
     return app

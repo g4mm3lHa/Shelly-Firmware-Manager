@@ -573,6 +573,52 @@ def compare(gen: int, backup: dict[str, Any], device: dict[str, Any]) -> dict[st
     return parts
 
 
+AFTER_ROWS = 100  # rows of each list of a comparison after an update kept at most
+
+
+def after_update(gen: int, before: dict[str, Any], now: dict[str, Any]) -> dict[str, Any]:
+    """What an update changed, from the backup made right before it and the device read
+    again afterwards: {"changed": [{"key", "before", "now"}], "new": [{"key", "value"}],
+    "scripts": {"before", "again", "stopped"}}.
+
+    changed: settings with another value now ("now" "–": no longer reported); new:
+    settings the backup did not have – the new firmware brought them, with Shelly's
+    default value. Counters that change by themselves (GEN2_IGNORED, e.g. sys.cfg_rev)
+    are never compared. scripts (Gen2+, Gen1 has none): how many scripts ran before the
+    update, how many of them run again, and the names of the others."""
+    if gen >= 2:
+        old, new, walk_lists = before.get("config") or {}, now.get("config") or {}, False
+    else:
+        old, new = _gen1_settings(before.get("settings") or {}), _gen1_settings(now.get("settings") or {})
+        walk_lists = True
+
+    def compared(path: tuple[str, ...]) -> bool:
+        """False for what is no setting (see _setting_rows) or belongs to the scripts."""
+        return gen < 2 or not (len(path) < 2 or path in GEN2_IGNORED or path[0].startswith("script:"))
+
+    changed: list[Row] = []
+    for path, value in _leaves(old, walk_lists):
+        if not compared(path):
+            continue
+        known, current = _dig(new, path)
+        if not known or current != value:
+            changed.append({"key": _label(path, gen), "before": _show(value), "now": _show(current) if known else "–"})
+    added: list[Row] = []
+    for path, value in _leaves(new, walk_lists):
+        if compared(path) and not _dig(old, path)[0]:
+            added.append({"key": _label(path, gen), "value": _show(value)})
+    ran = [str(s.get("name") or s.get("id")) for s in before.get("scripts") or [] if s.get("running") is True]
+    running = {str(s.get("name") or s.get("id")) for s in now.get("scripts") or [] if s.get("running") is True}
+    stopped = [name for name in ran if name not in running]
+    return {
+        "changed": sorted(changed, key=lambda r: r["key"])[:AFTER_ROWS],
+        "new": sorted(added, key=lambda r: r["key"])[:AFTER_ROWS],
+        "changed_count": len(changed),
+        "new_count": len(added),
+        "scripts": {"before": len(ran), "again": len(ran) - len(stopped), "stopped": stopped[:AFTER_ROWS]},
+    }
+
+
 def public_rows(rows: list[Row]) -> list[Row]:
     """Rows as the UI gets them: what a difference shows, without the write instructions."""
     return [{field: row[field] for field in ROW_FIELDS if field in row} for row in rows]

@@ -150,6 +150,7 @@ REGISTRY_MAX = 32 * 1024 * 1024  # bytes
 HA_REQUEST_NAMES = {
     "config/device_registry/list": "device registry",
     "config/entity_registry/list": "entity registry",
+    "config/area_registry/list": "area registry",
     "config_entries/get": "config entries",
     "config_entries/flow/progress": "discovery flows",
 }
@@ -410,6 +411,9 @@ class ManagerCore:
         self._header_got = ""  # version the reference request was answered with
         # Devices that installed an intermediate version: checked again at once
         self._step_checks: set[str] = set()
+        # Backup made right before the running installation of a device (ID), for the
+        # comparison after the update (see Backups.compare_after_update)
+        self._before_backups: dict[str, str] = {}
         self._upload = Pending()  # staged manual upload (see stage_upload)
         self._upload_lock = asyncio.Lock()  # one upload transfer at a time
         self._export = Pending()  # prepared store export (see prepare_export)
@@ -423,6 +427,15 @@ class ManagerCore:
         # user answered the import question (import a store or skip); persisted
         self.first_start_open = False
         self.first_start_notified = False  # the HA notification about the question was sent
+        # Card "Getting started" of the Devices tab: shown on a fresh installation until
+        # the user hides it; persisted (missing in older states = not shown)
+        self.getting_started = False
+        # Result of the last connection test of the download server (see
+        # Installs.run_connection_test): {"at", "ok", "url", "device", "ip", "seconds", "error"};
+        # persisted, valid only while "url" is the current download base URL
+        self.connection_test: dict[str, Any] | None = None
+        # Running connection test (memory only): {"token", "ip", "fetched", "from"}
+        self._test: dict[str, Any] | None = None
         # Set whenever the schedule changes (check finished): wakes the scheduler in
         # main.py instead of letting it poll every minute.
         self.schedule_changed = asyncio.Event()
@@ -462,6 +475,7 @@ class ManagerCore:
         except FileNotFoundError:
             if not backup.is_file():
                 self.first_start_open = True  # fresh installation (also after an uninstall)
+                self.getting_started = True
                 return
             log.error("State file missing, loading the backup")
             self._load_backup(backup)
@@ -524,6 +538,9 @@ class ManagerCore:
         self.first_start_open = data.get("first_start_open") is True
         self.first_start_notified = data.get("first_start_notified") is True
         self.gen1_marking_due = data.get("gen1_imports_marked") is not True
+        self.getting_started = data.get("getting_started") is True
+        test = data.get("connection_test")
+        self.connection_test = test if isinstance(test, dict) and isinstance(test.get("url"), str) else None
         unknown = data.get("unknown_files")
         if isinstance(unknown, list):
             self.unknown_files = {str(n): 0 for n in unknown if isinstance(n, str)}
@@ -580,6 +597,8 @@ class ManagerCore:
             "first_start_open": self.first_start_open,
             "first_start_notified": self.first_start_notified,
             "gen1_imports_marked": not self.gen1_marking_due,
+            "getting_started": self.getting_started,
+            "connection_test": self.connection_test,
             "unknown_files": sorted(self.unknown_files),
             "others": self.others,
             "listing": self.listing,
@@ -621,6 +640,10 @@ class ManagerCore:
         """Device registry via the Core WebSocket API (through the Supervisor proxy).
         The registry of all integrations arrives as one message (REGISTRY_MAX)."""
         return await self._ha_list("config/device_registry/list")
+
+    async def _area_registry(self) -> list[Any]:
+        """Area registry via the Core WebSocket API: [{"area_id", "name", …}]."""
+        return await self._ha_list("config/area_registry/list")
 
     async def _battery_devices(self) -> set[str]:
         """HA device IDs with a battery sensor of the Shelly integration (entity
@@ -711,6 +734,22 @@ class ManagerCore:
             log.warning("Notification failed: %s", err)
             return False
         return True
+
+    async def ha_version(self) -> str | None:
+        """Version of Home Assistant (Core API /config), None if it cannot be read
+        (only for "Details for a bug ticket")."""
+        try:
+            async with self.session.get(
+                f"{SUPERVISOR}/core/api/config",
+                headers={"Authorization": f"Bearer {self.token}"},
+                timeout=SUPERVISOR_TIMEOUT,
+            ) as resp:
+                resp.raise_for_status()
+                version = (await resp.json(content_type=None)).get("version")
+        except (TimeoutError, aiohttp.ClientError, ValueError, AttributeError) as err:
+            log.warning("Version of Home Assistant not available: %s", err or type(err).__name__)
+            return None
+        return clip(version, 40) if isinstance(version, str) else None
 
     async def _supervisor_post(self, path: str, body: dict[str, Any] | None) -> None:
         """POST to the Supervisor API (only /addons/self/* is used); errors -> ShellyError."""
