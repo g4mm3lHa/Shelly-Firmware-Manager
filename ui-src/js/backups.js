@@ -4,9 +4,10 @@
 // writes (manager_backups); the page shows its lists and the state of its two jobs
 // (backup run of several devices, restore).
 import {
-  $, ackGate, api, box, cell, checkbox, checkLine, closeModal, collator, confirmDialog, devUrl, deviceChoice, el, filePassword, filterControl,
-  fmt, fmtSize, formError, gateButton, guarded, icon, iconButton, input, matches, message, messageBody, modal, modalOpen, modelGen,
-  passwordCopy, searchText, searchTool, section, setTip, startDownload, t, tn, toast, ui, uploadFile, valueList,
+  $, ackGate, api, box, cell, checkbox, checkLine, closeModal, collator, confirmDialog, deviceChoice, devUrl, el,
+  filePassword, filterControl, fmt, fmtSize, formError, gateButton, guarded, icon, iconButton, input, matches, message,
+  messageBody, modal, modalOpen, modelGen, passwordCopy, searchText, searchTool, section, setTip, startDownload, t, tn,
+  toast, ui, uploadFile, valueList, warnBox,
 } from "./core.js";
 import {render} from "./main.js";
 import {areaChoice} from "./overview.js";
@@ -256,8 +257,8 @@ async function openDownload(d, b, back) {
     section(t("Backup"), valueList([[t("Device"), `${d.name} · ${modelGen(d)}`], [t("Backup"), backupText(b)], [t("Contents"), partsText(b.parts)],
       [t("File"), `${x.filename} · ${fmtSize(x.size)}`]])),
     section(t("Password"), box("div", "bk-pwrow", out, copy),
-      el("div", t("The file is sealed with this password. It is shown only here and stored nowhere – without it the file cannot be imported again."), "warnbox")),
-    box("div", "warnbox", el("span", t("Scripts and webhook addresses in a backup can contain secrets (tokens, keys). Keep the file and the password apart."))),
+      warnBox([t("The file is sealed with this password. It is shown only here and stored nowhere – without it the file cannot be imported again."),
+        t("Scripts and webhook addresses in a backup can contain secrets (tokens, keys). Keep the file and the password apart.")])),
     savedLabel],
   [{text: t("Cancel"), cancel: true, action: back}, {text: t("Download"), kind: "primary", action: () => {
     // The server refuses an expired download; a download through a link cannot show that

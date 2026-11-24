@@ -852,3 +852,21 @@ def test_unexpected_listing_count_in_the_state_counts_as_zero(net, listed):
     m.listing = {"listed": listed, "missing": []}
     m.save()
     assert make_manager(net).listing == {"listed": 0, "missing": []}
+
+
+
+
+async def test_waiting_for_the_update_server_is_shown(mgr, net, monkeypatch):
+    """While a device check waits for the Shelly update server the row shows "server",
+    afterwards the check goes on as "checking" and ends without activity."""
+    seen = []
+    original = shelly_cloud.fetch_offer
+
+    async def fetch_offer(*args, **kwargs):
+        seen.append(dict(mgr.activity))
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(shelly_cloud, "fetch_offer", fetch_offer)
+    await mgr.scan()
+    assert any("server" in activity.values() for activity in seen)
+    assert mgr.activity == {}

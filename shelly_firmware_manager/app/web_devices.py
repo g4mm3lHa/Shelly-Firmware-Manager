@@ -199,9 +199,10 @@ class DeviceRoutes(Handlers):
         )
 
     async def restart(self, request: web.Request) -> web.StreamResponse:
-        """Restart the Shelly."""
+        """Restart the Shelly; the row shows "Restarting" until it answers again."""
         device_id = self.device_id_from(request)
-        await guarded(self.mgr.restart_device(device_id))
+        await guarded(self.mgr.restart_watched(device_id))
+        self.background(self.mgr.watch_restart(device_id))
         return web.json_response({"started": True})
 
     async def device_password(self, request: web.Request) -> web.StreamResponse:

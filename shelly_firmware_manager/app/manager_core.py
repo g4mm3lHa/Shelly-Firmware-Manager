@@ -174,6 +174,10 @@ ACTIVITY_DOWNLOADING = "downloading"  # firmware for this device is being downlo
 
 ACTIVITY_RELOADING = "reloading"  # Reload Device Info is reading the device
 
+ACTIVITY_SERVER = "server"  # the check waits for the answer of the Shelly update server
+
+ACTIVITY_RESTARTING = "restarting"  # restarted from the app, waiting for its answer
+
 PART_PREFIX = ".part-"  # temporary download files (see shelly_cloud._store)
 
 # ASCII punctuation: escaped with a backslash in texts of the Home Assistant notification,
@@ -356,7 +360,7 @@ class ManagerCore:
         self.devices: dict[str, Device] = {}  # HA device ID -> state
         self.downloads: dict[str, dict[str, Any]] = {}  # file name -> {"served": {ip: n}, "rejected": {ip, ...}}
         self.firmware: dict[str, FirmwareMeta] = {}  # file name -> metadata of the stored firmware
-        self.activity: dict[str, str] = {}  # HA device ID -> ACTIVITY_* while a check runs
+        self.activity: dict[str, str] = {}  # HA device ID -> ACTIVITY_* while a check or restart runs
         self.progress: dict[str, Any] | None = None  # running full check: {"kind", "total", "done", "errors", "phase"}
         self.device_checks: dict[str, str] = {}  # HA device ID -> "queued"/"running" (single-device checks)
         self.storage_error: str | None = None  # last failure writing state.json (shown in the UI)
@@ -910,6 +914,9 @@ class ManagerCore:
         self.options = new
         if "download_base_url" in changed and self.download_base_confirmed is not None:
             self.download_base_confirmed = None  # a confirmation never outlives a change
+            self.save()
+        if {"download_base_url", "host_port"} & set(changed) and self.connection_test is not None:
+            self.connection_test = None  # a test result never outlives a changed address or host port
             self.save()
         return changed
 

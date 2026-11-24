@@ -563,3 +563,94 @@ async def test_wifi_signal_only_for_a_device_on_wifi(device_api):
     answers["Wifi.GetStatus"] = {"status": "got ip"}
     with pytest.raises(ShellyError):
         await shelly.wifi_signal(None, 2, "http://192.168.1.10")
+
+
+async def test_access_point_form_read_and_write(device_api):
+    """Gen2+ reads the access point details (network name, open, range extender – never a
+    password, the device does not return one) and writes the form in one Wifi.SetConfig:
+    a password protects it, open sends no password; turning it off sends only enable."""
+    calls, answers = device_api
+    answers["Shelly.GetConfig"] = {"wifi": {"ap": {"enable": False, "ssid": "ShellyPlus1-A8", "is_open": True,
+                                                   "range_extender": {"enable": False}}}}
+    got = await shelly.read_settings(None, 2, "http://1.2.3.4", "Plus1", None)
+    assert got["ap_config"] == {"ssid": "ShellyPlus1-A8", "open": True, "range_extender": False}
+    answers["Shelly.GetConfig"] = {"wifi": {"ap": {"enable": True}}}
+    got = await shelly.read_settings(None, 2, "http://1.2.3.4", "Plus1", None)
+    assert got["ap_config"] == {"ssid": None, "open": None, "range_extender": None}
+    answers["/settings"] = {}
+    assert (await shelly.read_settings(None, 1, "http://1.2.3.4", "SHSW-1", None))["ap_config"] is None
+
+    calls.clear()
+    form = {"enable": True, "ssid": " Garden ", "security": "password", "password": "secret 1", "range_extender": True}
+    await shelly.write_settings(None, 2, "http://1.2.3.4", shelly.validate_settings({"ap_config": form}, []))
+    assert calls == [("Wifi.SetConfig", {"config": {"ap": {"enable": True, "ssid": "Garden", "pass": "secret 1",
+                                                           "is_open": False, "range_extender": {"enable": True}}}})]
+    calls.clear()
+    form = {"enable": True, "ssid": "", "security": "open", "accept_open": True}
+    await shelly.write_settings(None, 2, "http://1.2.3.4", shelly.validate_settings({"ap_config": form}, []))
+    assert calls == [("Wifi.SetConfig", {"config": {"ap": {"enable": True, "ssid": None, "pass": None, "is_open": True}}})]
+    calls.clear()
+    form = {"enable": False, "ssid": "x", "security": "open"}
+    await shelly.write_settings(None, 2, "http://1.2.3.4", shelly.validate_settings({"ap_config": form}, []))
+    assert calls == [("Wifi.SetConfig", {"config": {"ap": {"enable": False}}})]
+    calls.clear()
+    keep = shelly.validate_settings({"ap_config": {"enable": True, "security": "keep"}}, [])
+    await shelly.write_settings(None, 2, "http://1.2.3.4", keep)
+    assert calls == [("Wifi.SetConfig", {"config": {"ap": {"enable": True}}})]
+    with pytest.raises(ValueError):
+        await shelly.write_settings(None, 1, "http://1.2.3.4", keep)
+
+
+@pytest.mark.parametrize(
+    "form",
+    [
+        None,
+        {"enable": "yes"},
+        {"enable": True},  # no security
+        {"enable": True, "security": "password"},  # no password
+        {"enable": True, "security": "password", "password": ""},
+        {"enable": True, "security": "password", "password": "x" * 65},
+        {"enable": True, "security": "open"},  # open not confirmed
+        {"enable": True, "security": "keep", "ssid": "x" * 30},
+        {"enable": True, "security": "keep", "ssid": "a\nb"},
+        {"enable": True, "security": "keep", "range_extender": "on"},
+    ],
+)
+def test_access_point_form_is_checked(form):
+    with pytest.raises(ValueError):
+        shelly.validate_settings({"ap_config": form}, [])
+
+
+async def test_access_point_form_logs_no_password(mgr, net, monkeypatch, caplog):
+    """The access point password goes to the device only: not in the log entry, the app
+    log, the answer or the stored state; the entry names the changes."""
+    await mgr.scan()
+    written = []
+
+    async def write(_session, _gen, _origin, changes, _auth=None):
+        written.append(changes)
+        return False
+
+    async def read(*_args, **_kwargs):
+        return {"ap": True, "ap_config": {"ssid": "Garden", "open": False, "range_extender": None}, "outputs": []}
+
+    monkeypatch.setattr(shelly, "write_settings", write)
+    monkeypatch.setattr(shelly, "read_settings", read)
+    mgr.devices[A].update(ap=False, ap_config={"ssid": None, "open": True, "range_extender": None})
+    form = {"enable": True, "ssid": "Garden", "security": "password", "password": "hunter2-secret"}
+    caplog.set_level("DEBUG")
+    settings, _restart, verified, not_applied = await mgr.change_settings(A, {"ap_config": form}, "u")
+    assert written[0]["ap_config"]["password"] == "hunter2-secret" and verified and not_applied == []
+    entry = mgr.events.entries[-1]
+    assert entry["changes"] == [{"setting": "Access point", "old": "off", "new": "on"},
+                                {"setting": "Access point name", "old": "default", "new": "Garden"},
+                                {"setting": "Access point security", "old": "open", "new": "new password"}]
+    mgr.save()
+    for text in (json.dumps(mgr.events.entries), caplog.text, json.dumps(settings), json.dumps(mgr.devices),
+                 data_paths.STATE_FILE.read_text()):
+        assert "hunter2" not in text
+    with pytest.raises(ValueError, match="range extender"):
+        await mgr.change_settings(A, {"ap_config": {"enable": True, "security": "keep", "range_extender": True}}, "u")
+    mgr.devices[A]["gen"] = 1
+    with pytest.raises(ValueError):
+        await mgr.change_settings(A, {"ap_config": {"enable": False}}, "u")

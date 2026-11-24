@@ -1,4 +1,4 @@
-// Logs tab: activity log with filters, grouping per device and deleting entries.
+// Logs tab: activity log with filters, unread marks and deleting entries.
 import {
   $, api, box, confirmDialog, closeModal, el, filterControl, fmt, fmtSize, icon, iconButton, keptDetails, matches, mb, openDetails, pad, searchText,
   searchTool, t, tn, ui, valueList,
@@ -259,9 +259,6 @@ function logSummary(e) {
 }
 export const mobileQuery = matchMedia("(max-width:700px)");
 mobileQuery.addEventListener("change", () => render(true));
-/** The device an entry is about (for grouping): the device of an installation, setting
- *  or password entry, or the only device of a single-device check with a finding. */
-const logDevice = e => e.device || (e.kind === "check" && e.devices === 1 && e.findings && e.findings.length === 1 ? e.findings[0].device : null) || null;
 /** Delete one log entry after a confirmation. */
 function deleteLogEntry(e) {
   confirmDialog({title: t("Delete log entry?"), icon: "delete", button: t("Delete"),
@@ -286,14 +283,13 @@ function entryMarks(entries) {
   }
   return marks;
 }
-/** Classes of an entry: its place in a group of the same device, and "unread" (lightly
- *  highlighted) if it is newer than what this browser had read when the tab was opened. */
-const entryClass = (group, unread) => (group ? ` grp grp-${group}` : "") + (unread ? " unread" : "");
-/** Desktop entry: time, type, content, user, delete. group = position in a run of
- *  entries of the same device ("first" | "mid" | "last" | null): marked by a side bar. */
-function logRow(e, d, group, unread) {
+/** Class of an entry: "unread" (bar on the left) if it is newer than what this browser had
+ *  read when the tab was opened. */
+const entryClass = unread => (unread ? " unread" : "");
+/** Desktop entry: time, type, content, user, delete. */
+function logRow(e, d, unread) {
   const sev = severity(e);
-  const row = box("div", "log" + entryClass(group, unread), el("span", `${pad(d.getHours())}:${pad(d.getMinutes())}`, "num sub"),
+  const row = box("div", "log" + entryClass(unread), el("span", `${pad(d.getHours())}:${pad(d.getMinutes())}`, "num sub"),
     el("span", KIND_LABELS[e.kind] || e.kind, "tag"),   // neutral like on phones: the outcome has its own label
     box("div", "log-body" + (sev === "error" ? " bad" : ""), el("span", SEVERITY_LABELS[sev], `tag sev-${sev}`), box("div", null, ...logContent(e))),
     el("span", e.user || "", "user"), logDelete(e));
@@ -302,7 +298,7 @@ function logRow(e, d, group, unread) {
 }
 /** Mobile entry: time/type/outcome, short summary, details collapsed. Details that
  *  only repeat the summary are left out: the summary is shown without expansion. */
-function logTile(e, d, group, unread) {
+function logTile(e, d, unread) {
   const sev = severity(e), summary = logSummary(e);
   const head = box("div", "log-head", el("span", `${pad(d.getHours())}:${pad(d.getMinutes())}`, "num sub"),
     el("span", KIND_LABELS[e.kind] || e.kind, "tag"), el("span", SEVERITY_LABELS[sev], `tag sev-${sev}`), el("span", null, "spacer"), logDelete(e));
@@ -315,7 +311,7 @@ function logTile(e, d, group, unread) {
   // The user stands top right, beside the first summary line
   const lines = () => summary.map((x, i) => i === 0 && e.user ? box("div", "first", el("span", x), el("span", e.user, "user")) : el("div", x));
   const same = [...body.children].map(c => c.textContent.trim()).join("\n") === summary.join("\n");
-  const tile = box("div", "log-m" + entryClass(group, unread), head);
+  const tile = box("div", "log-m" + entryClass(unread), head);
   if (e.id) tile.dataset.key = e.id;
   if (same) { tile.append(box("div", "log-sum", ...lines())); return tile; }
   const det = el("details"), key = `logm-${e.ts}-${e.kind}`;
@@ -339,20 +335,16 @@ export function renderLogs() {
   logFilter.set(ui.logFilter, Object.fromEntries(Object.entries(LOG_FILTERS).map(([key, [, fn]]) => [key, base.filter(fn).length])));
   const out = [], shown = base.filter(LOG_FILTERS[ui.logFilter][1]);
   const dayOf = e => { const d = new Date(e.ts * 1000); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
-  // Directly consecutive entries of the same device on the same day form a group
-  const same = (a, b) => !!a && !!b && !!logDevice(a) && logDevice(a) === logDevice(b) && dayOf(a) === dayOf(b);
   const marks = entryMarks(ui.logs), readUntil = ui.logsUnreadFrom;
   let day = null, card = null;
-  shown.forEach((e, i) => {
+  shown.forEach(e => {
     const d = new Date(e.ts * 1000), key = dayOf(e);
     if (key !== day) {
       day = key; out.push(el("div", `${key} · ${d.toLocaleDateString(lang, {weekday: "long"})}`, "day"));
       card = el("div", null, "card"); out.push(card);
     }
-    const before = same(shown[i - 1], e), after = same(e, shown[i + 1]);
-    const group = before && after ? "mid" : before ? "last" : after ? "first" : null;
     const unread = readUntil != null && marks.get(e) > readUntil;
-    card.append(mobileQuery.matches ? logTile(e, d, group, unread) : logRow(e, d, group, unread));
+    card.append(mobileQuery.matches ? logTile(e, d, unread) : logRow(e, d, unread));
   });
   $("log-clear").disabled = !ui.logs.length;
   if (!out.length) out.push(box("div", "card", el("div", ui.logs.length ? t("No entries match.") : t("No log entries yet."), "empty")));

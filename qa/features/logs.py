@@ -32,16 +32,15 @@ def _logs_after_check(c):
 
 
 def _logs(c):
-    """Logs tab: group bar, coloured findings, deleting an entry / the whole log (last case)."""
+    """Logs tab: no device groups, coloured findings, deleting an entry / the whole log (last case)."""
     case, f, page, out, last = c.case, c.f, c.page, c.out, c.last
-    # Logs – group bar, findings coloured by severity, delete one entry / all (last case)
+    # Logs – no group bar, findings coloured by severity, delete one entry / all (last case)
     f.locator("#tab-logs").click()
     entries = f.locator("#log-list .log, #log-list .log-m")
     entries.first.wait_for()
     _logs_after_check(c)
     total = entries.count()
-    check(f"{case}: three consecutive entries of one device grouped", f.locator("#log-list .grp").count() == 3
-          and f.locator("#log-list .grp-first").count() == 1 and f.locator("#log-list .grp-last").count() == 1)
+    check(f"{case}: entries of one device are not grouped (no side bar)", f.locator("#log-list [class*=grp]").count() == 0)
     check(f"{case}: delete icon per entry", f.locator("#log-list .log-del").count() == total, str(total))
     f.locator("#log-quiet").check()   # "Hide successful entries": warnings and errors stay
     sev = f.evaluate("[...document.querySelectorAll('#log-list .tag[class*=sev-]')].map(t => t.className)")

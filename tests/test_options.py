@@ -125,11 +125,14 @@ async def test_stored_public_ip_blocks_installations_until_corrected(net):
 
 
 async def test_changing_the_url_drops_the_confirmation(net):
+    """A new address drops the confirmation and the result of the last connection test."""
     m = make_manager(net, download_base_url=LEGACY)
     m.confirm_download_base(LEGACY)
+    m.connection_test = {"ok": False, "url": LEGACY, "at": 1, "device": "Hall", "error": "timeout"}
     assert await m.save_options({"download_base_url": "http://192.168.1.5:8098"}) == ["download_base_url"]
-    assert m.download_base_confirmed is None
-    assert json.loads(data_paths.STATE_FILE.read_text())["download_base_confirmed"] is None
+    assert m.download_base_confirmed is None and m.connection_test is None
+    stored = json.loads(data_paths.STATE_FILE.read_text())
+    assert stored["download_base_confirmed"] is None and stored["connection_test"] is None
 
 
 def test_empty_url_unsets_the_option():

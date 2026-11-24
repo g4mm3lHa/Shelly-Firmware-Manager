@@ -25,10 +25,10 @@ CELLS_OVERLAP_JS = """() => [...document.querySelectorAll('#bk-cards .bk-row:not
 # The focused node as "TAG|label" (accessible name, else its text)
 ACTIVE_JS = """() => { const a = document.activeElement;
   return a ? a.tagName + '|' + (a.getAttribute('aria-label') || a.textContent.trim().slice(0, 60)) : ''; }"""
-# True if the border of the first node matching the selector has the strong line colour
-STRONG_BORDER_JS = """sel => { const probe = document.createElement('div'); probe.style.border = '1px solid var(--line-strong)';
-  document.body.append(probe); const want = getComputedStyle(probe).borderTopColor; probe.remove();
-  return getComputedStyle(document.querySelector(sel)).borderTopColor === want; }"""
+# True if the first node matching the selector has no line and a background of its own
+# (phone tiles: card background or the tint on the tinted card)
+TILE_JS = """sel => { const s = getComputedStyle(document.querySelector(sel));
+  return s.borderTopStyle === 'none' && s.backgroundColor !== 'rgba(0, 0, 0, 0)'; }"""
 # Contrast (WCAG) of the text of the first node matching each selector against the
 # background behind it (the nearest opaque one), read from the rendered pixels' colours
 CONTRAST_JS = """sels => { const cv = document.createElement('canvas').getContext('2d', {willReadFrequently: true});
@@ -73,7 +73,7 @@ def _tab(c):
     check(f"{case}: kept backup marked", row.locator(".bk-pin").count() == 1, row.inner_text()[:120])
     check(f"{case}: no overflow (backups)", f.evaluate(OVERFLOW_JS) <= 0)
     if c.width <= 700:
-        check(f"{case}: phone tiles of the devices with the strong line", f.evaluate(STRONG_BORDER_JS, "#bk-cards .bk-row:not(.bk-head)"))
+        check(f"{case}: phone tiles of the devices without line, own surface", f.evaluate(TILE_JS, "#bk-cards .bk-row:not(.bk-head)"))
     c.page.screenshot(path=c.out / f"{case}-backups.png", full_page=not c.embedded)
     removed = f.locator("#bk-cards .bk-row", has_text="Old plug").first
     check(f"{case}: backups of a device that is no longer listed stay, no new backup",
@@ -390,7 +390,7 @@ def _other_tabs(c):
     parts = f.evaluate("""() => [...document.querySelectorAll('#view-schedules .sch-last .sub .nowrap')].map(s => s.textContent)""")
     check(f"{case}: schedule Backup – the result wraps only between its parts", "1 asleep" in parts and "2 left out" in parts, str(parts))
     if c.width <= 700:
-        check(f"{case}: phone tiles of the schedules with the strong line", f.evaluate(STRONG_BORDER_JS, "#view-schedules .sch-row:not(.sch-head)"))
+        check(f"{case}: phone tiles of the schedules without line, own surface", f.evaluate(TILE_JS, "#view-schedules .sch-row:not(.sch-head)"))
     f.locator("#tab-settings").click()
     f.wait_for_selector("#view-settings .card")
     card = f.locator("#view-settings .card", has=f.locator(".card-head h2", has_text="Backups")).first
@@ -461,11 +461,23 @@ def _contrast(c):
 
 def _languages(browser, out, width, scheme, embedded):
     """Six tabs: every tab inside the viewport with its whole label, in English and
-    German; German terms of the Backups tab; no overflow."""
+    German; German terms of the Backups tab; no overflow. Only the dictionary of the page
+    language is loaded; a status message of the server is shown translated."""
     for lang in ("en", "de"):
         case = f"backups-{lang}-{width}-{scheme}{'-embedded' if embedded else ''}"
         script = f"localStorage.setItem({json.dumps(GERMAN)}, {json.dumps(json.dumps(lang))})"
         ctx, page, f, errors = open_page(browser, BACKUPS, width, scheme, embedded, init=script)
+        f.wait_for_selector("#dev-cards tr", state="attached")
+        scripts = f.evaluate("""() => performance.getEntriesByType('resource').map(e => new URL(e.name).pathname.split('/').pop())
+          .filter(n => n.endsWith('.js'))""")
+        check(f"{case}: only the dictionary of the language is loaded", scripts == ["start.js", *(["i18n-de.js"] if lang == "de" else []), "app.js"],
+              str(scripts))
+        if lang == "de" and width > 700:  # a status message of the server, translated
+            f.locator("#dev-cards tr", has_text="Guest room").first.locator("td.c-status .pill").first.click()
+            f.wait_for_selector("#dlg .dmsg")
+            shown = f.locator("#dlg .dmsg").inner_text()
+            check(f"{case}: status message of the server in German", shown == "Geräteadresse 203.0.113.7 liegt in keinem privaten Netz", shown)
+            page.keyboard.press("Escape")
         for tab in TABS:
             f.locator(f"#tab-{tab}").click()
             page.wait_for_timeout(200)
