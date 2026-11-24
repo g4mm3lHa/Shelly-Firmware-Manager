@@ -922,26 +922,17 @@ class ManagerCore:
 
     @property
     def busy(self) -> str | None:
-        """Text for the UI while a check or installations are running (the full
-        check button is blocked while this is set). A schedule run is not named here:
-        the Schedules tab shows it under "Last run", the UI blocks the button by
-        schedule_running."""
+        """Text of the busy state while a check, installations, reloading or a restore is
+        running (the full check button is blocked while this is set). It is not shown
+        under the page title: the rows, the progress line and the dialogs show what runs.
+        A schedule run is not named here: the Schedules tab shows it under "Last run",
+        the UI blocks the button by schedule_running."""
         if self.checking:
             return "Check in progress"
         parts = []
         if self.device_checks:
             names = [str(self.devices.get(i, {}).get("name") or "device") for i in self.device_checks]
             parts.append(f"Checking {names[0]}" if len(names) == 1 else f"Checking {len(names)} devices")
-        if note := self.busy_note:
-            parts.append(note)
-        return " · ".join(parts) or None
-
-    @property
-    def busy_note(self) -> str | None:
-        """The line under the page title: what busy names except checks – a check
-        shows "Checking …" in the row of its device (a full check in the progress
-        line), not under the title."""
-        parts = []
         if self.installing:
             parts.append(f"Installations running: {len(self.installing)}")
         if self.reloading:

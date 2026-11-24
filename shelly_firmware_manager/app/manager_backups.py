@@ -47,6 +47,8 @@ DOWNLOAD_TTL_S = 600  # a prepared download must be fetched within 10 min
 IMPORT_TTL_S = 900  # a staged backup file that is not imported within 15 min is dropped
 
 AFTER_UPDATE_WAIT_S = 15  # comparison after an update: wait until the scripts of the device run again
+LOG_CHANGED_ROWS = 10  # comparison after an update: changed values kept in its log entry
+LOG_VALUE_LEN = 60  # and the length of each value there
 
 APP_USER = "App"  # user of what the app does by itself (retention), in the log
 
@@ -269,8 +271,9 @@ class Backups(DeviceSettings):
         AFTER_UPDATE_WAIT_S, so its scripts have started) and compared with the backup
         made right before the installation (shelly_backup.after_update). The result is
         kept on the device as after_update ({"at", "backup_at", "from_version",
-        "to_version", ...}, or {"at", "error"}) for as long as the device shows "just
-        updated", and logged.
+        "to_version", ...}, or {"at", "error"}) until the next check of the device (the
+        check after an intermediate version keeps it) or its next installation, and
+        logged with the changed values and the stopped scripts.
         Nothing is changed on the device."""
         await asyncio.sleep(AFTER_UPDATE_WAIT_S)
         dev = self.devices.get(device_id)
@@ -297,15 +300,30 @@ class Backups(DeviceSettings):
         }  # fmt: skip
         scripts = result["scripts"]
         severity = "warning" if result["changed_count"] or scripts["stopped"] else "success"
+        # The log entry keeps the first changed values (shortened), shown when it is opened
+        changed_rows = [
+            {"key": row["key"], "before": clip(row["before"], LOG_VALUE_LEN), "now": clip(row["now"], LOG_VALUE_LEN)}
+            for row in result["changed"][:LOG_CHANGED_ROWS]
+        ]
         self.events.add(
             "backup", severity=severity, event="compared", device=name, changed=result["changed_count"],
             new_fields=result["new_count"], scripts_before=scripts["before"], scripts_stopped=scripts["stopped"],
-            user=user,
+            changed_rows=changed_rows or None, user=user,
         )  # fmt: skip
         log.info(
             "%s: compared after the update: %d changed, %d new", name, result["changed_count"], result["new_count"]
         )
         self.save()
+
+    def after_update_seen(self, device_id: str) -> bool:
+        """"Seen" in the comparison after an update: the line below the firmware of the
+        device goes away, the comparison stays in its row menu. False without one."""
+        comparison = self.devices[device_id].get("after_update")
+        if not isinstance(comparison, dict):
+            return False
+        comparison["seen"] = True
+        self.save()
+        return True
 
     async def _backup_result(
         self,

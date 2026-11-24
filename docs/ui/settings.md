@@ -67,7 +67,7 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
 - **Upload progress (3.4.1):** firmware upload and store import send the file in parts
   and show "Uploading <file> … n %" in the dialog, then "Checking <file> …" (import).
 
-## Offer delay, way back, import (3.9.0, mockups `3.9.0`, approved 2026-11-22)
+## Offer delay, previous version, import (3.9.0, mockups `3.9.0`, approved 2026-11-22)
 - **Options (F1):** "Offer updates only after (days)" in "Checks" after "Check time";
   "Keep installed versions" in "Firmware & Storage" after "Allow downgrades", below it
   the line "n installed versions: x are stored (MB), y are downloaded at the next check
@@ -106,6 +106,8 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
   before saving." (approved 2026-11-21); it disappears when the user edits the field.
 
 ## Connection test of the download server (3.12.0, mockups `3.12.0-ui` A1, approved 2026-11-24)
+- **Help text of the download base URL (2026-11-24):** ends with the hint that the host port
+  is set in the Configuration tab of the app (Network) and the address must use it.
 - **Row (1 a):** below the download base URL: "Test connection" (play icon) and the last
   result: green "Reachable · last tested <time> with <device>", red "Not reachable · …" or
   grey "Not tested yet"; shown while the result belongs to the saved address. The button is
@@ -115,8 +117,11 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
   "Automatic (first reachable device of Gen 2 or newer)" and the devices that can test),
   hint about Gen 1 and the one-time test address; Cancel / blue "Start test". Running and
   result: check lines Download base URL, Download server, "Fetch by <device> (<ip>)";
-  reachable: green message; not reachable: red message, the error (English server text),
-  "Common causes" and the hint about the port; Close / blue "Test again". Without a Gen2+
+  reachable: green message; not reachable: red message, the error (English server text;
+  a device error as readable text with its codes, e.g. "connection error (Shelly code -114 /
+  -14)", the raw answer only in the log entry and the bug ticket text), "Common causes" (the
+  port cause names the port of the saved address) and the hint about the port; Close / blue
+  "Test again". Without a Gen2+
   device: yellow message "No Shelly of Gen 2 or newer is known yet …".
 - **Installation dialog (1 a):** yellow check line "Download server" with "Test now" at the
   top of "Before installing" while no test with the current address succeeded.

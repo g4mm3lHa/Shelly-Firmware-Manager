@@ -887,7 +887,7 @@ async def test_preview_and_restore(backed, net, shellys):
     mgr.reserve_restore(backup["id"], ["scripts", "settings"], False, "alice")
     state = mgr.public_state()
     assert state["restore"]["steps"] == ["backup", "settings", "scripts", "verify"] and "user" not in state["restore"]
-    assert "Restoring a backup" in state["busy"] and state["busy_note"] == "Restoring a backup"
+    assert state["busy"] == "Restoring a backup"
     for blocked in (
         lambda: mgr.reserve_check("all"),
         lambda: mgr.reserve_check("device", A),
@@ -1232,6 +1232,13 @@ async def test_comparison_after_a_confirmed_update(net, shellys, monkeypatch, qu
     assert view["after_update"]["changed_count"] == 1
     entry = backup_events(mgr, "compared")[-1]
     assert (entry["severity"], entry["changed"], entry["scripts_stopped"]) == ("warning", 1, ["auto-light.js"])
+    assert entry["changed_rows"] == [{"key": "switch:0 · initial_state", "before": "off", "now": "on"}]
+    # "Seen" removes the line below the firmware; the comparison stays until the next check
+    assert mgr.after_update_seen(A) is True and mgr.devices[A]["after_update"]["seen"] is True
+    assert mgr.after_update_seen(B) is False
+    # The check after an intermediate version keeps the comparison, any other check ends it
+    await mgr.check_device(A, trigger="step")
+    assert mgr.devices[A]["after_update"]["changed_count"] == 1
     await mgr.check_device(A)
     assert "after_update" not in mgr.devices[A]
     plain_mgr = manager_with(net, shellys, backup_before_install=False)

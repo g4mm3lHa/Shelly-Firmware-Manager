@@ -121,7 +121,6 @@ class Manager(Schedules):
             "offer_after_days": self.offer_after_days,
             "last_scan": self.last_scan,
             "busy": self.busy,
-            "busy_note": self.busy_note,  # line under the page title (no checks, see busy_note)
             "schedule_running": self.schedule_running,  # name of the schedule whose run is going on
             # mark of the newest log entry (EventLog.latest): the Logs tab reloads and marks unread
             # entries; the "!" of the tab follows the newest error entry

@@ -711,10 +711,13 @@ class Installs(Checks):
         result.update(at=int(time.time()), url=url)
         self.connection_test = result
         self.save()
-        log.info("Connection test with %s: %s", result.get("device"), "reachable" if result["ok"] else result["error"])
+        outcome = "reachable" if result["ok"] else result["error"]
+        if result.get("detail"):
+            outcome += f" ({result['detail']})"  # the device's raw answer
+        log.info("Connection test with %s: %s", result.get("device"), outcome)
         self.events.add(
             "connection", ok=result["ok"], severity="success" if result["ok"] else "error", device=result.get("device"),
-            url=url, error=result.get("error"), user=user,
+            url=url, error=result.get("error"), detail=result.get("detail"), user=user,
         )  # fmt: skip
         return result
 
@@ -751,12 +754,10 @@ class Installs(Checks):
             log.warning("Connection test: %s did not answer", dev.get("name"))
             result.update(error=f"Device not reachable: {error_text(err, 200) or type(err).__name__}", silent=True)
         except ShellyError as err:
-            text = error_text(err, 300)
-            if "-104" in text:
-                text = f"No connection to {url} (timeout after {shelly.FETCH_TEST_TIMEOUT_S} s): {text}"
-            elif "-114" in text:
-                text = f"No connection to {url}: {text}"
-            result["error"] = text
+            raw = error_text(err, 300)
+            result["error"] = shelly.fetch_error(raw, url)
+            if result["error"] != raw:
+                result["detail"] = raw  # the device's own answer: Logs tab, app log and bug ticket text only
         finally:
             self._test = None
         return result

@@ -1016,6 +1016,30 @@ async def fetch_test(
     }
 
 
+# Error code of a device answer: "'code': -114" (RPC error object) or a leading "-104 …"
+_FETCH_CODE_RE = re.compile(r"'code':\s*(-?\d+)|^Device reports:\s*(-\d+)\b")
+# Low-level code at the end of the device's message, e.g. "-1: Connection error: -14"
+_FETCH_DETAIL_RE = re.compile(r"error:\s*(-\d+)")
+
+
+def fetch_error(text: str, url: str) -> str:
+    """Readable text of a failed fetch of the connection test (fetch_test): the codes of
+    the device's answer instead of its raw error object, e.g. "No connection to <url>:
+    connection error (Shelly code -114 / -14)". Texts without a device code (password,
+    unsupported …) stay as they are; the raw text is kept by the caller for the log."""
+    match = _FETCH_CODE_RE.search(text)
+    if not match:
+        return text
+    code = match.group(1) or match.group(2)
+    detail = _FETCH_DETAIL_RE.search(text)
+    codes = f"{code} / {detail.group(1)}" if detail and detail.group(1) != code else code
+    if code == "-104":
+        return f"No connection to {url}: timeout after {FETCH_TEST_TIMEOUT_S} s (Shelly code {codes})"
+    if code == "-114":
+        return f"No connection to {url}: connection error (Shelly code {codes})"
+    return f"The device could not fetch {url} (Shelly code {codes})"
+
+
 async def port_open(ip: str, port: int) -> float:
     """Seconds needed to open a TCP connection to ip:port (closed at once, nothing is
     sent). TimeoutError or OSError if the device does not accept it within

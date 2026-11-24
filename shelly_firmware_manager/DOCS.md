@@ -112,6 +112,9 @@ server of the app (port 8098) and be reachable from every Shelly.
 
 - Form: `http://<address>:<port>` or `https://<address>:<port>`. A path may follow, e.g.
   for a reverse proxy; the file name is appended to it.
+- The port is the host port of the app: it is set on the app page in Home Assistant,
+  tab **Configuration**, section **Network** (default 8098). If you change it there,
+  change the address too.
 - Use the IP address of Home Assistant, not a host name: Shellys often cannot resolve
   names, the update then fails with a connection error. A host name is accepted, but
   the Settings tab warns while you type.
@@ -170,7 +173,9 @@ search finds the area too. The app reads the areas at every check.
 
 **Security:** a strip above the list counts the devices without password protection
 and with the cloud, the access point or the websocket debug log switched on (unknown
-states do not count). A click on a count filters the list, a second click clears it.
+states do not count). Only counts above 0 are shown; without any, the strip shows **No
+findings**. On a phone a count shows its icon and number only, the name is in its
+tooltip. A click on a count filters the list, a second click clears it.
 
 The list is split into sections, each shown only when it has devices. A device appears
 in the first section that fits, **Removed** and **Ignored** first:
@@ -284,8 +289,8 @@ password is not stored here.
 **Row menu** ⋮ per device: Check for updates, Install update (for a scheduled
 installation: **Install now** and **Cancel scheduled installation**), Offer update now (only
 while an update is on hold), Downgrade, Device details (status, firmware with build date
-and way back, model, generation, firmware ID, NTP server and history), Comparison after
-update (while a just updated device shows "Updated"), Reload device info, Open web UI, the device settings, Ignore / Resume device and Restart. On touch
+and previous version, model, generation, firmware ID, NTP server and history), Comparison after
+update (until the next check of the device), Reload device info, Open web UI, the device settings, Ignore / Resume device and Restart. On touch
 devices a tap on a disabled button shows the reason.
 
 **Battery devices** (e.g. H&T, door/window sensors) sleep between wake-ups and answer
@@ -358,10 +363,10 @@ are offered at once.
 Shelly only offers the current version for download. With **Keep installed versions**
 on (default), a check also stores the version a Gen2+ device runs while it is up to
 date – only then does Shelly still offer that file. After the next update this file is
-the device's way back (see [Downgrade](#downgrade-gen2)).
+the device's previous version (see [Downgrade](#downgrade-gen2)).
 
 A device with an open update has no source for its installed version any more; the
-installation dialog then says that there is no way back. The line below the option in
+installation dialog then says that it cannot be downgraded to it after the update. The line below the option in
 the Settings tab shows how many installed versions are stored, how many the next check
 downloads, and the free disk space.
 
@@ -371,7 +376,7 @@ downloads, and the free disk space.
    "Install update" in the row menu, or **Install** behind a device in the Firmware tab).
 2. The dialog shows installed and target version, build date, size, SHA-256, source and
    the changelog (security entries and entries for this model are highlighted). The
-   section **Before installing** checks two points: **Way back** (Gen2+: is the
+   section **Before installing** checks two points: **Previous version** (Gen2+: is the
    installed version stored, so a downgrade stays possible?) and **Wi-Fi signal** (read
    from the device when the dialog opens; −80 dBm and below is weak, the download may
    fail). Devices on the cable have no signal line; "unknown" means the device did not
@@ -444,7 +449,7 @@ may contain bugs." – also for a scheduled installation. The offer delay does n
 betas. Shelly offers betas only now and then and not for every model; the app log names
 for every checked device whether a beta was offered.
 
-The way back to a stable version is a downgrade, so it needs that version in the firmware
+Returning to a stable version is a downgrade, so it needs that version in the firmware
 store (see [Keep installed versions](#keep-installed-versions)). When you switch the
 option off, offered betas are withdrawn at the next start of the app (saving the
 settings restarts it); a device that already runs a beta is not changed. Gen1 devices get
@@ -480,7 +485,7 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
 - All downloaded and uploaded firmware files, grouped by device type, with size, date,
   SHA-256 and the devices they are provided for. The top shows the number of files, their
   total size and the free disk space. Filters: Provided (to at least one device),
-  Installed (a device runs this version now – its way back after the next update),
+  Installed (a device runs this version now – its previous version after the next update),
   Uploaded, Imported (not confirmed by the Shelly update server yet), Intermediate, Gen1
   and Unused (no listed device has this firmware ID; no file
   counts as unused while the ID of a device is unknown, e.g. a sleeping battery device).
@@ -504,7 +509,7 @@ A device may refuse a downgrade, and settings of newer firmware may be lost.
   bin icon (two confirmations). A file that is provided to devices can be deleted too:
   the dialog names them, they lose the provided update and show "Available" until they
   are checked again. For a version marked "Installed" the dialog warns that these
-  devices have no way back after their next update without it. A file that is being installed cannot be deleted, nor any file
+  devices cannot return to it after their next update without it. A file that is being installed cannot be deleted, nor any file
   during **Check all** and the files of the checked device's type during a single check. To skip a stored version (Gen1: the store comes first),
   delete it.
 - **Upload firmware** adds a version you have from another source:
@@ -616,8 +621,11 @@ started) and compares it with that backup. While the device shows "Updated", a l
 below its firmware names the changed settings or the scripts that ran before and do not
 run now; **Comparison after update** in the row menu shows the details: changed values,
 settings that are new with the firmware (they have Shelly's default value, collapsed)
-and the scripts. Counters that change with every update (`sys.cfg_rev`) are not
-compared. Nothing is changed on the device; the result is logged. Downgrades and
+and the scripts. **Seen** in that dialog removes the line; the comparison stays in the
+row menu until the next check of the device (the check right after an intermediate
+version keeps it). Counters that change with every update (`sys.cfg_rev`) are not
+compared. Nothing is changed on the device; the result is logged with the first changed
+values and the stopped scripts. Downgrades and
 installations without a backup **Before update** get no comparison.
 
 ### Logs
@@ -634,7 +642,7 @@ the user of the check that fetched it; scheduled checks and their downloads name
 in its details in the normal text colour – they are not contacted and never make the
 entry a warning or error. Removed devices are counted too ("1 removed"); each one is a
 warning if it still answers at its last address and an error if not. A device that does not
-answer is an error; a battery device that is asleep is a warning. Filters and a device search help to find entries. Passwords never appear in the log. Consecutive
+answer is an error; a battery device that is asleep is a warning. Filters and a device search help to find entries; **Hide successful entries** leaves only warnings and errors. Passwords never appear in the log. Consecutive
 entries of the same device are marked by a bar at the side.
 
 The tab updates itself when a new entry is written. A red "!" on the tab marks error
@@ -761,7 +769,8 @@ Gen2+ firmware is downloaded over HTTPS only.
 | Installations are disabled: the download base URL is not a valid address | The saved address contains characters or a host name that are not allowed – correct it in the Settings tab (see [Download base URL](#download-base-url)) |
 | Installations are disabled: the IP address of the download base URL is not in a private network | The saved address was accepted by an older version of the app – correct it in the Settings tab; installations stay disabled until then |
 | Download rejected: request came from 172.30.x.x | Docker hides the device address – turn off "Serve downloads only to known Shellys" |
-| Not reachable (connection test) – No connection to … (timeout after 8 s) | The Shelly gets no answer from the download base URL: check the IP address, the host port of the app (**Network** on the app page) and firewalls or separate networks (VLAN, guest Wi-Fi) between the Shelly and Home Assistant |
+| Not reachable (connection test) – No connection to …: timeout after 8 s (Shelly code -104) | The Shelly gets no answer from the download base URL: check the IP address, the host port of the app (**Network** on the app page) and firewalls or separate networks (VLAN, guest Wi-Fi) between the Shelly and Home Assistant |
+| Not reachable (connection test) – No connection to …: connection error (Shelly code -114 / …) | The Shelly could not open a connection, usually because nothing listens on that port: check that the port of the address is the host port of the app (**Network** on the app page) and the IP address. The log entry shows the device's own answer |
 | Another web server answered at … (connection test) | The address and port lead to another server, not to the download server of this app – check the IP address and the port |
 | The request reached the download server from …, not from the device address (connection test) | Network address translation (NAT, e.g. Docker or a router between networks) hides the device address – turn off **Serve downloads only to known Shellys** or route without NAT |
 | No Shelly of Gen 2 or newer is known yet – run a check first (connection test) | Only Gen2+ Shellys can run the test. Run **Check now** first; Gen1 devices cannot test the connection |
@@ -910,7 +919,7 @@ in the firmware store and **Allow downgrades** is switched on (see
   re-created script, schedule or webhook can get another ID on the device. Gen1: actions
   are part of a backup only where the device lets them be read.
 - Keep installed versions: the installed version can be stored only while Shelly still
-  offers it, so a device that already has an open update has no way back stored.
+  offers it, so a device that already has an open update has no previous version stored.
 - Offer delay: the age counts from the build date, which can lie a few days before Shelly
   starts to offer the version; that start cannot be read.
 - Gen1: Shelly offers the firmware only over plain HTTP and without a checksum (see

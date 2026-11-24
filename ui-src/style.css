@@ -924,6 +924,8 @@ button.after-note span{text-decoration:underline}
 .sec-n{font-size:var(--fs-text);font-weight:600}
 .sec-label{font-size:var(--fs-small);color:var(--secondary-text-color)}
 .sec-tile.active{border-color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 12%,var(--card-background-color))}
+/* Phones: counters as symbol and number only (the name is in the tooltip) */
+@media (max-width:700px){.sec-tile.has{padding-right:10px}.sec-tile.has .sec-label{display:none}}
 /* Logs tab: red trash icon of "Delete all logs" */
 #log-clear svg{fill:var(--error-color)}
 @media (max-width:700px){

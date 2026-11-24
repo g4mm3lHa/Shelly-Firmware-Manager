@@ -52,7 +52,7 @@ const deviceSection = d => section(t("Device"), valueList([[t("Name"), d.name], 
   [t("Model"), modelGen(d)]]));
 /** Installed and target version on one line. */
 const versionStep = (from, to) => `${from || "–"}  →  ${to || "–"}`;
-// ---- Before installing: way back (installed version stored) and Wi-Fi signal
+// ---- Before installing: previous version (installed version stored) and Wi-Fi signal
 // Signal classes in dBm: better than -70 good, -70 to -79 fair, -80 and below weak
 const WEAK_RSSI = -80, FAIR_RSSI = -70;
 const dbm = rssi => `${String(rssi).replace("-", "−")} dBm`;
@@ -60,7 +60,7 @@ const weak = rssi => typeof rssi === "number" && rssi <= WEAK_RSSI;
 const signalText = rssi => `${dbm(rssi)} · ${weak(rssi) ? t("weak") : rssi <= FAIR_RSSI ? t("fair") : t("good")}.`;
 const WEAK_TEXT = rssi => t("Weak Wi-Fi signal ({dbm}). The Shelly downloads the firmware over Wi-Fi – the download may fail.", {dbm: dbm(rssi)});
 const BACK_OK = d => t("{version} is stored – a downgrade stays possible.", {version: d.way_back.version});
-const BACK_NO = d => t("{version} is not stored and Shelly no longer offers it – there is no way back after this update.", {version: d.way_back.version});
+const BACK_NO = d => t("{version} is not stored and Shelly no longer offers it – after this update there is no downgrade to it.", {version: d.way_back.version});
 const noWayBack = d => !!d.way_back && !d.way_back.stored;
 /** Build date of the offered version with its age in days (local dates). */
 export function daysAgo(day) {
@@ -81,7 +81,7 @@ async function readSignals(devs) {
 const backupCheck = one => ui.state && ui.state.backup_before_install ? [checkLine("ok", t("Backup"),
   one ? t("The settings of the device are backed up right before the installation.") : t("The settings of every device are backed up right before its installation."))] : [];
 /** Section "Before installing": download server (while its connection was never tested
- *  successfully), way back, backup and Wi-Fi signal; for several devices only
+ *  successfully), previous version, backup and Wi-Fi signal; for several devices only
  *  the findings per device (or one line "every device" without findings). The signal is
  *  read when the dialog opens ("Reading …"); devices on the cable have no signal line, a
  *  value that could not be read is shown as "unknown" (yellow, a finding). */
@@ -90,9 +90,9 @@ function beforeInstalling(devs) {
   const back = () => {
     const known = devs.filter(d => d.way_back), missing = known.filter(noWayBack);
     if (!known.length) return [];
-    if (one) return [checkLine(known[0].way_back.stored ? "ok" : "warn", t("Way back"), known[0].way_back.stored ? BACK_OK(known[0]) : BACK_NO(known[0]))];
-    return missing.length ? missing.map(d => checkLine("warn", `${t("Way back")} – ${d.name}`, BACK_NO(d)))
-      : [checkLine("ok", t("Way back"), t("The installed version of every device is stored."))];
+    if (one) return [checkLine(known[0].way_back.stored ? "ok" : "warn", t("Previous version"), known[0].way_back.stored ? BACK_OK(known[0]) : BACK_NO(known[0]))];
+    return missing.length ? missing.map(d => checkLine("warn", `${t("Previous version")} – ${d.name}`, BACK_NO(d)))
+      : [checkLine("ok", t("Previous version"), t("The installed version of every device is stored."))];
   };
   const signal = values => {
     if (!values) return [checkLine("wait", t("Wi-Fi signal"), t("Reading …"))];
@@ -119,7 +119,7 @@ const IMPORT_FALLBACK = d => (d.gen === 1 ? t("Shelly's firmware list could not 
   " " + t("This stored version comes from an imported firmware store and Shelly has not confirmed it – it is only as trustworthy as the export you imported. It is offered for a manual installation at your own risk.") +
   (d.gen === 1 ? "" : " " + t("It also cannot be verified whether the device needs an intermediate version first; if it does, the device rejects the firmware."));
 // Beta version (option "Offer beta firmware"): yellow box and an own tick in the dialog
-const BETA_WARNING = t("Beta firmware: a pre-release version of Shelly for testing. It can contain errors. The way back to a stable version is a downgrade, which needs that version in the firmware store.");
+const BETA_WARNING = t("Beta firmware: a pre-release version of Shelly for testing. It can contain errors. Returning to a stable version is a downgrade, which needs that version in the firmware store.");
 // "Install at": once, at most 7 days ahead, in the time zone of Home Assistant
 const PLAN_DAYS = 7;
 const isoDay = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;

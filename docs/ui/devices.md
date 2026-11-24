@@ -127,14 +127,15 @@ Wordings: `mockups/3.9.0/TEXTE.md`.
   Row menu "Offer update now" after "Install update" (lifts the hold, checks the device).
   Device details: "Available: <version> · on hold until <date>".
 - **Device details (F5, F22):** rows "Build date" (offered or held version, date only)
-  and "Way back" ("<version> is stored" / "is not stored", Gen2+).
+  and "Previous version" ("<version> is stored" / "is not stored", Gen2+; name approved
+  2026-11-24).
 - **Shellys not listed (F10, F11):** line "N of M Shellys listed · Why are K missing?"
   (link style) only while at least one is missing: right in the toolbar before
   "Columns" on wide screens, above the first card on phones; opens the dialog "Shellys
   not listed" (intro, section "Not listed · K" with name, model, yellow reason tag and
   what to do; section "Still missing?").
 - **Installation dialog (F4, F6, F12):** section "Before installing" after "Firmware" as a
-  check list (green check / yellow "!"): "Way back" (Gen2+) and "Wi-Fi signal" (read when
+  check list (green check / yellow "!"): "Previous version" (Gen2+) and "Wi-Fi signal" (read when
   the dialog opens, "Reading …"; −80 dBm and below weak; devices on the cable: no line;
   not readable: yellow line "Wi-Fi signal: unknown", a finding, approved 2026-11-22). Several devices: only the findings per device, else one line
   "every device". Row "Build date" (date · age) in the section "Firmware" (one device).
@@ -221,11 +222,14 @@ Wordings: `mockups/3.9.0/TEXTE.md`.
   are disabled; tag "n of 3 done". After three ticks the card stays with "Hide" (it never
   comes back) and the line "Everything is set up. Updates are installed only after your
   approval." The yellow notice bar stays as before. Phones: steps below each other.
-- **Security (C5, 9 a):** narrow strip "Security" above the cards (below "Getting started"):
-  four counters Unprotected (lock), Cloud on, Access point on, Debug log on; unknown states
-  do not count, 0 shows a green check; a click sets the filter, a second click clears it
-  (tile marked while active). New filter entries "Access point on" and "Debug log on" after
-  "Cloud on".
+- **Security (C5, 9 a; rc2 changes approved 2026-11-24):** narrow strip "Security" above the
+  cards (below "Getting started"): counters Unprotected (lock), Cloud, Access point, Debug log
+  (short names; the filter entries keep "Cloud on", "Access point on", "Debug log on"), each
+  only while above 0 (an active filter keeps its tile); unknown states do not count; all 0:
+  one green check tile "No findings". Phones (≤ 700 px): symbol and number only, the name in
+  the tooltip (variant A, `mockups/3.12.0-rc2`). A click sets the filter, a second click
+  clears it (tile marked while active). Filter entries "Access point on" and "Debug log on"
+  after "Cloud on".
 - **Area (C1, 7 a, 8 c):** column "Area" after "Device" while at least one device has an
   area of Home Assistant (else no column, no Columns/Sort entry); hideable via Columns;
   "–" without area, sorted last; phones: first row "Area" of the details. Own filter tool
@@ -241,10 +245,12 @@ Wordings: `mockups/3.9.0/TEXTE.md`.
 - **Details for a bug ticket (A3, 10):** button bottom left in the device details; dialog
   (copy icon) with intro, the masked text (monospace box; English, plus language and
   browser), hint "Please read it before pasting …", Close / blue "Copy text".
-- **Comparison after update (B3, 5 a, 6 b):** while a device shows "Updated" and the
-  comparison found changed values or stopped scripts: yellow link line "n settings changed"
-  (or "n scripts stopped") under the firmware; row menu "Comparison after update" after
-  "Device details". Dialog (backup icon): Device, Update a → b, Compared with "Backup “Before
+- **Comparison after update (B3, 5 a, 6 b; rc2 2026-11-24):** while a device shows "Updated"
+  and the comparison found changed values or stopped scripts: yellow link line "n settings
+  changed" (or "n scripts stopped") under the firmware until "Seen"; row menu "Comparison
+  after update" after "Device details" as long as the comparison exists (until the next check
+  of the device; the check after an intermediate version keeps it). Dialog buttons: Close /
+  blue "Seen" while the line is shown (removes it), else Close only. Dialog (backup icon): Device, Update a → b, Compared with "Backup “Before
   update” · <time>"; section Result (check lines Settings, Scripts, New fields); "Changed · n"
   table (Setting, Before the update, Now); "New with the firmware · n" collapsed ("Show
   fields", Setting, Default value); hint "Not compared: counters that change with every

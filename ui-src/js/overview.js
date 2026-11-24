@@ -78,26 +78,32 @@ export function areaChoice(name, devices, label, chosen) {
 }
 
 // ---------------------------------------------------------------- Security
-// Narrow strip above the device cards: four counters (no password protection, cloud,
-// access point, websocket debug log switched on); unknown states do not count, 0 shows a
-// green check. A click sets the matching filter of the list, a second click clears it.
+// Narrow strip above the device cards: counters of no password protection, cloud, access
+// point and websocket debug log switched on, each only while it is above 0 (unknown states
+// do not count); all 0: one green check "No findings". Tiles carry a short name (phones:
+// symbol and number only, the name in the tooltip); the filter entries keep the long one.
+// A click sets the matching filter of the list, a second click clears it.
+/** [key, filter name, tile name, icon, test, tooltip] of each counter. */
 export const SECURITY_ITEMS = [
-  ["unprotected", t("Unprotected"), "lock", d => d.auth_enabled === false, t("Devices without password protection: anyone in the network can switch and change them.")],
-  ["cloud", t("Cloud on"), "cloud", d => d.cloud === true, t("Devices with the Shelly cloud switched on.")],
-  ["ap", t("Access point on"), "ap", d => d.ap === true, t("Devices whose own Wi-Fi access point is switched on.")],
-  ["debug", t("Debug log on"), "bug", d => d.debug_ws === true, t("Devices with the websocket debug log switched on.")],
+  ["unprotected", t("Unprotected"), t("Unprotected"), "lock", d => d.auth_enabled === false, t("Devices without password protection: anyone in the network can switch and change them.")],
+  ["cloud", t("Cloud on"), t("Cloud"), "cloud", d => d.cloud === true, t("Devices with the Shelly cloud switched on.")],
+  ["ap", t("Access point on"), t("Access point"), "ap", d => d.ap === true, t("Devices whose own Wi-Fi access point is switched on.")],
+  ["debug", t("Debug log on"), t("Debug log"), "bug", d => d.debug_ws === true, t("Devices with the websocket debug log switched on.")],
 ];
 /** The strip "Security" for the devices (search applied). */
 export function securityStrip(devices) {
-  const tiles = SECURITY_ITEMS.map(([key, label, iconName, fn, tip]) => {
+  const tiles = [];
+  for (const [key, , label, iconName, fn, tip] of SECURITY_ITEMS) {
     const n = devices.filter(fn).length, active = ui.devFilter === key;
-    const b = el("button", null, "sec-tile" + (n ? " has" : " zero") + (active ? " active" : "")); b.type = "button";
-    b.append(box("span", "sec-icon", icon(n ? iconName : "check")), el("span", String(n), "sec-n"), el("span", label, "sec-label"));
-    b.setAttribute("aria-pressed", String(active));
-    attachTip(b, () => tip + " " + (active ? t("Click: clear the filter.") : t("Click: filter the list.")));
+    if (!n && !active) continue;   // an active filter keeps its tile until it is cleared
+    const b = el("button", null, "sec-tile has" + (active ? " active" : "")); b.type = "button";
+    b.append(box("span", "sec-icon", icon(iconName)), el("span", String(n), "sec-n"), el("span", label, "sec-label"));
+    b.setAttribute("aria-pressed", String(active)); b.setAttribute("aria-label", `${label}: ${n}`);
+    attachTip(b, () => `${label}: ${tip} ` + (active ? t("Click: clear the filter.") : t("Click: filter the list.")));
     b.onclick = () => { ui.devFilter = active ? "all" : key; render(true); };
-    return b;
-  });
+    tiles.push(b);
+  }
+  if (!tiles.length) tiles.push(box("span", "sec-tile zero", box("span", "sec-icon", icon("check")), el("span", t("No findings"), "sec-label")));
   return box("div", "sec-strip", el("span", t("Security"), "sec-title"), ...tiles);
 }
 

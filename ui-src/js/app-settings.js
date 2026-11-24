@@ -20,7 +20,7 @@ export const OPTION_FIELDS = [
   ["check_interval_days", "Check every (days)", "number", "1–30 days", "Checks"],
   ["check_time", "Check time", "time", "Local time of Home Assistant", "Checks"],
   ["offer_after_days", "Offer updates only after (days)", "number", "Holds a new firmware version back until it is this many days old (age from its build date); 0 = offer at once. 0–60, default 0", "Checks"],
-  ["download_base_url", "Download base URL for the Shellys", "text", "LAN IP address of Home Assistant + host port 8098, e.g. http://192.168.1.20:8098 (no host name; IP addresses only in private networks). Required for installations", "Download Server"],
+  ["download_base_url", "Download base URL for the Shellys", "text", "LAN IP address of Home Assistant + host port 8098, e.g. http://192.168.1.20:8098 (no host name; IP addresses only in private networks). Required for installations. The host port is set in the Configuration tab of this app (Network); the address must use the same port.", "Download Server"],
   ["restrict_downloads_to_devices", "Serve downloads only to known Shellys", "bool", "Switch off if downloads are rejected from 172.30.x.x", "Download Server"],
   ["gen1_updates_enabled", "Enable Gen1 updates", "bool", "Gen1 firmware is only available via plain HTTP without a checksum", STORAGE],
   ["allow_downgrade", "Allow downgrades", "bool", "Installing an older stored firmware on Gen2+ devices (device menu and Firmware tab); off by default", STORAGE],

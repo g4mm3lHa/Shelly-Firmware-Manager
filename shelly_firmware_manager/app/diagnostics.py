@@ -112,6 +112,8 @@ def report(values: dict[str, Any], entries: Iterable[dict[str, Any]]) -> str:
     test_text = "not tested"
     if isinstance(test, dict):
         test_text = ("reachable" if test.get("ok") else "not reachable") + f" ({_when(test.get('at'))})"
+        if test.get("detail"):  # the device's raw answer of a failed test
+            test_text += f" · device answer: {test['detail']}"
     base = values.get("download_base") or "not set"
     lines.append(masker.text(f"Download base URL: {base} · connection test: {test_text}"))
     lines.append("Options: " + " · ".join(f"{k} {v}" for k, v in values.get("options", {}).items()))

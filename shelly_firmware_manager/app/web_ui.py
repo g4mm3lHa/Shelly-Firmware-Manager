@@ -220,6 +220,7 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
     app.router.add_post("/api/backups/{bid}/restore", backups.backup_restore)
     app.router.add_post("/api/backups/{bid}/download", backups.backup_download)
     app.router.add_post("/api/devices/{id}/backup", backups.backup_device)
+    app.router.add_post("/api/devices/{id}/after-update/seen", backups.after_update_seen)
     app.router.add_post("/api/devices/{id}/backups/import", backups.backup_import, name=BACKUP_IMPORT_ROUTE)
     app.router.add_get("/api/logs", settings.logs)
     app.router.add_post("/api/logs/clear", settings.logs_clear)

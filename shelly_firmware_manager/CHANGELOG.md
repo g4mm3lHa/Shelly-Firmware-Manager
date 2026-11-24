@@ -5,6 +5,32 @@
 Release candidate. Connection test of the download server, help for devices that do not
 answer, Home Assistant areas, a security overview and six more languages.
 
+Changes in rc2
+
+Added
+- Comparison after an update: "Seen" removes the line below the firmware; the
+  comparison stays in the row menu until the next check of the device.
+- Logs: the entry of a comparison after an update opens with the changed values
+  (before → now, shortened) and the scripts that stopped.
+
+Changed
+- Strip "Security": only counts above 0, otherwise "No findings"; shorter names; phones
+  show symbol and number only, the name is in the tooltip.
+- "Way back" is now called "Previous version" in the device details, the install dialog
+  and the Firmware tab.
+- Logs: "Hide successful entries" hides every successful entry, not only checks.
+- No status line under the page title any more; running work shows in the rows,
+  dialogs and tabs. The line remains for storage and loading errors.
+- Help of the download base URL: the host port is set in the app's Configuration tab
+  (Network).
+
+Fixed
+- Connection test: the cause names the port of the saved address instead of 8098; a
+  device error reads "connection error (Shelly code -114 / -14)", the raw answer is in
+  the log and the bug ticket text.
+- The comparison after an update is kept when the device installs an intermediate
+  version and is checked again right after it.
+
 Changes in rc1
 
 Added
