@@ -39,7 +39,7 @@ both servers in parallel (cancels checks/installations, saves the state), exit 0
 - `web_ui.py`: Ingress UI + JSON API: CSRF/size middleware, page, state, route table → `test_web.py`, `test_security.py`
 - `web_base.py`: shared parts of the handlers: `Handlers`, `json_body`, `guarded`, `translated`, `SECURITY_HEADERS` → `test_web.py`, `test_security.py`
 - `web_devices.py`, `web_firmware.py`, `web_backups.py`, `web_schedules.py`, `web_settings.py` (logs and settings): handlers per area → `test_web.py`, `test_security.py`, `test_backups.py`, `test_timetable.py`
-- `download_server.py`: LAN download server for the Shellys → `test_security.py`
+- `download_server.py`: LAN download server for the Shellys, address of the connection test → `test_security.py`, `test_diagnosis.py`
 - `shelly.py`: device access: errors and text helpers, authentication, requests, settings, OTA WebSocket → `test_device_settings.py`, `test_device_transport.py`, `test_guards.py`
 - `shelly_net.py`: device addresses: private networks only, origin pinning, host names → `test_guards.py`, `test_check.py`
 - `shelly_cloud.py`: manufacturer servers: offers, changelog pages, firmware downloads → `test_offers.py`, `test_guards.py`, `test_tls.py`
@@ -51,14 +51,17 @@ both servers in parallel (cancels checks/installations, saves the state), exit 0
 - `app_options.py`: option validation → `test_options.py`
 - `events.py`: activity log → `test_state.py`
 - `credentials.py`: per-device passwords → `test_state.py`
+- `diagnostics.py`: text of "Details for a bug ticket", masking (pure functions) → `test_diagnosis.py`
 - `changelog.py`: changelog pages → `test_changelog.py`, `test_changelog_pages.py`
 - `tls.py`: certificate pinning → `test_security.py`, `test_tls.py`
 - `data_paths.py`: paths below `/data` (read as `data_paths.NAME`)
 
 ## UI (`ui-src/js/*.js`, `ui-src/style.css`; built into `app/static/` – never read the build)
 
-`core.js` shared state and helpers · `i18n.js` language and `t()` (`i18n-de.js` German
-texts) · `devices.js` Devices tab · `install.js` install and downgrade dialogs ·
+`core.js` shared state and helpers · `i18n.js` language and `t()` (`i18n-<lang>.js` texts of
+de, nl, fr, it, es, pl, pt) · `devices.js` Devices tab · `diagnosis.js` connection test,
+Getting started, Try again, bug ticket text, comparison after an update · `overview.js`
+areas, Security strip, CSV export · `install.js` install and downgrade dialogs ·
 `device-settings.js` device dialogs · `firmware.js` Firmware tab · `schedules.js`
 Schedules tab · `backups.js` Backups tab and backup dialogs · `logs.js` Logs tab · `app-settings.js` Settings tab · `main.js` entry,
 header, tabs, polling.
@@ -66,5 +69,5 @@ UI checks: `qa/features/<area>.py` (runner `qa/ui_features.py`), `qa/ui_test.py`
 `docs/codemap/tests.md`.
 
 App definition besides `config.yaml`: `apparmor.txt`, `README.md` / `DOCS.md` (app store),
-`translations/en.yaml` and `de.yaml`. Check flow: `tools/dev/check.sh [tests|ui|full|build]`; rules of
+`translations/<lang>.yaml` (hint field `settings` in eight languages). Check flow: `tools/dev/check.sh [tests|ui|full|build]`; rules of
 ruff, mypy and pytest in `pyproject.toml`.

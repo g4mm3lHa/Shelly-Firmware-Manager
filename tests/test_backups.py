@@ -1227,7 +1227,7 @@ async def test_comparison_after_a_confirmed_update(net, shellys, monkeypatch, qu
     assert after["changed"] == [{"key": "switch:0 · initial_state", "before": "off", "now": "on"}]
     assert after["new"] == [{"key": "switch:0 · reverse", "value": "false"}]
     assert after["scripts"] == {"before": 1, "again": 0, "stopped": ["auto-light.js"]}
-    assert (after["old"], after["new"] and after["backup_at"]) and after["old"] == "1.4.0"
+    assert after["from_version"] == "1.4.0" and after["to_version"] == mgr.devices[A]["version"] and after["backup_at"]
     view = next(d for d in mgr.public_state()["devices"] if d["id"] == A)
     assert view["after_update"]["changed_count"] == 1
     entry = backup_events(mgr, "compared")[-1]

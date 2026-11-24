@@ -25,6 +25,9 @@ Part of `docs/CODEMAP.md`; read when you change routes: the table and the middle
 | `POST /api/devices/passwords` | `set_passwords` (`mode` store/set, `devices`, `password`, `confirm`, `acknowledged`, `keep`; result per device, never the password) |
 | `POST /api/devices/{id}/ignore` | `set_ignored` |
 | `POST /api/devices/{id}/reload` | `reload_device` |
+| `POST /api/devices/{id}/probe` | `probe_device` (Try again: `{address, port, device}` steps – address in Home Assistant, device port open, device answers; no check, nothing changed) |
+| `GET /api/devices/{id}/report` | `device_report` (`{text}`: Details for a bug ticket, masked; nothing sent anywhere) |
+| `POST /api/getting-started/hide` | `hide_getting_started` |
 | `POST /api/devices/{id}/forget` | `forget_device` (Remove from list; `confirm`; removed devices only) |
 | `GET /api/firmware` | `firmware_list` (per file `devices`: `id`, `name` of the devices it is provided for; `installed`: names of the devices running it; `changelog` flag), `store_size`, `free_space` |
 | `GET /api/firmware/{name}/changelog` | `firmware_changelog` (stored changelog of this file, no request) |
@@ -51,9 +54,11 @@ Part of `docs/CODEMAP.md`; read when you change routes: the table and the middle
 | `GET /api/logs` | `events.list` |
 | `POST /api/logs/{id}/delete` · `/api/logs/clear` | `events.remove` · `events.clear` (`confirm`) |
 | `GET` · `POST /api/settings` | `options_view` (+ `installed_versions`) · `save_options` + restart |
+| `POST /api/settings/connection-test` | `run_connection_test` (`device`: ID or null = automatic; one test at a time, else 409; answer: the result as in `connection_test`) |
 | `POST /api/settings/download-base/confirm` | `confirm_download_base` |
 | `GET /api/settings/app-page` | `app_page` (link to the app page, changelog) |
 | `GET /static/…` | `app.js`, `style.css` (immutable cache with `?v=`) |
 
 Download server (port 8098): `GET|HEAD /<sha256>.<zip|bin|gbl>` → `may_download`,
-`record_download` (GET only).
+`record_download` (GET only); `GET|HEAD /connection-test/<32 hex>` → `test_fetched` (only the
+running test's token, from its device, GET once; answer: a short text, never a file; else 404).

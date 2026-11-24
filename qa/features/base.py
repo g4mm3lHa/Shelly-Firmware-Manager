@@ -102,8 +102,9 @@ def tip_text(f):
 
 def filter_entries(f, view):
     """Entries of the filter popover of a tab (devices, firmware, logs) without opening
-    it: [(label, count, checked)]."""
-    return f.evaluate("""view => [...document.querySelectorAll(`#view-${view} .filter-item`)].map(b =>
+    it: [(label, count, checked)]; the area tool of the Devices tab is not part of it."""
+    return f.evaluate("""view => [...document.querySelectorAll(
+      `#view-${view} .tool:has(> .tool-btn[aria-label^="Filter"]) .filter-item`)].map(b =>
       [b.firstChild.textContent, b.lastChild.textContent, b.getAttribute('aria-checked') === 'true'])""", view)
 
 

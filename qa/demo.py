@@ -1,12 +1,14 @@
 """Local demo server with fake data for UI tests (no network access).
 
-Usage: python demo.py <app_dir> <port> <scenario: idle|busy|legacy|missing|features|first|public|docs>
+Usage: python demo.py <app_dir> <port> <scenario: idle|busy|legacy|missing|features|first|public|docs|diagnosis>
 legacy: download_base_url is the former example value (not confirmed) and one device
 installs with device progress; missing: download_base_url not set; public: download_base_url is a public IP address (saved
 before it was refused); features: idle
 plus stored older versions (one of them uploaded) for downgrade and upload checks, and backups of device
 settings with Shellys in memory that answer a backup and a restore; docs: features with
-fewer open updates and other models, for the screenshots of the documentation.
+fewer open updates and other models, for the screenshots of the documentation; diagnosis: features
+plus Home Assistant areas, a device that did not answer, a comparison after an update, the card
+"Getting started" and a fake connection test (automatic: reachable, a chosen device: not reachable).
 Serves the UI app below /ui/ and a same-origin wrapper /wrap that embeds it in an
 iframe (like the HA Ingress panel)."""
 
@@ -18,6 +20,9 @@ import time
 from pathlib import Path
 
 app_dir, port, scenario = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+diagnosis = scenario == "diagnosis"
+if diagnosis:
+    scenario = "features"
 sys.path.insert(0, app_dir)
 import data_paths
 import manager
@@ -46,6 +51,7 @@ elif scenario == "missing":   # also shows downgrades switched off
 m = manager.Manager(opts, session=None, token="t")
 # Fresh installation: only the "first" demo shows the first-start question
 m.first_start_open = scenario == "first"
+m.getting_started = False  # demos play an existing installation; the diagnosis scenario shows the card
 now = int(time.time())
 names = ["Kitchen light", "Living room ceiling with a really long device name", "Hall", "Garage door", "Pool pump",
          "Office desk", "Bedroom shutter", "Heat pump", "Garden plug", "Basement", "Attic fan", "Terrace",
@@ -382,6 +388,43 @@ if scenario == "busy":
     m.progress = {"kind": "all", "total": 25, "done": 18, "errors": 2, "phase": "devices"}
     m.activity.update({ids[18]: "checking", ids[19]: "downloading"})
     m.activity.update(dict.fromkeys(ids[20:], "waiting"))
+
+if diagnosis:
+    areas = ["Kitchen", "Living room", "Hall", "Garage", "Garden", "Office", "Bedroom", "Basement"]
+    for i, d in enumerate(m.devices.values()):
+        d["area"] = areas[i % len(areas)] if i % 5 != 4 else None
+    m.devices[f"{4:032x}"]["unreachable"] = True
+    m.devices[f"{6:032x}"].update(version="1.5.0", after_update={
+        "at": now - 600, "backup_at": now - 700, "from_version": "1.4.0", "to_version": "1.5.0",
+        "changed": [{"key": "cloud.enable", "before": "false", "now": "true"},
+                    {"key": "switch:0.initial_state", "before": "restore_last", "now": "off"}],
+        "new": [{"key": "ble.rpc.enable", "value": "true"}, {"key": "mqtt.enable_control", "value": "true"},
+                {"key": "switch:0.reverse", "value": "false"}],
+        "changed_count": 2, "new_count": 3, "scripts": {"before": 2, "again": 1, "stopped": ["ble-gateway"]}})
+    m.getting_started = True
+
+    async def demo_test(device_id, user="unknown"):
+        """Connection test without a device: automatic reachable, a chosen device not."""
+        await asyncio.sleep(1.5)
+        dev = m.devices[device_id or m.test_devices()[0]]
+        ok = device_id is None
+        m.connection_test = {"ok": ok, "device": dev["name"], "ip": dev["origin"][7:], "seconds": 0.21 if ok else None,
+                             "error": None if ok else "No connection to http://192.168.1.2:8098 (timeout after 8 s): Deadline exceeded",
+                             "at": int(time.time()), "url": m.download_base}
+        return m.connection_test
+
+    async def demo_probe(_device_id):
+        """"Try again": address found, port without answer."""
+        await asyncio.sleep(1)
+        return {"address": {"state": "ok", "ip": "192.168.1.14", "moved": False},
+                "port": {"state": "error", "port": 80, "text": "no answer after 5 s"}, "device": {"state": "skipped", "text": "Not tested"}}
+
+    async def demo_ha_version():
+        return "2026.11.2"
+
+    m.run_connection_test = demo_test
+    m.probe_device = demo_probe
+    m.ha_version = demo_ha_version
 
 
 async def demo_signal(device_id):

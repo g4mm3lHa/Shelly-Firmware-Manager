@@ -8,6 +8,7 @@ import {
 import {autoLanguage, languageChoice, LANGUAGES, setLanguage} from "./i18n.js";
 import {bulkPasswords} from "./device-settings.js";
 import {downgradeWarning} from "./install.js";
+import {connectionRow} from "./diagnosis.js";
 
 // ---------------------------------------------------------------- App settings
 // All app options, grouped into cards in this order (Title Case card heads). Saving
@@ -146,6 +147,7 @@ export function renderSettings() {
       const note = key === "keep_installed" ? el("div", installedNote(o.installed_versions), "desc set-note")
         : key === "backup_keep" ? el("div", backupsNote(ui.state && ui.state.backup_totals), "desc set-note") : null;
       form.append(box("div", `set-field t-${type}`, box("div", "set-name", lab, info), box("div", "set-control", control), help, warn, suggest, note));
+      if (key === "download_base_url") form.append(connectionRow(control));   // "Test connection" and the last result
     }
     return box("div", "card", box("div", "card-head", el("h2", t(group))), box("div", "card-body", form));
   });
@@ -377,7 +379,7 @@ function importSummary(token, name, r) {
   const [ack, ackLabel] = checkbox(t("I created this export myself or I trust its source"));
   modal(IMPORT_TITLE, [
     messageBody(tn(r.files, "Seal and the file checked – nothing was changed since the export.", "Seal and all {n} files checked – nothing was changed since the export."), "success"),
-    valueList([[t("File"), name], [t("Exported"), r.exported ? fmt(r.exported) : t("unknown")], [t("Size"), mb(r.size)],
+    valueList([[t("File"), name], [t("Exported"), r.exported ? fmt(r.exported) : "–"], [t("Size"), mb(r.size)],
       [t("Backups"), r.backups ? t("{n} in the file · {new} new", {n: r.backups, new: r.backups_new || 0}) : null]]),
     section(t("Result"), box("div", "imp-groups", ...groups)),
     el("p", IMPORT_MARK, "hint"),

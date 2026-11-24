@@ -146,7 +146,7 @@ function renderProgress(p) {
 }
 const VIEWS = ["devices", "firmware", "schedules", "backups", "logs", "settings"];
 /** Switch tab and load its data. */
-function showView(v) {
+export function showView(v) {
   ui.view = v; closeRowMenu();
   for (const k of VIEWS) { $("view-" + k).hidden = k !== v; $("tab-" + k).classList.toggle("active", k === v); $("tab-" + k).setAttribute("aria-selected", k === v); }
   // "Check now" belongs to the device data, not to the settings: hidden there, its place

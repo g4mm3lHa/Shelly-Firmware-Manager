@@ -268,8 +268,9 @@ class Backups(DeviceSettings):
         """Comparison after a confirmed update: the device is read again (after
         AFTER_UPDATE_WAIT_S, so its scripts have started) and compared with the backup
         made right before the installation (shelly_backup.after_update). The result is
-        kept on the device as after_update ({"at", "backup_at", "old", "new", ...}, or
-        {"at", "error"}) for as long as the device shows "just updated", and logged.
+        kept on the device as after_update ({"at", "backup_at", "from_version",
+        "to_version", ...}, or {"at", "error"}) for as long as the device shows "just
+        updated", and logged.
         Nothing is changed on the device."""
         await asyncio.sleep(AFTER_UPDATE_WAIT_S)
         dev = self.devices.get(device_id)
@@ -291,8 +292,8 @@ class Backups(DeviceSettings):
             return
         result = shelly_backup.after_update(int(entry["gen"]), before, now)
         dev["after_update"] = {
-            "at": int(time.time()), "backup_at": entry["at"], "old": entry.get("fw"), "new": dev.get("version"),
-            **result,
+            "at": int(time.time()), "backup_at": entry["at"],
+            "from_version": entry.get("fw"), "to_version": dev.get("version"), **result,
         }  # fmt: skip
         scripts = result["scripts"]
         severity = "warning" if result["changed_count"] or scripts["stopped"] else "success"

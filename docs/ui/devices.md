@@ -211,3 +211,45 @@ Wordings: `mockups/3.9.0/TEXTE.md`.
 - **Running downgrade (review 3.10.0, F1 a, approved 2026-11-22):** the device stays in the
   section it had before (usually "Up-To-Date"); Firmware column "installed → target" with
   the tag "Downgrade" beside the firmware ID; status pill "Downgrading n %".
+
+## Diagnosis and overview (3.12.0, mockups `3.12.0-ui`, approved 2026-11-24)
+- **Getting started (D3, 3 a, 4 a):** card above the device list, only on a fresh
+  installation (state `getting_started`); steps in this order: "Set the download address"
+  (Open settings), "Start the first check" (Check now), "Test the connection" (Test now).
+  Ticked step: green check and its result ("http://…", "n Shellys found · m updates",
+  "Reachable · tested with <device>"); only the next open step has a blue button, later ones
+  are disabled; tag "n of 3 done". After three ticks the card stays with "Hide" (it never
+  comes back) and the line "Everything is set up. Updates are installed only after your
+  approval." The yellow notice bar stays as before. Phones: steps below each other.
+- **Security (C5, 9 a):** narrow strip "Security" above the cards (below "Getting started"):
+  four counters Unprotected (lock), Cloud on, Access point on, Debug log on; unknown states
+  do not count, 0 shows a green check; a click sets the filter, a second click clears it
+  (tile marked while active). New filter entries "Access point on" and "Debug log on" after
+  "Cloud on".
+- **Area (C1, 7 a, 8 c):** column "Area" after "Device" while at least one device has an
+  area of Home Assistant (else no column, no Columns/Sort entry); hideable via Columns;
+  "–" without area, sorted last; phones: first row "Area" of the details. Own filter tool
+  beside the filter icon (MDI `texture-box`, the area icon of Home Assistant): "All areas",
+  every area, "Without area", each with its count, several at once, dot while set, kept for
+  the page only. Search finds the area.
+- **Not reachable (A2):** device details of a device that did not answer its last check
+  (not a sleeping battery device): message "Not reachable", the text "The device did not
+  answer. Home Assistant may still show it as available.", "Common causes" (battery device
+  asleep, another network, outdated address) and "Try again" (restart icon) with the hint
+  "Checks the address, port 80 and the answer time. No automatic new attempt."; its result
+  as check lines Address / Port / Device with times ("not tested" after a failed step).
+- **Details for a bug ticket (A3, 10):** button bottom left in the device details; dialog
+  (copy icon) with intro, the masked text (monospace box; English, plus language and
+  browser), hint "Please read it before pasting …", Close / blue "Copy text".
+- **Comparison after update (B3, 5 a, 6 b):** while a device shows "Updated" and the
+  comparison found changed values or stopped scripts: yellow link line "n settings changed"
+  (or "n scripts stopped") under the firmware; row menu "Comparison after update" after
+  "Device details". Dialog (backup icon): Device, Update a → b, Compared with "Backup “Before
+  update” · <time>"; section Result (check lines Settings, Scripts, New fields); "Changed · n"
+  table (Setting, Before the update, Now); "New with the firmware · n" collapsed ("Show
+  fields", Setting, Default value); hint "Not compared: counters that change with every
+  update (sys.cfg_rev)." (Gen2+). No "Restore backup" button.
+- **CSV (C3, 10 a):** download icon in the toolbar before Columns (wide screens only) saves
+  the shown list at once (search, filter, area filter, sort order): Name, Shelly name, Area,
+  Model, Generation, IP, Firmware, Available, Status, Last check; semicolon, UTF-8.
+- **Empty times (T7, 11 a):** "Last update" and "Last backup" without a value show "never".

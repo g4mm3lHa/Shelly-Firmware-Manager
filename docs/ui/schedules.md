@@ -48,3 +48,8 @@ as the UI change). Read when you change the Schedules tab or the schedule dialog
   filter "Backups" (stored, failed, restored, deleted, downloaded, imported, removed by
   the limit); the run of a schedule stays one entry of the kind "Schedule" and is shown
   by both filters.
+- **Areas (3.12.0, C1 8 a/c, approved 2026-11-24):** third choice "Areas (new devices of an
+  area are included automatically)" between "All Shellys" and "Selected devices", offered
+  while a device has an area: the areas and "Without area" to tick, each with "n devices";
+  the radio shows the device count. Stored as areas, resolved at every run. The list names
+  "Areas: A, B (n)".

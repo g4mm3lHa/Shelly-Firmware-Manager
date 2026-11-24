@@ -6,9 +6,9 @@ downloads it and serves it to the devices from its own download server in your n
 Nothing is installed without your approval.
 
 - All Shellys of the Shelly integration in one list, sorted by what needs your attention,
-  with search and filters.
+  with search, filters, Home Assistant areas, a security overview and CSV export.
 - Automatic check on a schedule; Home Assistant notifies you about new updates.
-- Shellys only talk to Home Assistant – they need no internet access.
+- Shellys only talk to Home Assistant – no internet access needed; a connection test checks it.
 - Every installation is approved by you, bound to the exact file (SHA-256) and verified
   afterwards; required intermediate versions are offered step by step.
 - Install now or at a chosen time (up to 7 days ahead); optional beta firmware (Gen2+).
@@ -19,7 +19,7 @@ Nothing is installed without your approval.
 - Schedules restart Shellys or switch their cloud or Bluetooth at fixed times.
 - Backups of the device settings (scripts, schedules and webhooks included): by hand,
   before every installation and on a schedule; compare and restore part by part.
-- English and German interface (German machine translated – corrections welcome).
+- English, German, Dutch, French, Italian, Spanish, Polish, Portuguese (machine translated).
 
 Requires Home Assistant 2026.10 or newer and the Home Assistant Shelly integration (the
 app works with the devices it knows: Shellys on Wi-Fi/LAN; not Shelly BLU, Zigbee, Matter

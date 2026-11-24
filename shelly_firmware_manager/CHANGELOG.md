@@ -1,5 +1,39 @@
 # Changelog
 
+## 3.12.0
+
+Release candidate. Connection test of the download server, help for devices that do not
+answer, Home Assistant areas, a security overview and six more languages.
+
+Changes in rc1
+
+Added
+- Settings: "Test connection" lets a Shelly fetch a test address from the download
+  server (port 8098) and names the likely cause when it cannot.
+- Card "Getting started" on a fresh installation: download address, first check,
+  connection test; it can be hidden.
+- Devices that did not answer: device details name the likely causes; "Try again" checks
+  address, port and answer without a full check.
+- Device details: "Details for a bug ticket" with app, device and settings data; names,
+  IP and MAC addresses masked, no passwords, nothing is sent.
+- After an update with a "Before update" backup the app compares the settings and marks
+  what changed and which scripts no longer run (row menu "Comparison after update").
+- Home Assistant areas: column Area and area filter in the Devices tab, also found by
+  the search; schedules and "Back up now" can choose devices by area.
+- Strip "Security" above the device list: counts of devices without password, with
+  cloud, access point or debug log on; a click filters the list.
+- Devices tab (desktop): the list as shown can be saved as CSV file.
+- User interface in Dutch, French, Italian, Spanish, Polish and Portuguese (machine
+  translation); the language picker offers them.
+
+Changed
+- App options are stored by the app and changed only in the Settings tab; the app's
+  Configuration tab keeps a hint. The options set there before are taken over once.
+- "Before installing" in the install dialog names a missing or failed connection test.
+- Times without a value read "never", other empty values "–"; warning boxes in dialogs
+  with the tint of the notice bar; red trash icon at "Delete all logs".
+- Logs: times and host names in the normal font with equal-width digits.
+
 ## 3.11.1
 
 Released 2026-11-23. Stronger downgrade warning with a risk tick, and no downgrade

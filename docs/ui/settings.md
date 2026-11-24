@@ -104,3 +104,19 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
   unsaved change ("Unsaved changes" shows); nothing is saved until the user clicks Save. Grey note under
   the field while it holds the suggestion: "Suggestion from the address of this page – please check it
   before saving." (approved 2026-11-21); it disappears when the user edits the field.
+
+## Connection test of the download server (3.12.0, mockups `3.12.0-ui` A1, approved 2026-11-24)
+- **Row (1 a):** below the download base URL: "Test connection" (play icon) and the last
+  result: green "Reachable · last tested <time> with <device>", red "Not reachable · …" or
+  grey "Not tested yet"; shown while the result belongs to the saved address. The button is
+  disabled with the tooltip "Save first" while the field holds an unsaved change, and with
+  the notice text while installations are disabled by the address.
+- **Dialog (play icon):** intro, section Test (Download base URL, select "Test device":
+  "Automatic (first reachable device of Gen 2 or newer)" and the devices that can test),
+  hint about Gen 1 and the one-time test address; Cancel / blue "Start test". Running and
+  result: check lines Download base URL, Download server, "Fetch by <device> (<ip>)";
+  reachable: green message; not reachable: red message, the error (English server text),
+  "Common causes" and the hint about the port; Close / blue "Test again". Without a Gen2+
+  device: yellow message "No Shelly of Gen 2 or newer is known yet …".
+- **Installation dialog (1 a):** yellow check line "Download server" with "Test now" at the
+  top of "Before installing" while no test with the current address succeeded.

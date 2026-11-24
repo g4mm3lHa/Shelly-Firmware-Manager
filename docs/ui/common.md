@@ -85,7 +85,8 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   click outside, a second click on the icon or Escape closes; Enter in the search field
   closes it; dot on the search icon while a search text is set and on the filter icon
   while a filter other than "All" is chosen. Logs: search and filter icons. Start:
-  "All", popover closed.
+  "All", popover closed. Devices (3.12.0): the area filter icon follows the filter icon
+  while a device has an area (see `devices.md`).
 - Desktop order: icons, tab extras right. Phones: icons in row 1, tab extras in row 2,
   popover full width under row 1; "Upload firmware" as round icon at the right end of
   row 2; the Devices row 2 (column chooser) is not shown.
@@ -132,6 +133,12 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   changelogs and groups in dialogs.
 - **IP addresses (U11):** normal font with equal-width digits everywhere (table, tiles,
   dialogs); the link of the table stays blue and underlined.
+- **Design 3.12.0 (mockups `3.12.0-ui` sheet 07, 11 a, approved 2026-11-24):** T7 times
+  without a value read "never" everywhere ("Last update", "Last backup"), every other empty
+  value "–" (e.g. "Exported" of a store file); T9 warning boxes of dialogs with radius 8 and
+  the tint of the notice bar (the red box stays red); T10 red trash icon before "Delete all
+  logs"; T11 log time and host name in the normal font with equal-width digits – monospace
+  only for SHA-256, file names and passwords.
 - **Design tokens (`ui-src/style.css` `:root`):** four font sizes (11 tags and section
   titles, 12 secondary and hint text, 14 text, 15 card titles; app and dialog titles
   apart), three radii (8 fields/menus/popovers/notices/tooltips, 12 pills/tags/tiles/
@@ -200,7 +207,8 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   successes never set it; opening the tab clears it. The entries that were unread at that
   moment are lightly highlighted (primary colour, 8 %) until the tab is left.
 - **Language (F20–F25):** card "Display" at the end of the Settings tab with "Language":
-  "Same as Home Assistant" (default, fallback English), English, Deutsch; applies at once,
+  "Same as Home Assistant" (default, fallback English), English, Deutsch, and since 3.12.0
+  Nederlands, Français, Italiano, Español, Polski, Português (own names); applies at once,
   per browser, not part of "Save settings". German uses "du" (without address where
   possible). Logs tab: controls, filter and weekday translated, the entries stay English
   including their type and outcome labels. Dates and times keep the form
