@@ -14,6 +14,10 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
   summary name the backups as part of the export), Logs, Advanced (Max.
   parallel installations, Resolve host names, Pinned certificates; 3.8.0, mockup
   `3.8.0-hostname` B). Option labels with "Max." in front. Units in texts always "MB".
+- **Inner surface (live test 3.13.0-rc1, variant B, approved 2026-11-25):** the options of
+  each settings card stand on one inner surface in the card background (radius 12, 8 px
+  from the card edge, inside 14 / 12 px, phones 12 px), like the rows of the other tabs on
+  their tinted card; the card head stays on the tint.
 - **Columns (live test 3.10.0-rc1, approved 2026-11-22):** the cards fill independent column stacks
   (no shared row heights): three columns from 1600 px, two from 1168 px, else one; card n
   goes to column n mod columns, so the order reads left to right as before.

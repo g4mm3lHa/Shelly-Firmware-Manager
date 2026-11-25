@@ -609,7 +609,9 @@ async def test_access_point_form_read_and_write(device_api):
         {"enable": True},  # no security
         {"enable": True, "security": "password"},  # no password
         {"enable": True, "security": "password", "password": ""},
-        {"enable": True, "security": "password", "password": "x" * 65},
+        {"enable": True, "security": "password", "password": "x" * 64},  # the Shelly takes 8 to 63
+        {"enable": True, "security": "password", "password": "x" * 7},
+        {"enable": True, "security": "password", "password": "secret\n12"},
         {"enable": True, "security": "open"},  # open not confirmed
         {"enable": True, "security": "keep", "ssid": "x" * 30},
         {"enable": True, "security": "keep", "ssid": "a\nb"},
@@ -619,6 +621,13 @@ async def test_access_point_form_read_and_write(device_api):
 def test_access_point_form_is_checked(form):
     with pytest.raises(ValueError):
         shelly.validate_settings({"ap_config": form}, [])
+
+
+@pytest.mark.parametrize("password", ["x" * 8, "x" * 63, "pässwörd", "with space"])
+def test_access_point_password_lengths_the_shelly_takes(password):
+    """8 to 63 printable characters pass (the Shelly refuses other lengths with -113)."""
+    form = {"enable": True, "security": "password", "password": password}
+    assert shelly.validate_settings({"ap_config": form}, [])["ap_config"]["password"] == password
 
 
 async def test_access_point_form_logs_no_password(mgr, net, monkeypatch, caplog):
@@ -649,6 +658,13 @@ async def test_access_point_form_logs_no_password(mgr, net, monkeypatch, caplog)
     for text in (json.dumps(mgr.events.entries), caplog.text, json.dumps(settings), json.dumps(mgr.devices),
                  data_paths.STATE_FILE.read_text()):
         assert "hunter2" not in text
+    # A running access point that only gets a new password: no "Access point: on -> on" line
+    await mgr.change_settings(A, {"ap_config": {"enable": True, "security": "password", "password": "hunter2-other"}}, "u")
+    assert mgr.events.entries[-1]["changes"] == [{"setting": "Access point security", "old": "password", "new": "new password"}]
+    # Open again while it is open: nothing changed, so no line at all
+    mgr.devices[A].update(ap=True, ap_config={"ssid": "Garden", "open": True, "range_extender": None})
+    await mgr.change_settings(A, {"ap_config": {"enable": True, "security": "open", "accept_open": True}}, "u")
+    assert mgr.events.entries[-1]["changes"] == []
     with pytest.raises(ValueError, match="range extender"):
         await mgr.change_settings(A, {"ap_config": {"enable": True, "security": "keep", "range_extender": True}}, "u")
     mgr.devices[A]["gen"] = 1

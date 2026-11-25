@@ -63,7 +63,7 @@ NTP_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(:\d{1,5})?$
 # characters (None = the default name, the device ID), protected with a password or
 # open; the password is write-only on the device and only passed through by this app
 AP_SSID_RE = re.compile(r"^[^\x00-\x1f\x7f]{0,29}$")
-AP_PASSWORD_RE = re.compile(r"^[^\x00-\x1f\x7f]{1,64}$")  # not empty; WPA2 takes at most 63 (64 hex)
+AP_PASSWORD_RE = re.compile(r"^[^\x00-\x1f\x7f]{8,63}$")  # the length the Shelly accepts (WPA2 passphrase)
 AP_SECURITY = ("keep", "password", "open")  # keep: the protection the access point has now
 # Gen2+: config key prefix -> (RPC namespace, documented "initial_state" values)
 GEN2_OUTPUTS = {
@@ -116,6 +116,18 @@ def plain(value: object, limit: int = 200) -> str:
     notification, log lines): control and format characters (line breaks, escape
     sequences, bidi overrides …) and line/paragraph separators are removed."""
     return "".join(c for c in clip(value, limit) if unicodedata.category(c)[0] != "C" and c not in "\u2028\u2029")
+
+
+def device_error(error: object) -> str:
+    """Readable text of the error object of a Gen2+ answer ({"code": -113, "message":
+    "…"}): the device's message with its code, e.g. "Internal error: … (code -113)";
+    anything else as it came. Device text, so cleaned like plain (it reaches log lines)."""
+    if not isinstance(error, dict):
+        return plain(error)
+    message, code = plain(error.get("message"), 160).strip(), error.get("code")
+    if not isinstance(code, int) or isinstance(code, bool):
+        return message or plain(error)
+    return f"{message} (code {code})" if message else f"code {code}"
 
 
 def parse_json(text: str | bytes) -> Any:
@@ -341,7 +353,7 @@ async def _rpc(
         error = result["error"]
         if isinstance(error, dict) and error.get("code") == 404:  # "No handler for <method>"
             raise UnsupportedError(f"Not supported by this device ({clip(method, 40)})")
-        raise ShellyError(f"Device reports: {clip(error)}")
+        raise ShellyError(f"Device reports: {device_error(error)}")
     if status >= 400:
         raise ShellyError(f"Shelly rejected the request (HTTP {status})")
     if not isinstance(result, dict):
@@ -531,7 +543,7 @@ class OtaChannel:
             if isinstance(error, dict) and error.get("code") == 401:
                 raise AuthError("The Shelly rejected the password")
         if error:
-            raise ShellyError(f"Device reports: {clip(error)}")
+            raise ShellyError(f"Device reports: {device_error(error)}")
         return True
 
     def _socket(self) -> aiohttp.ClientWebSocketResponse:
@@ -632,8 +644,9 @@ def _ap_config(access_point: dict[str, Any]) -> dict[str, Any]:
 def _valid_ap_config(value: object) -> dict[str, Any]:
     """Checks the access point form: {"enable", "ssid", "security", "password",
     "accept_open", "range_extender"}. Turning it off changes nothing else. An open
-    access point needs accept_open; the password is only checked for "not empty" (the
-    Shelly decides, its refusal is shown in the form)."""
+    access point needs accept_open; the password needs 8 to 63 printable characters as
+    the Shelly demands (anything else the Shelly decides, its refusal is shown in the
+    form)."""
     if not isinstance(value, dict) or not isinstance(value.get("enable"), bool):
         raise ValueError("Invalid access point settings")
     if not value["enable"]:
@@ -653,7 +666,7 @@ def _valid_ap_config(value: object) -> dict[str, Any]:
         if not isinstance(password, str) or not password:
             raise ValueError("Enter a password for the access point")
         if not AP_PASSWORD_RE.fullmatch(password):
-            raise ValueError("Invalid access point password (max. 64 printable characters)")
+            raise ValueError("Invalid access point password (8 to 63 printable characters)")
         clean["password"] = password
     if security == "open" and value.get("accept_open") is not True:
         raise ValueError("Open access point not confirmed")
@@ -1088,7 +1101,7 @@ async def fetch_test(
     """Gen2+: let the device fetch url itself (HTTP.GET) and return its answer
     {"code": HTTP status, "message": text}. The body is not taken over. A request the
     device could not make (timeout, no connection, refused) is a ShellyError with the
-    device's message, e.g. "-104 Deadline exceeded"."""
+    device's message and code, e.g. "Deadline Exceeded (code -104)"."""
     answer = await _rpc(session, origin, "HTTP.GET", {"url": url, "timeout": FETCH_TEST_TIMEOUT_S}, auth)
     code = answer.get("code")
     return {
@@ -1097,21 +1110,21 @@ async def fetch_test(
     }
 
 
-# Error code of a device answer: "'code': -114" (RPC error object) or a leading "-104 …"
-_FETCH_CODE_RE = re.compile(r"'code':\s*(-?\d+)|^Device reports:\s*(-\d+)\b")
+# Error code of a device answer at the end of its text (device_error): "… (code -114)"
+_FETCH_CODE_RE = re.compile(r"\(code (-?\d+)\)$")
 # Low-level code at the end of the device's message, e.g. "-1: Connection error: -14"
 _FETCH_DETAIL_RE = re.compile(r"error:\s*(-\d+)")
 
 
 def fetch_error(text: str, url: str) -> str:
     """Readable text of a failed fetch of the connection test (fetch_test): the codes of
-    the device's answer instead of its raw error object, e.g. "No connection to <url>:
+    the device's answer instead of its message, e.g. "No connection to <url>:
     connection error (Shelly code -114 / -14)". Texts without a device code (password,
     unsupported …) stay as they are; the raw text is kept by the caller for the log."""
     match = _FETCH_CODE_RE.search(text)
     if not match:
         return text
-    code = match.group(1) or match.group(2)
+    code = match.group(1)
     detail = _FETCH_DETAIL_RE.search(text)
     codes = f"{code} / {detail.group(1)}" if detail and detail.group(1) != code else code
     if code == "-104":

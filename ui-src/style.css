@@ -754,6 +754,9 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
    short card does not leave a gap under it */
 .settings-grid{display:flex;gap:16px;align-items:flex-start}
 .set-stack{flex:1 1 0;min-width:0}
+/* Options of a settings card on one inner surface in the card background, like the rows
+   of the other tabs on their tinted card */
+.settings-grid .card-body{background:var(--card-background-color);margin:0 8px 8px;border-radius:var(--radius-s);padding:14px 12px}
 /* Firmware store block inside "Firmware & Storage": full width, between the options */
 .set-store{grid-column:1/-1;padding:12px 0;border-top:1px solid var(--line);
   border-bottom:1px solid var(--line)}
@@ -790,6 +793,7 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
   .set-field:first-child{border-top:0;padding-top:2px}
   .set-field:last-child{padding-bottom:0}
   .set-store{padding:14px 0;border-bottom:0}
+  .settings-grid .card-body{padding:12px}
   .set-name>label{font-weight:500}
   .form .desc{grid-column:1;margin:0}
   .form input[type=text],.form input[type=password],.form input[type=number],.form input[type=time]{width:100%;box-sizing:border-box}

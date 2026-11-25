@@ -5,6 +5,24 @@
 Release candidate. New look with tinted cards, an access point form, translated status
 messages and a faster start.
 
+Changes in rc2
+
+Added
+- Device settings: if the Shelly needs a restart to apply a change, the success message
+  offers to restart it right away.
+
+Changed
+- Settings tab: the options of each card stand on one inner surface, like the rows of
+  the other tabs.
+- Errors of a Shelly show its message with the code ("… (code -113)") instead of the
+  raw error object.
+
+Fixed
+- Access point: the password needs 8 to 63 characters as the Shelly demands; Save stays
+  disabled until then and the app checks it too.
+- Activity log: a setting the change leaves as it is gets no line (e.g. "Access point:
+  on → on").
+
 Changes in rc1
 
 Added

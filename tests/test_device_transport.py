@@ -303,14 +303,18 @@ async def test_get_errors(session, answer, error, text):
     (404, {"id": 1, "error": {"code": 404, "message": "No handler for Foo.Bar"}}, shelly.UnsupportedError,
      r"Not supported by this device \(Foo.Bar\)"),
     (500, {"id": 1, "error": {"code": -103, "message": "Invalid argument 'id'"}}, shelly.ShellyError,
-     "Device reports: .*Invalid argument"),
-    (200, {"id": 1, "error": {"code": -114, "message": "Busy"}}, shelly.ShellyError, "Device reports: .*Busy"),
+     r"^Device reports: Invalid argument 'id' \(code -103\)$"),
+    (200, {"id": 1, "error": {"code": -114, "message": "Busy"}}, shelly.ShellyError, r"^Device reports: Busy \(code -114\)$"),
+    (200, {"id": 1, "error": {"code": -113}}, shelly.ShellyError, r"^Device reports: code -113$"),
+    (200, {"id": 1, "error": "out of memory"}, shelly.ShellyError, "^Device reports: out of memory$"),
+    (200, {"id": 1, "error": {"code": -103, "message": "bad\nforged line\x1b[31m"}}, shelly.ShellyError,
+     r"^Device reports: badforged line\[31m \(code -103\)$"),
     (500, None, shelly.ShellyError, r"rejected the request \(HTTP 500\)"),
     (200, None, shelly.ShellyError, "Invalid response"),
 ])
 async def test_rpc_errors(session, status, answer, error, text):
-    """RPC errors carry the device's message (also with an HTTP error status); a
-    missing handler means the device lacks the feature."""
+    """RPC errors carry the device's message with its code, not the raw error object (also
+    with an HTTP error status); a missing handler means the device lacks the feature."""
     response = web.json_response(answer, status=status) if answer else web.Response(status=status, text="oops")
     async with FakeDevice(routes={"/rpc": response}) as dev:
         with pytest.raises(error, match=text):

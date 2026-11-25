@@ -1,7 +1,7 @@
 // Dialogs for the settings of a single Shelly: name, NTP, power-on action, eco mode, switches,
 // websocket debug log, password, restart; passwords of several devices in one step.
 import {
-  api, box, checkbox, closeModal, collator, confirmDialog, devUrl, el, field, formError, gateButton, icon, input,
+  api, box, checkbox, closeModal, collator, confirmDialog, devUrl, el, field, formError, gateButton, guarded, icon, input,
   message, messageBody, modal, radio, section, t, tn, ui, valueList, warnBox, webUrl,
 } from "./core.js";
 import {load} from "./main.js";
@@ -52,9 +52,19 @@ async function saveSettings(d, title, changes, quiet, error) {
     if (r.not_applied?.length) {  // accepted, but the read-back shows another value
       message(title, t("The Shelly accepted the request but did not apply: {settings}. The value read back is shown.", {settings: r.not_applied.join(", ")}), "warning"); return;
     }
-    if (quiet && !r.restart_required) { closeModal(); return; }
-    message(title, r.restart_required ? t("Saved. The Shelly reports that a restart is required to apply the change.") : t("Saved and read back from the Shelly."), "success");
+    if (r.restart_required) { restartOffer(d, title); return; }
+    if (quiet) { closeModal(); return; }
+    message(title, t("Saved and read back from the Shelly."), "success");
   } catch (e) { if (error) error.show(e.message); else message(title, e.message, "error"); }
+}
+/** Success message of a change the Shelly applies only after a restart, with the button
+ *  "Restart now" (red as every restart; not logged): it closes and the row shows the restart. */
+function restartOffer(d, title) {
+  modal(title, [messageBody(t("Saved. The Shelly reports that a restart is required to apply the change."), "success"),
+    el("p", t("The device will be unavailable for a few seconds."), "hint")],
+  [{text: t("Close")}, {text: t("Restart now"), kind: "danger", action: () => guarded(title, undefined, async () => {
+    await api(`${devUrl(d)}/restart`, {}); closeModal(); load(true);
+  })}]);
 }
 /** Edit the Shelly name (with old -> new confirmation) or the NTP server. */
 export function editValue(d, key) {
@@ -128,6 +138,10 @@ export function editCloud(d) {
 // step. The password goes to the Shelly only (never stored or logged by the app); the
 // Shelly decides whether it accepts it, its refusal stays in the form with the inputs.
 const AP_OPEN_WARNING = t("Anyone within Wi-Fi range can connect to this Shelly and – without a device password – change its settings.");
+// Length of an access point password the Shelly accepts (it refuses others with -113)
+const AP_PASSWORD_MIN = 8, AP_PASSWORD_MAX = 63;
+/** A password of that length, counted in characters as the server counts them. */
+const apPasswordFits = text => [...text].length >= AP_PASSWORD_MIN && [...text].length <= AP_PASSWORD_MAX;
 /** State pill of the access point strip: off, on and open, on with a password. */
 const apPill = (on, open) => !on ? t("Off") : open === true ? t("On · open") : open === false ? t("On · password") : t("On");
 export function editAccessPoint(d) {
@@ -143,9 +157,11 @@ export function editAccessPoint(d) {
     const options = protectedNow ? [["keep", t("Keep the current password")], ["password", t("Set a new password")], ["open", t("Open – no password")]]
       : [["password", t("Protect with a password")], ["open", t("Open – no password")]];
     const radios = options.map(([value, text], i) => radio("ap-security", text, i === 0, value));
-    const password = input("password", {autocomplete: "new-password", maxLength: 64});
+    // Longer than the limit on purpose: a pasted password that is too long stays whole and
+    // keeps Save disabled instead of being cut silently
+    const password = input("password", {autocomplete: "new-password", maxLength: 128});
     const passwordBlock = box("div", "sub-block", field(t("Password"), password),
-      el("p", t("Sent to the Shelly only – this app does not store it."), "hint"));
+      el("p", t("{min} to {max} characters. Sent to the Shelly only – this app does not store it.", {min: AP_PASSWORD_MIN, max: AP_PASSWORD_MAX}), "hint"));
     const [accept, acceptLabel] = checkbox(t("I accept the risk of an open access point"));
     const openBlock = box("div", "sub-block", box("div", "warnbox danger", el("strong", t("Open access point.")), " " + AP_OPEN_WARNING), acceptLabel);
     const [extender, extenderLabel] = checkbox([t("Range extender"), el("span", t("other devices reach your network through this Shelly"), "sub")],
@@ -176,8 +192,8 @@ export function editAccessPoint(d) {
       if (same) { message(title, t("Nothing changed.")); return; }
       saveSettings(d, title, {ap_config: form}, true, error);
     }}]);
-    // Save: a password must be entered, an open access point needs the accepted risk
-    gateButton(() => !enable.checked || (choice() === "password" ? password.value !== "" : choice() !== "open" || accept.checked),
+    // Save: a password of 8 to 63 characters, an open access point needs the accepted risk
+    gateButton(() => !enable.checked || (choice() === "password" ? apPasswordFits(password.value) : choice() !== "open" || accept.checked),
       enable, password, accept, ...radios.map(([r]) => r));
   });
 }

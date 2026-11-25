@@ -115,20 +115,27 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
   "Restart" (2026-11-17); after the command the popup closes and the row shows the
   restart (see the activity pills). The password popup keeps its value list under the
   strip.
+- **Restart after a setting (live test 3.13.0-rc1, approved 2026-11-25):** when the Shelly
+  reports that a saved setting needs a restart, the success message "Saved. The Shelly
+  reports that a restart is required …" adds the hint "The device will be unavailable for
+  a few seconds." and the buttons "Close" and "Restart now" (red like every restart; it
+  closes the message and the row shows the restart; not logged).
 - **Access point form (Gen2+, 2026-11-24, mockups `design-modern/H1`, `H2`, decisions
   A1–A7):** strip (pill Off / "On · open" / "On · password"), section "Access point" with
   the tick "Access point on" (ticked when the form opens, also while the access point is
   off; untick = turn off, nothing else is sent); while ticked:
   field "Network name (SSID)" (empty = default name, the device ID; up to 29 characters),
   section "Security" with radios "Protect with a password" (password field below, hint
-  "Sent to the Shelly only – this app does not store it.") and "Open – no password" (red
+  "8 to 63 characters. Sent to the Shelly only – this app does not store it.") and "Open – no password" (red
   warning "Open access point." and the tick "I accept the risk of an open access point");
   a running protected access point offers "Keep the current password" (preselected), "Set
   a new password", "Open – no password". "More options": "Range extender" only if the
   device reports it. Hint "Only the access point is changed; …". "Save" stays disabled
-  without a password or the accepted risk; the app checks nothing else, a refusal of the
-  Shelly stays in the form with the inputs. The password is never stored or logged; the
-  log names "new password". Gen1 stays locked (A7).
+  without a password of 8 to 63 characters (the Shelly refuses others; the server checks
+  it too, live test 3.13.0-rc1) or the accepted risk; the app checks nothing else, a
+  refusal of the Shelly stays in the form with the inputs, as "Device reports: <message>
+  (code n)". The password is never stored or logged; the log names "new password" and
+  only settings that change (no "on → on"). Gen1 stays locked (A7).
 - Websocket debug popup: explanation, link `<web_url>#/diagnostics` (new tab,
   noopener), warning below firmware 1.0.0.
 

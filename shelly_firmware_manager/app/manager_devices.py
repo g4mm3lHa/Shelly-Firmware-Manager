@@ -313,7 +313,8 @@ class DeviceSettings(Transfers):
 
     @staticmethod
     def _settings_diff(dev: Device, clean: dict[str, Any]) -> list[dict[str, Any]]:
-        """Old -> new values of a settings change, readable for the log."""
+        """Old -> new values of a settings change, readable for the log; a value the
+        change leaves as it is (e.g. "Access point: on -> on") gets no line."""
         onoff: dict[object, str] = {True: "on", False: "off"}
         diff: list[dict[str, Any]] = []
         if "name" in clean:
@@ -338,7 +339,7 @@ class DeviceSettings(Transfers):
             diff.append(
                 {"setting": f"Power-on action {clip(label, 64)}", "old": old.get("aop"), "new": value}
             )
-        return diff
+        return [line for line in diff if line["old"] != line["new"]]
 
     async def wifi_signal(self, device_id: str) -> dict[str, int | None]:
         """Wi-Fi signal of the device in dBm, read now for the installation dialog
