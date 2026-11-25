@@ -197,13 +197,20 @@ def _action_popups(c):
 
 def _access_point_form(c, body):
     """Access point form: network name, "Protect with a password" first; Save needs a
-    password, an open access point the accepted risk; the form sends the password once."""
+    password of 8 to 63 characters, an open access point the accepted risk; the form sends
+    the password once; a required restart is offered in the success message."""
     case, f, page, out = c.case, c.f, c.page, c.out
     save = f.locator("#dlg-btns button").last
     ssid = f.locator("#dlg-body .field input[type=text]").first
     check(f"{case}: access point form with its sections", all(x in body for x in ("Network name (SSID)", "Protect with a password",
           "Open – no password", "Range extender")) and ssid.input_value() == "ShellyPlus1-A8032AB636EC", body[:300])
     check(f"{case}: access point: Save needs a password", save.is_disabled())
+    check(f"{case}: access point: hint names the length", "8 to 63 characters." in body, body[:600])
+    f.locator("#dlg-body input[type=password]").fill("secret1")
+    check(f"{case}: access point: Save needs 8 characters", save.is_disabled())
+    f.locator("#dlg-body input[type=password]").fill("x" * 64)
+    check(f"{case}: access point: 64 characters stay whole, Save disabled",
+          save.is_disabled() and len(f.locator("#dlg-body input[type=password]").input_value()) == 64)
     f.locator("#dlg-body input[type=password]").fill("secret-1")
     check(f"{case}: access point: Save with a password", not save.is_disabled())
     f.locator("#dlg-body input[value=open]").check()
@@ -217,13 +224,26 @@ def _access_point_form(c, body):
 
     def answer(route):
         sent.append(route.request.post_data_json)
-        route.fulfill(json={**LIVE, "ap": True, "restart_required": False, "verified": True, "not_applied": []})
+        route.fulfill(json={**LIVE, "ap": True, "restart_required": True, "verified": True, "not_applied": []})
     page.route("**/settings", answer)
     save.click()
     wait_until(lambda: sent)
     page.unroute("**/settings")
     form = (sent or [{}])[0].get("ap_config", {})
     check(f"{case}: access point form sent", form == {"enable": True, "security": "password", "password": "secret-1"}, str(sent))
+    # The Shelly needs a restart: the success message offers "Restart now" (red), which restarts and closes
+    restart = f.locator("#dlg-btns button", has_text="Restart now")
+    restart.wait_for()
+    check(f"{case}: restart required: success message with Close and a red Restart now",
+          f.locator("#dlg-body .msg-success").is_visible() and "danger" in (restart.get_attribute("class") or "")
+          and f.locator("#dlg-btns button").first.inner_text() == "Close")
+    page.screenshot(path=out / f"{case}-popup-restart-offer.png")
+    restarts = []
+    page.route("**/restart", lambda route: (restarts.append(route.request.url), route.fulfill(json={"ok": True})))
+    restart.click()
+    wait_until(lambda: restarts and not f.locator("#dlg").is_visible())
+    page.unroute("**/restart")
+    check(f"{case}: Restart now sends the restart and closes", len(restarts) == 1 and not f.locator("#dlg").is_visible(), str(restarts))
     _t, _strip, _body, _buttons = _popup(f, f.locator("#dev-cards tr", has_text="Hall").first.locator(
         "[aria-label^='Access point']") if c.width > 700 else f.locator("#dev-cards tr", has_text="Hall").first.locator(
         ".act-strip.labeled [aria-label^='Access point']"))

@@ -280,7 +280,8 @@ access point, Bluetooth, cloud, actions and schedules and the websocket debug lo
 restart the device. The popup of an icon starts with the current state; "?" means the
 value is unknown (also the power-on action while the outputs of a device have never been
 read). Every change is read back from the device; a value the device
-accepted but did not apply is reported as a warning and logged as failed. The lock is
+accepted but did not apply is reported as a warning and logged as failed. If the Shelly
+reports that a change needs a restart, the success message offers **Restart now**. The lock is
 green if the device is protected and its password is stored in the app, yellow if the
 password is not stored here.
 
@@ -289,6 +290,7 @@ password is not stored here.
   the protection: a password, or open after you accept the risk (anyone in Wi-Fi range
   could then change the device without a device password). A running protected access
   point keeps its password unless you set a new one, because the Shelly never reveals it.
+  The password needs 8 to 63 characters, because the Shelly refuses any other length.
   The password goes to the Shelly only; the app does not store or log it. The Shelly
   decides whether it accepts a password or an open access point; its refusal is shown in
   the form. **Range extender** is offered if the device has it. Only the access point is
@@ -817,6 +819,7 @@ Gen2+ firmware is downloaded over HTTPS only.
 | The Shelly reports X instead of the target version Y | Check the device; run "Check for updates" again |
 | Certificate of … is not publicly trusted | See [Certificate pinning](#certificate-pinning) |
 | The Shelly requires a password | Store the device password (see [Device passwords](#device-passwords)) |
+| Device reports: … (code n) | The Shelly refused the request; the text and the code come from the device itself (English). Correct the entry the text names, e.g. an access point password of 8 to 63 characters; the code helps when you report the problem |
 | A Shelly is missing from the list | Open the line "N of M Shellys listed · Why are K missing?" above the list: it names the reason (disabled, not set up or ignored in Home Assistant). Shellys behind a gateway and unsupported kinds are not listed as devices (see the [FAQ](#faq)) |
 | No usable address (tile in the Devices tab) | The host name does not resolve, the IP address is outside the private networks or the device has no address. Set an address in the Shelly integration (IP address or a host name that Home Assistant resolves) |
 | … files read from the disk – they could have been changed (Logs tab, warning) | The firmware list was rebuilt from files in the firmware folder after the state was lost. Taken-over Gen2+ files are used only when the Shelly update server offers the same SHA-256. Delete files you do not trust in the Firmware tab; unknown files are listed there and never deleted automatically |

@@ -19,7 +19,7 @@ Part of `docs/CODEMAP.md`; read when you change routes: the table and the middle
 | `GET /api/devices/{id}/downgrades` | `downgrade_versions`, `downgrade_blocker` |
 | `GET /api/devices/{id}/changelog` | `changelog_for` |
 | `POST /api/devices/{id}/settings/refresh` | `refresh_settings` |
-| `POST /api/devices/{id}/settings` | `change_settings` (answer: `verified`, `not_applied`; `ap_config` = access point form `{enable, ssid, security: keep|password|open, password, accept_open, range_extender}` – the password goes to the device only) |
+| `POST /api/devices/{id}/settings` | `change_settings` (answer: `verified`, `not_applied`; `ap_config` = access point form `{enable, ssid, security: keep|password|open, password, accept_open, range_extender}` – the password (8–63 characters) goes to the device only) |
 | `POST /api/devices/{id}/restart` | `restart_watched` (command; error → answer) + background `watch_restart` (activity `restarting` until the device answers, else the device error) |
 | `POST /api/devices/{id}/password` | `set_device_password` (`mode`, `confirm`, `acknowledged`, `keep`) |
 | `POST /api/devices/passwords` | `set_passwords` (`mode` store/set, `devices`, `password`, `confirm`, `acknowledged`, `keep`; result per device, never the password) |
