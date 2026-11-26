@@ -1,6 +1,6 @@
 // Translation of texts the server sends in English: status messages of the devices (the
 // pill tooltip and the device details), install errors, the reasons of the download base
-// URL and the error texts of API answers. Each text of SERVER_TEXTS is the English
+// URL, the results of the connection test and the error texts of API answers. Each text of SERVER_TEXTS is the English
 // original as the server builds it, a value of its own as a {placeholder}; a dictionary
 // entry keyed by it translates every text of this form. A placeholder of NESTED holds a
 // text of the server itself and is translated the same way. Any other text (e.g. an
@@ -71,6 +71,14 @@ export const SERVER_TEXTS = [
   "A connection test is already running",
   "This device cannot run the test now (Gen 2 or newer, checked, not busy)",
   "No Shelly of Gen 2 or newer is known yet – run a check first",
+  // Results of the connection test of the download server
+  "No connection to {url}: timeout after {seconds} s (Shelly code {codes})",
+  "No connection to {url}: connection error (Shelly code {codes})",
+  "The device could not fetch {url} (Shelly code {codes})",
+  "The request reached the download server from {ips}, not from the device address {ip} – switch off the option “Serve downloads only to known Shellys” or check the network (NAT)",
+  "Another web server answered at {url} (HTTP {status}) – check the IP address and the port",
+  "The device gave no answer code",
+  "Device not reachable: {error}",
   // Download base URL
   "Installations are disabled: set the download base URL (LAN IP address of Home Assistant and port 8098) in the Settings tab.",
   "Installations are disabled: the download base URL is still the former example value {url}. Change it in the Settings tab or confirm that it really is the address of Home Assistant.",
@@ -93,6 +101,7 @@ export const SERVER_TEXTS = [
   "Unknown version format: {value}",
   "Invalid value for {key} in the answer",
   "Device reports: {error}",
+  "Not supported by this device ({method})",
   "Incomplete device information from the Shelly",
   "No device information (HTTP {status})",
   "Invalid device address",

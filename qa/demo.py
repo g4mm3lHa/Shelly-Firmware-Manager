@@ -410,7 +410,7 @@ if diagnosis:
         dev = m.devices[device_id or m.test_devices()[0]]
         ok = device_id is None
         m.connection_test = {"ok": ok, "device": dev["name"], "ip": dev["origin"][7:], "seconds": 0.21 if ok else None,
-                             "error": None if ok else "No connection to http://192.168.1.2:8098 (timeout after 8 s): Deadline exceeded",
+                             "error": None if ok else "No connection to http://192.168.1.2:8098: timeout after 8 s (Shelly code -104)",
                              "at": int(time.time()), "url": m.download_base}
         return m.connection_test
 

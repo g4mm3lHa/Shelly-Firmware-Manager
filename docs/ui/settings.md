@@ -135,9 +135,10 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
   "Automatic (first reachable device of Gen 2 or newer)" and the devices that can test),
   hint about Gen 1 and the one-time test address; Cancel / blue "Start test". Running and
   result: check lines Download base URL, Download server, "Fetch by <device> (<ip>)";
-  reachable: green message; not reachable: red message, the error (English server text;
-  a device error as readable text with its codes, e.g. "connection error (Shelly code -114 /
-  -14)", the raw answer only in the log entry and the bug ticket text), "Common causes" (the
+  reachable: green message; not reachable: red message, the error (server text shown
+  translated in the page language; a device error as readable text with its codes, e.g.
+  "connection error (Shelly code -114 / -14)"; the log entry and the bug ticket text stay
+  English, the raw answer only there), "Common causes" (the
   port cause names the port of the saved address) and the hint about the port; Close / blue
   "Test again". Without a Gen2+
   device: yellow message "No Shelly of Gen 2 or newer is known yet …".
