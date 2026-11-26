@@ -507,7 +507,9 @@ class ManagerCore:
         self.install_steps: dict[str, dict[str, Any]] = {}
         self.last_scan: int | None = None
         self.devices: dict[str, Device] = {}  # HA device ID -> state
-        self.downloads: dict[str, dict[str, Any]] = {}  # file name -> {"served": {ip: n}, "rejected": {ip, ...}}
+        # file name -> {"served": {ip: n}, "rejected": {ip, ...}, "attributed": {device id: n}}
+        # ("attributed": GETs from an address of no known device while only that device installed the file)
+        self.downloads: dict[str, dict[str, Any]] = {}
         self.firmware: dict[str, FirmwareMeta] = {}  # file name -> metadata of the stored firmware
         self.activity: dict[str, str] = {}  # HA device ID -> ACTIVITY_* while a check or restart runs
         self.progress: dict[str, Any] | None = None  # running full check: {"kind", "total", "done", "errors", "phase"}

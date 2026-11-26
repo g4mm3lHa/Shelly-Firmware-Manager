@@ -412,9 +412,12 @@ async def ota_run(mgr, monkeypatch, events, versions, keep_open=False, old="1.4.
                 monkeypatch.setattr(mgr, "approval_matches", lambda *_a: True)
                 result = await mgr.install(A, "s", "u")
             else:
+                mgr.installing.add(A)  # as Manager.install does around it
                 result = await mgr._install(A, dev, "s")
         except shelly.ShellyError as err:
             result = err
+        finally:
+            mgr.installing.discard(A)
         fake.release.set()
     return result, dev, phases
 
@@ -633,9 +636,11 @@ async def test_second_pass_total_limit_after_the_new_download(mgr, ota_install, 
 
 
 def other_device(mgr, status=manager_core.STATUS_CURRENT, file=None):
-    """A second known device B at 192.168.1.11 (installing the same file x.zip with file)."""
+    """A second known device B at 192.168.1.11 (with file: its installation of that file runs)."""
     mgr.devices[B] = {"name": "Hall", "gen": 2, "origin": "http://192.168.1.11", "mac": "BB", "status": status,
                       "file": file, "version": "2.1.1"}
+    if file is not None:
+        mgr.installing.add(B)
 
 
 async def test_second_pass_counts_an_unattributable_download_of_the_only_installation(mgr, ota_install,
@@ -677,6 +682,56 @@ async def test_second_pass_never_counts_an_ambiguous_download(mgr, ota_install, 
     assert time.monotonic() - started < 2  # not the total limit of a started second pass
 
 
+async def test_second_pass_never_counts_the_download_of_an_installation_still_sending_its_command(
+        mgr, ota_install, monkeypatch):
+    """NAT: B installs the same file but its status is not installing yet (it still waits for the
+    answer to its update command, and the Shelly already downloads). B's download does not count
+    for A: the start window stays, with its own error."""
+    monkeypatch.setattr(manager_installs, "TWO_STEP_FINISH_S", 3)
+    mgr.restrict_downloads = False
+    other_device(mgr, manager_core.STATUS_READY, "x.zip")
+    started = time.monotonic()
+    result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, [None, "2.1.1"], old="2.1.1", target="2.2.0",
+                                          hook=serve_again(mgr, address="172.30.32.1"))
+    assert isinstance(result, shelly.ShellyError) and "did not start within 0.4 s" in str(result)
+    assert time.monotonic() - started < 2  # not the total limit of a started second pass
+
+
+async def test_second_pass_judges_a_nat_download_when_it_arrives(mgr, ota_install, monkeypatch):
+    """NAT: B's download arrives while B installs the same file, and B's installation ends before
+    A's next poll (e.g. an ota_error). The download stays B's: the start window of A stays."""
+    monkeypatch.setattr(manager_installs, "TWO_STEP_FINISH_S", 3)
+    mgr.restrict_downloads = False
+    other_device(mgr, manager_core.STATUS_INSTALLING, "x.zip")
+    serve = serve_again(mgr, address="172.30.32.1")
+
+    def hook(version):
+        serve(version)
+        if serve.done and B in mgr.installing:  # B ends right after its download
+            mgr.devices[B]["status"] = manager_core.STATUS_ERROR
+            mgr.installing.discard(B)
+
+    result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, [None, "2.1.1"], old="2.1.1", target="2.2.0",
+                                          hook=hook)
+    assert isinstance(result, shelly.ShellyError) and "did not start within 0.4 s" in str(result)
+
+
+def test_nat_downloads_are_attributed_to_the_only_installation(mgr):
+    """A GET from an address of no known device counts for the installation of its file only
+    while it is the only one; the device's own address always counts for it."""
+    dev = install_device(mgr)
+    mgr.restrict_downloads = False
+    mgr.installing.add(A)
+    assert mgr.may_download("x.zip", "172.30.32.1")
+    mgr.record_download("x.zip", "172.30.32.1")
+    assert mgr._own_downloads(A, dev) == 1
+    other_device(mgr, manager_core.STATUS_READY, "x.zip")
+    mgr.record_download("x.zip", "172.30.32.1")  # two installations: B's or A's
+    mgr.record_download("x.zip", "192.168.1.11")  # B's own address: never A's
+    mgr.record_download("x.zip", "192.168.1.10")  # A's own address
+    assert mgr._own_downloads(A, dev) == 2 and mgr._own_downloads(B, mgr.devices[B]) == 1
+
+
 def nat_batch(mgr, own=None, finish=4):
     """hook for ota_run behind NAT while device B installs the same file: before the 2nd old
     answer of A the download server serves the file to the NAT address (B's download), before
@@ -693,6 +748,7 @@ def nat_batch(mgr, own=None, finish=4):
             mgr.record_download("x.zip", "172.30.32.1")
         if len(old_answers) == finish:
             mgr.devices[B]["status"] = manager_core.STATUS_CURRENT
+            mgr.installing.discard(B)
 
     return hook
 
@@ -824,6 +880,76 @@ def test_no_signed_version_query_after_a_refusal(mgr, monkeypatch):
     mgr._update_step(A, signin_refused=True)
     mgr._set_step(A, "reboot")  # stays with the installation
     assert mgr._poll_auth(A)(2) is None and mgr._signin_refused(A)
+
+
+async def test_refused_version_query_ends_the_signed_requests(mgr, monkeypatch):
+    """A version query after the update command signs Shelly.GetDeviceInfo only if /shelly lacks
+    a field. A refused or blocked sign-in there is no answer and is recorded once: the next
+    queries carry no credentials."""
+    monkeypatch.setattr(mgr.credentials, "auth_for", lambda *_a: "credentials")
+    dev = install_device(mgr)
+    mgr._set_step(A, "verify")
+    sent = []
+
+    async def device_info(_session, _origin, auth_for=None):
+        sent.append(auth_for(2))
+        raise shelly.AuthBlockedError("blocked") if len(sent) == 1 else shelly.AuthError("password required")
+
+    monkeypatch.setattr(shelly, "device_info", device_info)
+    assert await mgr._poll_version(A, dev) is None and mgr._signin_refused(A)
+    assert await mgr._poll_version(A, dev) is None
+    assert sent == ["credentials", None]
+
+
+async def test_ota_refused_version_query_keeps_the_installation(mgr, ota_install, monkeypatch):
+    """Over the device connection: a version query after the restart meets a refused sign-in. The
+    installation goes on, the later queries are unsigned, and the target version is confirmed."""
+    refused = []
+
+    def hook(version):
+        if version == "refused":
+            refused.append(version)
+            raise shelly.AuthError("password")
+
+    result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, [None, "refused", "1.5.0"], hook=hook)
+    assert result == (True, None) and refused and mgr._signin_refused(A)
+
+
+async def test_polling_refused_version_query_keeps_the_installation(run_install, monkeypatch, mgr):
+    """Without the device connection: the same – no error, no further signed request."""
+
+    def hook(version):
+        if version == "refused":
+            raise shelly.AuthBlockedError("blocked")
+
+    ok, diagnosis, _dev, _polls = await run_install("1.4.0", "1.5.0", ["refused", "1.5.0"], hook=hook)
+    assert ok and diagnosis is None and mgr._signin_refused(A)
+
+
+async def test_ota_error_during_the_second_pass_ends_it_at_once(mgr, ota_install, monkeypatch):
+    """An ota_error that arrives while the app waits for the second pass (the device WebSocket is
+    still open, e.g. after a timed-out query) ends the installation at once with the device's
+    error, not after the start window with the generic one."""
+    monkeypatch.setattr(manager_installs, "TWO_STEP_START_S", 5)
+    wait = mgr._await_second_pass
+
+    async def second_pass(device_id, dev, ota, version, polling=False):
+        async def fail():
+            await asyncio.sleep(0.1)
+            ota["error"] = "image check failed"  # as _read_ota_events records it
+            ota["failed"].set()
+
+        task = asyncio.create_task(fail())
+        try:
+            return await wait(device_id, dev, ota, version, polling)
+        finally:
+            await task
+
+    monkeypatch.setattr(mgr, "_await_second_pass", second_pass)
+    started = time.monotonic()
+    result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, [None, "2.1.1"], old="2.1.1", target="2.2.0")
+    assert isinstance(result, shelly.OtaError) and "image check failed" in str(result)
+    assert time.monotonic() - started < 2
 
 
 async def test_polling_refused_running_time_is_no_error(run_install, monkeypatch, mgr):
@@ -990,7 +1116,7 @@ async def test_download_diagnosis_per_device(mgr):
     assert mgr.may_download("x.zip", "192.168.1.10")
     mgr.record_download("x.zip", "192.168.1.10")
     assert mgr._downloaded(mgr.devices[A]) and not mgr._downloaded(mgr.devices[B])
-    mgr._reset_download(mgr.devices[B])  # B starts: A's record stays
+    mgr._reset_download(B, mgr.devices[B])  # B starts: A's record stays
     assert mgr._downloaded(mgr.devices[A])
     mgr.record_download("x.zip", "172.30.32.1")  # NAT: cannot be attributed
     assert mgr._downloaded(mgr.devices[B])
@@ -1044,6 +1170,31 @@ async def test_intermediate_version_is_followed_by_a_check_of_the_device(mgr, ne
     kinds = [(e["kind"], e.get("trigger"), e.get("user")) for e in mgr.events.entries[checks:]]
     assert kinds[-1] == ("check", "step", "alice") and [k[0] for k in kinds].count("install") == 2
     assert not mgr._step_checks and not mgr.checking
+
+
+async def test_no_check_after_an_intermediate_version_once_a_sign_in_was_refused(mgr, net, updating, monkeypatch):
+    """The device refused or blocked a sign-in after the update command: the check after the
+    intermediate version would read it with signed requests, so it is skipped. The installation
+    stays confirmed and the next step comes with the next check of the device."""
+    net.steps = {"1.4.0": "1.5.0"}
+    net.offer_version = "1.7.0"
+    await mgr.scan()
+    trigger = shelly.trigger_update
+    checked = []
+
+    async def refused(*args, **kwargs):
+        await trigger(*args, **kwargs)
+        mgr._update_step(A, signin_refused=True)  # as a refused read after the command does
+
+    async def check_device(*args, **kwargs):
+        checked.append(args)
+
+    monkeypatch.setattr(shelly, "trigger_update", refused)
+    monkeypatch.setattr(mgr, "check_device", check_device)
+    assert await mgr.install(A, mgr.devices[A]["sha256"], "alice") is True
+    dev = mgr.devices[A]
+    assert dev["version"] == "1.5.0" and dev["status"] == manager_core.STATUS_CURRENT and dev["updated"] is True
+    assert not checked and not mgr._step_checks
 
 
 async def test_stored_version_offered_on_server_error_can_be_installed(mgr, net, updating):

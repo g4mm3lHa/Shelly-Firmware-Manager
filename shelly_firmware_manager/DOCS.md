@@ -467,13 +467,14 @@ check the device, then install.
 
 The app recognises the new download by the address of the Shelly. Behind network address
 translation (NAT, e.g. Docker or a router between the networks) every download comes from
-another address. Such a download is meant to count for the Shelly while no other device
-installs the same file. While several do, the app cannot tell them apart and does not count
-it. The second step then shows itself only by the restart of the Shelly within 3 minutes.
+another address. Such a download is meant to count for the Shelly if no other device was
+installing the same file when it arrived; else the app cannot tell them apart. The second
+step then shows itself only by the restart of the Shelly within 3 minutes.
 
 After the update command the app reads the running time only as a hint. If the Shelly
-refuses or blocks the sign-in for it, the installation goes on without it. The app then
-sends no further signed request to the Shelly during this installation.
+refuses or blocks the sign-in for it or for a version query, the installation goes on
+without it. The app then sends no further signed request to the Shelly during this
+installation. After an intermediate version the next step then shows at the next check.
 
 Devices without this connection (Gen1, or when it is not available) are checked every
 10 seconds until they report exactly the target version (at most 5 minutes). If that
