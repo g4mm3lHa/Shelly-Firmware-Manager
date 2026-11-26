@@ -314,7 +314,7 @@ def _back_up_now(c):
 
 
 def _logs(c):
-    """Logs tab: the "!" only for unread error entries, unread entries highlighted while
+    """Logs tab: the red dot only for unread error entries, unread entries highlighted while
     the tab is open for the first time, filter "Backups"."""
     case, f, page = c.case, c.f, c.page
     f.locator("#tab-devices").click()

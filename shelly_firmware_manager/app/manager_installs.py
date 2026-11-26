@@ -588,10 +588,11 @@ class Installs(Checks):
     ) -> tuple[bool, str | None] | None:
         """Gen2+ with OTA events:
         - ota_error → error at once;
-        - no download request after 2 min, or no new progress for 60 s → error;
+        - no download request after 2 min, or no new progress for 60 s (120 s with a weak
+          Wi-Fi signal, _stall_limit) → error;
         - after 100 % / ota_success the Shelly must restart within 30 s (WebSocket
           closed or no answer), shown as "Restarting";
-        - within 30 s after the restart it must report the target version; the old
+        - within 90 s after the restart it must report the target version; the old
           version, another version or no answer → error.
         Returns None if the WebSocket ended before the update was applied (the
         caller polls instead)."""

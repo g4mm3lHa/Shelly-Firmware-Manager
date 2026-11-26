@@ -325,7 +325,7 @@ def test_credentials_write_error_is_reported(tmp_path):
 
 
 def test_log_mark_grows_within_one_second(tmp_path, monkeypatch):
-    """The mark of the newest entry (Logs tab: reload and unread "!") grows with every
+    """The mark of the newest entry (Logs tab: reload and unread dot) grows with every
     entry, also for two entries written in the same second."""
     log = events.EventLog(tmp_path / "events.json")
     assert log.latest() == 0
