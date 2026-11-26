@@ -270,11 +270,12 @@ list. A Shelly that Home Assistant does not know cannot be listed.
 **Host name:** the column exists only while **Resolve host names** is on (Settings tab,
 Advanced). It shows the host name set in the Shelly integration, else the name the
 device announces in your network (e.g. `shellyplus1pm-a0dd6c29c3e0.local`), and "–"
-while the name does not resolve. A name you give the Shelly does not change it: the
-column shows the device ID followed by `.local`. To show a name from your router,
-set up the Shelly integration with that host name. It is for display only: the app
-always reaches the device at its address in Home Assistant. The Columns chooser can hide it; on a phone it
-is a row in the details.
+while the name does not resolve.
+
+A name you give the Shelly does not change the announced name. It stays the device ID
+followed by `.local` and shows only while it resolves. The column is for display only:
+the app always reaches the device at its address in Home Assistant. The Columns chooser
+can hide it; on a phone it is a row in the details.
 
 **NTP server:** a click on the entry in the column (desktop) opens the dialog to change it.
 
