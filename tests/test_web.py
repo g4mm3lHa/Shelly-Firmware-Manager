@@ -507,8 +507,6 @@ async def test_http_install_refused_with_a_stored_bad_download_base_url(net):
             r = await c.post(f"/api/devices/{B}/install", json={"sha256": sha, "confirm": True, "downgrade": True,
                              "acknowledged": True}, headers=hdr(c))
             assert r.status == 409 and await r.text() == state["download_base"]["message"]
-            r = await c.post("/api/settings/download-base/confirm", json={"url": url}, headers=hdr(c))
-            assert r.status == 409  # nothing to confirm
         finally:
             await c.close()
 

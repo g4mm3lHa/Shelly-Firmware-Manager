@@ -1,10 +1,10 @@
 """Feature suites download_url_hint and download_url_notice: hints and notice for the download base URL
-(demos "idle" 8801, "legacy" 8803, "missing" 8804)."""
+(demos "idle" 8801, "missing" 8804, "public" 8807)."""
 
 import json
 from pathlib import Path
 
-from features.base import IDLE, LEGACY, MISSING, OVERFLOW_JS, PUBLIC, check, open_page, ui_frame, wait_until
+from features.base import IDLE, MISSING, OVERFLOW_JS, PUBLIC, check, open_page, ui_frame, wait_until
 
 
 # Cases shared with tests/test_guards.py: the hint the Settings tab shows for each address
@@ -76,29 +76,10 @@ def download_url_hint(browser, out):
 
 
 def download_url_notice(browser, out):
-    """Notice for a missing / unconfirmed download base URL; device progress in the pill."""
+    """Notice for a missing / public-IP download base URL; device progress in the pill."""
     cases = ((360, "light", True), (430, "dark", False), (1440, "dark", False), (1440, "light", False))
-    for index, (width, scheme, embedded) in enumerate(cases):
+    for width, scheme, embedded in cases:
         case = f"{width}-{scheme}{'-embedded' if embedded else ''}"
-        # Former example value, not confirmed
-        ctx, page, f, errors = open_page(browser, LEGACY, width, scheme, embedded)
-        notice = f.locator("#notice")
-        check(f"{case}: notice shown", notice.is_visible() and "former example value" in notice.text_content())
-        buttons = f.locator("#notice button").all_text_contents()
-        check(f"{case}: confirm and settings buttons", buttons == ["This address is correct", "Open settings"], str(buttons))
-        check(f"{case}: no install selection", f.locator("td.c-select input:not(.ghost)").count() == 0)
-        pills = f.locator("button.pill").all_text_contents()
-        check(f"{case}: device progress in the status pill", "Installing 55 %" in pills, str(sorted(set(pills))))
-        check(f"{case}: no horizontal overflow", f.evaluate(OVERFLOW_JS) <= 0)
-        page.screenshot(path=out / f"notice-legacy-{case}.png")
-        f.locator("#notice button", has_text="Open settings").click()
-        check(f"{case}: settings opened", wait_until(f.locator("#view-settings").is_visible))
-        if index == len(cases) - 1:  # changes the demo state: last case only
-            f.locator("#notice button", has_text="This address is correct").click()
-            f.locator("#dlg-btns button", has_text="Yes, this is correct").click()
-            check(f"{case}: confirmation removes the notice", wait_until(notice.is_hidden))
-        check(f"{case}: no console errors (legacy)", not errors, str(errors[:2]))
-        ctx.close()
         # Not set at all
         ctx, page, f, errors = open_page(browser, MISSING, width, scheme, embedded)
         notice = f.locator("#notice")
@@ -116,10 +97,14 @@ def download_url_notice(browser, out):
         notice = f.locator("#notice")
         check(f"{case}: notice for a public IP", notice.is_visible() and "private network" in notice.text_content())
         buttons = f.locator("#notice button").all_text_contents()
-        check(f"{case}: no confirm button", buttons == ["Open settings"], str(buttons))
+        check(f"{case}: only the settings button (public)", buttons == ["Open settings"], str(buttons))
         check(f"{case}: no install selection (public)", f.locator("td.c-select input:not(.ghost)").count() == 0)
+        pills = f.locator("button.pill").all_text_contents()
+        check(f"{case}: device progress in the status pill", "Installing 55 %" in pills, str(sorted(set(pills))))
         check(f"{case}: no horizontal overflow (public)", f.evaluate(OVERFLOW_JS) <= 0)
         page.screenshot(path=out / f"notice-public-{case}.png")
+        f.locator("#notice button", has_text="Open settings").click()  # leaves the Devices tab: last check
+        check(f"{case}: settings opened", wait_until(f.locator("#view-settings").is_visible))
         check(f"{case}: no console errors (public)", not errors, str(errors[:2]))
         ctx.close()
 

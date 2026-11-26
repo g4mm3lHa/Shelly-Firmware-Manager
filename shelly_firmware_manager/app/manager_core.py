@@ -203,9 +203,6 @@ SOURCE_IMPORT = "import"
 DOWNLOAD_BASE_MESSAGES = {
     "missing": "Installations are disabled: set the download base URL (LAN IP address of Home "
     "Assistant and port 8098) in the Settings tab.",
-    "unconfirmed": "Installations are disabled: the download base URL is still the former example "
-    f"value {app_options.LEGACY_DOWNLOAD_BASE}. Change it in the Settings tab or confirm that it "
-    "really is the address of Home Assistant.",
     "not_private": "Installations are disabled: the IP address of the download base URL is not in a "
     "private network (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7). Correct it in the "
     "Settings tab.",
@@ -328,7 +325,6 @@ class ManagerCore:
         self.tz, self.tz_name = schedule.local_zone()
         # Optional, no default: installations are refused while it is unset
         self.download_base = (options.get("download_base_url") or "").rstrip("/") or None
-        self.download_base_confirmed: str | None = None  # confirmed legacy example value (persisted)
         self.restrict_downloads = bool(options["restrict_downloads_to_devices"])
         self.gen1_enabled = bool(options["gen1_updates_enabled"])
         self.allow_downgrade = options.get("allow_downgrade") is True  # optional, missing = off
@@ -550,8 +546,6 @@ class ManagerCore:
         self.firmware = data.get("firmware") or {}
         self.schedule = data["schedule"] if isinstance(data.get("schedule"), dict) else {}
         self.schedules = self._stored_schedules(data.get("schedules"))
-        confirmed = data.get("download_base_confirmed")
-        self.download_base_confirmed = confirmed if isinstance(confirmed, str) else None
         self.first_start_open = data.get("first_start_open") is True
         self.first_start_notified = data.get("first_start_notified") is True
         self.gen1_marking_due = data.get("gen1_imports_marked") is not True
@@ -610,7 +604,6 @@ class ManagerCore:
             "firmware": self.firmware,
             "schedule": self.schedule,
             "schedules": self.schedules,
-            "download_base_confirmed": self.download_base_confirmed,
             "first_start_open": self.first_start_open,
             "first_start_notified": self.first_start_notified,
             "gen1_imports_marked": not self.gen1_marking_due,
@@ -918,9 +911,6 @@ class ManagerCore:
         log.info("App options changed by %s (%s)%s", user, ", ".join(changed), " – restarting" if restart else "")
         self.events.add("options", changes=diff, user=user)
         self.options = new
-        if "download_base_url" in changed and self.download_base_confirmed is not None:
-            self.download_base_confirmed = None  # a confirmation never outlives a change
-            self.save()
         if {"download_base_url", "host_port"} & set(changed) and self.connection_test is not None:
             self.connection_test = None  # a test result never outlives a changed address or host port
             self.save()
@@ -930,38 +920,15 @@ class ManagerCore:
     def download_base_issue(self) -> str | None:
         """Why installations are blocked by download_base_url, else None.
 
-        "missing": not set (optional option without default). "unconfirmed": still the
-        former example value, which is only accepted after an explicit confirmation –
-        it may really be the address of Home Assistant (FritzBox default network).
-        "not_private": an IP address outside the private networks, saved before the
-        option refused it. "invalid": not a usable address (odd characters, bad host name).
-        Neither can be confirmed, only corrected."""
+        "missing": not set (optional option without default). "not_private": an IP address
+        outside the private networks, saved before the option refused it. "invalid": not a
+        usable address (odd characters, bad host name). Both can only be corrected."""
         if not self.download_base:
             return "missing"
         problem = app_options.download_base_problem(self.download_base)
         if problem:
             return "not_private" if problem == app_options.DOWNLOAD_BASE_NOT_PRIVATE else "invalid"
-        legacy = app_options.LEGACY_DOWNLOAD_BASE.rstrip("/")
-        if self.download_base == legacy and self.download_base_confirmed != legacy:
-            return "unconfirmed"
         return None
-
-    def confirm_download_base(self, url: object, user: str | None = None) -> None:
-        """Confirm that the former example value really is the address of Home
-        Assistant. url must be the current value (no confirmation of a stale view).
-        Stored in state.json; no option change, no restart. Logged."""
-        current = isinstance(url, str) and url.rstrip("/") == self.download_base
-        if self.download_base_issue != "unconfirmed" or not current:
-            raise ShellyError("Nothing to confirm – the download base URL has changed, reload the page")
-        self.download_base_confirmed = self.download_base
-        self.save()
-        log.info("Download base URL %s confirmed by %s", self.download_base, user)
-        self.events.add(
-            "options",
-            confirmed=True,
-            changes=[{"option": "download_base_url", "old": "not confirmed", "new": "confirmed"}],
-            user=user,
-        )
 
     async def restart_app(self) -> None:
         """Ask the Supervisor to restart this app so new options take effect."""

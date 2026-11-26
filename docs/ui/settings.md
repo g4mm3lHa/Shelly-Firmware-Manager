@@ -132,8 +132,8 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
   localhost keep the advice to use the LAN IP. The hint judges the typed text (number forms
   such as 3232235778 count as non-private IP addresses, as on the server); other format
   errors (spaces, non-ASCII, bad host name) get no hint, the server names them on save. A stored address with a non-private IP
-  shows the notice above the tabs (message of the server, only "Open settings", no
-  "This address is correct") and installations stay disabled. A stored address with odd
+  shows the notice above the tabs (message of the server, only "Open settings") and
+  installations stay disabled. A stored address with odd
   characters or a bad host name shows the same notice with the message "Installations are
   disabled: the download base URL is not a valid address (http(s)://host:port, letters,
   digits, dots and hyphens in the host). Correct it in the Settings tab." (approved).
@@ -158,8 +158,8 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
 - **After saving (live test 3.12.0-rc3, 1a):** the page reloads after the app restart on the
   Settings tab (marker `#settings` in the address, removed at the start; after "Save" in the
   dialog "Unsaved changes" the marker of the chosen tab); a normal reload opens Devices.
-- **Texts with the port:** help of the download base URL ("+ the host port above"), Getting
-  started and the confirmation of the former example address name the real host port; the
+- **Texts with the port:** help of the download base URL ("+ the host port above") and Getting
+  started name the real host port; the
   connection test names the port cause only while the address port differs from it.
 - **Row (1 a):** below the download base URL: "Test connection" (play icon) and the last
   result: green "Reachable · last tested <time> with <device>", red "Not reachable · …" or

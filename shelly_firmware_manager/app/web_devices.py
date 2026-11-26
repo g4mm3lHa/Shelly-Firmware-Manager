@@ -121,7 +121,7 @@ class DeviceRoutes(Handlers):
             return web.json_response({"started": True})
         if self.mgr.checking:
             raise web.HTTPConflict(text="Check in progress – please try again afterwards")
-        if self.mgr.download_base_issue:  # Unset or unconfirmed former example value
+        if self.mgr.download_base_issue:  # Unset, not in a private network or not a valid address
             raise web.HTTPConflict(text=DOWNLOAD_BASE_MESSAGES[self.mgr.download_base_issue])
         if device_id in self.mgr.installing:
             raise web.HTTPConflict(text="Installation for this device is already running")

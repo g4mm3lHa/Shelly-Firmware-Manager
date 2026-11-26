@@ -6,9 +6,8 @@ Suites, in this order (the last three change the demo state in their last case):
                       credentials, query, localhost, host names). Demo "idle" on 8801.
 - setting_help        Settings: help texts as tooltips of the setting name and its
                       i-icon (mouse, keyboard, touch). Demo "idle" on 8801.
-- download_url_notice notice for a missing / unconfirmed / public-IP download base URL,
-                      device progress of a Gen2+ installation. Demos "legacy" 8803,
-                      "missing" 8804, "public" 8807.
+- download_url_notice notice for a missing / public-IP download base URL, device
+                      progress of a Gen2+ installation. Demos "missing" 8804, "public" 8807.
 - download_url_suggestion  empty download base URL pre-filled from the browser's private LAN
                       IP address (not for host names, public IPs, localhost). Demo "missing" 8804.
 - schedules           Schedules tab (cards, error in the schedule dialog), "Install at" in

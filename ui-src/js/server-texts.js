@@ -87,7 +87,6 @@ const SERVER_TEXTS = [
   "Device not reachable: {error}",
   // Download base URL
   "Installations are disabled: set the download base URL (LAN IP address of Home Assistant and port 8098) in the Settings tab.",
-  "Installations are disabled: the download base URL is still the former example value {url}. Change it in the Settings tab or confirm that it really is the address of Home Assistant.",
   "Installations are disabled: the IP address of the download base URL is not in a private network (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7). Correct it in the Settings tab.",
   "Installations are disabled: the download base URL is not a valid address (http(s)://host:port, letters, digits, dots and hyphens in the host). Correct it in the Settings tab.",
   // Answers of a Shelly and its address

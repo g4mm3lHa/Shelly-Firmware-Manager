@@ -1,9 +1,8 @@
 """Local demo server with fake data for UI tests (no network access).
 
-Usage: python demo.py <app_dir> <port> <scenario: idle|busy|legacy|missing|features|first|public|docs|diagnosis>
-legacy: download_base_url is the former example value (not confirmed) and one device
-installs with device progress; missing: download_base_url not set; public: download_base_url is a public IP address (saved
-before it was refused); features: idle
+Usage: python demo.py <app_dir> <port> <scenario: idle|busy|missing|features|first|public|docs|diagnosis>
+missing: download_base_url not set; public: download_base_url is a public IP address (saved
+before it was refused) and one device installs with device progress; features: idle
 plus stored older versions (one of them uploaded) for downgrade and upload checks, and backups of device
 settings with Shellys in memory that answer a backup and a restore; docs: features with
 fewer open updates and other models, for the screenshots of the documentation; diagnosis: features
@@ -41,10 +40,7 @@ for name, value in {"STATE_FILE": data / "state.json", "FW_DIR": data / "fw", "C
 opts = {"check_interval_days": 7, "check_time": "02:45", "download_base_url": "http://192.168.1.2:8098", "restrict_downloads_to_devices": True,
         "gen1_updates_enabled": True, "max_parallel_installs": 2,
         "log_retention_days": 30, "log_entry_limit": 1000, "allow_downgrade": True, "import_max_mb": 100}
-if scenario == "legacy":
-    import app_options
-    opts["download_base_url"] = app_options.LEGACY_DOWNLOAD_BASE
-elif scenario == "public":
+if scenario == "public":
     opts["download_base_url"] = "http://203.0.113.10:8098"
 elif scenario == "missing":   # also shows downgrades switched off
     del opts["download_base_url"]
@@ -380,7 +376,7 @@ if scenario in ("features", "docs"):  # backups of device settings and Shellys i
                             "parts": {"settings": True, "scripts": 1, "schedules": 1, "webhooks": 1}},
                            {"device": "Living room", "result": "stored", "severity": "success", "size": 1210,
                             "parts": {"settings": True, "scripts": 0, "schedules": 2, "webhooks": 0}}])
-if scenario == "legacy":  # an installation started before (device progress shown)
+if scenario == "public":  # an installation started before (device progress shown)
     ids = list(m.devices)
     m.devices[ids[7]].update(status="installing", ota_progress=55, message="The Shelly is downloading the firmware: 55 %")
     m.installing.add(ids[7])

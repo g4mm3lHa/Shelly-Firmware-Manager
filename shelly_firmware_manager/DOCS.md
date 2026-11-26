@@ -1114,9 +1114,10 @@ What changes when you update from an older version:
   downgrades** in the Settings tab if you use them. The sort order and columns of the
   Devices table start fresh and are then kept per browser. Check that the **Watchdog**
   switch on the app page is on.
-- **From 3.0.0 release candidates:** if the old example address
-  `http://192.168.178.50:8098` is still set, installations are blocked until you change
-  it or confirm it with "This address is correct".
+- **From 3.0.0 release candidates:** the old example address `http://192.168.178.50:8098`
+  no longer needs a confirmation – it is checked like any other address. If it is not the
+  address of your Home Assistant, correct it in the Settings tab (**Test connection** shows
+  whether the Shellys reach it).
 - **From 2.x or 1.x:** update to 3.0.0 first and start it once (it removes the former
   shared Shelly password from the stored options and converts the table settings), then
   update to the current version – or remove and reinstall the app. Backups made before

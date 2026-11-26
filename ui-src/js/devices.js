@@ -39,7 +39,7 @@ const shownStatus = d => d.planned && d.status === "ready" && !d.installing ? "s
 const downgrading = d => !!d.downgrade && d.status === "installing";
 const hasUpdate = d => !downgrading(d) && ["available", "ready", "installing"].includes(d.status);
 // Ignored devices are not installable until they are resumed; nothing is installable
-// while the download base URL is missing or the unconfirmed former example; a scheduled
+// while the download base URL is missing or not usable; a scheduled
 // installation is started from the row menu ("Install now") only
 export const installable = (d, s) => !d.planned && (d.status === "ready" || failedInstall(d)) && !d.installing && !d.ignored && !s.scanning && !d.activity &&
   !(s.download_base && s.download_base.issue);

@@ -1,4 +1,4 @@
-"""App options: bounds, unknown keys, optional download_base_url and its confirmation.
+"""App options: bounds, unknown keys, optional download_base_url.
 
 All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test servers."""
 
@@ -13,7 +13,6 @@ import data_paths
 import manager
 import manager_core
 import pytest
-import shelly
 from conftest import OPTIONS, A
 from helpers import make_manager, web_client, without_url
 
@@ -149,9 +148,6 @@ def test_allow_downgrade_is_an_optional_switch():
     assert new["allow_downgrade"] is True and changed == ["allow_downgrade"]
 
 
-LEGACY = app_options.LEGACY_DOWNLOAD_BASE
-
-
 async def test_missing_url_blocks_installations(net):
     m = manager.Manager(without_url(), session=None, token="t")
     assert m.download_base is None and m.download_base_issue == "missing"
@@ -161,19 +157,31 @@ async def test_missing_url_blocks_installations(net):
     assert state["issue"] == "missing" and "Settings tab" in state["message"]
 
 
-async def test_legacy_value_needs_confirmation_which_persists(net):
-    m = make_manager(net, download_base_url=LEGACY)
-    assert m.download_base_issue == "unconfirmed"
-    with pytest.raises(shelly.ShellyError):
-        m.confirm_download_base("http://192.168.178.51:8098", user="u")  # stale view
-    m.confirm_download_base(LEGACY, user="alice")
-    assert m.download_base_issue is None
-    entry = m.events.entries[-1]
-    assert entry["kind"] == "options" and entry["confirmed"] and entry["user"] == "alice"
-    m2 = make_manager(net, download_base_url=LEGACY + "/")  # restart, trailing slash
-    assert m2.download_base_issue is None
-    m3 = make_manager(net, download_base_url="http://192.168.1.5:8098")
-    assert m3.download_base_issue is None  # any other address needs no confirmation
+FORMER_EXAMPLE = "http://192.168.178.50:8098"  # example address of early release candidates
+
+
+async def test_former_example_address_is_an_ordinary_lan_address(net):
+    """The former example address needs no confirmation: no issue, no notice, no confirm route."""
+    for url in (FORMER_EXAMPLE, FORMER_EXAMPLE + "/"):
+        m = make_manager(net, download_base_url=url)
+        assert m.download_base_issue is None
+        assert m.public_state()["download_base"] == {"url": FORMER_EXAMPLE, "issue": None, "message": None}
+    client = await web_client(m)
+    try:
+        r = await client.post("/api/settings/download-base/confirm", json={"url": FORMER_EXAMPLE},
+                              headers={"X-CSRF-Token": client.csrf})
+        assert r.status == 404  # the route no longer exists
+    finally:
+        await client.close()
+
+
+async def test_stored_confirmation_of_older_versions_is_dropped(net):
+    """A confirmation stored by an earlier version is ignored on read and dropped on save."""
+    data_paths.STATE_FILE.write_text(json.dumps({"first_start_open": False, "download_base_confirmed": FORMER_EXAMPLE}))
+    m = make_manager(net, download_base_url=FORMER_EXAMPLE)
+    m.save()
+    assert "download_base_confirmed" not in json.loads(data_paths.STATE_FILE.read_text())
+    assert not hasattr(m, "download_base_confirmed")
 
 
 async def test_stored_public_ip_blocks_installations_until_corrected(net):
@@ -184,20 +192,16 @@ async def test_stored_public_ip_blocks_installations_until_corrected(net):
     assert state["issue"] == "not_private" and "private network" in state["message"]
     m.devices[A] = {"status": manager_core.STATUS_READY, "sha256": "a" * 64, "gen": 2}
     assert await m.install(A, "a" * 64, "u") is False
-    with pytest.raises(shelly.ShellyError):
-        m.confirm_download_base("http://203.0.113.10:8098", user="u")  # nothing to confirm
     assert make_manager(net, download_base_url="http://[fd00::2]:8098").download_base_issue is None
 
 
-async def test_changing_the_url_drops_the_confirmation(net):
-    """A new address drops the confirmation and the result of the last connection test."""
-    m = make_manager(net, download_base_url=LEGACY)
-    m.confirm_download_base(LEGACY)
-    m.connection_test = {"ok": False, "url": LEGACY, "at": 1, "device": "Hall", "error": "timeout"}
+async def test_changing_the_url_drops_the_connection_test(net):
+    """A new address drops the result of the last connection test."""
+    m = make_manager(net)
+    m.connection_test = {"ok": False, "url": OPTIONS["download_base_url"], "at": 1, "device": "Hall", "error": "timeout"}
     assert await m.save_options({"download_base_url": "http://192.168.1.5:8098"}) == ["download_base_url"]
-    assert m.download_base_confirmed is None and m.connection_test is None
-    stored = json.loads(data_paths.STATE_FILE.read_text())
-    assert stored["download_base_confirmed"] is None and stored["connection_test"] is None
+    assert m.connection_test is None
+    assert json.loads(data_paths.STATE_FILE.read_text())["connection_test"] is None
 
 
 def test_empty_url_unsets_the_option():
@@ -209,21 +213,16 @@ def test_empty_url_unsets_the_option():
         app_options.merge(OPTIONS, {"check_time": ""})  # only optional options can be emptied
 
 
-async def test_web_install_refused_and_confirm_endpoint(net):
-    m = make_manager(net, download_base_url=LEGACY)
+async def test_web_install_refused_while_the_url_is_missing(net):
+    """Without a download base URL the install route answers 409 with the notice text."""
+    m = manager.Manager(without_url(), session=None, token="t")
+    m.first_start_open = False
     m.devices[A] = {"status": manager_core.STATUS_READY, "sha256": "a" * 64, "gen": 2, "name": "K"}
     client = await web_client(m)
     try:
         hdr = {"X-CSRF-Token": client.csrf}
         r = await client.post(f"/api/devices/{A}/install", json={"sha256": "a" * 64, "confirm": True}, headers=hdr)
-        assert r.status == 409 and "former example value" in await r.text()
-        url = "/api/settings/download-base/confirm"
-        assert (await client.post(url, json={"url": LEGACY})).status == 403  # CSRF
-        assert (await client.post(url, json={"url": "http://x:1"}, headers=hdr)).status == 409
-        r = await client.post(url, json={"url": LEGACY}, headers=hdr)
-        assert r.status == 200 and m.download_base_issue is None
-        state = await (await client.get("/api/state")).json()
-        assert state["download_base"] == {"url": LEGACY, "issue": None, "message": None}
+        assert r.status == 409 and await r.text() == manager_core.DOWNLOAD_BASE_MESSAGES["missing"]
     finally:
         await client.close()
 

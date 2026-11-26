@@ -173,6 +173,7 @@ function logContent(e) {
     case "password":
       return [el("div", `${e.device}: ${passwordAction(e)}`), e.error ? el("div", e.error, "bad") : null].filter(Boolean);
     case "options":
+      // confirmed: entry of an earlier version (confirmation of the former example download address)
       if (e.confirmed) return [el("div", "Download base URL confirmed as the address of Home Assistant")];
       return [el("div", e.ok ? "App settings saved – app restarted" : "App settings could not be saved"),
         ...(e.changes || []).map(c => el("div", c.redacted ? `${optionLabel(c.option)}: changed` : `${optionLabel(c.option)}: ${arrow(c.old, c.new)}`, "sub")),

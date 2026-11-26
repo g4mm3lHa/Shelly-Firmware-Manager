@@ -80,9 +80,6 @@ DEFAULTS = {
 # or the settings file – e.g. the removed list of allowed Gen1 types (gen1_allowed_types)
 # of older versions or the hint field "settings" of the Configuration tab.
 KEYS = frozenset({*INT_RANGES, *BOOLS, *CHOICES, *DEFAULTS, "download_base_url", "pinned_certificates"})
-# Former default/example of download_base_url (release candidates of 3.0.0). The option
-# is optional without default; this value only counts after an explicit confirmation.
-LEGACY_DOWNLOAD_BASE = "http://192.168.178.50:8098"
 OPTIONAL = ("download_base_url",)  # options that can be removed (empty input)
 # allow_downgrade and beta_firmware have no default either: missing = off (also for
 # existing installations)
