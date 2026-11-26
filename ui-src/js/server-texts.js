@@ -102,6 +102,8 @@ const SERVER_TEXTS = [
   "Response from the device too large",
   "Invalid authentication request from the Shelly",
   "The Shelly answered the WebSocket request with a redirect",
+  "The Shelly answered with a redirect (HTTP {status}) – redirects are not followed",
+  "The Shelly requires HTTPS (Enhanced Security) – not supported by this app yet",
   "The device reported no usable Wi-Fi signal",
   "Unknown version format: {value}",
   "Invalid value for {key} in the answer",

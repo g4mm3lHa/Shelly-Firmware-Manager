@@ -13,7 +13,7 @@ from typing import Any
 
 import aiohttp
 import shelly
-from shelly import UNSUPPORTED, AuthError, DeviceAuth, ShellyError, clip, error_text
+from shelly import UNSUPPORTED, AuthError, DeviceAuth, HttpsRequiredError, ShellyError, clip, error_text
 
 from manager_core import (
     ACTIVITY_CHECKING, ACTIVITY_DOWNLOADING, ACTIVITY_RELOADING, ACTIVITY_SERVER, BATTERY_FROM_DEVICE, Device,
@@ -55,8 +55,9 @@ class DeviceSettings(Transfers):
         A failure must not stop the firmware check: the old values stay, but
         settings_error marks them as unknown (shown as such, logged as warning or
         error) – a failed read-back is never reported as confirmed. Exception
-        raise_auth: a missing or refused password (AuthError) is raised after
-        settings_error is set, so the check fails as an error of the device. A
+        raise_auth: a missing or refused password (AuthError) and a device that
+        requires HTTPS (HttpsRequiredError) are raised after settings_error is set, so
+        the check fails as an error of the device. A
         battery state reported by the device replaces one derived from Home
         Assistant (battery_source)."""
         try:
@@ -70,7 +71,7 @@ class DeviceSettings(Transfers):
             log.warning("%s: reading settings failed: %s", dev.get("name"), err)
             message = error_text(err, 300) or type(err).__name__
             dev["settings_error"] = {"message": message, "severity": severity_of(err)}
-            if raise_auth and isinstance(err, AuthError):
+            if raise_auth and isinstance(err, (AuthError, HttpsRequiredError)):
                 raise
             return False
         except Exception as err:

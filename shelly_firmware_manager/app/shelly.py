@@ -7,7 +7,9 @@ through shelly_cloud; both build on the errors and text helpers defined here.
 Security:
 - Devices are only contacted at the origin pinned by shelly_net.resolve_device_origin
   (private IP, no DNS rebinding); redirects are never followed and
-  every answer is size-limited (MAX_DEVICE_BODY, MAX_WS_FRAME).
+  every answer is size-limited (MAX_DEVICE_BODY, MAX_WS_FRAME). A redirect to HTTPS
+  (the device's Enhanced Security) raises HttpsRequiredError, any other redirect names
+  its HTTP status; the redirect target is never shown or logged.
 - Device authentication: Gen1 Basic Auth, Gen2+ Digest Auth (SHA-256, user
   "admin"). Credentials are only sent in the scheme matching the device's
   generation (no downgrade from Digest to Basic, no MD5, no Digest without qop
@@ -17,7 +19,8 @@ Security:
   options the device itself reported. Gen1 passwords are sent as query
   parameters (documented API); errors raised here never contain the URL.
 - Gen2+ installations use the device's RPC WebSocket at the same pinned origin
-  (OtaChannel): no redirects, frame size limit, SHA-256 Digest auth only.
+  (OtaChannel): no redirects (one to HTTPS/WSS raises HttpsRequiredError), frame size
+  limit, SHA-256 Digest auth only.
 """
 
 import asyncio
@@ -48,6 +51,13 @@ DEVICE_TIMEOUT = aiohttp.ClientTimeout(total=15)
 MAX_DEVICE_BODY = 1024 * 1024  # upper limit for a device response
 AUTH_USER = "admin"  # fixed user name of Gen2+ devices, also the Gen1 default
 DIGEST_PARAM_RE = re.compile(r'(\w+)=(?:"([^"]*)"|([^,\s]*))')
+# HTTP statuses of a redirect (the set aiohttp itself follows); a device answer with one
+# of them is never followed and never read as an answer
+REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+# Schemes of a redirect target that mean the device only speaks HTTPS (Enhanced Security)
+SECURE_SCHEMES = ("https://", "wss://")
+# Message of a device that redirects plain HTTP to HTTPS (HttpsRequiredError)
+HTTPS_REQUIRED = "The Shelly requires HTTPS (Enhanced Security) – not supported by this app yet"
 
 # Gen2+ RPC over WebSocket (used during an installation to receive the OTA events)
 OTA_WS_CONNECT_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=10)
@@ -90,6 +100,15 @@ class ShellyError(RuntimeError):
 
 class AuthError(ShellyError):
     """The device requires a password or rejected the stored one (severity: error)."""
+
+
+class HttpsRequiredError(ShellyError):
+    """The device redirects plain HTTP to HTTPS (severity: error).
+
+    Gen2+ Enhanced Security: always on for Shellys shipped with firmware 2.0 or later;
+    an older one does it once Enhanced Security is switched on and an HTTPS certificate
+    is installed. The redirect is never followed and this app does not speak HTTPS to
+    devices, so the device cannot be checked, updated or backed up."""
 
 
 class UnsupportedError(ShellyError):
@@ -279,6 +298,21 @@ class DeviceAuth:
 Query = Mapping[str, str] | Sequence[tuple[str, str]]
 
 
+def _redirect_error(status: int, location: str | None) -> ShellyError:
+    """Error for a redirect answer of a device: HttpsRequiredError if the target is
+    HTTPS/WSS (the scheme only, compared without case), else a ShellyError naming the
+    status. The target itself is never part of the text (it is device-controlled and
+    may name an address outside the LAN)."""
+    if _secure_target(location):
+        return HttpsRequiredError(HTTPS_REQUIRED)
+    return ShellyError(f"The Shelly answered with a redirect (HTTP {status}) – redirects are not followed")
+
+
+def _secure_target(location: str | None) -> bool:
+    """True if a redirect target (Location header) starts with https:// or wss://."""
+    return (location or "").strip().lower().startswith(SECURE_SCHEMES)
+
+
 async def _call(
     session: aiohttp.ClientSession,
     origin: str,
@@ -290,7 +324,10 @@ async def _call(
     """One request to a device; answers an authentication challenge once.
 
     Returns (HTTP status, parsed JSON or None). Redirects are forbidden (they
-    could lead out of the LAN) and the response size is limited.
+    could lead out of the LAN): a redirect status raises before the body is read
+    (HttpsRequiredError for a redirect to HTTPS, see _redirect_error). The response
+    size is limited. Order of the status checks: redirect first, then the password
+    challenge.
     """
     url = URL(origin + path)
     if params:
@@ -306,6 +343,8 @@ async def _call(
             allow_redirects=False,
             timeout=DEVICE_TIMEOUT,
         ) as resp:
+            if resp.status in REDIRECT_STATUSES:
+                raise _redirect_error(resp.status, resp.headers.get("Location"))
             if resp.status == 401:
                 if attempt or auth is None:
                     raise AuthError(
@@ -454,8 +493,14 @@ async def trigger_update(
         await _rpc(session, origin, "Shelly.Update", {"url": firmware_url}, auth)
 
 
-async def _refuse_redirect(_session: object, _context: object, _params: object) -> None:
-    """aiohttp trace hook: a redirect would lead away from the device – refuse it."""
+async def _refuse_redirect(_session: object, _context: object, params: aiohttp.TraceRequestRedirectParams) -> None:
+    """aiohttp trace hook: a redirect would lead away from the device – refuse it.
+
+    aiohttp calls it before it follows anything. A redirect to HTTPS/WSS raises
+    HttpsRequiredError (defensive: such a device already fails the check over HTTP);
+    the target is never part of the text."""
+    if _secure_target(params.response.headers.get("Location")):
+        raise HttpsRequiredError(HTTPS_REQUIRED)
     raise ShellyError("The Shelly answered the WebSocket request with a redirect")
 
 
@@ -469,9 +514,10 @@ class OtaChannel:
     request with "src" – here the Shelly.Update command itself.
 
     Security: the URL is built from the pinned private-IP origin (no DNS),
-    redirects are refused, frames are limited to MAX_WS_FRAME, no proxy from the
-    environment, Digest auth only as SHA-256 (DeviceAuth.ws_auth). Only the event
-    name, a clipped message and the percentage leave this class.
+    redirects are refused (one to HTTPS/WSS as HttpsRequiredError), frames are
+    limited to MAX_WS_FRAME, no proxy from the environment, Digest auth only as
+    SHA-256 (DeviceAuth.ws_auth). Only the event name, a clipped message and the
+    percentage leave this class.
 
     Usage: async with OtaChannel(origin, auth) as ota:
                accepted = await ota.update(url)

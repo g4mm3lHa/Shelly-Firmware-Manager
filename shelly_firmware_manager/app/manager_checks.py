@@ -43,7 +43,7 @@ import shelly
 import shelly_cloud
 import shelly_net
 from events import worst
-from shelly import AuthError, ShellyError, clip, error_text, plain
+from shelly import AuthError, HttpsRequiredError, ShellyError, clip, error_text, plain
 from shelly_net import AddressError
 
 from manager_core import (
@@ -627,8 +627,8 @@ class Checks(Backups):
 
     async def _probe_removed(self, device_id: str, dev: Device) -> bool:
         """Does a removed device still answer at its last address? Stored as
-        removed_reachable (a refused password counts as an answer); nothing else of
-        the device changes. False without a known address."""
+        removed_reachable (a refused password or a redirect to HTTPS counts as an
+        answer); nothing else of the device changes. False without a known address."""
         reachable = False
         origin = dev.get("origin")
         if isinstance(origin, str) and origin:
@@ -636,7 +636,7 @@ class Checks(Backups):
             try:
                 await shelly.device_info(self.session, origin, self._auth_for(device_id))
                 reachable = True
-            except AuthError:
+            except (AuthError, HttpsRequiredError):
                 reachable = True
             except (TimeoutError, ShellyError, aiohttp.ClientError, KeyError, ValueError, OSError) as err:
                 log.info("%s (removed) not reachable: %s", dev.get("name"), err)
@@ -770,7 +770,8 @@ class Checks(Backups):
         )
         self._apply_info(dev, info)
         # A device that needs a password the app does not have (or refuses the stored
-        # one) fails the check: the row shows the error the log shows
+        # one), or that requires HTTPS for its settings, fails the check: the row shows
+        # the error the log shows
         await self._read_settings(device_id, dev, extended=True, raise_auth=True)
 
         if info["gen"] == 1 and not self.gen1_enabled:

@@ -847,6 +847,8 @@ Gen2+ firmware is downloaded over HTTPS only.
 | The Shelly reports X instead of the target version Y | Check the device; run "Check for updates" again |
 | Certificate of … is not publicly trusted | See [Certificate pinning](#certificate-pinning) |
 | The Shelly requires a password | Store the device password (see [Device passwords](#device-passwords)) |
+| The Shelly requires HTTPS (Enhanced Security) – not supported by this app yet | The Shelly answers plain HTTP only with a redirect to HTTPS. According to Shelly, devices shipped with firmware 2.0 or later always do this. Older ones do it after Enhanced Security was switched on and an HTTPS certificate was installed. The app never follows the redirect and cannot check, update or back up this Shelly yet. Until then, update it in its own web interface (`https://<IP>`) |
+| The Shelly answered with a redirect (HTTP …) – redirects are not followed | Something at the device address sends the request elsewhere, e.g. another web server or a proxy. The app never follows a redirect: check the address of the device in the Shelly integration |
 | Device reports: … (code n) | The Shelly refused the request; the text and the code come from the device itself (English). Correct the entry the text names, e.g. an access point password of 8 to 63 characters; the code helps when you report the problem |
 | A Shelly is missing from the list | Open the line "N of M Shellys listed · Why are K missing?" above the list: it names the reason (disabled, not set up or ignored in Home Assistant). Shellys behind a gateway and unsupported kinds are not listed as devices (see the [FAQ](#faq)) |
 | No usable address (tile in the Devices tab) | The host name does not resolve, the IP address is outside the private networks or the device has no address. Set an address in the Shelly integration (IP address or a host name that Home Assistant resolves) |
@@ -988,7 +990,8 @@ in the firmware store and **Allow downgrades** is switched on (see
   [Gen1 firmware](#gen1-firmware)); no downgrade; no installation progress.
 - A downgrade needs the older version in the firmware store – Shelly only offers the
   current version for download. A device may refuse a downgrade.
-- Communication with the Shellys is unencrypted in your network.
+- Communication with the Shellys is unencrypted in your network. Shellys that accept only
+  HTTPS (Enhanced Security, see [Troubleshooting](#troubleshooting)) are not supported yet.
 - Shelly's server interfaces are not officially guaranteed; a change on their side can
   break checks until the app is updated.
 

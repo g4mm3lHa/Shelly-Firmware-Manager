@@ -45,7 +45,17 @@ from backup_store import BackupStore
 from changelog import Changelogs
 from credentials import Credentials
 from events import EventLog
-from shelly import AuthError, DeviceAuth, ShellyError, clip, error_text, plain, port_open, same_secret
+from shelly import (
+    AuthError,
+    DeviceAuth,
+    HttpsRequiredError,
+    ShellyError,
+    clip,
+    error_text,
+    plain,
+    port_open,
+    same_secret,
+)
 from shelly_net import resolve_lan_address
 from tls import CertificatePins
 
@@ -215,9 +225,12 @@ FIRST_START_BLOCK = "Not before the first-start question is answered: import a f
 
 
 def severity_of(err: BaseException) -> str:
-    """Log severity of a device error: authentication and internal errors are
-    errors; unreachable devices, timeouts and temporary/missing data warnings."""
-    if isinstance(err, AuthError) or not isinstance(err, (TimeoutError, ShellyError, aiohttp.ClientError, OSError)):
+    """Log severity of a device error: authentication errors, a device that requires
+    HTTPS (both stay until the user acts) and internal errors are errors; unreachable
+    devices, timeouts and temporary/missing data warnings."""
+    if isinstance(err, (AuthError, HttpsRequiredError)):
+        return "error"
+    if not isinstance(err, (TimeoutError, ShellyError, aiohttp.ClientError, OSError)):
         return "error"
     return "warning"
 

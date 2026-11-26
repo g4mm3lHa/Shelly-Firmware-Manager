@@ -182,7 +182,7 @@ def _texts_of(node: ast.expr) -> list[str]:
 
 
 # Errors that become a status message of a device (or the answer of an install dialog)
-ERRORS = {"ShellyError", "AuthError", "AddressError", "OtaError", "UnsupportedError"}
+ERRORS = {"ShellyError", "AuthError", "AddressError", "HttpsRequiredError", "OtaError", "UnsupportedError"}
 # Functions whose returned text is a status message or the error of a connection test
 MESSAGE_FUNCTIONS = {"_install_diagnosis", "_ota_error_text", "fetch_error"}
 # Functions whose "error" values (keyword or ["error"]) are the result of a connection test
@@ -215,6 +215,7 @@ def _sent_texts() -> list[str]:
     import manager_checks
     import manager_core
     import manager_store
+    import shelly
 
     texts = [
         *manager_checks.OFFER_MESSAGES.values(),
@@ -225,6 +226,7 @@ def _sent_texts() -> list[str]:
             manager_checks.STORE_FALLBACK_HINT, manager_checks.IMPORT_FALLBACK_HINT, manager_checks.IMPORT_FALLBACK_HINT_GEN1)),
         manager_core.unexpected_text(KeyError("X")),
         manager_core.FIRST_START_BLOCK,
+        shelly.HTTPS_REQUIRED,
     ]
     app = ROOT / "shelly_firmware_manager" / "app"
     for name in SOURCES + MESSAGE_ONLY:

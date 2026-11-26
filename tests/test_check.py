@@ -522,6 +522,34 @@ async def test_missing_password_fails_the_check_of_the_device(mgr, net):
     assert dev["status"] == manager_core.STATUS_READY and "settings_error" not in dev
 
 
+async def test_device_that_requires_https_is_an_error(mgr, net, monkeypatch):
+    """A Shelly that redirects to HTTPS (Enhanced Security): an error of this device
+    with the text, not "Not reachable"; the other devices are not affected. The same
+    from the settings read fails the check like a missing password."""
+    real = shelly.device_info
+
+    async def device_info(session, origin, *args, **kwargs):
+        if origin == "http://192.168.1.11":  # Hall
+            raise shelly.HttpsRequiredError(shelly.HTTPS_REQUIRED)
+        return await real(session, origin, *args, **kwargs)
+
+    monkeypatch.setattr(shelly, "device_info", device_info)
+    assert await mgr.scan()
+    hall = mgr.devices[B]
+    assert hall["status"] == manager_core.STATUS_ERROR and hall["error_level"] == "error"
+    assert hall["message"] == shelly.HTTPS_REQUIRED and hall["unreachable"] is False
+    assert mgr.devices[A]["status"] == manager_core.STATUS_READY
+    assert mgr.devices[C]["status"] == manager_core.STATUS_READY
+    entry = [e for e in mgr.events.entries if e["kind"] == "check"][-1]
+    assert entry["severity"] == "error" and entry["errors"] == 1
+    monkeypatch.setattr(shelly, "device_info", real)
+    net.settings_error = shelly.HttpsRequiredError(shelly.HTTPS_REQUIRED)
+    assert await mgr.scan()
+    dev = mgr.devices[A]
+    assert dev["status"] == manager_core.STATUS_ERROR and dev["message"] == shelly.HTTPS_REQUIRED
+    assert dev["settings_error"]["severity"] == "error" and not dev["unreachable"]
+
+
 # ---------------------------------------------------------------- Unexpected errors stay with their device
 
 

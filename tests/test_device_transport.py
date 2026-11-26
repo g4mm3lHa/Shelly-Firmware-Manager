@@ -255,21 +255,58 @@ async def test_gen1_basic_auth_and_query(session):
     assert len(dev.requests) == 1
 
 
-@pytest.mark.parametrize("status", [301, 302, 307, 308])
+@pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
 async def test_redirects_are_never_followed(session, status):
     """A redirect could lead out of the LAN: the target never gets a request, for
-    GET (device info) and POST (RPC) alike."""
+    GET (device info) and POST (RPC) alike; the error names the status, not the target."""
     async with FakeDevice(routes={"/shelly": GEN2_INFO, "/rpc": rpc(None)}) as target:
         def moved(_request, _body):
             return web.Response(status=status, headers={"Location": target.origin + "/shelly"})
 
         async with FakeDevice(routes={"/shelly": moved, "/rpc": moved}) as dev:
-            with pytest.raises(shelly.ShellyError, match="Invalid response"):
+            text = rf"answered with a redirect \(HTTP {status}\) – redirects are not followed"
+            with pytest.raises(shelly.ShellyError, match=text) as err:
                 await shelly.device_info(session, dev.origin)
-            with pytest.raises(shelly.ShellyError, match="Invalid response"):
+            assert type(err.value) is shelly.ShellyError and target.origin not in str(err.value)
+            with pytest.raises(shelly.ShellyError, match=text):
                 await shelly.restart(session, 2, dev.origin)
         assert target.requests == []
     assert len(dev.requests) == 2
+
+
+@pytest.mark.parametrize("location", ["https://{host}/shelly", "HTTPS://{host}/rpc", " wss://{host}/rpc"])
+async def test_redirect_to_https_is_named(session, location):
+    """A Shelly that sends plain HTTP to HTTPS (Enhanced Security) raises
+    HttpsRequiredError for GET and POST; the redirect is not followed and its target
+    is not part of the message."""
+    async with FakeDevice(routes={"/shelly": GEN2_INFO, "/rpc": rpc(None)}) as target:
+        host = target.origin.removeprefix("http://")
+        def moved(_request, _body):
+            return web.Response(status=301, headers={"Location": location.format(host=host)})
+
+        async with FakeDevice(routes={"/shelly": moved, "/rpc": moved}) as dev:
+            with pytest.raises(shelly.HttpsRequiredError, match="requires HTTPS") as err:
+                await shelly.device_info(session, dev.origin)
+            assert str(err.value) == shelly.HTTPS_REQUIRED and host not in str(err.value)
+            with pytest.raises(shelly.HttpsRequiredError):
+                await shelly.restart(session, 2, dev.origin)
+            with pytest.raises(shelly.HttpsRequiredError):  # Try again: before "No device information"
+                await shelly.answers(session, dev.origin)
+        assert target.requests == []
+    assert len(dev.requests) == 3
+
+
+async def test_redirect_is_never_an_answer(session):
+    """A redirect without a target gets the general text; a redirect whose body is a
+    JSON object is not taken as the device's answer."""
+    no_target = web.Response(status=302)
+    with_body = web.json_response(GEN2_INFO, status=301, headers={"Location": "/elsewhere"})
+    async with FakeDevice(routes={"/shelly": no_target, "/rpc": with_body}) as dev:
+        with pytest.raises(shelly.ShellyError, match=r"redirect \(HTTP 302\)") as err:
+            await shelly.device_info(session, dev.origin)
+        assert not isinstance(err.value, shelly.HttpsRequiredError)
+        with pytest.raises(shelly.ShellyError, match=r"redirect \(HTTP 301\)"):
+            await shelly.device_rpc(session, dev.origin, "Shelly.GetDeviceInfo")
 
 
 async def test_answer_size_limit(session):

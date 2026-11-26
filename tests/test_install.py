@@ -104,9 +104,10 @@ REAL_CHANNEL = shelly.OtaChannel  # conftest replaces it with a fake per test
 class FakeShelly:
     """Local Gen2 RPC WebSocket at /rpc with optional Digest auth (official format)."""
 
-    def __init__(self, password=None, events=(), redirect=False, keep_open=False):
-        """keep_open: after the events the WebSocket stays open until release is set
-        (a device still running; closing it stands for the restart)."""
+    def __init__(self, password=None, events=(), redirect=None, keep_open=False):
+        """redirect: target URL the device redirects the WebSocket request to (None: no
+        redirect). keep_open: after the events the WebSocket stays open until release
+        is set (a device still running; closing it stands for the restart)."""
         self.password, self.events, self.redirect = password, list(events), redirect
         self.keep_open, self.release = keep_open, asyncio.Event()
         self.realm = "shellyplus1-aabbcc"
@@ -123,7 +124,7 @@ class FakeShelly:
 
     async def handler(self, request):
         if self.redirect:
-            raise web.HTTPFound("http://203.0.113.1/rpc")
+            raise web.HTTPFound(self.redirect)
         ws = web.WebSocketResponse()
         await ws.prepare(request)
         async for msg in ws:
@@ -200,10 +201,20 @@ def test_ws_auth_refuses_downgrades():
 
 
 async def test_channel_refuses_redirects():
-    async with FakeShelly(redirect=True) as dev:
-        with pytest.raises(shelly.ShellyError, match="redirect"):
+    async with FakeShelly(redirect="http://203.0.113.1/rpc") as dev:
+        with pytest.raises(shelly.ShellyError, match="redirect") as err:
             async with REAL_CHANNEL(dev.origin):
                 pass
+    assert not isinstance(err.value, shelly.HttpsRequiredError)
+
+
+async def test_channel_names_a_redirect_to_https():
+    """A WebSocket redirect to HTTPS is refused as HttpsRequiredError; its target is not in the text."""
+    async with FakeShelly(redirect="https://192.168.1.10/rpc") as dev:
+        with pytest.raises(shelly.HttpsRequiredError) as err:
+            async with REAL_CHANNEL(dev.origin):
+                pass
+    assert str(err.value) == shelly.HTTPS_REQUIRED and "192.168.1.10" not in str(err.value)
 
 
 def install_device(m, gen=2):
