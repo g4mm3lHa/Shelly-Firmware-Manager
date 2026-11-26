@@ -86,7 +86,9 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   checks; warnings and errors stay.
 - The entry "compared after the update" opens like the other entries: the names of the first
   changed settings ("key: changed", no values; the device dialog shows them) and the scripts
-  that stopped.
+  that stopped. Its line ends in "· n removed fields" when the firmware removed fields (count
+  only, no names); removed fields alone keep the entry a success, so the tick hides it
+  (2026-11-26).
 
 ## Toolbar and card heads (3.5.0, variant B)
 - Same toolbar in all tabs: search, sort and filter only as small round icons (36 px

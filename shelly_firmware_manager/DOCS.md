@@ -688,6 +688,11 @@ first changed settings (without their values, which may hold e.g. a server addre
 stopped scripts. Downgrades and
 installations without a backup **Before update** get no comparison.
 
+Settings the new firmware no longer has, such as `ble.enable` (removed in Gen2+ firmware 2.0.0),
+are meant to be listed apart under **Removed with the firmware**. They do not count as changed,
+add no line below the firmware and are only counted in the log. A component the device no
+longer reports at all still counts as changed.
+
 ### Logs
 
 The activity log records checks, downloads, uploads, installations and downgrades,

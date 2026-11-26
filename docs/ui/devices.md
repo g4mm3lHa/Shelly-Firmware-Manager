@@ -276,16 +276,24 @@ Wordings: `mockups/3.9.0/TEXTE.md`.
 - **Details for a bug ticket (A3, 10):** button bottom left in the device details; dialog
   (copy icon) with intro, the masked text (monospace box; English, plus language and
   browser), hint "Please read it before pasting …", Close / blue "Copy text".
-- **Comparison after update (B3, 5 a, 6 b; rc2 2026-11-24):** while a device shows "Updated"
+- **Comparison after update (B3, 5 a, 6 b; rc2 2026-11-24; removed fields 2026-11-26):** while a device shows "Updated"
   and the comparison found changed values or stopped scripts: yellow link line "n settings
   changed" (or "n scripts stopped") under the firmware until "Seen"; row menu "Comparison
   after update" after "Device details" as long as the comparison exists (until the next check
   of the device; the check after an intermediate version keeps it). Dialog buttons: Close /
   blue "Seen" while the line is shown (removes it), else Close only. Dialog (backup icon): Device, Update a → b, Compared with "Backup “Before
-  update” · <time>"; section Result (check lines Settings, Scripts, New fields); "Changed · n"
-  table (Setting, Before the update, Now); "New with the firmware · n" collapsed ("Show
-  fields", Setting, Default value); hint "Not compared: counters that change with every
-  update (sys.cfg_rev)." (Gen2+). No "Restore backup" button.
+  update” · <time>"; section Result (check lines Settings, Scripts, New fields, Removed fields);
+  "Changed · n" table (Setting, Before the update, Now); "New with the firmware · n" collapsed
+  ("Show fields", Setting, Default value); "Removed with the firmware · n" collapsed ("Show
+  fields", Setting, Before the update; old values plain grey, not blue like new values); hint
+  "Not compared: counters that change with every update (sys.cfg_rev)." (Gen2+). No "Restore
+  backup" button.
+- **Removed fields (2026-11-26, mockup `fw6-backup-vergleich`):** a field of the backup the device
+  no longer reports while it still reports its component (Gen1: its channel or /settings) was
+  removed by the firmware (e.g. ble · enable): green check line "Removed fields – n settings no
+  longer exist in this firmware." (1: "1 setting no longer exists in this firmware.") and the
+  section above. Not a change: no yellow line, no "Seen", log entry not a warning. A component
+  that is no longer reported at all still counts as changed (Now "–").
 - **CSV (C3, 10 a):** download icon in the toolbar before Columns (wide screens only) saves
   the shown list at once (search, filter, area filter, sort order): Name, Shelly name, Area,
   Model, Generation, IP, Firmware, Available, Status, Last check; semicolon, UTF-8.

@@ -566,6 +566,25 @@ async def test_refused_values_are_named_and_the_rest_is_written(one):
     assert result["restart"] is None and result["confirmed"]
 
 
+async def test_restore_skips_settings_a_newer_firmware_removed(one):
+    """A backup made before an update that removed fields (ble.enable since Gen2+ 2.0.0):
+    the preview and the restore skip them as unknown, write the rest and report no error."""
+    one.config["ble"] = {"enable": True, "rpc": {"enable": True}, "observer": {"enable": False}}
+    backup = await shelly_backup.read(target_of(one))
+    one.config["ble"] = {"rpc": {"enable": False}}
+    skipped = [
+        {"key": "ble · enable", "reason": "unknown"},
+        {"key": "ble · observer.enable", "reason": "unknown"},
+    ]
+    preview = shelly_backup.compare(2, backup, await shelly_backup.read(target_of(one)))
+    assert preview["settings"]["skipped"] == skipped
+    assert [row["key"] for row in preview["settings"]["rows"]] == ["ble · rpc.enable"]
+    result = await shelly_backup.restore(target_of(one), backup, ["settings"], lambda _s: None)
+    settings = result["parts"][0]
+    assert (settings["total"], settings["open"], settings["skipped"]) == (1, [], skipped)
+    assert one.config["ble"] == {"rpc": {"enable": True}} and result["confirmed"]
+
+
 async def test_restore_reports_a_device_that_stops_answering(one):
     backup = await shelly_backup.read(target_of(one))
     one.config["wifi"]["sta"]["ssid"] = "Guest"
@@ -1211,8 +1230,9 @@ async def test_error_mark_of_the_log_and_unreachable_devices(mgr, net):
 
 
 def test_after_update_splits_changed_and_new_settings():
-    """Changed values and settings the backup did not have are listed apart; counters
-    such as sys.cfg_rev are never compared; scripts that ran before and stopped are named."""
+    """Changed values, settings the backup did not have and settings the firmware removed
+    are listed apart; counters such as sys.cfg_rev are never compared; scripts that ran
+    before and stopped are named."""
     before = FakeShelly()
     now = FakeShelly()
     now.config["switch:0"]["initial_state"] = "restore_last"
@@ -1222,23 +1242,81 @@ def test_after_update_splits_changed_and_new_settings():
     data_before = {"config": before.config, "scripts": [{"id": 1, "name": "a", "running": True}, {"id": 2, "name": "b", "running": True}]}
     data_now = {"config": now.config, "scripts": [{"id": 1, "name": "a", "running": True}, {"id": 2, "name": "b", "running": False}]}
     result = shelly_backup.after_update(2, data_before, data_now)
-    assert result["changed"] == [
-        {"key": "mqtt · server", "before": "–", "now": "–"},
-        {"key": "switch:0 · initial_state", "before": "off", "now": "restore_last"},
-    ]
+    assert result["changed"] == [{"key": "switch:0 · initial_state", "before": "off", "now": "restore_last"}]
     assert result["new"] == [{"key": "switch:0 · reverse", "value": "false"}]
-    assert (result["changed_count"], result["new_count"]) == (2, 1)
+    # mqtt is still reported, only its field is not: the firmware removed it
+    assert result["gone"] == [{"key": "mqtt · server", "before": "–"}]
+    assert (result["changed_count"], result["new_count"], result["gone_count"]) == (1, 1, 1)
     assert result["scripts"] == {"before": 2, "again": 1, "stopped": ["b"]}
 
 
+def test_after_update_names_fields_the_firmware_removed():
+    """A field missing after the update while its component is still reported counts as
+    removed by the firmware (ble.enable and ble.observer since Gen2+ 1.5.0/2.0.0, access of
+    virtual components) and not as a change; a whole missing component does."""
+    before = FakeShelly()
+    before.config["ble"] = {"enable": True, "rpc": {"enable": True}, "observer": {"enable": False}}
+    before.config["boolean:200"] = {"id": 200, "name": "x", "access": "*"}
+    now = FakeShelly()
+    now.config["ble"] = {"rpc": {"enable": True}}
+    now.config["boolean:200"] = {"id": 200, "name": "x"}
+    del now.config["input:0"]
+    result = shelly_backup.after_update(2, {"config": before.config}, {"config": now.config})
+    assert result["gone"] == [
+        {"key": "ble · enable", "before": "true"},
+        {"key": "ble · observer.enable", "before": "false"},
+        {"key": "boolean:200 · access", "before": "*"},
+    ]
+    assert result["changed"] == [
+        {"key": "input:0 · id", "before": "0", "now": "–"},
+        {"key": "input:0 · type", "before": "switch", "now": "–"},
+    ]
+    assert (result["changed_count"], result["new_count"], result["gone_count"]) == (2, 0, 3)
+
+
 def test_after_update_of_a_gen1_device():
-    """Gen1: the settings are compared, there are no scripts."""
-    before = {"settings": {"relays": [{"default_state": "off"}], "mode": "relay"}, "actions": None}
+    """Gen1: the settings are compared, there are no scripts. A field missing in a channel
+    or in /settings that is still reported was removed by the firmware; a missing channel
+    is a change."""
+    before = {
+        "settings": {"relays": [{"default_state": "off", "auto_on": 0}, {"default_state": "off"}],
+                     "mode": "relay", "led_status_disable": False},
+        "actions": None,
+    }  # fmt: skip
     now = {"settings": {"relays": [{"default_state": "on", "schedule": False}], "mode": "relay"}, "actions": None}
     result = shelly_backup.after_update(1, before, now)
-    assert result["changed"] == [{"key": "relays.0 · default_state", "before": "off", "now": "on"}]
+    assert result["changed"] == [
+        {"key": "relays.0 · default_state", "before": "off", "now": "on"},
+        {"key": "relays.1 · default_state", "before": "off", "now": "–"},
+    ]
     assert result["new"] == [{"key": "relays.0 · schedule", "value": "false"}]
+    assert result["gone"] == [
+        {"key": "led_status_disable", "before": "false"},
+        {"key": "relays.0 · auto_on", "before": "0"},
+    ]
     assert result["scripts"] == {"before": 0, "again": 0, "stopped": []}
+
+
+async def test_comparison_of_an_update_that_only_removed_fields(net, shellys, monkeypatch, quick_install):
+    """Fields the firmware removed are kept and counted, but raise no warning; the log
+    names neither them nor their values."""
+    mgr = manager_with(net, shellys, backup_before_install=True)
+    fake(shellys, net, A).config["mqtt"]["user"] = "user-x7"
+
+    async def trigger(_session, _gen, origin, url, _auth=None):
+        device = net.by_origin(origin)
+        net.devices[device] = (*net.devices[device][:2], "1.5.0", "1.5.0")
+        shellys[origin].config["mqtt"].pop("user")
+
+    monkeypatch.setattr(shelly, "trigger_update", trigger)
+    await mgr.scan()
+    assert await mgr.install(A, mgr.devices[A]["sha256"], "alice") is True
+    after = mgr.devices[A]["after_update"]
+    assert after["gone"] == [{"key": "mqtt · user", "before": "user-x7"}] and after["gone_count"] == 1
+    assert after["changed"] == [] and after["changed_count"] == 0
+    entry = backup_events(mgr, "compared")[-1]
+    assert (entry["severity"], entry["gone_fields"], entry["changed"]) == ("success", 1, 0)
+    assert "changed_keys" not in entry and "user-x7" not in json.dumps(entry)
 
 
 async def test_comparison_after_a_confirmed_update(net, shellys, monkeypatch, quick_install):

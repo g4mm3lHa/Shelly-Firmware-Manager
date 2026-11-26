@@ -393,11 +393,14 @@ if diagnosis:
     m.devices[f"{4:032x}"]["unreachable"] = True
     m.devices[f"{6:032x}"].update(version="1.5.0", after_update={
         "at": now - 600, "backup_at": now - 700, "from_version": "1.4.0", "to_version": "1.5.0",
-        "changed": [{"key": "cloud.enable", "before": "false", "now": "true"},
-                    {"key": "switch:0.initial_state", "before": "restore_last", "now": "off"}],
-        "new": [{"key": "ble.rpc.enable", "value": "true"}, {"key": "mqtt.enable_control", "value": "true"},
-                {"key": "switch:0.reverse", "value": "false"}],
-        "changed_count": 2, "new_count": 3, "scripts": {"before": 2, "again": 1, "stopped": ["ble-gateway"]}})
+        "changed": [{"key": "cloud · enable", "before": "false", "now": "true"},
+                    {"key": "switch:0 · initial_state", "before": "restore_last", "now": "off"}],
+        "new": [{"key": "ble · rpc.enable", "value": "true"}, {"key": "mqtt · enable_control", "value": "true"},
+                {"key": "switch:0 · reverse", "value": "false"}],
+        # Firmware 1.5.0 removed ble.observer: a field gone while its component is still reported
+        "gone": [{"key": "ble · observer.enable", "before": "false"}],
+        "changed_count": 2, "new_count": 3, "gone_count": 1,
+        "scripts": {"before": 2, "again": 1, "stopped": ["ble-gateway"]}})
     m.getting_started = True
 
     async def demo_test(device_id, user="unknown"):

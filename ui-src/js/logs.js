@@ -79,7 +79,7 @@ function backupLine(e) {
     // Comparison with the backup "Before update" once the update was confirmed
     case "compared": return e.error ? `${e.device}: comparison after the update failed`
       : `${e.device}: compared after the update · ${plural(e.changed ?? 0, "setting")} changed · ${plural(e.new_fields ?? 0, "new field")}` +
-        (e.scripts_before ? ` · ${plural(e.scripts_before, "script")} ran before` : "");
+        (e.gone_fields ? ` · ${plural(e.gone_fields, "removed field")}` : "") + (e.scripts_before ? ` · ${plural(e.scripts_before, "script")} ran before` : "");
     default: return `${e.device}: backup ${e.event}`;
   }
 }
