@@ -265,7 +265,7 @@ async def test_concurrent_waiters_share_a_failure(ha):
     assert m._ha_reading == {} and "devices" not in m._ha_cache
 
 
-async def test_cancelled_reads_hand_over():
+async def test_cancelled_reads_hand_over(net):
     """A cancelled reader hands over to the caller waiting for it, which reads itself; a
     cancelled waiter leaves the read running, and its answer is kept."""
     m = manager.Manager(dict(OPTIONS), session=None, token="t")
