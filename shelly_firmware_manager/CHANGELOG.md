@@ -5,6 +5,20 @@
 Release candidate. New look with tinted cards, an access point form, translated status
 messages and a faster start.
 
+Changes in rc3
+
+Added
+- Settings tab, card "Display": base colour of the app – Default (neutral grey surfaces,
+  buttons in the Home Assistant theme colour) or Blue, Teal, Green, Violet, Orange.
+- Saving only the base colour keeps the app running (no restart).
+
+Changed
+- Connection test of the download server: the result is shown in the page language; the
+  log entry stays English.
+
+Fixed
+- Errors of a Shelly show its code only once ("Timed out (code -104)").
+
 Changes in rc2
 
 Added

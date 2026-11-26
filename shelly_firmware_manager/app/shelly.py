@@ -121,12 +121,15 @@ def plain(value: object, limit: int = 200) -> str:
 def device_error(error: object) -> str:
     """Readable text of the error object of a Gen2+ answer ({"code": -113, "message":
     "…"}): the device's message with its code, e.g. "Internal error: … (code -113)";
-    anything else as it came. Device text, so cleaned like plain (it reaches log lines)."""
+    anything else as it came. A message that starts with the same code ("-104: Timed
+    out") loses that prefix, so the code is shown once. Device text, so cleaned like
+    plain (it reaches log lines)."""
     if not isinstance(error, dict):
         return plain(error)
     message, code = plain(error.get("message"), 160).strip(), error.get("code")
     if not isinstance(code, int) or isinstance(code, bool):
         return message or plain(error)
+    message = message.removeprefix(f"{code}:").lstrip()  # the message itself is already stripped
     return f"{message} (code {code})" if message else f"code {code}"
 
 

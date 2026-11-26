@@ -27,11 +27,20 @@
    .tone-warning, .tone-error, .tone-primary) or a state class mapped to a tone; success
    text is mixed like the link text. Monospace font, shadows, layers (z-index), icon sizes
    and the beta colour are tokens too.
-   Surfaces: cards, tool icons, tonal buttons and the tab strip are tinted with the theme's
-   primary colour instead of drawing lines: --surf (cards, phone tiles, status strips) and
-   --surf-hi (buttons, tab strip, tool icons); rows of a list stand on the card as bands in the
-   card background. The tint is weaker in light themes (4 % / 10 %) than in dark ones (7 % /
-   16 %); core.js marks the scheme of the HA theme on the root element (data-scheme). */
+   Surfaces: cards, tool icons, tonal buttons and the tab strip are tinted instead of drawing
+   lines: --surf (cards, phone tiles, status strips) and --surf-hi (buttons, tab strip, tool
+   icons); rows of a list stand on the card as bands in the card background. The tint is weaker
+   in light themes (4 % / 10 %) than in dark ones (7 % / 16 %); core.js marks the scheme of the
+   HA theme on the root element (data-scheme). Every surface tint (also hover backgrounds, the
+   shadow of the active tab, chosen tiles) mixes --tint; accents (lines, fills, icons, text, focus
+   outline, chosen boxes) use --primary-color.
+   Base colour (option base_color, Settings → Display): the server writes the saved value into
+   data-base-color of the root element, the Settings tab previews a choice there. "default":
+   --tint is the text colour (neutral grey surfaces), the accents keep the primary colour of the
+   HA theme. A colour (--base-<name>) replaces --primary-color for surfaces and accents together,
+   with white text on filled primary buttons; its declarations are !important, because core.js
+   copies the theme's --primary-color as an inline style onto the root element (a normal inline
+   declaration loses against an !important one of a style sheet). */
 :root{--fs-tag:11px;--fs-small:12px;--fs-text:14px;--fs-title:15px;
   --radius-xs:8px;--radius-s:12px;--radius-m:14px;--radius-tile:16px;--radius-l:24px;--radius-btn:999px;--fs-head:16px;
   --line:var(--divider-color);--line-strong:color-mix(in srgb,var(--primary-text-color) 50%,var(--card-background-color));
@@ -44,13 +53,23 @@
   --shadow-dlg:0 8px 32px rgba(0,0,0,.4);--shadow-bar:0 -2px 8px rgba(0,0,0,.18);
   --z-bar:5;--z-menu:10;--z-pop:12;--z-tip:20;--z-toast:30;
   --icon-xs:13px;--icon-s:14px;--icon-m:16px;--icon:18px;--icon-l:20px;--icon-xl:22px;--icon-xxl:24px;
-  --surf:color-mix(in srgb,var(--primary-color) 7%,var(--card-background-color));
-  --surf-hi:color-mix(in srgb,var(--primary-color) 16%,var(--card-background-color))}
-:root[data-scheme=light]{--surf:color-mix(in srgb,var(--primary-color) 4%,var(--card-background-color));
-  --surf-hi:color-mix(in srgb,var(--primary-color) 10%,var(--card-background-color))}
+  --base-blue:#03a9f4;--base-teal:#00897b;--base-green:#558b2f;--base-violet:#7e57c2;--base-orange:#ef6c00;
+  --tint:var(--primary-text-color);
+  --surf:color-mix(in srgb,var(--tint) 7%,var(--card-background-color));
+  --surf-hi:color-mix(in srgb,var(--tint) 16%,var(--card-background-color))}
+:root[data-scheme=light]{--surf:color-mix(in srgb,var(--tint) 4%,var(--card-background-color));
+  --surf-hi:color-mix(in srgb,var(--tint) 10%,var(--card-background-color))}
 /* Before core.js has marked the scheme: the browser's scheme (the fallback colours follow it) */
-@media (prefers-color-scheme:light){:root:not([data-scheme]){--surf:color-mix(in srgb,var(--primary-color) 4%,var(--card-background-color));
-  --surf-hi:color-mix(in srgb,var(--primary-color) 10%,var(--card-background-color))}}
+@media (prefers-color-scheme:light){:root:not([data-scheme]){--surf:color-mix(in srgb,var(--tint) 4%,var(--card-background-color));
+  --surf-hi:color-mix(in srgb,var(--tint) 10%,var(--card-background-color))}}
+/* A chosen base colour: primary colour of the whole app, surfaces tinted with it */
+:root[data-base-color=blue]{--primary-color:var(--base-blue)!important}
+:root[data-base-color=teal]{--primary-color:var(--base-teal)!important}
+:root[data-base-color=green]{--primary-color:var(--base-green)!important}
+:root[data-base-color=violet]{--primary-color:var(--base-violet)!important}
+:root[data-base-color=orange]{--primary-color:var(--base-orange)!important}
+:root:is([data-base-color=blue],[data-base-color=teal],[data-base-color=green],[data-base-color=violet],[data-base-color=orange]){
+  --text-primary-color:#fff!important;--tint:var(--primary-color)}
 
 /* ================================================================ Base */
 *{box-sizing:border-box}
@@ -98,7 +117,7 @@ button:disabled{opacity:.45;cursor:default}
 button.icon,a.icon{background:none;border:0;padding:4px;line-height:0;color:var(--secondary-text-color);border-radius:50%}
 a.icon{display:inline-block;color:var(--link-text)}   /* same box as an icon button: icons of a row stay on one line */
 button.icon:hover:not(:disabled),button.icon:focus-visible{color:var(--primary-color);
-  background:color-mix(in srgb,var(--primary-color) 12%,transparent)}
+  background:color-mix(in srgb,var(--tint) 12%,transparent)}
 button.icon svg,.svg{width:var(--icon);height:var(--icon);fill:currentColor;vertical-align:middle}
 button.icon.red{color:var(--error-color)}
 /* Fields and selects: strong border on every width (at least 3:1 against the card) */
@@ -142,7 +161,7 @@ input[type=file]::file-selector-button{min-height:var(--control-h);margin-right:
 button.icon.tool-btn{position:relative;width:36px;height:36px;padding:0;display:inline-flex;align-items:center;
   justify-content:center;border:0;background:var(--surf-hi);color:var(--link-text)}
 .tool.open>button.icon.tool-btn{color:var(--link-text);border-color:var(--primary-color);
-  background:color-mix(in srgb,var(--primary-color) 12%,var(--card-background-color))}
+  background:color-mix(in srgb,var(--tint) 12%,var(--card-background-color))}
 /* Dot while a search text is set or a filter other than "All" is chosen */
 button.icon.tool-btn.has-value::after{content:"";position:absolute;top:3px;right:3px;width:8px;height:8px;border-radius:50%;
   background:var(--primary-color);border:2px solid var(--card-background-color)}
@@ -444,7 +463,7 @@ h1 .beta{margin-left:4px;color:var(--error-text);font-size:var(--fs-tag);font-we
   padding:7px 16px;display:flex;align-items:center;gap:6px}
 .tab svg{width:var(--icon);height:var(--icon);fill:currentColor}
 .tab.active{background:var(--card-background-color);color:var(--link-text);font-weight:500;
-  box-shadow:0 1px 3px color-mix(in srgb,var(--primary-color) 30%,transparent)}
+  box-shadow:0 1px 3px color-mix(in srgb,var(--tint) 30%,transparent)}
 /* Logs tab: unread error entries (red round "!" after the name, on phones after the icon) */
 .tab-unread{display:inline-flex;align-items:center;justify-content:center;flex:none;width:16px;height:16px;
   border-radius:50%;background:var(--error-color);color:#fff;font-size:11px;font-weight:700;line-height:1}
@@ -504,7 +523,7 @@ button.cell-link:disabled{color:inherit;opacity:1}
   /* Rows as bands in the card background on the tinted card, 3 px apart, rounded ends */
   table:where(.dev-table){border-collapse:separate;border-spacing:0;padding:0 8px 8px}
   :where(.dev-table) tbody tr>td{background:var(--card-background-color);border-top:3px solid var(--surf)}
-  :where(.dev-table) tbody tr:hover>td{background:color-mix(in srgb,var(--primary-color) 4%,var(--card-background-color))}
+  :where(.dev-table) tbody tr:hover>td{background:color-mix(in srgb,var(--tint) 4%,var(--card-background-color))}
   :where(.dev-table) tbody td:first-child{border-radius:var(--radius-s) 0 0 var(--radius-s)}
   :where(.dev-table) tbody td:last-child{border-radius:0 var(--radius-s) var(--radius-s) 0}
   .col-hidden,.c-details{display:none}
@@ -785,6 +804,19 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
 .bulk-res-row{display:flex;align-items:center;gap:12px;padding:6px 0}
 /* Settings: line under "Keep installed versions" */
 .form .desc.set-note:empty{display:none}
+/* Base colour (card Display): one radio group of round swatches; the chosen one has a ring,
+   its name follows the dots. The label around each radio is its click area (44 px on phones). */
+.swatches{display:flex;align-items:center;flex-wrap:wrap;gap:0 2px}
+.swatch{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;cursor:pointer}
+.swatch input[type=radio]{width:22px;height:22px;border:1px solid color-mix(in srgb,var(--primary-text-color) 25%,transparent)}
+.swatch input[type=radio]:checked{box-shadow:0 0 0 2px var(--card-background-color),0 0 0 4px var(--primary-text-color)}
+.swatch input[type=radio]:checked::after{content:none}
+.swatch input[type=radio]:focus-visible{outline-offset:5px}
+.swatch input[value=default]{background:linear-gradient(90deg,#e0e0e0 50%,#616161 50%)}
+.swatch input[value=blue]{background:var(--base-blue)}.swatch input[value=teal]{background:var(--base-teal)}
+.swatch input[value=green]{background:var(--base-green)}.swatch input[value=violet]{background:var(--base-violet)}
+.swatch input[value=orange]{background:var(--base-orange)}
+.swatch-name{margin-left:8px;color:var(--secondary-text-color)}
 @media (max-width:700px){
   /* Settings: each option is one block (label, control, help) with a separator */
   .form{display:block}
@@ -800,6 +832,7 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
   .set-field.t-bool{grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:12px}
   .set-field.t-bool>.desc{grid-column:1/-1}
   .set-field.t-bool input{width:22px;height:22px;margin:0}
+  .swatch{width:44px;height:44px}
   /* Pinned certificate entry: host on its own line, fingerprint + remove below */
   .pins>div:first-child>div{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center}
   .pins>div:first-child>div>input:first-child{grid-column:1/-1}
@@ -911,7 +944,7 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
 /* Kept backup: grey pin = can be kept, primary colour = kept */
 button.icon.bk-keep{color:var(--secondary-text-color);opacity:.55}button.icon.bk-keep.on{color:var(--link-text);opacity:1}
 /* Job bar above the cards (backup run, restore): neutral, with "Show" */
-.notice.bk-job{margin:0 0 12px;border-left-color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 10%,var(--card-background-color))}
+.notice.bk-job{margin:0 0 12px;border-left-color:var(--primary-color);background:color-mix(in srgb,var(--tint) 10%,var(--card-background-color))}
 .bk-job .spinner{display:inline-block;vertical-align:-1px;margin-right:4px}
 /* Progress of a backup run in its dialog: text and bar like the progress of a check */
 .progress.bk-progress{margin:14px 0 4px}
@@ -1003,7 +1036,7 @@ button.after-note span{text-decoration:underline}
 .sec-icon svg{width:14px;height:14px;fill:currentColor}
 .sec-n{font-size:var(--fs-text);font-weight:600}
 .sec-label{font-size:var(--fs-small);color:var(--secondary-text-color)}
-.sec-tile.active{border-color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 12%,var(--card-background-color))}
+.sec-tile.active{border-color:var(--primary-color);background:color-mix(in srgb,var(--tint) 12%,var(--card-background-color))}
 /* Phones: counters as symbol and number only (the name is in the tooltip) */
 @media (max-width:700px){.sec-tile.has{padding-right:10px}.sec-tile.has .sec-label{display:none}}
 /* Logs tab: red trash icon of "Delete all logs" */

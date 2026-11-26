@@ -8,6 +8,7 @@ import {
 } from "./core.js";
 import {lang} from "./i18n.js";
 import {load, render, showView} from "./main.js";
+import {serverText} from "./server-texts.js";
 
 // ---------------------------------------------------------------- Connection test
 // A Gen2+ Shelly fetches a test address from the download server (server: run_connection_test).
@@ -92,7 +93,7 @@ async function runConnectionTest(device) {
       [{text: t("Close")}], "play");
     } else {
       modal(TEST_TITLE, [messageBody(t("The Shelly cannot reach the download server. An installation would fail like this."), "error"),
-        section(t("Test"), testLines(url, "err", who, r.error || "–")),
+        section(t("Test"), testLines(url, "err", who, serverText(r.error) || "–")),
         section(t("Common causes"), box("ul", "causes", ...testCauses(url).map(c => el("li", c)))),
         el("p", t("Home Assistant itself reaches the device. Only the way from the Shelly to Home Assistant (port {port}) matters.", {port: urlPort(url)}), "hint")],
       [{text: t("Close")}, {text: t("Test again"), kind: "primary", action: () => runConnectionTest(device)}], "play");

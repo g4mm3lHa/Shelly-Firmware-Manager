@@ -182,19 +182,36 @@ def _texts_of(node: ast.expr) -> list[str]:
 
 
 # Errors that become a status message of a device (or the answer of an install dialog)
-ERRORS = {"ShellyError", "AuthError", "AddressError", "OtaError"}
-# Functions whose returned text is a status message
-MESSAGE_FUNCTIONS = {"_install_diagnosis", "_ota_error_text"}
+ERRORS = {"ShellyError", "AuthError", "AddressError", "OtaError", "UnsupportedError"}
+# Functions whose returned text is a status message or the error of a connection test
+MESSAGE_FUNCTIONS = {"_install_diagnosis", "_ota_error_text", "fetch_error"}
+# Functions whose "error" values (keyword or ["error"]) are the result of a connection test
+RESULT_FUNCTIONS = {"_test_with"}
 # Sources of status messages; the errors of the other modules answer dialogs
 SOURCES = ("manager_checks.py", "manager_installs.py", "manager_store.py", "manager_schedules.py",
            "shelly.py", "shelly_net.py")
 MESSAGE_ONLY = ("manager_core.py", "manager_devices.py", "manager_backups.py")
 
 
+def _result_errors(func: ast.AsyncFunctionDef) -> list[str]:
+    """Values of "error" in a function of the connection test: error=… keywords and
+    result["error"] = … assignments."""
+    texts: list[str] = []
+    for node in ast.walk(func):
+        if isinstance(node, ast.Call):
+            texts += [text for keyword in node.keywords if keyword.arg == "error" for text in _texts_of(keyword.value)]
+        elif isinstance(node, ast.Assign):
+            target = node.targets[0]
+            if isinstance(target, ast.Subscript) and isinstance(target.slice, ast.Constant) and target.slice.value == "error":
+                texts += _texts_of(node.value)
+    return texts
+
+
 def _sent_texts() -> list[str]:
     """Texts the server sends as status messages and errors: the message constants, the
-    values of "message" (keyword or dev["message"]), the texts of Shelly errors and of
-    the diagnosis functions – with every value of an f-string as "X"."""
+    values of "message" (keyword or dev["message"]), the texts of Shelly errors, of the
+    diagnosis functions and the errors of the connection test – with every value of an
+    f-string as "X"."""
     import manager_checks
     import manager_core
     import manager_store
@@ -227,6 +244,8 @@ def _sent_texts() -> list[str]:
                     texts += _texts_of(node.value)
             elif isinstance(node, ast.FunctionDef) and node.name in MESSAGE_FUNCTIONS:
                 texts += [text for ret in ast.walk(node) if isinstance(ret, ast.Return) and ret.value for text in _texts_of(ret.value)]
+            elif isinstance(node, ast.AsyncFunctionDef) and node.name in RESULT_FUNCTIONS:
+                texts += _result_errors(node)
     # Texts that are only values (e.g. "{error}. {hint}", covered by the hints above)
     return [text for text in texts if re.sub(r"[X.\s]", "", text)]
 

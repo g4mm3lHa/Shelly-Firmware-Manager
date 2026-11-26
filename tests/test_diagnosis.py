@@ -87,6 +87,9 @@ def test_fetch_error_texts():
     assert shelly.fetch_error("Device reports: Deadline Exceeded (code -104)", url) == (
         f"No connection to {url}: timeout after {shelly.FETCH_TEST_TIMEOUT_S} s (Shelly code -104)"
     )
+    assert shelly.fetch_error(f"Device reports: {shelly.device_error({'code': -104, 'message': '-104: Timed out'})}", url) == (
+        f"No connection to {url}: timeout after {shelly.FETCH_TEST_TIMEOUT_S} s (Shelly code -104)"
+    )
     assert shelly.fetch_error("Device reports: Invalid argument (code -103)", url) == (
         f"The device could not fetch {url} (Shelly code -103)"
     )

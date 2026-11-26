@@ -14,6 +14,26 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
   summary name the backups as part of the export), Logs, Advanced (Max.
   parallel installations, Resolve host names, Pinned certificates; 3.8.0, mockup
   `3.8.0-hostname` B). Option labels with "Max." in front. Units in texts always "MB".
+- **Base colour (live test 3.13.0-rc2, finding D; mockup `3.13.0-grundfarbe` variant B, approved
+  2026-11-26):** card "Display", row "Base colour" below "Language", with the i-icon help
+  "Colour of the surfaces, buttons and links of this app. Default: neutral grey surfaces;
+  buttons and links in the colour of the Home Assistant theme." Six round dots in a row, one
+  radio group: Default (half light grey, half dark grey), Blue #03a9f4, Teal #00897b, Green
+  #558b2f, Violet #7e57c2, Orange #ef6c00; the chosen dot has a ring, its name follows the dots
+  in secondary text; every dot has its name as accessible name and tooltip, a visible focus ring
+  and a 44 px touch target on phones. Choosing a dot previews the colour in the whole page at
+  once and shows "Unsaved changes"; it is saved with "Save settings" (app option `base_color`,
+  all browsers) and shown from the first paint after that. A save that changes only the base
+  colour does not restart the app (`reports/3.13.0/FRAGEN-rc3.md` 1 b, approved 2026-11-26): the
+  dialog "Save settings?" has no restart hint and the button "Save", then it closes, the form
+  shows the saved settings and a toast "Settings saved" appears; with other changes it stays
+  "Save & restart". White text on filled buttons stays for every colour (2 a). Leaving the tab or a new form from the
+  saved settings shows the saved colour again. Default after the update: "Default" (no choice
+  "Same as Home Assistant"). Default = surfaces neutral from the text colour, accents in the
+  theme's primary colour; a colour replaces the primary colour for surfaces and accents.
+  Hint under the card: "The language applies at once and only in this browser – no “Save
+  settings” needed. The base colour is saved with “Save settings” for all browsers. Logs, error
+  messages and the documentation stay English."
 - **Inner surface (live test 3.13.0-rc1, variant B, approved 2026-11-25):** the options of
   each settings card stand on one inner surface in the card background (radius 12, 8 px
   from the card edge, inside 14 / 12 px, phones 12 px), like the rows of the other tabs on
@@ -135,9 +155,10 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
   "Automatic (first reachable device of Gen 2 or newer)" and the devices that can test),
   hint about Gen 1 and the one-time test address; Cancel / blue "Start test". Running and
   result: check lines Download base URL, Download server, "Fetch by <device> (<ip>)";
-  reachable: green message; not reachable: red message, the error (English server text;
-  a device error as readable text with its codes, e.g. "connection error (Shelly code -114 /
-  -14)", the raw answer only in the log entry and the bug ticket text), "Common causes" (the
+  reachable: green message; not reachable: red message, the error (server text shown
+  translated in the page language; a device error as readable text with its codes, e.g.
+  "connection error (Shelly code -114 / -14)"; the log entry and the bug ticket text stay
+  English, the raw answer only there), "Common causes" (the
   port cause names the port of the saved address) and the hint about the port; Close / blue
   "Test again". Without a Gen2+
   device: yellow message "No Shelly of Gen 2 or newer is known yet …".

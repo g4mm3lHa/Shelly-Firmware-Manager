@@ -1,11 +1,12 @@
 """Routes of the Logs and Settings tabs: the activity log (list, delete one, delete all),
-the app options (read, save with a restart of the app, confirm the download URL) and the
-connection test of the download server.
+the app options (read, save with a restart of the app unless only options without a restart
+changed, confirm the download URL) and the connection test of the download server.
 """
 
 import asyncio
 import logging
 
+import app_options
 from aiohttp import web
 from events import ENTRY_ID_RE, user_from
 from shelly import ShellyError
@@ -65,9 +66,11 @@ class SettingsRoutes(Handlers):
         return web.json_response({"url": await self.mgr.app_page()})
 
     async def options_save(self, request: web.Request) -> web.StreamResponse:
-        """Save changed app options via the Supervisor, then restart the app."""
+        """Save changed app options, then restart the app – not when only options that apply
+        without a restart changed (app_options.NO_RESTART, e.g. the base colour)."""
         changed = await guarded(self.mgr.save_options(await json_body(request), user_from(request.headers)))
-        if changed:
+        restart = app_options.needs_restart(changed)
+        if restart:
 
             async def restart_later() -> None:
                 """Restart after the answer has been sent; failures are logged."""
@@ -78,7 +81,7 @@ class SettingsRoutes(Handlers):
                     log.error("App restart failed – restart it manually: %s", err)
 
             self.background(restart_later())
-        return web.json_response({"changed": changed, "restarting": bool(changed)})
+        return web.json_response({"changed": changed, "restarting": restart})
 
     async def confirm_download_base(self, request: web.Request) -> web.StreamResponse:
         """Confirm that the former example download URL really is the address of Home
