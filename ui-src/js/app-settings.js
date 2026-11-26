@@ -3,17 +3,20 @@
 // card "Device Passwords" (several devices).
 import {
   $, ackGate, api, attachTip, box, checkbox, closeModal, el, field, filePassword, fmt, fmtSize, formError, guarded, icon, iconButton, input,
-  mb, message, messageBody, modal, passwordCopy, section, startDownload, t, tn, ui, uploadFile, valueList,
+  mb, message, messageBody, modal, passwordCopy, section, setTip, startDownload, t, tn, toast, ui, uploadFile, valueList,
 } from "./core.js";
-import {autoLanguage, languageChoice, LANGUAGES, setLanguage} from "./i18n.js";
+import {autoLanguage, setLanguage, storeLanguage} from "./i18n.js";
+import {languageChoice, LANGUAGES} from "./lang.js";
 import {bulkPasswords} from "./device-settings.js";
 import {downgradeWarning} from "./install.js";
 import {connectionRow} from "./diagnosis.js";
 
 // ---------------------------------------------------------------- App settings
 // All app options, grouped into cards in this order (Title Case card heads). Saving
-// stores them in the app (settings.json) and restarts it. [key, label, type, description, group]
-// in English (same texts as translations/en.yaml), translated when shown.
+// stores them in the app (settings.json) and restarts it, unless only options of NO_RESTART
+// changed. [key, label, type, description, group]
+// in English (same texts as translations/en.yaml), translated when shown. The base colour
+// (group "Display") stands in the card Display with the language (languageCard).
 const OPTION_GROUPS = ["Checks", "Download Server", "Firmware & Storage", "Backups", "Logs", "Advanced"];
 const STORAGE = "Firmware & Storage";
 export const OPTION_FIELDS = [
@@ -35,6 +38,7 @@ export const OPTION_FIELDS = [
   ["max_parallel_installs", "Max. parallel installations", "number", "1–20; further approvals wait", "Advanced"],
   ["resolve_host_names", "Resolve host names", "bool", "Looks up each device's host name (<device id>.local) at every check and shows the column “Host name”; off by default", "Advanced"],
   ["pinned_certificates", "Pinned certificates", "pins", "Host below shelly.cloud + SHA-256 fingerprint; several entries per host allowed", "Advanced"],
+  ["base_color", "Base colour", "color", "Colour of the surfaces, buttons and links of this app. Default: neutral grey surfaces; buttons and links in the colour of the Home Assistant theme.", "Display"],
 ];
 // The firmware store block (export / import) stands in the card "Firmware & Storage"
 // directly before this option
@@ -144,10 +148,21 @@ function backupsNote(totals) {
       : t("{n} backups of {devices} devices are stored ({size}), encrypted.", {n: totals.count, devices: totals.devices, size});
   return stored + " " + where;
 }
-/** Build the grouped settings cards with one common Save button. */
+/** Help of an option: the i-icon after its name and the visually hidden description (id
+ *  "<id>-help"); the text is the tooltip of the name and the icon. Returns [icon, description]. */
+function optionHelp(lab, id, label, desc) {
+  const help = el("div", desc, "sr-only"); help.id = id + "-help";
+  const info = el("button", null, "icon help"); info.type = "button"; info.append(icon("info"));
+  info.setAttribute("aria-label", t("Help: {name}", {name: label})); info.setAttribute("aria-describedby", help.id);
+  attachTip(lab, () => desc, true); attachTip(info, () => desc, true);
+  return [info, help];
+}
+/** Build the grouped settings cards with the common save area ("Unsaved changes" hint and
+ *  "Save settings") above and below them. */
 export function renderSettings() {
   const o = ui.options; settingsInputs = {};
   if (!o) { $("settings-form").replaceChildren(box("div", "card", box("div", "card-body", el("p", t("Loading …"), "hint")))); return; }
+  savedBase = BASE_COLORS.some(c => c[0] === o.base_color) ? o.base_color : "default"; showBase(savedBase);
   const cards = OPTION_GROUPS.map(group => {
     const form = el("div", null, "form");
     for (const [key, english, type, descEn] of OPTION_FIELDS.filter(f => f[4] === group)) {
@@ -164,11 +179,8 @@ export function renderSettings() {
       // the download base URL). On wide screens the block is "display: contents", so the
       // name/control grid is unchanged. The help text is a tooltip of the name and the
       // icon; it stays in the page (visually hidden) as description of the control.
-      const help = el("div", desc, "sr-only"); help.id = id + "-help";
+      const [info, help] = optionHelp(lab, id, label, desc);
       control.setAttribute("aria-describedby", help.id);
-      const info = el("button", null, "icon help"); info.type = "button"; info.append(icon("info"));
-      info.setAttribute("aria-label", t("Help: {name}", {name: label})); info.setAttribute("aria-describedby", help.id);
-      attachTip(lab, () => desc, true); attachTip(info, () => desc, true);
       let warn = null, suggest = null;
       if (key === "download_base_url") {   // live hints while typing (address, port), no blocking
         warn = el("div", null, "desc warnc"); warn.id = id + "-warn"; warn.setAttribute("role", "status");
@@ -195,14 +207,31 @@ export function renderSettings() {
   followPort(settingsInputs.host_port, settingsInputs.download_base_url);
   cards.unshift(passwordsCard());   // Device Passwords first
   cards.push(languageCard());       // Display last
-  const save = el("button", t("Save settings"), "primary"); save.onclick = saveOptions;
-  const dirty = el("span", t("Unsaved changes"), "unsaved"); dirty.hidden = true;
-  const markDirty = () => { dirty.hidden = !Object.keys(optionChanges()).length; };
+  // The common save area twice in the same state: above the cards (right; phones: full
+  // width over the first card) and below them. The hint shows only while something changed.
+  const areas = ["form-actions-top", "form-actions"].map(cls => {
+    const save = el("button", t("Save settings"), "primary"); save.onclick = () => saveOptions();
+    const dirty = el("span", t("Unsaved changes"), "unsaved"); dirty.hidden = true;
+    return box("div", cls, dirty, save);
+  });
+  const markDirty = () => { const clean = !settingsDirty(); for (const area of areas) area.firstChild.hidden = clean; };
   const wrap = box("div", "settings-grid");
   settingsCards = cards; layoutSettings(wrap);
   wrap.addEventListener("input", markDirty); wrap.addEventListener("change", markDirty); wrap.addEventListener("click", () => setTimeout(markDirty));
-  $("settings-form").replaceChildren(wrap, box("div", "form-actions", dirty, save), changelogNote());   // common save area
+  $("settings-form").replaceChildren(areas[0], wrap, areas[1], changelogNote());
   markDirty();   // a suggested download base URL is an unsaved change
+}
+/** True while the form of the Settings tab holds a change that is not saved (the state of
+ *  "Unsaved changes"); false while the form is still loading. */
+export function settingsDirty() { return !!ui.options && "base_color" in settingsInputs && Object.keys(optionChanges()).length > 0; }
+/** Dialog "Unsaved changes" before a step that would drop the changes of the form: leaving
+ *  the Settings tab (next.go switches to next.view) or a new language (next.language, the
+ *  page reloads). "Discard" takes the step without saving; the blue "Save" runs the normal
+ *  save flow and takes the step after it; the X and Escape stay on the tab with the changes. */
+export function confirmLeave(next) {
+  const go = () => { closeModal(); if (next.language) setLanguage(next.language); else next.go(); };
+  modal(t("Unsaved changes"), [el("p", t("The settings are not saved yet."))],
+    [{text: t("Discard"), action: go}, {text: t("Save"), kind: "primary", action: () => saveOptions(next)}]);
 }
 /** Popup when "Allow downgrades" is ticked: the red downgrade warning; the red "Enable"
  *  needs the tick "I understand the risk". Cancel, the X and Escape take the tick back.
@@ -270,6 +299,7 @@ function optionChanges() {
     else if (type === "number") value = Number(input.value);
     else if (type === "port") value = input.value.trim() === "" ? null : Number(input.value);
     else if (type === "pins") value = input.values();
+    else if (type === "color") value = input.querySelector("input:checked").value;
     else value = input.value.trim();
     // A missing optional switch (allow_downgrade, beta_firmware) counts as off
     const old = type === "pins" ? o[key] || [] : type === "text" || type === "port" ? o[key] ?? (type === "port" ? null : "") :
@@ -278,29 +308,47 @@ function optionChanges() {
   }
   return changes;
 }
+// Options that apply without a restart of the app (server: app_options.NO_RESTART): a save
+// that changes only these keeps the app running and the page open
+const NO_RESTART = new Set(["base_color"]);
 // Waiting for the restart after "Save settings": poll interval, time after which any
 // answer reloads the page (restart not noticed), poll interval after that time (ms)
 const RESTART_POLL = 500, RESTART_GIVE_UP = 60000, RESTART_SLOW_POLL = 2000;
-/** Collect changed options, confirm, save and wait for the app restart. */
-function saveOptions() {
+/** Collect changed options, confirm, save and wait for the app restart (none if only
+ *  options without a restart changed: the form then shows the saved options again).
+ *  next (from "Unsaved changes", see confirmLeave): the step that follows the save – without
+ *  a restart it runs at once; with a restart the new language is stored before and the page
+ *  reloads in it on the Settings tab, or it opens next.view after the reload. Cancel stays
+ *  on the tab with the changes. */
+function saveOptions(next) {
   const changes = optionChanges();
   if (!Object.keys(changes).length) { message(t("Settings"), t("Nothing changed.")); return; }
   const names = Object.keys(changes).map(k => t(OPTION_FIELDS.find(f => f[0] === k)[1]));
+  const restart = Object.keys(changes).some(k => !NO_RESTART.has(k));
   const port = "host_port" in changes ? el("p", t("The app restarts with port {port}. Before that it checks that no other program on the Home Assistant host uses this port. If the app does not come back, reset the port in the Configuration tab of the app (Network).", {port: changes.host_port}), "warnbox") : null;
-  modal(t("Save settings?"), [el("p", t("Changed: ") + names.join(", ")), port, el("p", t("The app restarts to apply the settings; this page reconnects automatically."), "hint")].filter(Boolean),
-    [{text: t("Cancel")}, {text: t("Save & restart"), kind: "primary", action: () => guarded(t("Save settings?"), undefined, async () => {
+  const note = restart ? el("p", t("The app restarts to apply the settings; this page reconnects automatically."), "hint") : null;
+  modal(t("Save settings?"), [el("p", t("Changed: ") + names.join(", ")), port, note].filter(Boolean),
+    [{text: t("Cancel")}, {text: restart ? t("Save & restart") : t("Save"), kind: "primary", action: () => guarded(t("Save settings?"), undefined, async () => {
       const r = await api("api/settings", changes);
-      if (!r.restarting) { message(t("Settings"), t("Nothing changed.")); return; }
+      if (!r.changed.length) { message(t("Settings"), t("Nothing changed.")); return; }
+      ui.options = {...ui.options, ...changes};   // saved: the form no longer counts as changed (also while the app restarts)
+      if (!r.restarting) {
+        closeModal(); renderSettings(); toast(t("Settings saved"));
+        if (next && next.language) setLanguage(next.language);
+        else if (next) next.go();
+        return;
+      }
+      if (next && next.language) storeLanguage(next.language);
       modal(t("Settings saved"), [el("p", t("The app is restarting …"), "hint")], []);
-      waitForRestart();
+      waitForRestart(next && next.view);
     })}]);
 }
 /** Poll until the restarted app answers with a new start mark ("start_id" of the state),
- *  then reload the page on the Settings tab (marker "#settings" in the address, removed
- *  again at the start, see main.js). After 60 s without a new mark the page reloads as
- *  soon as the app answers at all, and asks less often. */
-function waitForRestart() {
-  try { history.replaceState(null, "", "#settings"); } catch (e) { /* page opens on Devices */ }
+ *  then reload the page on the Settings tab or the given tab (marker "#<tab>" in the
+ *  address, removed again at the start, see main.js). After 60 s without a new mark the
+ *  page reloads as soon as the app answers at all, and asks less often. */
+function waitForRestart(view = "settings") {
+  try { history.replaceState(null, "", "#" + view); } catch (e) { /* page opens on Devices */ }
   const before = ui.state && ui.state.start_id;
   const started = Date.now();
   const probe = async () => {
@@ -328,7 +376,40 @@ function storeBlock() {
     el("p", t("Move the complete firmware store to another Home Assistant instance: export it as one ZIP file (sealed with a password) and import it there. The backups of the device settings are part of the export. Device passwords are not exported."), "hint"),
     box("div", "store-btns", ex, im));
 }
-/** Card "Display": language of this page, stored in this browser only. */
+// Base colour of the app (option base_color): the server writes the saved value into the
+// root element (data-base-color, see style.css); a dot of the card Display previews its colour
+// there at once. Saving keeps it; leaving the tab without saving ("Discard" in the dialog
+// "Unsaved changes") or rendering the form again from the saved options shows the saved
+// colour again.
+const BASE_COLORS = [["default", t("Default")], ["blue", t("Blue")], ["teal", t("Teal")], ["green", t("Green")],
+  ["violet", t("Violet")], ["orange", t("Orange")]];
+let savedBase = document.documentElement.dataset.baseColor;
+const showBase = value => { document.documentElement.dataset.baseColor = value; };
+/** Show the saved base colour again (the Settings tab is left). */
+export function resetBaseColor() { if (savedBase) showBase(savedBase); }
+/** Row "Base colour": one radio group of round swatches (name as accessible name and tooltip),
+ *  the name of the chosen one after the dots. */
+function baseColorRow() {
+  const [, english, , descEn] = OPTION_FIELDS.find(f => f[0] === "base_color");
+  const label = t(english), desc = t(descEn), id = "opt-base_color";
+  const lab = el("label", label); lab.id = id + "-label";
+  const [info, help] = optionHelp(lab, id, label, desc);
+  const group = box("div", "swatches"); group.id = id;
+  group.setAttribute("role", "radiogroup"); group.setAttribute("aria-labelledby", lab.id); group.setAttribute("aria-describedby", help.id);
+  const current = savedBase || "default", name = el("span", "", "swatch-name"); name.setAttribute("aria-hidden", "true");
+  for (const [code, text] of BASE_COLORS) {
+    const dot = input("radio", {name: "base-color", value: code, checked: code === current});
+    dot.setAttribute("aria-label", text); setTip(dot, text);
+    dot.addEventListener("change", () => { showBase(code); name.textContent = text; });
+    if (dot.checked) name.textContent = text;
+    group.append(box("label", "swatch", dot));
+  }
+  group.append(name);
+  settingsInputs.base_color = group;
+  return box("div", "set-field t-color", box("div", "set-name", lab, info), box("div", "set-control", group), help);
+}
+/** Card "Display": language of this page (stored in this browser only) and the base colour
+ *  of the app (an app option, saved with "Save settings"). */
 function languageCard() {
   const select = el("select"); select.id = "set-language";
   for (const [code, name] of LANGUAGES) {
@@ -337,11 +418,17 @@ function languageCard() {
     select.append(option);
   }
   select.value = languageChoice();
-  select.onchange = () => setLanguage(select.value);
+  // A new language reloads the page: with unsaved changes the dialog asks first; the
+  // selection shows the language of the page until the new one applies
+  select.onchange = () => {
+    const language = select.value;
+    if (!settingsDirty()) { setLanguage(language); return; }
+    select.value = languageChoice(); confirmLeave({language});
+  };
   const lab = el("label", t("Language")); lab.htmlFor = select.id;
   return box("div", "card", box("div", "card-head", el("h2", t("Display"))), box("div", "card-body",
-    box("div", "form", box("div", "set-field t-select", box("div", "set-name", lab), box("div", "set-control", select))),
-    el("p", t("Applies at once and only in this browser – no “Save settings” needed. Logs, error messages and the documentation stay English."), "hint lang-note")));
+    box("div", "form", box("div", "set-field t-select", box("div", "set-name", lab), box("div", "set-control", select)), baseColorRow()),
+    el("p", t("The language applies at once and only in this browser – no “Save settings” needed. The base colour is saved with “Save settings” for all browsers. The activity log, texts the Shelly itself sends and the documentation stay English."), "hint lang-note")));
 }
 /** Settings card that opens the dialog for passwords of several devices. */
 function passwordsCard() {

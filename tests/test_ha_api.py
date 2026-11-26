@@ -348,9 +348,11 @@ async def test_host_port_is_read_and_set_through_the_supervisor(ha, monkeypatch)
     with pytest.raises(ValueError, match="already in use on ha.lan"):
         await m._check_port_free(8123, "http://ha.lan:8123")
     assert asked == [("192.168.1.3", 8123)]
+    m.connection_test = {"ok": False, "url": str(m.download_base), "at": 1, "device": "Hall", "error": "timeout"}
     assert await m.save_options({"host_port": 8099, "log_entry_limit": 600}, user="Admin") == ["log_entry_limit", "host_port"]
     assert sup.posts[-1] == ("/addons/self/options", f"Bearer {TOKEN}", {"network": {"8098/tcp": 8099}})
     assert m.host_port == 8099 and m.options["log_entry_limit"] == 600
+    assert m.connection_test is None   # the last test result belongs to the old port
     entry = [e for e in m.events.entries if e["kind"] == "options"][-1]
     assert {"option": "host_port", "old": "8097", "new": "8099"} in entry["changes"]
     sup.post_status, sup.post_answer = 400, {"result": "error", "message": "bad"}

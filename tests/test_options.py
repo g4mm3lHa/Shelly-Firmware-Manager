@@ -2,6 +2,7 @@
 
 All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test servers."""
 
+import asyncio
 import json
 import re
 from pathlib import Path
@@ -74,6 +75,70 @@ def test_keep_installed_and_offer_after_days():
     assert changed == ["keep_installed", "offer_after_days"]
 
 
+
+async def test_base_color_choice(net):
+    """base_color: "default" by default, only the listed values (also over HTTP and in a
+    stored set); the page carries the saved value on its root element, an invalid one the default."""
+    assert app_options.public_view(OPTIONS)["base_color"] == "default"
+    for bad in ("red", "Teal", "#00897b", "", None, 1, True, ["teal"]):
+        with pytest.raises(ValueError):
+            app_options.merge(OPTIONS, {"base_color": bad})
+    new, changed = app_options.merge(OPTIONS, {"base_color": "teal"})
+    assert new["base_color"] == "teal" and changed == ["base_color"]
+    assert app_options.change_list(app_options.with_defaults(OPTIONS), new, changed) == [
+        {"option": "base_color", "old": "default", "new": "teal"}]
+    options, dropped = app_options.take_over({"base_color": "<b>"})
+    assert dropped == ["base_color"] and options["base_color"] == "default"
+    for stored, shown in (("violet", "violet"), ('"><script>', "default"), (None, "default")):
+        client = await web_client(make_manager(net, base_color=stored))
+        try:
+            page = await (await client.get("/")).text()
+            assert f'<html lang="en" data-base-color="{shown}">' in page and "__BASE_COLOR__" not in page
+            if stored == "violet":
+                r = await client.post("/api/settings", json={"base_color": "red"}, headers={"X-CSRF-Token": client.csrf})
+                assert r.status == 400 and "base_color: one of default, blue" in await r.text()
+                assert (await (await client.get("/api/settings")).json())["base_color"] == "violet"
+        finally:
+            await client.close()
+
+async def test_base_color_alone_saves_without_a_restart(net, monkeypatch):
+    """A save that changes only options of NO_RESTART (the base colour) stores them, logs the
+    change and keeps the app running, also while work runs; any other changed key restarts."""
+    import web_settings
+    assert not app_options.needs_restart([]) and not app_options.needs_restart(["base_color"])
+    assert app_options.needs_restart(["host_port"]) and app_options.needs_restart(["base_color", "log_entry_limit"])
+    monkeypatch.setattr(web_settings, "RESTART_DELAY_S", 0)
+    m = make_manager(net)
+    restarts = []
+
+    async def restart_app():
+        restarts.append(True)
+
+    m.restart_app = restart_app
+    client = await web_client(m)
+    try:
+        hdr = {"X-CSRF-Token": client.csrf}
+        m.settings_warning = app_options.SETTINGS_INVALID   # cleared by a successful save
+        m.schedule_running = "Night"   # running work blocks only a save with a restart
+        r = await client.post("/api/settings", json={"base_color": "teal"}, headers=hdr)
+        assert r.status == 200 and await r.json() == {"changed": ["base_color"], "restarting": False}
+        await asyncio.sleep(0.05)
+        assert restarts == [] and m.options["base_color"] == "teal" and m.settings_warning is None
+        assert json.loads(data_paths.SETTINGS_FILE.read_text())["base_color"] == "teal"
+        assert '<html lang="en" data-base-color="teal">' in await (await client.get("/")).text()
+        entry = [e for e in m.events.entries if e["kind"] == "options"][-1]
+        assert entry["changes"] == [{"option": "base_color", "old": "default", "new": "teal"}]
+        r = await client.post("/api/settings", json={"base_color": "green", "log_entry_limit": 500}, headers=hdr)
+        assert r.status != 200 and "Not possible" in await r.text() and m.options["base_color"] == "teal"
+        m.schedule_running = None
+        r = await client.post("/api/settings", json={"base_color": "green", "log_entry_limit": 500}, headers=hdr)
+        assert (await r.json())["restarting"] is True
+        await asyncio.sleep(0.05)
+        assert restarts == [True]
+    finally:
+        await client.close()
+
+
 def test_allow_downgrade_is_an_optional_switch():
     """allow_downgrade: no default (missing = off), only true/false accepted."""
     without = {k: v for k, v in OPTIONS.items() if k != "allow_downgrade"}
@@ -125,11 +190,14 @@ async def test_stored_public_ip_blocks_installations_until_corrected(net):
 
 
 async def test_changing_the_url_drops_the_confirmation(net):
+    """A new address drops the confirmation and the result of the last connection test."""
     m = make_manager(net, download_base_url=LEGACY)
     m.confirm_download_base(LEGACY)
+    m.connection_test = {"ok": False, "url": LEGACY, "at": 1, "device": "Hall", "error": "timeout"}
     assert await m.save_options({"download_base_url": "http://192.168.1.5:8098"}) == ["download_base_url"]
-    assert m.download_base_confirmed is None
-    assert json.loads(data_paths.STATE_FILE.read_text())["download_base_confirmed"] is None
+    assert m.download_base_confirmed is None and m.connection_test is None
+    stored = json.loads(data_paths.STATE_FILE.read_text())
+    assert stored["download_base_confirmed"] is None and stored["connection_test"] is None
 
 
 def test_empty_url_unsets_the_option():

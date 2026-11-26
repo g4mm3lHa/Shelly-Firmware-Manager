@@ -59,6 +59,7 @@ def _device_list(c):
 
 
 LIVE = {"shelly_name": "shelly-2", "ntp": "time.local", "eco": True, "ap": False, "ble": True, "debug_ws": False,
+        "ap_config": {"ssid": "ShellyPlus1-A8032AB636EC", "open": True, "range_extender": False},
         "outputs": [{"key": "switch:0", "name": "switch:0", "aop": "restore_last", "options": ["off", "on", "restore_last"]}]}
 
 
@@ -129,7 +130,7 @@ def _action_popups(c):
     # Switch and restart popups: no question; the button names the action
     expect = (("Hall", "Eco mode", "Eco mode – Hall", "On", "t-good", "Turn off"),
               ("Hall", "Bluetooth", "Bluetooth – Hall", "On", "t-good", "Turn off"),
-              ("Hall", "Access point", "Access point – Hall", "Off", "t-off", "Turn on"),
+              ("Hall", "Access point", "Access point – Hall", "Off", "t-off", "Save"),
               ("Hall", "Power-on action", "Power-on action – Hall", "Restore last state", "t-good", None),
               ("Hall", "Websocket debug log", "Websocket debug log – Hall", "Off", "t-off", "Turn on"),
               ("Living room", "Password protection", "Device password – Living room ceiling with a really long device name",
@@ -150,6 +151,8 @@ def _action_popups(c):
             page.screenshot(path=out / f"{case}-popup-debug.png")
         if label == "Eco mode":
             page.screenshot(path=out / f"{case}-popup-eco.png")
+        if label == "Access point":
+            _access_point_form(c, body)
         if label == "Power-on action":  # the select stays inside the dialog, its text shortened
             inside = f.evaluate("""() => { const d = document.getElementById('dlg-body').getBoundingClientRect();
               return [...document.querySelectorAll('#dlg-body select')].every(s => s.getBoundingClientRect().right <= d.right + 0.5); }""")
@@ -190,6 +193,60 @@ def _action_popups(c):
         row.locator("td.c-details summary").click()
     f.evaluate("() => scrollTo(0, 0)")
     page.wait_for_timeout(300)   # the scroll event (hides a touch tooltip) arrives before the next tap
+
+
+def _access_point_form(c, body):
+    """Access point form: network name, "Protect with a password" first; Save needs a
+    password of 8 to 63 characters, an open access point the accepted risk; the form sends
+    the password once; a required restart is offered in the success message."""
+    case, f, page, out = c.case, c.f, c.page, c.out
+    save = f.locator("#dlg-btns button").last
+    ssid = f.locator("#dlg-body .field input[type=text]").first
+    check(f"{case}: access point form with its sections", all(x in body for x in ("Network name (SSID)", "Protect with a password",
+          "Open – no password", "Range extender")) and ssid.input_value() == "ShellyPlus1-A8032AB636EC", body[:300])
+    check(f"{case}: access point: Save needs a password", save.is_disabled())
+    check(f"{case}: access point: hint names the length", "8 to 63 characters." in body, body[:600])
+    f.locator("#dlg-body input[type=password]").fill("secret1")
+    check(f"{case}: access point: Save needs 8 characters", save.is_disabled())
+    f.locator("#dlg-body input[type=password]").fill("x" * 64)
+    check(f"{case}: access point: 64 characters stay whole, Save disabled",
+          save.is_disabled() and len(f.locator("#dlg-body input[type=password]").input_value()) == 64)
+    f.locator("#dlg-body input[type=password]").fill("secret-1")
+    check(f"{case}: access point: Save with a password", not save.is_disabled())
+    f.locator("#dlg-body input[value=open]").check()
+    warn = f.locator("#dlg-body .warnbox.danger")
+    check(f"{case}: access point: open = red warning, Save after the risk is accepted", warn.is_visible() and save.is_disabled())
+    f.locator("#dlg-body label", has_text="I accept the risk of an open access point").click()
+    check(f"{case}: access point: open accepted", not save.is_disabled())
+    page.screenshot(path=out / f"{case}-popup-ap-open.png")
+    f.locator("#dlg-body input[value=password]").check()
+    sent = []
+
+    def answer(route):
+        sent.append(route.request.post_data_json)
+        route.fulfill(json={**LIVE, "ap": True, "restart_required": True, "verified": True, "not_applied": []})
+    page.route("**/settings", answer)
+    save.click()
+    wait_until(lambda: sent)
+    page.unroute("**/settings")
+    form = (sent or [{}])[0].get("ap_config", {})
+    check(f"{case}: access point form sent", form == {"enable": True, "security": "password", "password": "secret-1"}, str(sent))
+    # The Shelly needs a restart: the success message offers "Restart now" (red), which restarts and closes
+    restart = f.locator("#dlg-btns button", has_text="Restart now")
+    restart.wait_for()
+    check(f"{case}: restart required: success message with Close and a red Restart now",
+          f.locator("#dlg-body .msg-success").is_visible() and "danger" in (restart.get_attribute("class") or "")
+          and f.locator("#dlg-btns button").first.inner_text() == "Close")
+    page.screenshot(path=out / f"{case}-popup-restart-offer.png")
+    restarts = []
+    page.route("**/restart", lambda route: (restarts.append(route.request.url), route.fulfill(json={"ok": True})))
+    restart.click()
+    wait_until(lambda: restarts and not f.locator("#dlg").is_visible())
+    page.unroute("**/restart")
+    check(f"{case}: Restart now sends the restart and closes", len(restarts) == 1 and not f.locator("#dlg").is_visible(), str(restarts))
+    _t, _strip, _body, _buttons = _popup(f, f.locator("#dev-cards tr", has_text="Hall").first.locator(
+        "[aria-label^='Access point']") if c.width > 700 else f.locator("#dev-cards tr", has_text="Hall").first.locator(
+        ".act-strip.labeled [aria-label^='Access point']"))
 
 
 def _name_tips(c):
@@ -502,8 +559,10 @@ def _layout(c):
         f.locator("#dlg-x").click()
         check(f"{case}: no tooltip after a tap", tip_after_tap is True)
     card.locator("button.install").first.click()
-    heads = f.evaluate("[...document.querySelectorAll('#dlg .dsec h3')].map(h => h.textContent)")
-    check(f"{case}: installation dialog in sections", heads == ["Device", "Firmware", "Before installing", "Start", "Changelog"], str(heads))
+    heads = f.evaluate("[...document.querySelectorAll('#dlg .dsec>h3, #dlg .dsec>summary')].map(h => h.textContent)")
+    closed = f.evaluate("(() => { const d = document.querySelector('#dlg details.dsec'); return !!d && !d.open; })()")
+    check(f"{case}: installation dialog in sections, changelog collapsed",
+          heads == ["Device", "Firmware", "Before installing", "Start", "Changelog"] and closed, f"{heads} {closed}")
     page.screenshot(path=out / f"{case}-install-dialog.png")
     f.locator("#dlg-btns button", has_text="Cancel").click()
     if width < 700:   # phone tile: lines, flush button rows, Details button
@@ -525,10 +584,10 @@ def _layout(c):
             top: Math.round(r(q('.name')).top - r(tr).top), bottom: Math.round(r(tr).bottom - r(q('dl.tile-kv')).bottom)}; }""")
         check(f"{case}: tile – checkbox and menu on the name line, IP right of the Shelly name, status on the firmware line",
               geo["check"] < 2 and geo["menu"] < 2 and geo["status"] < 2 and geo["ip"], str(geo))
-        # Details: outlined button, 36 px, full content width (tile padding 12 px + border each side)
+        # Details: tonal button without line, 28 px, full content width (tile padding 12 px each side)
         det = geo["details"]
-        check(f"{case}: tile – Details as outlined 36 px button over the content width",
-              det["h"] == 36 and det["border"] == "solid" and det["full"] <= 26, str(det))
+        check(f"{case}: tile – Details as tonal 28 px button over the content width",
+              det["h"] == 28 and det["border"] == "none" and det["full"] <= 24, str(det))
         check(f"{case}: tile – every button row flush with the content width", all(x <= 1 for x in geo["flush"]), str(geo["flush"]))
         check(f"{case}: tile – details chevron, padding top = bottom", geo["chevron"] == "solid" and abs(geo["top"] - geo["bottom"]) <= 3,
               str(geo))

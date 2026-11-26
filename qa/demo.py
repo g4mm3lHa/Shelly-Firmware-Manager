@@ -26,6 +26,7 @@ if diagnosis:
 sys.path.insert(0, app_dir)
 import data_paths
 import manager
+from shelly import ShellyError
 import web_ui
 from aiohttp import web
 import logging
@@ -386,7 +387,7 @@ if scenario == "legacy":  # an installation started before (device progress show
 if scenario == "busy":
     ids = list(m.devices)
     m.progress = {"kind": "all", "total": 25, "done": 18, "errors": 2, "phase": "devices"}
-    m.activity.update({ids[18]: "checking", ids[19]: "downloading"})
+    m.activity.update({ids[18]: "checking", ids[19]: "downloading", ids[17]: "server", ids[16]: "restarting"})
     m.activity.update(dict.fromkeys(ids[20:], "waiting"))
 
 if diagnosis:
@@ -409,7 +410,7 @@ if diagnosis:
         dev = m.devices[device_id or m.test_devices()[0]]
         ok = device_id is None
         m.connection_test = {"ok": ok, "device": dev["name"], "ip": dev["origin"][7:], "seconds": 0.21 if ok else None,
-                             "error": None if ok else "No connection to http://192.168.1.2:8098 (timeout after 8 s): Deadline exceeded",
+                             "error": None if ok else "No connection to http://192.168.1.2:8098: timeout after 8 s (Shelly code -104)",
                              "at": int(time.time()), "url": m.download_base}
         return m.connection_test
 
@@ -433,6 +434,36 @@ async def demo_signal(device_id):
     return {"rssi": None if dev.get("gen") == 1 else -50 - (int(device_id, 16) * 7) % 40}
 
 m.wifi_signal = demo_signal
+
+# Current values of the device dialogs (NTP server, power-on action, eco mode, access point, ...):
+# the demo reaches no Shelly, so it answers with the stored values of the device and one
+# example output (a device that is not reachable still fails). QA only, not part of the app.
+SETTING_KEYS = ("shelly_name", "ntp", "eco", "outputs", "ap", "ap_config", "ble", "debug_ws", "cloud", "cloud_connected",
+                "ble_proxy", "battery", "gen1_hostname")
+EXAMPLE_OUTPUTS = [{"key": "switch:0", "name": "switch:0", "aop": "restore_last", "options": ["off", "on", "restore_last"]}]
+
+
+async def demo_refresh(device_id):
+    """Settings of a device dialog from the stored values (refusals of the app stay)."""
+    dev = m._settings_device(device_id)
+    if dev.get("unreachable"):
+        raise ShellyError("Device not reachable")
+    values = {key: dev[key] for key in SETTING_KEYS if key in dev}
+    values.setdefault("outputs", EXAMPLE_OUTPUTS)
+    # A Shelly output without a name is named by its key (like shelly._output)
+    values["outputs"] = [{**o, "name": o.get("name") or o["key"]} for o in values["outputs"]]
+    values.setdefault("ntp", "time.local")
+    # Access point details of a Gen2+ device: the default name, protected while it is on
+    # (every second device also has a range extender); stored like a real read, so the
+    # app decides on the same values as the form
+    if dev.get("gen", 1) >= 2 and "ap_config" not in values:
+        values["ap_config"] = dev["ap_config"] = {
+            "ssid": f"{dev.get('type') or 'Shelly'}-{device_id[-12:].upper()}",
+            "open": False if dev.get("ap") is True else True,
+            "range_extender": False if int(device_id, 16) % 2 else None}
+    return values
+
+m.refresh_settings = demo_refresh
 
 
 async def wrap(_request):

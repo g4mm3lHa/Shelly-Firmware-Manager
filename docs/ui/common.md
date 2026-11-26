@@ -104,8 +104,8 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   row 2; the Devices row 2 (column chooser) is not shown.
 - **Header checkbox (3.8.0, desktop):** the checkbox of the updates card head stands
   exactly above the row checkboxes (same left edge); the title keeps its place.
-- Card heads (device groups, firmware IDs, settings cards) in Title Case and the same
-  weight (600).
+- Card heads (device groups, firmware IDs, settings cards) in Title Case, 16 px and the
+  same weight (500, design E4).
 - App title (H1, 2026-11-21): "Firmware Manager for Shelly"; the sidebar entry
   (`panel_title`) stays "Shelly Firmware".
 - **Beta mark (3.8.0):** a pre-release (version with a suffix, e.g. `-rc1`) shows a small
@@ -134,11 +134,13 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
 - **Icons in buttons (T8):** before the text ("Upload firmware", "Export store", "Import
   store", "Device passwords").
 - **Controls:** fields and selects with the strong line colour on every width (at least
-  3:1, mockup `M6`); buttons, cards and checkboxes keep the fine line; phone tiles of
-  all tabs (Devices, Logs, Schedules, Backups) carry the strong line. Heights (U10): desktop
+  3:1, mockup `M6`); buttons are tonal and cards and phone tiles have no line (design E4
+  below). Heights (U10): desktop
   33 px for text buttons (also "Check now" and dialog buttons), fields, selects and the
   time field (mockup `M8`; icons, pills, "Install" and tabs unchanged); phones 44 px for
-  all of them and the file chooser. Checkboxes and radios in the theme's primary colour;
+  all of them and the file chooser, except the compact device tile (design E4: pills and
+  "Install" 26 px, "Details" 28 px; approved). Checkboxes and
+  radios are the app's own (18 px, rounded, primary colour, label in the text colour);
   the file chooser's button like a normal button.
 - **One disclosure sign (U3):** a chevron after the text (down when closed, up when open):
   "Details" of the phone tiles, "For n devices", log entries (desktop and phone tiles),
@@ -151,12 +153,31 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   the tint of the notice bar (the red box stays red); T10 red trash icon before "Delete all
   logs"; T11 log time and host name in the normal font with equal-width digits – monospace
   only for SHA-256, file names and passwords.
-- **Design tokens (`ui-src/style.css` `:root`):** four font sizes (11 tags and section
-  titles, 12 secondary and hint text, 14 text, 15 card titles; app and dialog titles
-  apart), three radii (8 fields/menus/popovers/notices/tooltips, 12 pills/tags/tiles/
-  cards/dialogs, the theme's button radius for buttons and outlined tile buttons), two
-  lines (fine = theme divider, strong = at least 3:1), one warning text colour
-  (`--warn-text`), control height (33 / 44 px). New styles use these tokens.
+- **Design tokens (`ui-src/style.css` `:root`):** font sizes (11 tags and section
+  titles, 12 secondary and hint text, 14 text, 15 tile names, 16 card heads; app and
+  dialog titles apart), radii (8 pills, 12 fields/menus/popovers/notices/tooltips/list
+  rows, 14 tags/dialogs/status strips, 16 phone tiles, 24 cards, round buttons and tabs),
+  two lines (fine = theme divider, strong = at least 3:1), two tinted surfaces
+  (`--surf`, `--surf-hi`), one warning text colour (`--warn-text`), control height
+  (33 / 44 px). New styles use these tokens.
+- **Design E4 (3.13.0, mockups `design-modern`, approved 2026-11-24):** surfaces tinted
+  instead of lines – with the base colour of the Settings tab (3.13.0, approved 2026-11-26):
+  "Default" tints them from the text colour (neutral grey) while the accents (lines, fills,
+  icons, link text, focus outline, ticks) keep the theme's primary colour; a chosen colour
+  replaces the primary colour for surfaces and accents together. Page in the card background, cards
+  `--surf` (light themes 4 %, dark 7 %), buttons, tool icons and the tab strip `--surf-hi`
+  (10 % / 16 %; the scheme is read from the HA theme). Buttons tonal (tint, link text
+  colour, no line), "primary" filled. Tabs: one rounded tinted strip, the active tab
+  raised in the card background (phones: full width). App icon (52 px) left of the
+  title and the header pills on wide screens. Rows of the tab lists (Devices, Firmware,
+  Schedules, Backups, Logs, Other Shellys, unknown files) are bands in the card
+  background on the tinted card, 3 px apart; tables and lists inside dialogs keep the
+  fine lines (V12). Phone tiles without line, compact (Devices: "Review & install"
+  right-aligned on its own line above the card title); Logs and Backups tiles tinted.
+  Selects with an own chevron, the date field like every field (V3); status strips of
+  the device dialogs tinted (V4); long device lists of dialogs (device passwords,
+  downgrade versions) scroll in a box (V5); installation dialog on wide screens 820 px
+  with "Device" and "Firmware" side by side (V6).
 - **Warning text (3.11.0, live tests rc3 and rc4, 2026-11-23):** every yellow text uses
   `--warn-text`: log lines, tags, pills, "Unsaved changes", the header status and hints.
   It is the warning colour turned towards orange (70 % warning, 30 % error colour), then
@@ -175,8 +196,9 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   and tabs, then one section per tab with its own phone block. A coloured state reads
   `--tone` (pills, action icons, status strips, message and check-list icons), set by
   `.tone-success|warning|error|primary` or a state class mapped there; neutral is the
-  default. Rows of a list share one line rule (fine line, none under the last row);
-  phone tiles have the card background, the strong line and the medium radius (one rule
+  default. Rows of a list in a dialog share one line rule (fine line, none under the last
+  row), rows of a tab list one band rule; phone tiles have the card background, no line
+  and the tile radius (one rule
   for Devices and Schedules; Logs and Backups set it in their tab, after their own rules
   for the last row). The
   Devices table is `:where(.dev-table)`, so its rules never reach a table in a dialog.
@@ -217,11 +239,14 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   after the icon) while the log holds an error entry
   newer than the newest entry this browser has shown in the Logs tab – warnings and
   successes never set it; opening the tab clears it. The entries that were unread at that
-  moment are lightly highlighted (primary colour, 8 %) until the tab is left.
-- **Language (F20–F25):** card "Display" at the end of the Settings tab with "Language":
+  moment carry a bar in the primary colour on the left until the tab is left; entries of
+  one device are not grouped (design E4, approved 2026-11-24).
+- **Language (F20–F25):** card "Display" at the end of the Settings tab with "Language"
+  (below it "Base colour", an app option saved with "Save settings", see `settings.md`):
   "Same as Home Assistant" (default, fallback English), English, Deutsch, and since 3.12.0
   Nederlands, Français, Italiano, Español, Polski, Português (own names); applies at once,
-  per browser, not part of "Save settings". German uses "du" (without address where
+  per browser, not part of "Save settings"; the page reloads on the Settings tab, with unsaved
+  settings the dialog "Unsaved changes" asks first (`settings.md`). German uses "du" (without address where
   possible). Logs tab: controls, filter and weekday translated, the entries stay English
   including their type and outcome labels. Dates and times keep the form
   "2026-11-23 03:00" in every language. Texts from the server or the Shelly stay English.

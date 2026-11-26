@@ -14,9 +14,48 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
   summary name the backups as part of the export), Logs, Advanced (Max.
   parallel installations, Resolve host names, Pinned certificates; 3.8.0, mockup
   `3.8.0-hostname` B). Option labels with "Max." in front. Units in texts always "MB".
+- **Base colour (live test 3.13.0-rc2, finding D; mockup `3.13.0-grundfarbe` variant B, approved
+  2026-11-26):** card "Display", row "Base colour" below "Language", with the i-icon help
+  "Colour of the surfaces, buttons and links of this app. Default: neutral grey surfaces;
+  buttons and links in the colour of the Home Assistant theme." Six round dots in a row, one
+  radio group: Default (half light grey, half dark grey), Blue #03a9f4, Teal #00897b, Green
+  #558b2f, Violet #7e57c2, Orange #ef6c00; the chosen dot has a ring, its name follows the dots
+  in secondary text; every dot has its name as accessible name and tooltip, a visible focus ring
+  and a 44 px touch target on phones. Choosing a dot previews the colour in the whole page at
+  once and shows "Unsaved changes"; it is saved with "Save settings" (app option `base_color`,
+  all browsers) and shown from the first paint after that. A save that changes only the base
+  colour does not restart the app (`reports/3.13.0/FRAGEN-rc3.md` 1 b, approved 2026-11-26): the
+  dialog "Save settings?" has no restart hint and the button "Save", then it closes, the form
+  shows the saved settings and a toast "Settings saved" appears; with other changes it stays
+  "Save & restart". White text on filled buttons stays for every colour (2 a). Leaving the tab without saving
+  ("Discard" in the dialog "Unsaved changes") or a new form from the saved settings shows the
+  saved colour again. Default after the update: "Default" (no choice
+  "Same as Home Assistant"). Default = surfaces neutral from the text colour, accents in the
+  theme's primary colour; a colour replaces the primary colour for surfaces and accents.
+  Hint under the card: "The language applies at once and only in this browser – no “Save
+  settings” needed. The base colour is saved with “Save settings” for all browsers. Logs, error
+  messages and the documentation stay English."
+- **Inner surface (live test 3.13.0-rc1, variant B, approved 2026-11-25):** the options of
+  each settings card stand on one inner surface in the card background (radius 12, 8 px
+  from the card edge, inside 14 / 12 px, phones 12 px), like the rows of the other tabs on
+  their tinted card; the card head stays on the tint.
 - **Columns (live test 3.10.0-rc1, approved 2026-11-22):** the cards fill independent column stacks
   (no shared row heights): three columns from 1600 px, two from 1168 px, else one; card n
   goes to column n mod columns, so the order reads left to right as before.
+- **Save area and unsaved changes (live test 3.13.0-rc3, findings F and G, approved 2026-11-26
+  without mockup):** the save area ("Unsaved changes" hint, button "Save settings") stands twice
+  in the same state: above the cards on the right (phones: full width over the first card, as a
+  bar like the one below, not sticky) and below the cards (phones: the sticky bar); the hint
+  shows only while the form holds a change, the button always. Leaving the tab (also clicking
+  the Settings tab again or "Open settings") or choosing a new language while the form holds
+  a change opens the dialog "Unsaved changes" with "The settings are not saved yet.": "Discard"
+  takes the step and drops the changes; the blue "Save" runs the normal save flow ("Save
+  settings?", Cancel stays on the tab) and takes the step after it – without a restart at
+  once, with a restart the page opens the chosen tab (a new language: the Settings tab in that
+  language) after the reload; the X and Escape stay on the tab with the changes. A suggested
+  download base URL counts as a change. No browser warning when the page is closed.
+- **Language change (live test 3.13.0-rc3, finding E, approved 2026-11-26):** the page reloads in
+  the new language on the Settings tab (marker `#settings`, as after saving).
 - **Changelog hint (3.5.0, 2026-11-19):** last line of the Settings tab, below
   the Save area: hint "What changed in each version: open the app page in Home
   Assistant and choose “Changelog” next to the version." – the link opens the info
@@ -117,8 +156,8 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
   the host port field; live while typing in either field, saving stays possible; none while
   the host port is unknown or empty.
 - **After saving (live test 3.12.0-rc3, 1a):** the page reloads after the app restart on the
-  Settings tab (marker `#settings` in the address, removed at the start); a normal reload
-  opens Devices.
+  Settings tab (marker `#settings` in the address, removed at the start; after "Save" in the
+  dialog "Unsaved changes" the marker of the chosen tab); a normal reload opens Devices.
 - **Texts with the port:** help of the download base URL ("+ the host port above"), Getting
   started and the confirmation of the former example address name the real host port; the
   connection test names the port cause only while the address port differs from it.
@@ -131,9 +170,10 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
   "Automatic (first reachable device of Gen 2 or newer)" and the devices that can test),
   hint about Gen 1 and the one-time test address; Cancel / blue "Start test". Running and
   result: check lines Download base URL, Download server, "Fetch by <device> (<ip>)";
-  reachable: green message; not reachable: red message, the error (English server text;
-  a device error as readable text with its codes, e.g. "connection error (Shelly code -114 /
-  -14)", the raw answer only in the log entry and the bug ticket text), "Common causes" (the
+  reachable: green message; not reachable: red message, the error (server text shown
+  translated in the page language; a device error as readable text with its codes, e.g.
+  "connection error (Shelly code -114 / -14)"; the log entry and the bug ticket text stay
+  English, the raw answer only there), "Common causes" (the
   port cause names the port of the saved address) and the hint about the port; Close / blue
   "Test again". Without a Gen2+
   device: yellow message "No Shelly of Gen 2 or newer is known yet …".

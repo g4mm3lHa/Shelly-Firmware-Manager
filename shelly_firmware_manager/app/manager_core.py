@@ -174,6 +174,10 @@ ACTIVITY_DOWNLOADING = "downloading"  # firmware for this device is being downlo
 
 ACTIVITY_RELOADING = "reloading"  # Reload Device Info is reading the device
 
+ACTIVITY_SERVER = "server"  # the check waits for the answer of the Shelly update server
+
+ACTIVITY_RESTARTING = "restarting"  # restarted from the app, waiting for its answer
+
 PART_PREFIX = ".part-"  # temporary download files (see shelly_cloud._store)
 
 # ASCII punctuation: escaped with a backslash in texts of the Home Assistant notification,
@@ -356,7 +360,7 @@ class ManagerCore:
         self.devices: dict[str, Device] = {}  # HA device ID -> state
         self.downloads: dict[str, dict[str, Any]] = {}  # file name -> {"served": {ip: n}, "rejected": {ip, ...}}
         self.firmware: dict[str, FirmwareMeta] = {}  # file name -> metadata of the stored firmware
-        self.activity: dict[str, str] = {}  # HA device ID -> ACTIVITY_* while a check runs
+        self.activity: dict[str, str] = {}  # HA device ID -> ACTIVITY_* while a check or restart runs
         self.progress: dict[str, Any] | None = None  # running full check: {"kind", "total", "done", "errors", "phase"}
         self.device_checks: dict[str, str] = {}  # HA device ID -> "queued"/"running" (single-device checks)
         self.storage_error: str | None = None  # last failure writing state.json (shown in the UI)
@@ -870,7 +874,8 @@ class ManagerCore:
         return app_options.public_view(self.options)
 
     async def save_options(self, changes: object, user: str | None = None) -> list[str]:
-        """Validate and store in settings.json; the caller restarts the app.
+        """Validate and store in settings.json; the caller restarts the app unless only
+        options of app_options.NO_RESTART changed (app_options.needs_restart).
 
         "host_port" is no option of settings.json: a new host port of the download server
         is set in Home Assistant (POST /addons/self/options {"network": …}, open to every
@@ -884,8 +889,10 @@ class ManagerCore:
         new, changed = app_options.merge(self.options, changes)
         if not changed and port is None:
             return []
+        restart = port is not None or app_options.needs_restart(changed)
+        # A restart would cancel running work; options without a restart can always be saved
         busy = self.busy or (f"Schedule “{self.schedule_running}” is running" if self.schedule_running else None)
-        if busy:
+        if busy and restart:
             raise ShellyError(f"Not possible – {busy}")
         diff = app_options.change_list(self.options, new, changed)
         if port is not None:
@@ -905,11 +912,15 @@ class ManagerCore:
                 error = f"Settings could not be stored: {err.strerror or type(err).__name__}"
                 self.events.add("options", ok=False, changes=diff, user=user, error=error)
                 raise ShellyError(error) from None
-        log.info("App options changed by %s (%s) – restarting", user, ", ".join(changed))
+            self.settings_warning = None  # the stored set is complete and valid now
+        log.info("App options changed by %s (%s)%s", user, ", ".join(changed), " – restarting" if restart else "")
         self.events.add("options", changes=diff, user=user)
         self.options = new
         if "download_base_url" in changed and self.download_base_confirmed is not None:
             self.download_base_confirmed = None  # a confirmation never outlives a change
+            self.save()
+        if {"download_base_url", "host_port"} & set(changed) and self.connection_test is not None:
+            self.connection_test = None  # a test result never outlives a changed address or host port
             self.save()
         return changed
 

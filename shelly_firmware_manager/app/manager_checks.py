@@ -27,11 +27,12 @@ other integrations are listed read-only (other_shellys).
 """
 
 import asyncio
+import contextlib
 import datetime
 import functools
 import logging
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -48,6 +49,7 @@ from shelly_net import AddressError
 from manager_core import (
     ACTIVITY_CHECKING,
     ACTIVITY_DOWNLOADING,
+    ACTIVITY_SERVER,
     ACTIVITY_WAITING,
     BATTERY_FROM_DEVICE,
     BATTERY_FROM_HA,
@@ -795,14 +797,16 @@ class Checks(Backups):
                     self._provide_stored(dev, info, *stored)
                 return
             try:
-                offer = await self._manufacturer_offer(info, offers)
+                with self._asking_server(device_id):
+                    offer = await self._manufacturer_offer(info, offers)
             except (TimeoutError, ShellyError, aiohttp.ClientError, OSError) as err:
                 await self._store_fallback(dev, info, err)
                 raise
         else:
-            offer = await self._step_offer(dev, info, offers)
-            if offer is not None and self.beta_firmware:
-                offer = await self._beta_choice(dev, info, offer, offers)
+            with self._asking_server(device_id):
+                offer = await self._step_offer(dev, info, offers)
+                if offer is not None and self.beta_firmware:
+                    offer = await self._beta_choice(dev, info, offer, offers)
         beta = offer is not None and offer.get("channel") == "beta"
         dev["offer_version"] = offer["version"] if offer else None
         if not offer or shelly.parse_version(offer["version"]) <= shelly.parse_version(info["version"]):
@@ -1107,6 +1111,17 @@ class Checks(Backups):
             hint = IMPORT_FALLBACK_HINT if info["gen"] >= 2 else IMPORT_FALLBACK_HINT_GEN1
         hint = hint.format(version=meta["version"])
         raise ShellyError(f"{error_text(err, 300) or type(err).__name__}. {hint}") from err
+
+    @contextlib.contextmanager
+    def _asking_server(self, device_id: str) -> Iterator[None]:
+        """The row shows "Shelly server …" (ACTIVITY_SERVER) while the check of this
+        device waits for the Shelly update server, "Checking …" again afterwards."""
+        self.activity[device_id] = ACTIVITY_SERVER
+        try:
+            yield
+        finally:
+            if self.activity.get(device_id) == ACTIVITY_SERVER:
+                self.activity[device_id] = ACTIVITY_CHECKING
 
     def _start_header_check(self) -> None:
         """Start the reference request of this check once (see HEADER_CHECK)."""

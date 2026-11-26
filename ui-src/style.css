@@ -26,9 +26,23 @@
    and check-list icons) reads one variable, --tone, set by a tone class (.tone-success,
    .tone-warning, .tone-error, .tone-primary) or a state class mapped to a tone; success
    text is mixed like the link text. Monospace font, shadows, layers (z-index), icon sizes
-   and the beta colour are tokens too. */
+   and the beta colour are tokens too.
+   Surfaces: cards, tool icons, tonal buttons and the tab strip are tinted instead of drawing
+   lines: --surf (cards, phone tiles, status strips) and --surf-hi (buttons, tab strip, tool
+   icons); rows of a list stand on the card as bands in the card background. The tint is weaker
+   in light themes (4 % / 10 %) than in dark ones (7 % / 16 %); core.js marks the scheme of the
+   HA theme on the root element (data-scheme). Every surface tint (also hover backgrounds, the
+   shadow of the active tab, chosen tiles) mixes --tint; accents (lines, fills, icons, text, focus
+   outline, chosen boxes) use --primary-color.
+   Base colour (option base_color, Settings → Display): the server writes the saved value into
+   data-base-color of the root element, the Settings tab previews a choice there. "default":
+   --tint is the text colour (neutral grey surfaces), the accents keep the primary colour of the
+   HA theme. A colour (--base-<name>) replaces --primary-color for surfaces and accents together,
+   with white text on filled primary buttons; its declarations are !important, because core.js
+   copies the theme's --primary-color as an inline style onto the root element (a normal inline
+   declaration loses against an !important one of a style sheet). */
 :root{--fs-tag:11px;--fs-small:12px;--fs-text:14px;--fs-title:15px;
-  --radius-s:8px;--radius-m:12px;--radius-btn:var(--ha-button-border-radius,18px);
+  --radius-xs:8px;--radius-s:12px;--radius-m:14px;--radius-tile:16px;--radius-l:24px;--radius-btn:999px;--fs-head:16px;
   --line:var(--divider-color);--line-strong:color-mix(in srgb,var(--primary-text-color) 50%,var(--card-background-color));
   --warn-text:color-mix(in srgb,color-mix(in srgb,var(--warning-color) 70%,var(--error-color)) 50%,var(--primary-text-color));--control-h:33px;
   --link-text:color-mix(in srgb,var(--primary-color) 60%,var(--primary-text-color));--error-text:color-mix(in srgb,var(--error-color) 70%,var(--primary-text-color));
@@ -38,13 +52,31 @@
   --shadow-pop:0 4px 16px rgba(0,0,0,.25);--shadow-toast:0 4px 16px rgba(0,0,0,.3);--shadow-tip:0 2px 8px rgba(0,0,0,.3);
   --shadow-dlg:0 8px 32px rgba(0,0,0,.4);--shadow-bar:0 -2px 8px rgba(0,0,0,.18);
   --z-bar:5;--z-menu:10;--z-pop:12;--z-tip:20;--z-toast:30;
-  --icon-xs:13px;--icon-s:14px;--icon-m:16px;--icon:18px;--icon-l:20px;--icon-xl:22px;--icon-xxl:24px}
+  --icon-xs:13px;--icon-s:14px;--icon-m:16px;--icon:18px;--icon-l:20px;--icon-xl:22px;--icon-xxl:24px;
+  --base-blue:#03a9f4;--base-teal:#00897b;--base-green:#558b2f;--base-violet:#7e57c2;--base-orange:#ef6c00;
+  --tint:var(--primary-text-color);
+  --surf:color-mix(in srgb,var(--tint) 7%,var(--card-background-color));
+  --surf-hi:color-mix(in srgb,var(--tint) 16%,var(--card-background-color))}
+:root[data-scheme=light]{--surf:color-mix(in srgb,var(--tint) 4%,var(--card-background-color));
+  --surf-hi:color-mix(in srgb,var(--tint) 10%,var(--card-background-color))}
+/* Before core.js has marked the scheme: the browser's scheme (the fallback colours follow it) */
+@media (prefers-color-scheme:light){:root:not([data-scheme]){--surf:color-mix(in srgb,var(--tint) 4%,var(--card-background-color));
+  --surf-hi:color-mix(in srgb,var(--tint) 10%,var(--card-background-color))}}
+/* A chosen base colour: primary colour of the whole app, surfaces tinted with it */
+:root[data-base-color=blue]{--primary-color:var(--base-blue)!important}
+:root[data-base-color=teal]{--primary-color:var(--base-teal)!important}
+:root[data-base-color=green]{--primary-color:var(--base-green)!important}
+:root[data-base-color=violet]{--primary-color:var(--base-violet)!important}
+:root[data-base-color=orange]{--primary-color:var(--base-orange)!important}
+:root:is([data-base-color=blue],[data-base-color=teal],[data-base-color=green],[data-base-color=violet],[data-base-color=orange]){
+  --text-primary-color:#fff!important;--tint:var(--primary-color)}
 
 /* ================================================================ Base */
 *{box-sizing:border-box}
 body{font-family:var(--ha-font-family-body,var(--mdc-typography-font-family,Roboto,system-ui,sans-serif));
-  margin:16px;color:var(--primary-text-color);background:var(--primary-background-color);font-size:var(--fs-text)}
-h1{font-size:1.4em;margin:0;font-weight:500}
+  margin:16px;color:var(--primary-text-color);background:var(--card-background-color);font-size:var(--fs-text)}
+@media (min-width:701px){body{margin:24px}}
+h1{font-size:22px;margin:0;font-weight:400}
 h2{font-size:var(--fs-title);margin:0;font-weight:500}
 a{color:var(--link-text)}
 .mono{font-family:var(--font-mono)}
@@ -69,35 +101,50 @@ a{color:var(--link-text)}
 
 /* Controls */
 button,select,input{font:inherit;color:var(--primary-text-color)}
-button{cursor:pointer;padding:6px 12px;border-radius:var(--radius-btn);
-  border:1px solid var(--line);background:var(--card-background-color)}
-button.primary{background:var(--primary-color);color:var(--text-primary-color);border-color:transparent}
+/* Buttons are tonal: tinted surface, link text colour, no line */
+button{cursor:pointer;padding:6px 16px;border-radius:var(--radius-btn);
+  border:0;background:var(--surf-hi);color:var(--link-text);font-weight:500}
+button.primary{background:var(--primary-color);color:var(--text-primary-color);border-color:transparent;padding:10px 22px}
 button.danger{background:var(--error-color);color:#fff;border-color:transparent}
 button.small{padding:1px 10px}
+/* Icons, menu entries, tabs and the listing line are not tonal buttons */
+button.icon,button.sort-item,.rowmenu button,.tab,button.listing{background:none;font-weight:400}
 /* Text buttons (not icons, pills, tabs, menu entries, action icons or "Install"): one
    height with fields and selects */
-button:not(.icon):not(.small):not(.pill):not(.tab):not(.sort-item):not(.act){min-height:var(--control-h)}
+button:not(.icon):not(.small):not(.pill):not(.tab):not(.sort-item):not(.act):not(.cell-link){min-height:var(--control-h)}
 input.ghost{visibility:hidden}   /* keeps the indentation of a row without checkbox */
 button:disabled{opacity:.45;cursor:default}
 button.icon,a.icon{background:none;border:0;padding:4px;line-height:0;color:var(--secondary-text-color);border-radius:50%}
 a.icon{display:inline-block;color:var(--link-text)}   /* same box as an icon button: icons of a row stay on one line */
 button.icon:hover:not(:disabled),button.icon:focus-visible{color:var(--primary-color);
-  background:color-mix(in srgb,var(--primary-color) 12%,transparent)}
+  background:color-mix(in srgb,var(--tint) 12%,transparent)}
 button.icon svg,.svg{width:var(--icon);height:var(--icon);fill:currentColor;vertical-align:middle}
 button.icon.red{color:var(--error-color)}
 /* Fields and selects: strong border on every width (at least 3:1 against the card) */
-input[type=search],input[type=text],input[type=password],input[type=number],input[type=time],select,textarea{
+input[type=search],input[type=text],input[type=password],input[type=number],input[type=time],input[type=date],select,textarea{
   min-height:var(--control-h);padding:7px 10px;border-radius:var(--radius-s);border:1px solid var(--line-strong);
   background:var(--card-background-color);color:var(--primary-text-color);font:inherit}
-select,input[type=time]{padding-top:0;padding-bottom:0}   /* their own inner height would exceed the control height */
+select,input[type=time],input[type=date]{padding-top:0;padding-bottom:0}   /* their own inner height would exceed the control height */
 input.mono{font-family:var(--font-mono)}   /* after font:inherit: SHA, export password (fixed width, never cut off) */
-input[type=checkbox],input[type=radio]{accent-color:var(--primary-color)}
+/* Dropdowns with an own chevron (no browser arrow) */
+select{appearance:none;-webkit-appearance:none;padding-right:34px;background-repeat:no-repeat;background-size:6px 6px;
+  background-position:calc(100% - 18px) 50%,calc(100% - 12px) 50%;
+  background-image:linear-gradient(45deg,transparent 50%,var(--secondary-text-color) 50%),linear-gradient(135deg,var(--secondary-text-color) 50%,transparent 50%)}
+/* Own checkboxes and radios: 18 px, rounded, filled in the primary colour when chosen */
+input[type=checkbox],input[type=radio]{appearance:none;-webkit-appearance:none;width:18px;height:18px;margin:0;flex:none;display:inline-grid;place-content:center;
+  vertical-align:-4px;cursor:pointer;border:1.5px solid var(--line-strong);background:var(--card-background-color)}
+input[type=checkbox]{border-radius:5px}input[type=radio]{border-radius:50%}
+input[type=checkbox]:checked{background:var(--primary-color);border-color:var(--primary-color)}
+input[type=checkbox]:checked::after{content:"";width:9px;height:5px;border-left:2px solid var(--text-primary-color);border-bottom:2px solid var(--text-primary-color);transform:translateY(-1px) rotate(-45deg)}
+input[type=radio]:checked{border-color:var(--primary-color)}
+input[type=radio]:checked::after{content:"";width:9px;height:9px;border-radius:50%;background:var(--primary-color)}
+input[type=checkbox]:disabled,input[type=radio]:disabled{opacity:.4;cursor:default}
 /* File chooser (upload, import): its button like a normal button */
 input[type=file]{max-width:100%;color:var(--secondary-text-color)}
-input[type=file]::file-selector-button{min-height:var(--control-h);margin-right:10px;padding:6px 12px;font:inherit;cursor:pointer;
-  border:1px solid var(--line);border-radius:var(--radius-btn);background:var(--card-background-color);color:var(--primary-text-color)}
+input[type=file]::file-selector-button{min-height:var(--control-h);margin-right:10px;padding:6px 16px;font:inherit;font-weight:500;cursor:pointer;
+  border:0;border-radius:var(--radius-btn);background:var(--surf-hi);color:var(--link-text)}
 :focus-visible{outline:2px solid var(--primary-color);outline-offset:1px}
-.check{display:inline-flex;align-items:center;gap:6px;cursor:pointer;color:var(--secondary-text-color)}
+.check{display:inline-flex;align-items:center;gap:8px;cursor:pointer;color:var(--primary-text-color)}
 
 /* ================================================================ Building blocks */
 /* Text button with an icon before the text (Upload firmware, Add schedule, Back up now,
@@ -112,9 +159,9 @@ input[type=file]::file-selector-button{min-height:var(--control-h);margin-right:
 /* Search, sort and filter: small round icons, a click opens a popover below the icon */
 .tool{position:relative;flex:none}
 button.icon.tool-btn{position:relative;width:36px;height:36px;padding:0;display:inline-flex;align-items:center;
-  justify-content:center;border:1px solid var(--line);background:var(--card-background-color)}
+  justify-content:center;border:0;background:var(--surf-hi);color:var(--link-text)}
 .tool.open>button.icon.tool-btn{color:var(--link-text);border-color:var(--primary-color);
-  background:color-mix(in srgb,var(--primary-color) 12%,var(--card-background-color))}
+  background:color-mix(in srgb,var(--tint) 12%,var(--card-background-color))}
 /* Dot while a search text is set or a filter other than "All" is chosen */
 button.icon.tool-btn.has-value::after{content:"";position:absolute;top:3px;right:3px;width:8px;height:8px;border-radius:50%;
   background:var(--primary-color);border:2px solid var(--card-background-color)}
@@ -150,23 +197,27 @@ button.filter-item[aria-checked=true]::after{margin-left:0;padding-left:8px}
 .rowmenu hr{border:0;border-top:1px solid var(--line);margin:4px 0}
 .menu-hint{padding:0 16px 6px;max-width:260px;color:var(--secondary-text-color);font-size:var(--fs-small)}
 
-/* Cards */
-.card{background:var(--card-background-color);border-radius:var(--ha-card-border-radius,var(--radius-m));
-  box-shadow:var(--ha-card-box-shadow,none);border:1px solid var(--line);margin-bottom:16px;overflow:hidden}
-.card-head{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+/* Cards: tinted surface, large radius, no line */
+.card{background:var(--surf);border-radius:var(--radius-l);box-shadow:none;border:0;margin-bottom:16px;overflow:hidden}
+.card-head{display:flex;align-items:center;gap:12px;padding:16px 20px 6px;flex-wrap:wrap}
 .card-head .spacer{flex:1}
-.card-body{padding:12px 16px}
+.card-body{padding:8px 20px 18px}
+@media (max-width:700px){.card-body{padding:8px 16px 16px}}
 .empty{padding:24px 16px;color:var(--secondary-text-color)}
-/* Card heads (device groups, firmware IDs, settings cards): all in the same, bold weight */
-.card-head h2{font-weight:600}
-/* Rows of a list: a fine line between them, none under the last one */
-.oth-row,.unk-row,.fw-row,.fw-head,.log,.log-m,.sch-row,.bk-row,.bk-item,.bk-part,.prechk>li,.miss-row,.bulk-row,.bulk-res-row{
-  border-bottom:1px solid var(--line)}
-.oth-row:last-child,.unk-row:last-child,.fw-row:last-child,.log:last-child,.log-m:last-child,.sch-row:last-child,.bk-item:last-child,
-.bk-part:last-child,.prechk>li:last-child,.miss-row:last-child{border-bottom:0}
+/* Card heads (device groups, firmware IDs, settings cards): all in the same weight */
+.card-head h2{font-size:var(--fs-head);font-weight:500}
+/* Rows of a list inside a dialog: a fine line between them, none under the last one */
+.log-m,.bk-item,.bk-part,.prechk>li,.miss-row,.bulk-row,.bulk-res-row{border-bottom:1px solid var(--line)}
+.log-m:last-child,.bk-item:last-child,.bk-part:last-child,.prechk>li:last-child,.miss-row:last-child{border-bottom:0}
+/* Rows of a list in a tab: bands in the card background on the tinted card (like the Devices rows) */
+.fw-row,.unk-row,.oth-row:not(.oth-head),.sch-row:not(.sch-head),.bk-row:not(.bk-head),.log{
+  background:var(--card-background-color);border-bottom:0;border-radius:var(--radius-s);margin:0 8px 3px}
+.fw-head,.oth-head,.sch-head,.bk-head{margin:0 8px;border-bottom:0}
+:is(.fw-row,.unk-row,.oth-row,.sch-row,.bk-row,.log):last-child{margin-bottom:8px}
+.log:first-child{margin-top:8px}
 
 /* Status pill and indicators */
-.pill{display:inline-flex;align-items:center;gap:4px;padding:2px 10px;border-radius:var(--radius-m);font-size:var(--fs-small);
+.pill{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:var(--radius-xs);font-size:var(--fs-small);
   border:0;font-weight:500;cursor:default;white-space:nowrap;
   background:color-mix(in srgb,var(--tone) 16%,transparent);
   /* Text mixed half towards the text colour: >= 4.5:1 (WCAG AA) on light and dark cards;
@@ -181,6 +232,10 @@ button.pill{cursor:pointer}
   --tone:var(--warning-color);--tone-text:var(--warn-text)}
 .tone-error,.p-error,.p-unconfirmed,.act.c-alert,.fstrip.t-alert,.msg-error,.prechk>li.err{--tone:var(--error-color)}
 .tone-primary,.p-activity,.p-scheduled,.prechk>li.run{--tone:var(--primary-color)}   /* run: the step that is running (spinner) */
+/* Waiting for the Shelly update server: turns yellow when its delay (set by the script:
+   5 s after the wait began) has passed */
+.p-activity.p-server{animation:server-slow 0s linear forwards}
+@keyframes server-slow{to{--tone:var(--warning-color);--tone-text:var(--warn-text)}}
 .act.alert.s-on{--tone:var(--error-color)}
 .act.s-on.c-warn{--tone:var(--warning-color);--tone-text:var(--warn-text)}
 .status-cell{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
@@ -261,7 +316,7 @@ html.dlg-open{overflow:hidden}
 /* Status strip of the popups opened by an action icon: icon, feature name, state; a long
    state (German, phones) moves below the name instead of overlapping it */
 .fstrip{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;margin:12px 0 4px;padding:8px 12px;border-radius:var(--radius-m);
-  background:color-mix(in srgb,var(--primary-text-color) 5%,transparent)}
+  background:var(--surf)}
 .fstrip .fs-icon{display:inline-flex;align-items:center;justify-content:center;flex:none;width:32px;height:32px;
   border-radius:50%;color:var(--tone);background:color-mix(in srgb,var(--tone) 16%,transparent)}
 .fstrip .fs-icon svg{width:var(--icon);height:var(--icon);fill:currentColor}
@@ -282,7 +337,8 @@ dl.kv>dd.sha{font-size:var(--fs-tag);word-break:break-all;color:var(--secondary-
 dl.kv>dd.ver{font-weight:600;white-space:pre-wrap;overflow-wrap:anywhere}   /* long Gen1 versions wrap */
 dl.kv>dd.src{font-size:var(--fs-small)}
 .dsec{margin:14px 0 4px}
-.dsec>h3{margin:0 0 4px;font-size:var(--fs-tag);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--secondary-text-color)}
+.dsec>h3,.dsec-sum{margin:0 0 4px;font-size:var(--fs-tag);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--secondary-text-color)}
+.dsec-sum{cursor:pointer}   /* a collapsed section (changelog of one device): the title opens it */
 /* Status dialog: message left, status pill right */
 .dstatus{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:12px}
 .dmsg{margin:0;line-height:1.45}
@@ -311,12 +367,21 @@ dialog th,dialog td{padding:6px 8px;text-align:left;vertical-align:middle;border
 dialog th{color:var(--secondary-text-color);font-weight:500;font-size:var(--fs-small);white-space:nowrap;user-select:none}
 /* Power-on action: the select takes at most the width that is left and shortens its text with "…" */
 .aop-table select{width:100%;min-width:0;max-width:100%;text-overflow:ellipsis}
-.field{display:flex;flex-direction:column;gap:6px;margin:8px 0;color:var(--secondary-text-color)}
+/* Field names of every form: grey, 12 px (the control keeps the text size) */
+.field{display:flex;flex-direction:column;gap:6px;margin:8px 0;color:var(--secondary-text-color);font-size:var(--fs-small)}
+.field :is(input,select,textarea,button){font-size:var(--fs-text)}
 
 .field input,.field select{min-width:min(320px,100%)}
 .modes{display:flex;flex-direction:column;gap:6px;margin:10px 0}
 .modes .check{color:var(--primary-text-color)}
 .modes .sub-check{margin-left:26px}   /* option of the mode above it ("Store in this app") */
+/* Inputs of the choice above them (access point: the password, the open warning) */
+.sub-block{margin:2px 0 8px 26px}
+.sub-block>.field{margin-top:4px}
+.dsec>.check{display:flex;margin:6px 0}
+.check>.sub{margin-left:8px}   /* short explanation after a checkbox label */
+/* Long lists of choices in a dialog (downgrade versions): a box that scrolls inside */
+dialog .modes:has(>.check:nth-child(9)){max-height:236px;overflow:auto;border:1px solid var(--line);border-radius:var(--radius-s);padding:8px 12px}
 
 /* Section "Before installing" of the installation dialog: green check or yellow "!" per line */
 .prechk{list-style:none;margin:2px 0 0;padding:0;display:flex;flex-direction:column}
@@ -328,6 +393,11 @@ dialog th{color:var(--secondary-text-color);font-weight:500;font-size:var(--fs-s
 .prechk>li>div{min-width:0;line-height:1.4}
 .prechk strong{display:block;font-weight:500}
 .prechk>li>div>span{color:var(--secondary-text-color);font-size:var(--fs-small)}
+/* One finding on several devices: the line opens the devices with their texts */
+.prechk>li>div>details>summary{cursor:pointer}
+.pc-devs{list-style:none;margin:4px 0 0;padding:0;font-size:var(--fs-small)}
+.pc-devs>li{padding:3px 0}.pc-devs .name{font-weight:500;margin-right:6px}
+.pc-devs>li>span:last-child{color:var(--primary-text-color)}
 .prechk>li.warn>div>span{color:var(--primary-text-color)}
 .pc-fail{margin:0;color:var(--primary-text-color)}
 .hint.pc-sub{margin:2px 0 0 26px}
@@ -351,18 +421,18 @@ dialog th{color:var(--secondary-text-color);font-weight:500;font-size:var(--fs-s
   /* Touch targets: buttons, fields, selects, the file chooser and the link entries of the row menu 44 px */
   button,input[type=search],select{min-height:44px}
   .rowmenu a{display:flex;align-items:center;min-height:44px}
-  button.pill{min-height:32px}   /* status details are also in the ⋮ menu */
-  .pill.p-ignored,.pill.p-removed,.pill.p-activity{min-height:32px}   /* same size as the status pill */
-  button.install{min-height:32px;padding:2px 10px;border-radius:var(--radius-m);font-size:var(--fs-small);font-weight:500}   /* same size as the status pill */
+  /* Pills and "Install" 26 px high (compact tiles; status details are also in the ⋮ menu) */
+  .pill,button.pill,.pill.p-ignored,.pill.p-removed,.pill.p-activity{min-height:26px}
+  button.install{min-height:26px;padding:2px 10px;border-radius:var(--radius-m);font-size:var(--fs-small);font-weight:500}   /* same size as the status pill */
   button.icon{min-width:44px;min-height:44px}
   a.icon{min-width:44px;min-height:44px}
   dialog{width:calc(100vw - 16px);max-height:calc(100vh - 24px)}
   #dlg-body{padding-top:12px}
   /* Toast as wide as its text, at most the width minus 16 px on each side */
   .toast{left:16px;right:16px;transform:none;width:fit-content;max-width:none;margin:0 auto}
-  /* Tiles: rows become separated tiles with a strong border (at least 3:1 against the page;
-     the Backups rows set it in their tab, after the rule for the last row of a card) */
-  :where(.dev-table) tr,.sch-row{background:var(--card-background-color);border:1px solid var(--line-strong);border-radius:var(--radius-m)}
+  /* Tiles: rows become separated tiles in the card background on the tinted card, no line
+     (Logs and Backups tiles are tinted, set in their tab) */
+  :where(.dev-table) tr,.sch-row{background:var(--card-background-color);border:0;border-radius:var(--radius-tile)}
 }
 
 /* ================================================================ Page head and tabs */
@@ -371,7 +441,7 @@ h1 .beta{margin-left:4px;color:var(--error-text);font-size:var(--fs-tag);font-we
 .meta{color:var(--secondary-text-color);font-size:var(--fs-small);line-height:1.6}
 .meta:empty{display:none}.busy{color:var(--warn-text)}
 #meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
-.meta-pill{--tone:var(--secondary-text-color)}
+.meta-pill{--tone:var(--secondary-text-color);background:var(--surf)}
 .progress{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px;color:var(--secondary-text-color);font-size:var(--fs-small)}
 
 .progress progress{flex:1 1 160px;max-width:320px;height:6px;accent-color:var(--primary-color)}
@@ -387,15 +457,26 @@ h1 .beta{margin-left:4px;color:var(--error-text);font-size:var(--fs-tag);font-we
 .titlebar{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
 /* "Check now" in the Settings tab: invisible and not focusable, its place stays (no jump) */
 #scan.off-view{visibility:hidden}
-.tabs{display:flex;gap:4px;margin:12px 0 16px;border-bottom:1px solid var(--line);overflow-x:auto}
-.tab{background:none;color:var(--secondary-text-color);border-radius:0;border:0;border-bottom:2px solid transparent;
-  padding:8px 16px;display:flex;align-items:center;gap:6px}
+/* Tabs: a tinted strip, the active tab raised in the card background */
+.tabs{display:flex;gap:2px;margin:16px 0;padding:4px;border-radius:var(--radius-btn);background:var(--surf-hi);overflow-x:auto}
+.tab{color:color-mix(in srgb,var(--link-text) 55%,var(--primary-text-color));border-radius:var(--radius-btn);border:0;
+  padding:7px 16px;display:flex;align-items:center;gap:6px}
 .tab svg{width:var(--icon);height:var(--icon);fill:currentColor}
-.tab.active{color:var(--link-text);border-bottom-color:var(--primary-color)}
+.tab.active{background:var(--card-background-color);color:var(--link-text);font-weight:500;
+  box-shadow:0 1px 3px color-mix(in srgb,var(--tint) 30%,transparent)}
 /* Logs tab: unread error entries (red round "!" after the name, on phones after the icon) */
 .tab-unread{display:inline-flex;align-items:center;justify-content:center;flex:none;width:16px;height:16px;
   border-radius:50%;background:var(--error-color);color:#fff;font-size:11px;font-weight:700;line-height:1}
 
+/* Wide screens: the app icon left of the title and the header pills; the tab strip as wide as its tabs */
+@media (min-width:701px){
+  .tabs{width:fit-content}
+  .titlebar>div:first-child{display:grid;grid-template-columns:auto 1fr;column-gap:14px;align-items:center}
+  .titlebar>div:first-child::before{content:"";grid-row:1/span 2;width:52px;height:52px;border-radius:var(--radius-s);
+    background:url(icon.png) center/cover}
+  .titlebar>div:first-child>*{grid-column:2}
+  #meta{margin-top:2px}
+}
 @media (max-width:700px){
   /* Inside HA the app title is hidden; a "(beta)" mark stays, on its own line above the pills */
   .embedded h1 .app-title{display:none}
@@ -409,10 +490,10 @@ h1 .beta{margin-left:4px;color:var(--error-text);font-size:var(--fs-tag);font-we
   .meta-pill{display:block;max-width:100%;min-width:0;overflow:hidden;text-overflow:ellipsis}
   #scan{flex:none;white-space:nowrap}
   /* Tabs share the width so all four stay reachable */
-  .tabs{gap:0}.tab{flex:1;justify-content:center;padding:10px 4px;min-height:48px}
+  .tabs{gap:0}.tab{flex:1;justify-content:center;min-height:44px}
   /* Tabs: only the active tab shows its name, the others only their icon */
   .tabs-icons .tab:not(.active){font-size:0;flex:0 0 44px;gap:0;padding:10px 0}
-  .tabs-icons .tab.active{flex:1;padding:10px 2px;white-space:nowrap}
+  .tabs-icons .tab.active{flex:1;padding:8px 2px;white-space:nowrap}
   .tabs-icons .tab svg{width:var(--icon-xl);height:var(--icon-xl)}
   .tabs-icons .tab:not(.active) .tab-unread{margin-left:2px}
 }
@@ -420,10 +501,7 @@ h1 .beta{margin-left:4px;color:var(--error-text);font-size:var(--fs-tag);font-we
 /* ================================================================ Tab Devices */
 /* Device tables (inside the cards) */
 table:where(.dev-table){border-collapse:collapse;width:100%}
-:where(.dev-table) th,:where(.dev-table) td{padding:8px 10px;text-align:left;vertical-align:middle;
-  border-bottom:1px solid var(--line)}
-:where(.dev-table) tr:last-child>td{border-bottom:0}
-:where(.dev-table) tbody tr:hover>td{background:color-mix(in srgb,var(--primary-text-color) 4%,transparent)}
+:where(.dev-table) th,:where(.dev-table) td{padding:8px 10px;text-align:left;vertical-align:middle}
 :where(.dev-table) th{color:var(--secondary-text-color);font-weight:500;font-size:var(--fs-small);white-space:nowrap;user-select:none}
 th.sortable,.fw-head>.sortable{cursor:pointer}th.sortable:hover,.fw-head>.sortable:hover{color:var(--primary-text-color)}
 .fw-head>[data-dir=asc]::after{content:" ▲";font-size:.75em}.fw-head>[data-dir=desc]::after{content:" ▼";font-size:.75em}
@@ -435,8 +513,19 @@ tr.ignored>td:not(.c-device):not(.c-status):not(.c-select):not(.c-menu):not(.c-d
 button.icon.pen{padding:2px}button.icon.pen svg{width:var(--icon-s);height:var(--icon-s)}
 th[data-dir=asc]::after{content:" ▲";font-size:.75em}th[data-dir=desc]::after{content:" ▼";font-size:.75em}
 td.c-menu{text-align:right}
+/* Value of a cell that opens its dialog (NTP server): plain text in the link colour, underlined on hover */
+button.cell-link{min-height:0;padding:0;border:0;background:none;color:var(--link-text);font-weight:400;max-width:100%;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+button.cell-link:hover:not(:disabled){text-decoration:underline}
+button.cell-link:disabled{color:inherit;opacity:1}
 /* Wide screens: the user's column choice applies, the mobile details cell is not used */
 @media (min-width:701px){
+  /* Rows as bands in the card background on the tinted card, 3 px apart, rounded ends */
+  table:where(.dev-table){border-collapse:separate;border-spacing:0;padding:0 8px 8px}
+  :where(.dev-table) tbody tr>td{background:var(--card-background-color);border-top:3px solid var(--surf)}
+  :where(.dev-table) tbody tr:hover>td{background:color-mix(in srgb,var(--tint) 4%,var(--card-background-color))}
+  :where(.dev-table) tbody td:first-child{border-radius:var(--radius-s) 0 0 var(--radius-s)}
+  :where(.dev-table) tbody td:last-child{border-radius:0 var(--radius-s) var(--radius-s) 0}
   .col-hidden,.c-details{display:none}
   /* Fixed column widths: the columns of both device cards line up */
   table:where(.dev-table){table-layout:fixed}
@@ -447,9 +536,10 @@ td.c-menu{text-align:right}
   td.c-area{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   td.c-host_name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   th.c-menu,td.c-menu{width:52px}
-  /* Header checkbox of the updates card exactly above the row checkboxes (card head
-     padding 16 px, cell padding 10 px); the title keeps its place */
-  .card-head>input[type=checkbox]{margin:3px 9px 3px -2px}
+  /* Header checkbox of the updates card exactly above the row checkboxes (card head padding
+     20 px - 1 px = row band inset 8 px + cell padding + the centred checkbox, measured); the
+     title keeps its place */
+  .card-head>input[type=checkbox]{margin:0 13px 0 -1px}
   td.c-device .name,td.c-device .sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   td.c-device .name-line .tag{display:none}   /* Gen label: phone tiles only */
   td.c-device .name-line{display:flex;align-items:center;gap:6px;min-width:0}   /* name + battery icon */
@@ -498,34 +588,34 @@ button.listing.listing-phone{display:none}
   #cols{display:none}   /* fixed card layout: no column chooser */
   :where(.dev-table) thead{display:none}
   table:where(.dev-table),:where(.dev-table) tbody{display:block}
-  /* Each device is a clearly separated tile: tiles sit on the page background like the
-     firmware cards, with their own card background and a border of at least 3:1
-     contrast (the theme's divider colour is too faint, about 1.5:1 in dark themes). */
-  :where(.dev-table) tbody{padding:10px;background:var(--primary-background-color);border-radius:0 0 var(--radius-m) var(--radius-m)}
+  /* Each device is a compact tile in the card background on the tinted card */
+  :where(.dev-table) tbody{padding:6px}
   /* Tile: checkbox, HA name and ⋮ on line 1; Shelly name left, IP right on line 2;
      firmware left, status/Install right on line 3; "Details" button below. Same padding
      at top and bottom. */
-  :where(.dev-table) tr{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;column-gap:8px;row-gap:2px;align-items:center;
-    padding:12px;margin-bottom:10px}
-  /* Head of the tile like the head of a firmware card: HA name (600) with the "Gen n"
-     label, divider line over the full tile width. The band is a grid item behind line 1. */
-  :where(.dev-table) tr::before{content:"";grid-column:1/-1;grid-row:1;align-self:stretch;margin:-12px -12px 0;
-    border-bottom:1px solid var(--line)}
-  td.c-select,td.c-menu,td.c-device .name-line{margin-bottom:12px}
+  :where(.dev-table) tr{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;column-gap:8px;row-gap:0;align-items:center;
+    padding:8px 12px;margin-bottom:6px}
+  .card:has(.dev-table) .card-head{padding:12px 16px 4px}
+  /* "Review & install" right-aligned on its own line above the card title */
+  .card-head>button.primary{order:-2;margin-left:auto}
+  .card-head:has(>button.primary)::before{content:"";order:-1;flex-basis:100%;height:0;margin:-6px 0}
+  .card:has(.dev-table) .card-head:has(>button.primary){padding-top:10px}
   td.c-device{display:contents}
   td.c-device .name-line{grid-column:2;grid-row:1;align-self:center;display:flex;align-items:center;gap:8px;min-width:0}
   td.c-device .name{font-size:var(--fs-title);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   td.c-device .name-line .tag{display:inline-block;margin:0;flex:none}
   td.c-device .shelly-name{grid-column:2;grid-row:2}
+  td.c-device .shelly-name button.icon{margin:-13px 0}   /* 44 px touch target inside the compact line */
+  td.c-device .name-line>*{position:relative;z-index:1}   /* HA name, Gen label and battery icon stay tappable above it */
   :where(.dev-table) tr:last-child{margin-bottom:0}
   :where(.dev-table) tbody tr:hover>td{background:none}
   :where(.dev-table) td{display:block;border:0;padding:2px 0;min-width:0}
   td.c-select{grid-column:1;grid-row:1;width:auto;align-self:center}
   .card:has(td.c-select input) td.c-select{width:20px}   /* aligned names in the updates card */
-  td.c-status{grid-column:3/5;grid-row:3;align-self:center;padding-top:6px}
+  td.c-status{grid-column:3/5;grid-row:3;align-self:center;padding-top:2px}
   td.c-menu{grid-column:4;grid-row:1;width:auto;align-self:center}
   td.c-menu button.icon{margin:-12px 0}   /* 44 px touch target, 20 px (one text line) in the layout */
-  td.c-firmware{grid-column:2;grid-row:3;padding-top:6px}
+  td.c-firmware{grid-column:2;grid-row:3;padding-top:2px}
   /* IP right of the Shelly name: grey, plain text with ↗ when it links to the web UI */
   td.c-ip{grid-column:3/5;grid-row:2;text-align:right;color:var(--secondary-text-color);font-size:var(--fs-small)}
   td.c-ip a{color:inherit;text-decoration:none}
@@ -542,11 +632,11 @@ button.listing.listing-phone{display:none}
   .unk-row{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"name act" "size act";gap:2px 12px}
   .unk-name{grid-area:name}.unk-size{grid-area:size;color:var(--secondary-text-color);font-size:var(--fs-small)}.unk-row>.actions{grid-area:act}
   .unk-row>.actions>*{min-width:44px;min-height:44px}
-  /* "Details" as outlined button like the feature buttons: full content width, 36 px,
-     centred text with a chevron (down when closed, up when open) */
+  /* "Details" as tonal button: full content width, 28 px, centred text with a chevron
+     (down when closed, up when open) */
   td.c-details summary{cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:center;gap:8px;
-    min-height:36px;margin-top:10px;padding:4px 10px;border:1px solid var(--line-strong);border-radius:var(--radius-btn);
-    color:var(--primary-text-color);font-size:var(--fs-small)}
+    min-height:28px;margin-top:6px;padding:2px 10px;border:0;border-radius:var(--radius-btn);background:var(--surf-hi);
+    color:var(--link-text);font-size:var(--fs-small)}
   td.c-details summary::-webkit-details-marker{display:none}
   td.c-details summary::after{content:"";width:6px;height:6px;margin-top:-3px;border-right:2px solid currentColor;
     border-bottom:2px solid currentColor;transform:rotate(45deg);transition:transform .15s}
@@ -556,7 +646,7 @@ button.listing.listing-phone{display:none}
   .detail-actions{margin-bottom:10px}
   /* Feature buttons: natural width, every row stretched to the full content width */
   .act-strip.labeled .act{flex:1 1 auto;min-height:36px;padding:4px 10px;gap:5px;font-size:var(--fs-small);border-radius:var(--radius-btn);
-    border-color:var(--line-strong)}
+    border:0;background:var(--surf)}
   .act-strip.labeled .act svg{width:var(--icon-m);height:var(--icon-m)}
   /* Detail list: label left, value right */
   dl.tile-kv{border-top:1px solid var(--line)}
@@ -597,7 +687,7 @@ button.listing.listing-phone{display:none}
      Three columns, so that the version with its labels gets all the room beside the icons
      (not only the width of the size below it) */
   .fw-row{grid-template-columns:auto 1fr auto;grid-template-areas:"ver ver act" "size date date" "sha sha sha" "dev dev dev";
-    gap:6px 12px;padding:8px 16px 12px}
+    gap:6px 12px;padding:8px 16px 12px;border-radius:var(--radius-tile);margin:0 6px 6px}
   .fw-head{display:none}   /* phones: small labels inside the tile instead */
   .fw-row [data-label]::before{content:attr(data-label);margin-right:6px;color:var(--secondary-text-color);font-size:var(--fs-tag);font-weight:500}
   .fw-ver{grid-area:ver;overflow-wrap:anywhere}
@@ -606,8 +696,7 @@ button.listing.listing-phone{display:none}
   .fw-size{grid-area:size}.fw-date{grid-area:date;justify-self:end;text-align:right}   /* right, under the icons */
   .fw-sha{grid-area:sha;display:flex;align-items:center;gap:4px;min-width:0}
   .fw-sha>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
-  .fw-dev{grid-area:dev;min-width:0;overflow-wrap:anywhere;padding-top:6px;
-    border-top:1px dashed var(--line)}
+  .fw-dev{grid-area:dev;min-width:0;overflow-wrap:anywhere;padding-top:6px}
   .fw-dev summary{padding:6px 0}
   .fw-row details ul{padding-left:0;list-style:none}
   .fw-row details li{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:44px}
@@ -622,11 +711,8 @@ button.listing.listing-phone{display:none}
 /* Logs */
 .day{margin:16px 0 6px;color:var(--secondary-text-color);font-weight:500}
 .log{display:grid;grid-template-columns:52px 110px 1fr auto auto;gap:4px 12px;padding:8px 16px;align-items:start}
-/* Consecutive entries of one device – side bar only, the content is not indented */
-.log.grp,.log-m.grp{box-shadow:inset 3px 0 0 var(--primary-color)}
-.log.grp-first,.log.grp-mid{border-bottom-color:transparent}
-/* Entries that were unread when the Logs tab was opened: lightly highlighted */
-.log.unread,.log-m.unread{background:color-mix(in srgb,var(--primary-color) 8%,var(--card-background-color))}
+/* Entries that were unread when the Logs tab was opened: a bar in the primary colour on the left */
+.log.unread,.log-m.unread{background:var(--card-background-color);box-shadow:inset 3px 0 0 var(--primary-color);border-radius:3px var(--radius-s) var(--radius-s) 3px}
 .log .log-del{margin:-3px 0}
 .log>.tag{justify-self:start}   /* kind label as wide as its text (neutral, also in error entries) */
 .tag[class*=sev-]{min-width:64px;text-align:center}   /* Success / Warning / Error: one size */
@@ -651,10 +737,10 @@ button.listing.listing-phone{display:none}
 .log-details{margin-top:6px;overflow-wrap:anywhere}
 .log-details ul{margin:4px 0 0;padding-left:18px}
 @media (max-width:700px){
-  /* Logs: entries as separated tiles with a 5 px gap (like the device tiles) */
+  /* Logs: entries as separated tinted tiles with a 6 px gap */
   #log-list .card:has(>.log-m){background:none;border:0;box-shadow:none;overflow:visible}
-  .log-m,.log-m:last-child{margin-bottom:5px;background:var(--card-background-color);border-radius:var(--radius-m);
-    border:1px solid var(--line-strong)}
+  .log-m,.log-m:last-child{margin:0 0 6px;background:var(--surf);border-radius:var(--radius-tile);border:0}
+  .log-m.unread{background:var(--surf);border-radius:3px var(--radius-tile) var(--radius-tile) 3px}
   .log{grid-template-columns:52px 1fr}
   .log .user{grid-column:2}
   .log-head .spacer{flex:1}
@@ -680,13 +766,18 @@ button.listing.listing-phone{display:none}
 .set-name{display:flex;align-items:center;gap:6px;min-width:0}
 .set-name>label{cursor:help}
 button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help svg{width:var(--icon-m);height:var(--icon-m)}
-.form-actions{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:4px}
+/* Common save area of the Settings tab, above the cards (right) and below them */
+.form-actions,.form-actions-top{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:4px}
+.form-actions-top{margin:0 0 12px}
 .unsaved{color:var(--warn-text);font-size:var(--fs-small)}
 .set-changelog{margin:16px 0 0}
 /* Settings cards in independent column stacks (app-settings.js: 1, 2 or 3 columns), so a
    short card does not leave a gap under it */
 .settings-grid{display:flex;gap:16px;align-items:flex-start}
 .set-stack{flex:1 1 0;min-width:0}
+/* Options of a settings card on one inner surface in the card background, like the rows
+   of the other tabs on their tinted card */
+.settings-grid .card-body{background:var(--card-background-color);margin:0 8px 8px;border-radius:var(--radius-s);padding:14px 12px}
 /* Firmware store block inside "Firmware & Storage": full width, between the options */
 .set-store{grid-column:1/-1;padding:12px 0;border-top:1px solid var(--line);
   border-bottom:1px solid var(--line)}
@@ -701,9 +792,10 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
 .imp-list{margin:6px 0 4px 18px;padding:0;font-size:var(--fs-small)}
 .imp-list li{margin:2px 0}
 /* Passwords of several devices: device list with the step per device, result rows */
-.bulk-list{display:flex;flex-direction:column}
+.bulk-list{display:flex;flex-direction:column;max-height:296px;overflow:auto;border:1px solid var(--line);border-radius:var(--radius-s);padding:0 12px}   /* scrolls inside, the dialog stays short */
 .bulk-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;padding:6px 0}
 .bulk-row.off{opacity:.6}
+.bulk-off>summary{padding:8px 0;color:var(--secondary-text-color);cursor:pointer}   /* "n not possible": devices that do not fit */
 .bulk-all{padding:4px 0 8px;font-weight:500}
 .bulk-dev{display:inline-flex;flex-direction:column}
 .bulk-dev .sub,.bulk-row>.sub{color:var(--secondary-text-color);font-size:var(--fs-small)}
@@ -714,6 +806,19 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
 .bulk-res-row{display:flex;align-items:center;gap:12px;padding:6px 0}
 /* Settings: line under "Keep installed versions" */
 .form .desc.set-note:empty{display:none}
+/* Base colour (card Display): one radio group of round swatches; the chosen one has a ring,
+   its name follows the dots. The label around each radio is its click area (44 px on phones). */
+.swatches{display:flex;align-items:center;flex-wrap:wrap;gap:0 2px}
+.swatch{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;cursor:pointer}
+.swatch input[type=radio]{width:22px;height:22px;border:1px solid color-mix(in srgb,var(--primary-text-color) 25%,transparent)}
+.swatch input[type=radio]:checked{box-shadow:0 0 0 2px var(--card-background-color),0 0 0 4px var(--primary-text-color)}
+.swatch input[type=radio]:checked::after{content:none}
+.swatch input[type=radio]:focus-visible{outline-offset:5px}
+.swatch input[value=default]{background:linear-gradient(90deg,#e0e0e0 50%,#616161 50%)}
+.swatch input[value=blue]{background:var(--base-blue)}.swatch input[value=teal]{background:var(--base-teal)}
+.swatch input[value=green]{background:var(--base-green)}.swatch input[value=violet]{background:var(--base-violet)}
+.swatch input[value=orange]{background:var(--base-orange)}
+.swatch-name{margin-left:8px;color:var(--secondary-text-color)}
 @media (max-width:700px){
   /* Settings: each option is one block (label, control, help) with a separator */
   .form{display:block}
@@ -722,12 +827,14 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
   .set-field:first-child{border-top:0;padding-top:2px}
   .set-field:last-child{padding-bottom:0}
   .set-store{padding:14px 0;border-bottom:0}
+  .settings-grid .card-body{padding:12px}
   .set-name>label{font-weight:500}
   .form .desc{grid-column:1;margin:0}
   .form input[type=text],.form input[type=password],.form input[type=number],.form input[type=time]{width:100%;box-sizing:border-box}
   .set-field.t-bool{grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:12px}
   .set-field.t-bool>.desc{grid-column:1/-1}
   .set-field.t-bool input{width:22px;height:22px;margin:0}
+  .swatch{width:44px;height:44px}
   /* Pinned certificate entry: host on its own line, fingerprint + remove below */
   .pins>div:first-child>div{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center}
   .pins>div:first-child>div>input:first-child{grid-column:1/-1}
@@ -737,6 +844,10 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
     background:var(--card-background-color);border:1px solid var(--line);border-radius:var(--radius-m);
     box-shadow:var(--shadow-bar)}
   .form-actions .unsaved{margin-right:auto}
+  /* Save area above the cards: full width over the first card, scrolls with the page */
+  .form-actions-top{padding:10px 12px;background:var(--card-background-color);border:1px solid var(--line);
+    border-radius:var(--radius-m)}
+  .form-actions-top .unsaved{margin-right:auto}
 }
 
 /* ================================================================ Installation dialog */
@@ -744,6 +855,13 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
 .plan-note{color:var(--link-text)}
 .inst-when{display:flex;flex-wrap:wrap;gap:8px}.inst-when input{min-height:var(--control-h)}
 .dsec+label.check{display:flex;margin-top:12px}
+/* Wide screens: sections "Device" and "Firmware" side by side, the other sections over the full width */
+@media (min-width:701px){
+  dialog:has(.prechk):has(dl.kv){width:min(820px,calc(100vw - 32px))}
+  #dlg-body:has(.prechk):has(dl.kv){display:grid;grid-template-columns:1fr 1fr;column-gap:28px;align-items:start}
+  #dlg-body:has(.prechk):has(dl.kv)>*{grid-column:1/-1}
+  #dlg-body:has(.prechk):has(dl.kv)>.dsec:has(>dl.kv){grid-column:auto}
+}
 @media (max-width:700px){
   /* "Install n updates?": two-line entries instead of the five columns – name, below it
      IP · installed → target · source (the plain table does not fit at 360 px) */
@@ -772,6 +890,7 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
 .sch-form{display:grid;gap:10px}
 .sch-field{display:grid;grid-template-columns:minmax(96px,34%) minmax(0,1fr);align-items:center}
 
+.sch-field>label{color:var(--secondary-text-color);font-size:var(--fs-small)}   /* field names like .field */
 .sch-field .desc{color:var(--secondary-text-color);font-size:var(--fs-small);margin-top:2px}
 .sch-field input[type=text],.sch-field select{width:100%}.sch-field input[type=number],.sch-n{width:80px}
 .sch-days{display:flex;flex-wrap:wrap;gap:4px 12px;margin-left:26px}
@@ -782,8 +901,7 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
 @media (max-width:700px){
   .sch-head{display:none}
   .card.schedules{background:none;box-shadow:none}
-  .sch-row,.sch-row.sch-inst{grid-template-columns:auto minmax(0,1fr) auto;gap:6px 10px;margin:10px;padding:12px}
-  .sch-row:last-child{border-bottom:1px solid var(--line-strong)}
+  .sch-row,.sch-row.sch-inst{grid-template-columns:auto minmax(0,1fr) auto;gap:6px 10px;margin:0 6px 6px;padding:10px 12px;border-radius:var(--radius-tile)}
   .sch-row.sch-inst{grid-template-columns:minmax(0,1fr) auto}
   .sch-row .sch-on{grid-column:1;grid-row:1}.sch-row .sch-name{grid-column:2;grid-row:1}.sch-row .sch-btns{grid-column:3;grid-row:1}
   .sch-inst .sch-name{grid-column:1}.sch-inst .sch-btns{grid-column:2}
@@ -805,7 +923,7 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
 .bk-row.bk-none{grid-template-columns:minmax(0,2fr) minmax(0,4.9fr) auto;padding:10px 16px}
 .backups>:last-child{border-bottom:0}
 .bk-head{color:var(--secondary-text-color);font-size:var(--fs-small)}
-.bk-row.open{border-bottom:0}
+.bk-row.open{border-bottom:0;border-radius:var(--radius-s) var(--radius-s) 0 0;margin-bottom:0}
 .bk-name .tag{margin:0 0 0 6px}
 .bk-why{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}.bk-why .tag{margin:0}
 .bk-last{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
@@ -815,7 +933,7 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
 .bk-tog::after{content:"";width:7px;height:7px;margin-top:-4px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg)}
 .bk-tog.open::after{margin-top:4px;transform:rotate(-135deg)}
 /* Backups of a device: inset list below its row; in the "Backups" dialog two-line entries */
-.bk-list{margin:0 16px 12px 64px;border:1px solid var(--line);border-radius:var(--radius-s);background:color-mix(in srgb,var(--primary-text-color) 3%,transparent)}
+.bk-list{margin:0 8px 3px;border:0;border-radius:0 0 var(--radius-s) var(--radius-s);background:var(--card-background-color)}   /* joined to its open row */
 .bk-item{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,2fr) minmax(0,.8fr) minmax(0,2.4fr) minmax(0,.6fr) 190px;gap:12px;align-items:center;padding:6px 12px}
 .bk-parts .tag{margin:0 0 0 6px}
 .bk-warn svg{width:var(--icon-m);height:var(--icon-m);fill:var(--warning-color);vertical-align:-3px;margin-right:6px}
@@ -832,7 +950,7 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
 /* Kept backup: grey pin = can be kept, primary colour = kept */
 button.icon.bk-keep{color:var(--secondary-text-color);opacity:.55}button.icon.bk-keep.on{color:var(--link-text);opacity:1}
 /* Job bar above the cards (backup run, restore): neutral, with "Show" */
-.notice.bk-job{margin:0 0 12px;border-left-color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 10%,var(--card-background-color))}
+.notice.bk-job{margin:0 0 12px;border-left-color:var(--primary-color);background:color-mix(in srgb,var(--tint) 10%,var(--card-background-color))}
 .bk-job .spinner{display:inline-block;vertical-align:-1px;margin-right:4px}
 /* Progress of a backup run in its dialog: text and bar like the progress of a check */
 .progress.bk-progress{margin:14px 0 4px}
@@ -858,18 +976,19 @@ table.bk-diff td.bk-new{color:var(--link-text);font-weight:600}
 @media (max-width:700px){
   .bk-head{display:none}
   .card.backups{background:none;box-shadow:none}
-  .card.backups>.card-head{background:var(--card-background-color);border-radius:var(--radius-m);border:1px solid var(--line)}
-  .bk-row,.bk-row.bk-none{grid-template-columns:auto minmax(0,1fr) auto;gap:6px 10px;margin:10px 0;padding:12px;border:1px solid var(--line-strong);border-radius:var(--radius-m);
-    background:var(--card-background-color)}
+  .card.backups>.card-head{border:0;background:none;padding:8px 4px}
+  /* Tiles tinted like the log tiles (the list rows of the tab are bands in the card background) */
+  .bk-row,.bk-row.bk-none{grid-template-columns:auto minmax(0,1fr) auto;gap:6px 10px;padding:10px 12px}
+  .bk-row:not(.bk-head){margin:0 0 6px;border:0;border-radius:var(--radius-tile);background:var(--surf)}
   .bk-row.bk-none{grid-template-columns:minmax(0,1fr) auto}
-  .bk-row.open{margin-bottom:0;border-bottom:0;border-radius:var(--radius-m) var(--radius-m) 0 0}
+  .bk-row.open:not(.bk-head){margin-bottom:0;border-bottom:0;border-radius:var(--radius-tile) var(--radius-tile) 0 0}
   .bk-row .bk-chev{grid-column:1;grid-row:1;margin:-6px 0 -6px -8px}.bk-row .bk-name{grid-column:2;grid-row:1;text-align:left}.bk-row .bk-btns{grid-column:3;grid-row:1}
   .bk-none .bk-name{grid-column:1}.bk-none .bk-btns{grid-column:2}.bk-none .bk-why-none{grid-column:1/-1;grid-row:2}
   .bk-row>.bk-fw{display:none}   /* the firmware of each backup is in its own line of the list */
   .bk-row .bk-c[data-label],.bk-list:not(.in-dlg) .bk-c[data-label]{grid-column:1/-1;display:grid;grid-template-columns:96px minmax(0,1fr);align-items:baseline}
   .bk-row .bk-c[data-label]::before,.bk-list:not(.in-dlg) .bk-c[data-label]::before{content:attr(data-label);color:var(--secondary-text-color);font-size:var(--fs-small)}
   .bk-last .bk-why{grid-column:2}
-  .bk-list:not(.in-dlg){margin:0 0 10px;border-color:var(--line-strong);border-radius:0 0 var(--radius-m) var(--radius-m);background:var(--card-background-color)}
+  .bk-list:not(.in-dlg){margin:0 0 6px;border:0;border-radius:0 0 var(--radius-tile) var(--radius-tile);background:var(--surf)}
   .bk-list:not(.in-dlg) .bk-item{grid-template-columns:minmax(0,1fr) auto;gap:4px 10px;padding:10px 12px}
   .bk-list:not(.in-dlg) .bk-date{grid-column:1;grid-row:1;font-weight:600}
   .bk-list .bk-btns,.bk-list.in-dlg .bk-btns{grid-column:1/-1;grid-row:auto;justify-content:flex-start}
@@ -915,15 +1034,15 @@ button.after-note span{text-decoration:underline}
 /* Strip "Security": four counters, a click filters the list */
 .sec-strip{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px}
 .sec-title{font-size:var(--fs-tag);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--secondary-text-color);margin-right:4px}
-.sec-tile{display:inline-flex;gap:6px;align-items:center;padding:3px 12px 3px 4px;border:1px solid var(--line);border-radius:var(--radius-btn);
-  background:var(--card-background-color);min-height:0;--tone:var(--warning-color)}
+.sec-tile{display:inline-flex;gap:6px;align-items:center;padding:3px 12px 3px 4px;border:0;border-radius:var(--radius-btn);
+  background:var(--surf);min-height:0;--tone:var(--warning-color)}
 .sec-tile.zero{--tone:var(--success-color)}
 .sec-icon{width:24px;height:24px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
   background:color-mix(in srgb,var(--tone) 18%,transparent);color:color-mix(in srgb,var(--tone) 70%,var(--primary-text-color))}
 .sec-icon svg{width:14px;height:14px;fill:currentColor}
 .sec-n{font-size:var(--fs-text);font-weight:600}
 .sec-label{font-size:var(--fs-small);color:var(--secondary-text-color)}
-.sec-tile.active{border-color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 12%,var(--card-background-color))}
+.sec-tile.active{border-color:var(--primary-color);background:color-mix(in srgb,var(--tint) 12%,var(--card-background-color))}
 /* Phones: counters as symbol and number only (the name is in the tooltip) */
 @media (max-width:700px){.sec-tile.has{padding-right:10px}.sec-tile.has .sec-label{display:none}}
 /* Logs tab: red trash icon of "Delete all logs" */

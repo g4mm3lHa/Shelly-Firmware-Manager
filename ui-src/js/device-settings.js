@@ -1,9 +1,10 @@
 // Dialogs for the settings of a single Shelly: name, NTP, power-on action, eco mode, switches,
 // websocket debug log, password, restart; passwords of several devices in one step.
 import {
-  api, box, checkbox, closeModal, collator, confirmDialog, devUrl, el, field, formError, gateButton, icon, input, message, messageBody,
-  modal, radio, section, t, tn, ui, valueList, webUrl,
+  api, box, checkbox, closeModal, collator, confirmDialog, devUrl, el, field, formError, gateButton, guarded, icon, input,
+  message, messageBody, modal, radio, section, t, tn, ui, valueList, warnBox, webUrl,
 } from "./core.js";
+import {load} from "./main.js";
 
 // ---------------------------------------------------------------- Device settings
 // Flow: read live values from the Shelly -> input -> (Shelly name: confirmation
@@ -51,9 +52,19 @@ async function saveSettings(d, title, changes, quiet, error) {
     if (r.not_applied?.length) {  // accepted, but the read-back shows another value
       message(title, t("The Shelly accepted the request but did not apply: {settings}. The value read back is shown.", {settings: r.not_applied.join(", ")}), "warning"); return;
     }
-    if (quiet && !r.restart_required) { closeModal(); return; }
-    message(title, r.restart_required ? t("Saved. The Shelly reports that a restart is required to apply the change.") : t("Saved and read back from the Shelly."), "success");
+    if (r.restart_required) { restartOffer(d, title); return; }
+    if (quiet) { closeModal(); return; }
+    message(title, t("Saved and read back from the Shelly."), "success");
   } catch (e) { if (error) error.show(e.message); else message(title, e.message, "error"); }
+}
+/** Success message of a change the Shelly applies only after a restart, with the button
+ *  "Restart now" (red as every restart; not logged): it closes and the row shows the restart. */
+function restartOffer(d, title) {
+  modal(title, [messageBody(t("Saved. The Shelly reports that a restart is required to apply the change."), "success"),
+    el("p", t("The device will be unavailable for a few seconds."), "hint")],
+  [{text: t("Close")}, {text: t("Restart now"), kind: "danger", action: () => guarded(title, undefined, async () => {
+    await api(`${devUrl(d)}/restart`, {}); closeModal(); load(true);
+  })}]);
 }
 /** Edit the Shelly name (with old -> new confirmation) or the NTP server. */
 export function editValue(d, key) {
@@ -104,9 +115,8 @@ export function editEco(d) {
     [{text: t("Cancel")}, {text: word, kind: "primary", action: () => saveSettings(d, title, {eco: target}, true)}]);
   });
 }
-/** Access point / Bluetooth: only the on/off switch, no further configuration.
- *  [label, colour while on] – an active access point is shown red like in the action column. */
-const SWITCHES = {ap: [t("Access point"), "alert"], ble: [t("Bluetooth"), "good"]};
+/** Bluetooth: only the on/off switch, no further configuration. [label, colour while on] */
+const SWITCHES = {ble: [t("Bluetooth"), "good"]};
 // Bluetooth while Home Assistant runs its proxy script on the Shelly: Home Assistant turns
 // Bluetooth on again unless its scanner mode is disabled in the Shelly integration
 const BLE_PROXY = t("Home Assistant uses this Shelly as a Bluetooth proxy (its script “aioshelly_ble_integration” is running).") + " " +
@@ -124,13 +134,76 @@ export function editCloud(d) {
     [{text: t("Cancel")}, {text: word, kind: "primary", action: () => saveSettings(d, title, {cloud: target}, true)}]);
   });
 }
+// Access point form (Gen2+): on/off, network name, protection and range extender in one
+// step. The password goes to the Shelly only (never stored or logged by the app); the
+// Shelly decides whether it accepts it, its refusal stays in the form with the inputs.
+const AP_OPEN_WARNING = t("Anyone within Wi-Fi range can connect to this Shelly and – without a device password – change its settings.");
+// Length of an access point password the Shelly accepts (it refuses others with -113)
+const AP_PASSWORD_MIN = 8, AP_PASSWORD_MAX = 63;
+/** A password of that length, counted in characters as the server counts them. */
+const apPasswordFits = text => [...text].length >= AP_PASSWORD_MIN && [...text].length <= AP_PASSWORD_MAX;
+/** State pill of the access point strip: off, on and open, on with a password. */
+const apPill = (on, open) => !on ? t("Off") : open === true ? t("On · open") : open === false ? t("On · password") : t("On");
+export function editAccessPoint(d) {
+  const label = t("Access point"), title = `${label} – ${d.name}`;
+  withLive(d, title, live => {
+    const conf = live.ap_config;
+    if (typeof live.ap !== "boolean" || !conf) { message(title, t("This device does not offer an access point switch.")); return; }
+    const protectedNow = live.ap && conf.open === false, error = formError();
+    // Ticked also while it is off: the form is opened to set it up and turn it on
+    const [enable, enableLabel] = checkbox(t("Access point on"), true);
+    const ssid = input("text", {value: conf.ssid || "", maxLength: 29, autocomplete: "off", spellcheck: false});
+    // Security: a running protected access point keeps its password unless changed
+    const options = protectedNow ? [["keep", t("Keep the current password")], ["password", t("Set a new password")], ["open", t("Open – no password")]]
+      : [["password", t("Protect with a password")], ["open", t("Open – no password")]];
+    const radios = options.map(([value, text], i) => radio("ap-security", text, i === 0, value));
+    // Longer than the limit on purpose: a pasted password that is too long stays whole and
+    // keeps Save disabled instead of being cut silently
+    const password = input("password", {autocomplete: "new-password", maxLength: 128});
+    const passwordBlock = box("div", "sub-block", field(t("Password"), password),
+      el("p", t("{min} to {max} characters. Sent to the Shelly only – this app does not store it.", {min: AP_PASSWORD_MIN, max: AP_PASSWORD_MAX}), "hint"));
+    const [accept, acceptLabel] = checkbox(t("I accept the risk of an open access point"));
+    const openBlock = box("div", "sub-block", box("div", "warnbox danger", el("strong", t("Open access point.")), " " + AP_OPEN_WARNING), acceptLabel);
+    const [extender, extenderLabel] = checkbox([t("Range extender"), el("span", t("other devices reach your network through this Shelly"), "sub")],
+      conf.range_extender === true);
+    const choice = () => radios.find(([r]) => r.checked)[0].value;
+    const security = section(t("Security"), ...radios.flatMap(([r, l]) => r.value === "password" ? [l, passwordBlock] : r.value === "open" ? [l, openBlock] : [l]));
+    const details = box("div", null, field(t("Network name (SSID)"), ssid),
+      el("p", t("Empty = the default name (device ID). Up to 29 characters."), "hint"), security,
+      conf.range_extender == null ? null : section(t("More options"), extenderLabel));
+    const sync = () => {
+      details.hidden = !enable.checked; passwordBlock.hidden = choice() !== "password"; openBlock.hidden = choice() !== "open";
+    };
+    for (const control of [enable, ...radios.map(([r]) => r)]) control.addEventListener("change", sync);
+    sync();
+    modal(title, [featureStrip("ap", label, live.ap ? "alert" : "off", apPill(live.ap, conf.open)),
+      section(label, enableLabel), details,
+      el("p", t("Only the access point is changed; the Wi-Fi connection to your network stays as it is."), "hint"), error.line],
+    [{text: t("Cancel")}, {text: t("Save"), kind: "primary", action: () => {
+      const form = {enable: enable.checked};
+      if (enable.checked) {
+        form.security = choice();
+        if (ssid.value.trim() !== (conf.ssid || "")) form.ssid = ssid.value.trim();
+        if (form.security === "password") form.password = password.value;
+        if (form.security === "open") form.accept_open = accept.checked;
+        if (conf.range_extender != null && extender.checked !== conf.range_extender) form.range_extender = extender.checked;
+      }
+      const same = enable.checked === live.ap && (!enable.checked || (form.security === "keep" && !("ssid" in form) && !("range_extender" in form)));
+      if (same) { message(title, t("Nothing changed.")); return; }
+      saveSettings(d, title, {ap_config: form}, true, error);
+    }}]);
+    // Save: a password of 8 to 63 characters, an open access point needs the accepted risk
+    gateButton(() => !enable.checked || (choice() === "password" ? apPasswordFits(password.value) : choice() !== "open" || accept.checked),
+      enable, password, accept, ...radios.map(([r]) => r));
+  });
+}
 export function editSwitch(d, key) {
   const [label, onTone] = SWITCHES[key], title = `${label} – ${d.name}`;
   withLive(d, title, live => {
-    if (typeof live[key] !== "boolean") { message(title, key === "ap" ? t("This device does not offer an access point switch.") : t("This device does not offer a Bluetooth switch.")); return; }
+    if (typeof live[key] !== "boolean") { message(title, t("This device does not offer a Bluetooth switch.")); return; }
     const target = !live[key], word = target ? t("Turn on") : t("Turn off");
     modal(title, [switchStrip(key, label, live[key], onTone),
-      el("p", key === "ap" ? t("Only the switch is changed; all other Wi-Fi settings stay as they are.") : t("Only the global Bluetooth switch is changed."), "hint"),
+      el("p", t("Only the global Bluetooth switch is changed."), "hint"),
       key === "ble" && live.ble && live.ble_proxy ? el("div", BLE_PROXY, "warnbox") : null].filter(Boolean),
     [{text: t("Cancel")}, {text: word, kind: "primary", action: () => saveSettings(d, title, {[key]: target}, true)}]);
   });
@@ -157,12 +230,13 @@ export function editDebug(d) {
     modal(title, content, [{text: t("Cancel")}, {text: word, kind: "primary", action: () => saveSettings(d, title, {debug_ws: target}, true)}]);
   });
 }
-/** Restart: one confirmation (not logged). */
+/** Restart: one confirmation (not logged); the row then shows the restart. */
 export function restartDevice(d) {
   const title = `${t("Restart")} – ${d.name}`;
   confirmDialog({title, button: t("Restart"),
     content: [featureStrip("restart", t("Restart"), "neutral", null), el("p", t("The device will be unavailable for a few seconds."), "hint")],
-    action: async () => { await api(`${devUrl(d)}/restart`, {}); message(title, t("Restart command sent."), "success"); }});
+    // The device row shows "Restarting …" until the Shelly answers again
+    action: async () => { await api(`${devUrl(d)}/restart`, {}); closeModal(); load(true); }});
 }
 // Device password. Storing existing access credentials (this app only) is clearly
 // separated from changing the protection on the device. The password is
@@ -208,10 +282,11 @@ export function editPassword(d) {
     const choice = mode === "enable" || mode === "change";
     keepLabel.hidden = !choice;
     if (choice) input.parentElement.after(keepLabel);
-    // Storage note: yellow box (Gen2+ hash) or red box (Gen1 plain text, or not stored)
-    if (!choice) storage.replaceChildren(el("p", storedText, "hint"));
-    else if (keep.checked) storage.replaceChildren(el("div", `${storedText} ${HA_AFTER_SET}`, d.gen === 1 ? "warnbox danger" : "warnbox"));
-    else storage.replaceChildren(el("div", `${NOT_STORED} ${HA_AFTER_SET}`, "warnbox danger"));
+    // Storage note: yellow (Gen2+ hash: one box with the password warning) or red box (Gen1
+    // plain text, or not stored), then the yellow password warning
+    if (!choice) storage.replaceChildren(el("p", storedText, "hint"), warnBox([PASSWORD_WARNING]));
+    else if (keep.checked && d.gen !== 1) storage.replaceChildren(warnBox([`${storedText} ${HA_AFTER_SET}`, PASSWORD_WARNING]));
+    else storage.replaceChildren(warnBox([`${keep.checked ? storedText : NOT_STORED} ${HA_AFTER_SET}`], true), warnBox([PASSWORD_WARNING]));
   };
   keep.onchange = update;
   modes.forEach((mode, i) => {
@@ -225,8 +300,7 @@ export function editPassword(d) {
   modal(title, [
     featureStrip("lock", t("Password protection"), tone, d.auth_enabled === true ? t("Protected") : d.auth_enabled === false ? t("Not protected") : t("Unknown")),
     valueList([[t("Stored in this app"), d.password_set ? t("yes") : t("no")]]),   // the protection state is in the strip
-    radios, hint, pwField, pw2Field, storage,
-    el("div", PASSWORD_WARNING, "warnbox"), error.line],
+    radios, hint, pwField, pw2Field, storage, error.line],
   [{text: t("Cancel")}, {text: t("Continue"), kind: "primary", action: () => {
     const mode = radios.querySelector("input:checked").value, m = PASSWORD_MODES[mode], password = pw.value;
     if (m.input && !password) { error.show(t("No password entered.")); return; }
@@ -281,9 +355,10 @@ export function bulkPasswords() {
     pw2Field.hidden = !set; keepLabel.hidden = !set;
     const stored = t("Gen2+: only a SHA-256 hash bound to each device is stored. Gen1: plain text in the app's private storage (1–50 characters).");
     const ha = t("After setting it, also enter the password for these devices in the Home Assistant Shelly integration.");
-    if (!set) storage.replaceChildren(el("p", stored, "hint"));
-    else if (keep.checked) storage.replaceChildren(el("div", `${stored} ${ha}`, "warnbox"));
-    else storage.replaceChildren(el("div", `${NOT_STORED} ${ha}`, "warnbox danger"));
+    // Yellow notes in one box with the password warning; the red note in its own box
+    if (!set) storage.replaceChildren(el("p", stored, "hint"), warnBox([PASSWORD_WARNING]));
+    else if (keep.checked) storage.replaceChildren(warnBox([`${stored} ${ha}`, PASSWORD_WARNING]));
+    else storage.replaceChildren(warnBox([`${NOT_STORED} ${ha}`], true), warnBox([PASSWORD_WARNING]));
     // Step 1 is "Continue" (blue); the red button with the count follows in the confirmation
     gateButton(() => n > 0);
   };
@@ -298,10 +373,14 @@ export function bulkPasswords() {
     all.onchange = () => { for (const [cb] of boxes) if (!cb.disabled) cb.checked = all.checked; update(); };
     const state = d => d.auth_enabled === true ? (d.password_set ? t("protected · stored") : t("protected · not stored")) :
       d.auth_enabled === false ? t("not protected") : t("unknown");
+    const row = ([cb, d, text, ok]) => box("div", "bulk-row" + (ok ? "" : " off"),
+      box("label", "check", cb, box("span", "bulk-dev", el("span", d.name || "?", "name"), el("span", `Gen ${d.gen || "?"} · ${state(d)}`, "sub"))),
+      el("span", (ok ? "→ " : "") + text, ok ? "bulk-step" : "sub"));
+    // Devices that do not fit follow the fitting ones, collapsed under "n not possible" (reason per device)
+    const unfit = boxes.filter(([, , , ok]) => !ok), rest = el("details", null, "bulk-off");
+    rest.append(el("summary", tn(unfit.length, "1 not possible", "{n} not possible")), ...unfit.map(row));
     list.replaceChildren(box("label", "check bulk-all", all, " " + t("All devices that fit ({n} of {total})", {n: fits.length, total: devices.length})),
-      ...boxes.map(([cb, d, text, ok]) => box("div", "bulk-row" + (ok ? "" : " off"),
-        box("label", "check", cb, box("span", "bulk-dev", el("span", d.name || "?", "name"), el("span", `Gen ${d.gen || "?"} · ${state(d)}`, "sub"))),
-        el("span", (ok ? "→ " : "") + text, ok ? "bulk-step" : "sub"))));
+      ...boxes.filter(([, , , ok]) => ok).map(row), ...(unfit.length ? [rest] : []));
     update();
   };
   BULK_MODES.forEach(([k, label]) => {
@@ -312,7 +391,7 @@ export function bulkPasswords() {
   const error = formError();
   modal(BULK_TITLE, [section(t("Action"), modes), section(t("Devices"), devices.length ? list : el("p", t("No devices yet – they are found by the check."), "hint")),
     section(t("Password (every selected device gets it)"), box("div", null, field(t("Password (user “admin”)"), pw), pw2Field)),
-    keepLabel, storage, el("div", PASSWORD_WARNING, "warnbox"), error.line],
+    keepLabel, storage, error.line],
   [{text: t("Cancel")}, {text: t("Continue"), kind: "primary", action: () => {
     const m = mode(), set = m === "set", picked = chosen(), password = pw.value;
     if (!picked.length) { error.show(t("No device selected.")); return; }

@@ -8,7 +8,7 @@ Part of `docs/CODEMAP.md`; read when you change routes: the table and the middle
 
 | Route | Handler → Manager |
 |---|---|
-| `GET /` | page (CSRF token, asset version) |
+| `GET /` | page (CSRF token, asset version, saved base colour as `data-base-color` of the root element) |
 | `GET /api/state` | `public_state` (ETag / 304; `start_id` is new with every app start) |
 | `POST /api/scan` | `reserve_check` + `scan` (background) |
 | `POST /api/devices/{id}/check` | `reserve_check("device")` + `check_device` |
@@ -19,8 +19,8 @@ Part of `docs/CODEMAP.md`; read when you change routes: the table and the middle
 | `GET /api/devices/{id}/downgrades` | `downgrade_versions`, `downgrade_blocker` |
 | `GET /api/devices/{id}/changelog` | `changelog_for` |
 | `POST /api/devices/{id}/settings/refresh` | `refresh_settings` |
-| `POST /api/devices/{id}/settings` | `change_settings` (answer: `verified`, `not_applied`) |
-| `POST /api/devices/{id}/restart` | `restart_device` |
+| `POST /api/devices/{id}/settings` | `change_settings` (answer: `verified`, `not_applied`; `ap_config` = access point form `{enable, ssid, security: keep|password|open, password, accept_open, range_extender}` – the password (8–63 characters) goes to the device only) |
+| `POST /api/devices/{id}/restart` | `restart_watched` (command; error → answer) + background `watch_restart` (activity `restarting` until the device answers, else the device error) |
 | `POST /api/devices/{id}/password` | `set_device_password` (`mode`, `confirm`, `acknowledged`, `keep`) |
 | `POST /api/devices/passwords` | `set_passwords` (`mode` store/set, `devices`, `password`, `confirm`, `acknowledged`, `keep`; result per device, never the password) |
 | `POST /api/devices/{id}/ignore` | `set_ignored` |
@@ -54,11 +54,11 @@ Part of `docs/CODEMAP.md`; read when you change routes: the table and the middle
 | `POST /api/backups/import/check` · `/confirm` · `/cancel` | `check_backup_import` (`token`, `password`) · `confirm_backup_import` · `cancel_backup_import` |
 | `GET /api/logs` | `events.list` |
 | `POST /api/logs/{id}/delete` · `/api/logs/clear` | `events.remove` · `events.clear` (`confirm`) |
-| `GET` · `POST /api/settings` | `read_host_port`, `options_view` (+ `installed_versions`, `host_port`, `host_port_known`) · `save_options` + restart (`host_port`: checked free, set via `POST /addons/self/options` `network`) |
+| `GET` · `POST /api/settings` | `read_host_port`, `options_view` (+ `installed_versions`, `host_port`, `host_port_known`) · `save_options` + restart, none if only `app_options.NO_RESTART` options changed (answer `restarting`; `host_port`: checked free, set via `POST /addons/self/options` `network`) |
 | `POST /api/settings/connection-test` | `run_connection_test` (`device`: ID or null = automatic; one test at a time, else 409; answer: the result as in `connection_test`) |
 | `POST /api/settings/download-base/confirm` | `confirm_download_base` |
 | `GET /api/settings/app-page` | `app_page` (link to the app page, changelog) |
-| `GET /static/…` | `app.js`, `style.css` (immutable cache with `?v=`) |
+| `GET /static/…` | `start.js` (loader), `app.js`, `i18n-<code>.js`, `style.css` (immutable cache with `?v=`) |
 
 Download server (port 8098): `GET|HEAD /<sha256>.<zip|bin|gbl>` → `may_download`,
 `record_download` (GET only); `GET|HEAD /connection-test/<32 hex>` → `test_fetched` (only the

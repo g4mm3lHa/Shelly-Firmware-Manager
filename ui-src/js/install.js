@@ -1,7 +1,7 @@
 // Installation and downgrade dialogs (approval bound to the SHA-256 of the provided file).
 import {
-  $, api, box, checkbox, checkLine, closeModal, confirmDialog, devUrl, el, fmt, input, mb, message, modal, modelGen, pad, radio, section, selected,
-  shaRow, t, tn, toast, ui, valueList,
+  $, api, box, checkbox, checkLine, closeModal, confirmDialog, devUrl, el, fmt, input, mb, message, modal, modelGen,
+  pad, radio, section, selected, shaRow, t, tn, toast, ui, valueList, warnBox,
 } from "./core.js";
 import {load} from "./main.js";
 import {connectionCheckLine} from "./diagnosis.js";
@@ -33,6 +33,13 @@ function changelogBox(d) {
   const c = box("div", null, el("p", t("Loading changelog …"), "hint"));
   api(`${devUrl(d)}/changelog`).then(r => c.replaceChildren(...changelogNodes(r))).catch(() => c.replaceChildren(...changelogNodes(null)));
   return c;
+}
+/** Collapsed changelog of a device (chevron); loaded when it is opened the first time.
+ *  heading: the summary is the section title (one device) instead of a device name. */
+function changelogDetails(d, title, heading = false) {
+  const det = el("details", null, heading ? "dsec" : ""); det.append(el("summary", title, heading ? "dsec-sum" : ""));
+  det.ontoggle = () => { if (det.open && det.children.length === 1) det.append(changelogBox(d)); };
+  return det;
 }
 // Where the provided update comes from (device field offer_source). Updates
 // from the firmware store are provided without asking the Shelly update server.
@@ -80,9 +87,20 @@ async function readSignals(devs) {
  *  fails. [] while the option is off. */
 const backupCheck = one => ui.state && ui.state.backup_before_install ? [checkLine("ok", t("Backup"),
   one ? t("The settings of the device are backed up right before the installation.") : t("The settings of every device are backed up right before its installation."))] : [];
+/** Yellow check line of one finding on several devices: one device by its name, more as
+ *  "title – n devices", expandable with every device and its text. items: [[device, text]]. */
+function findingLine(title, items) {
+  if (items.length === 1) return checkLine("warn", `${title} – ${items[0][0].name}`, items[0][1]);
+  const line = checkLine("warn", ""), det = el("details");
+  det.append(box("summary", null, el("strong", `${title} – ${tn(items.length, "1 device", "{n} devices")}`)),
+    box("ul", "pc-devs", ...items.map(([d, text]) => box("li", null, el("span", d.name, "name"), el("span", text)))));
+  line.lastChild.replaceChildren(det);
+  return line;
+}
 /** Section "Before installing": download server (while its connection was never tested
  *  successfully), previous version, backup and Wi-Fi signal; for several devices only
- *  the findings per device (or one line "every device" without findings). The signal is
+ *  the findings (one line per check, expandable with the devices; or one line "every
+ *  device" without findings). The signal is
  *  read when the dialog opens ("Reading …"); devices on the cable have no signal line, a
  *  value that could not be read is shown as "unknown" (yellow, a finding). */
 function beforeInstalling(devs) {
@@ -91,7 +109,7 @@ function beforeInstalling(devs) {
     const known = devs.filter(d => d.way_back), missing = known.filter(noWayBack);
     if (!known.length) return [];
     if (one) return [checkLine(known[0].way_back.stored ? "ok" : "warn", t("Previous version"), known[0].way_back.stored ? BACK_OK(known[0]) : BACK_NO(known[0]))];
-    return missing.length ? missing.map(d => checkLine("warn", `${t("Previous version")} – ${d.name}`, BACK_NO(d)))
+    return missing.length ? [findingLine(t("Previous version"), missing.map(d => [d, BACK_NO(d)]))]
       : [checkLine("ok", t("Previous version"), t("The installed version of every device is stored."))];
   };
   const signal = values => {
@@ -101,7 +119,7 @@ function beforeInstalling(devs) {
     const finding = v => v === UNKNOWN_SIGNAL ? t("unknown") : WEAK_TEXT(v);
     const bad = read.filter(([, v]) => v === UNKNOWN_SIGNAL || weak(v));
     if (one) return [checkLine(bad.length ? "warn" : "ok", t("Wi-Fi signal"), bad.length ? finding(read[0][1]) : signalText(read[0][1]))];
-    return bad.length ? bad.map(([d, v]) => checkLine("warn", `${t("Wi-Fi signal")} – ${d.name}`, finding(v)))
+    return bad.length ? [findingLine(t("Wi-Fi signal"), bad.map(([d, v]) => [d, finding(v)]))]
       : [checkLine("ok", t("Wi-Fi signal"), t("Good or fair on every device."))];
   };
   const block = section(t("Before installing"), list);
@@ -113,7 +131,7 @@ function beforeInstalling(devs) {
   readSignals(devs).then(fill);
   return block;
 }
-// Imported files (V1): offered only while Shelly cannot be asked (store fallback)
+// Imported files: offered only while Shelly cannot be asked (store fallback)
 export const IMPORT_WARNING = t("This file comes from an imported firmware store. The Shelly update server has not confirmed it – it is only as trustworthy as the export you imported.");
 const IMPORT_FALLBACK = d => (d.gen === 1 ? t("Shelly's firmware list could not be loaded.") : t("The Shelly update server could not be asked.")) +
   " " + t("This stored version comes from an imported firmware store and Shelly has not confirmed it – it is only as trustworthy as the export you imported. It is offered for a manual installation at your own risk.") +
@@ -153,11 +171,10 @@ export function openInstall(devs) {
         restartLabel,
         el("p", t("The app restarts the Shelly, waits until it answers again and then starts the installation."), "hint pc-sub"));
     }
-    if (d.gen === 1) content.push(el("div", GEN1_WARNING, "warnbox"));
-    if (d.offer_source === "upload") content.push(el("div", UPLOAD_HINT, "warnbox"));
-    if (d.beta) content.push(el("div", BETA_WARNING, "warnbox"));
+    const warnings = [d.gen === 1 ? GEN1_WARNING : null, d.offer_source === "upload" ? UPLOAD_HINT : null, d.beta ? BETA_WARNING : null];
+    if (warnings.some(Boolean)) content.push(warnBox(warnings));
     if (d.step_target != null) content.push(el("p", stepHint(d), "hint"));
-    changelogs.push(section(t("Changelog"), changelogBox(d)));
+    changelogs.push(changelogDetails(d, t("Changelog"), true));
   } else {
     // Phones show the rows as two-line entries (style.css, class inst-list)
     const table = el("table", null, "inst-list"), h = el("tr");
@@ -170,15 +187,11 @@ export function openInstall(devs) {
       table.append(r);
     }
     content.push(table, beforeInstalling(devs));
-    if (betas.length) content.push(el("div", (betas.length === devs.length ? "" : `${betas.map(d => d.name).join(", ")}: `) + BETA_WARNING, "warnbox"));
-    if (devs.some(d => d.gen === 1)) content.push(el("div", GEN1_WARNING, "warnbox"));
-    if (devs.some(d => d.offer_source === "upload")) content.push(el("div", UPLOAD_HINT, "warnbox"));
+    const warnings = [betas.length ? (betas.length === devs.length ? "" : `${betas.map(d => d.name).join(", ")}: `) + BETA_WARNING : null,
+      devs.some(d => d.gen === 1) ? GEN1_WARNING : null, devs.some(d => d.offer_source === "upload") ? UPLOAD_HINT : null];
+    if (warnings.some(Boolean)) content.push(warnBox(warnings));
     for (const d of devs.filter(x => x.step_target != null)) content.push(el("p", stepHint(d), "hint"));
-    for (const d of devs) {
-      const det = el("details"); det.append(el("summary", `${t("Changelog")} – ${d.name}`));
-      det.ontoggle = () => { if (det.open && det.children.length === 1) det.append(changelogBox(d)); };
-      changelogs.push(det);
-    }
+    changelogs.push(section(t("Changelog"), ...devs.map(d => changelogDetails(d, d.name))));
   }
   // A stored version offered without the server's answer needs the risk acknowledgment;
   // an imported file (only offered this way) gets its own box that names its origin
@@ -187,8 +200,8 @@ export function openInstall(devs) {
     : t("I accept the risk of installing without the update server's verification"));
   if (unverified.length) {
     const plain = unverified.filter(d => d.offer_source !== "import"), imported = unverified.filter(d => d.offer_source === "import");
-    if (plain.length) content.push(el("div", plain.length === devs.length ? FALLBACK_WARNING : `${plain.map(d => d.name).join(", ")}: ${FALLBACK_WARNING}`, "warnbox"));
-    for (const d of imported) content.push(el("div", (devs.length === 1 ? "" : `${d.name}: `) + IMPORT_FALLBACK(d), "warnbox"));
+    content.push(warnBox([plain.length ? (plain.length === devs.length ? FALLBACK_WARNING : `${plain.map(d => d.name).join(", ")}: ${FALLBACK_WARNING}`) : null,
+      ...imported.map(d => (devs.length === 1 ? "" : `${d.name}: `) + IMPORT_FALLBACK(d))]));
     content.push(ackLabel);
   }
   // Start: now, or once at a chosen date and time (default: tomorrow 03:00)
@@ -273,7 +286,7 @@ export async function openDowngrade(d) {
     list.append(radio("dg-version", [el("span", v.version, "name"), el("span", ` · ${mb(v.size || 0)} · ${fmt(v.downloaded)} `, "sub"), sourceTag(v)],
       i === 0, String(i))[1]);
   });
-  modal(title, [valueList([[t("Firmware ID"), r.type], [t("Installed"), r.installed]]), el("p", t("Stored older versions (newest first):")), list,
+  modal(title, [valueList([[t("Firmware ID"), r.type], [t("Installed"), r.installed]]), section(t("Stored older versions (newest first)"), list),
     el("p", t("Newer versions are installed with “Install update”."), "hint"), downgradeWarning()],
   [{text: t("Cancel")}, {text: t("Continue"), kind: "primary", action: () => {
     downgradeInstall(d, r.versions[Number(list.querySelector("input:checked").value)]);

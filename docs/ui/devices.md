@@ -42,14 +42,20 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
   filter "All" (search applies) and "Other Shellys" only.
 - "Install update" only for Ready (or a failed installation or a store fallback), not
   ignored, no check running. Red "Install" button next to the status (table and phone
-  tiles; on phones the size of the status pill, 32 px).
+  tiles; on phones the size of the status pill, 26 px).
 - A confirmed installation keeps the device in "Updates available" as "Updated", an
   unconfirmed one with the status "Unconfirmed" (both: no checkbox, same indentation;
   not after a downgrade); a **failed installation** stays there as "Error" **with
   checkbox and Install** (marker `install_failed`, file stays provided; not after a
   failed downgrade); the result of a single check of the device or a full check decides
   afterwards – while the check runs the device stays in the card (UI `shownUpdates`).
-- Phones: "Ignored" and "Checking…" labels 32 px like the status pill. Row menu
+- **Activity pills (2026-11-24, mockup `design-modern/H3`, decisions P1–P3):** while the
+  check of a device waits for the Shelly update server: "Shelly server …" with spinner,
+  blue, yellow 5 s after the page first saw the wait, until error or success. After
+  "Restart": "Restarting …" blue with spinner instead of the pills and "Install" until
+  the device answers again (at most 2 minutes); then the pills from before, without an
+  answer the device shows the error.
+- Phones: "Ignored" and "Checking…" labels 26 px like the status pill. Row menu
   "Downgrade" disabled without a stored older version; while the option "Allow
   downgrades" is off the entry is not shown (Gen2+ only; 3.11.1, approved 2026-11-23).
 - **Sorting:** sort tool of the toolbar (see "Toolbar") with all sortable columns, also
@@ -103,11 +109,33 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
   state pill On/Off, Protected/Not protected/Unknown, Not available, Not supported;
   restart without pill; power-on pill = current value "Restore last state" / "Mixed"; a
   pill too long for the line moves below the name, right-aligned).
-  Switch popups (eco, access point, Bluetooth, websocket debug log) ask no question:
+  Switch popups (eco, Bluetooth, websocket debug log) ask no question:
   strip + button, the button names the action ("Turn on" / "Turn off"). Restart popup:
   no question, hint "The device will be unavailable for a few seconds.", button
-  "Restart" (2026-11-17). The password popup keeps its value list under the
+  "Restart" (2026-11-17); after the command the popup closes and the row shows the
+  restart (see the activity pills). The password popup keeps its value list under the
   strip.
+- **Restart after a setting (live test 3.13.0-rc1, approved 2026-11-25):** when the Shelly
+  reports that a saved setting needs a restart, the success message "Saved. The Shelly
+  reports that a restart is required …" adds the hint "The device will be unavailable for
+  a few seconds." and the buttons "Close" and "Restart now" (red like every restart; it
+  closes the message and the row shows the restart; not logged).
+- **Access point form (Gen2+, 2026-11-24, mockups `design-modern/H1`, `H2`, decisions
+  A1–A7):** strip (pill Off / "On · open" / "On · password"), section "Access point" with
+  the tick "Access point on" (ticked when the form opens, also while the access point is
+  off; untick = turn off, nothing else is sent); while ticked:
+  field "Network name (SSID)" (empty = default name, the device ID; up to 29 characters),
+  section "Security" with radios "Protect with a password" (password field below, hint
+  "8 to 63 characters. Sent to the Shelly only – this app does not store it.") and "Open – no password" (red
+  warning "Open access point." and the tick "I accept the risk of an open access point");
+  a running protected access point offers "Keep the current password" (preselected), "Set
+  a new password", "Open – no password". "More options": "Range extender" only if the
+  device reports it. Hint "Only the access point is changed; …". "Save" stays disabled
+  without a password of 8 to 63 characters (the Shelly refuses others; the server checks
+  it too, live test 3.13.0-rc1) or the accepted risk; the app checks nothing else, a
+  refusal of the Shelly stays in the form with the inputs, as "Device reports: <message>
+  (code n)". The password is never stored or logged; the log names "new password" and
+  only settings that change (no "on → on"). Gen1 stays locked (A7).
 - Websocket debug popup: explanation, link `<web_url>#/diagnostics` (new tab,
   noopener), warning below firmware 1.0.0.
 
@@ -165,17 +193,16 @@ Wordings: `mockups/3.9.0/TEXTE.md`.
   rc4, 2026-11-23); "Mixed" and the dialog texts are translated.
 
 ## Phone tiles (mockups approved 2026-11-12, T1 of 2026-11-19 in 3.5.0)
-- Line 1 = tile head like the head of a firmware card (2026-11-19): checkbox, name
-  (600, card-head size) with the "Gen n" label (omitted while the generation is unknown)
-  and ⋮, divider line over the full tile width; line 2 Shelly name + pencil (lighter) left, IP
-  right (grey, no underline, not monospace, ↗, link to the web UI); line 3 firmware
-  left, status pill + Install right; then "Details" as outlined button (36 px, full
-  content width, centred text + chevron down/up, like the feature buttons). Outline of
-  "Details" and the feature buttons in the tile line colour (at least 3:1 in light and
-  dark themes, 2026-11-19). 12 px
-  padding top and bottom, feature buttons 36 px with natural width and every row (incl.
-  the last) stretched to the full width, detail list right-aligned with lines; ⋮ keeps
-  its 44 px touch target.
+- Compact tile (design E4, approved 2026-11-24): line 1 checkbox, name (600, 15 px)
+  with the "Gen n" label (omitted while the generation is unknown) and ⋮, no divider
+  line; line 2 Shelly name + pencil (lighter) left, IP right (grey, no underline, not
+  monospace, ↗, link to the web UI); line 3 firmware left, status pill + Install right
+  (26 px); then "Details" as tonal button (28 px, full content width, centred text +
+  chevron down/up). The tile has no line (card background on the tinted card, radius
+  16 px, 6 px apart), 8 px padding top and bottom; feature buttons tonal, 36 px with
+  natural width and every row (incl. the last) stretched to the full width, detail list
+  right-aligned with lines; ⋮ and the pencil keep their 44 px touch target. "Review &
+  install" stands right-aligned on its own line above the card title.
 - Firmware ID only in the details; Ignored label at the status.
 - Check entries (2026-11-19): ignored devices of a full check counted in the summary
   ("…, n ignored") and listed after the findings as "<name>: ignored – not checked" in

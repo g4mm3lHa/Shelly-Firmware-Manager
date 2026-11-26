@@ -1,6 +1,7 @@
 // Core of the Ingress UI: shared state, HA theme, API calls, DOM helpers, tooltip and dialogs.
 import {load} from "./main.js";
 import {t} from "./i18n.js";
+import {serverText} from "./server-texts.js";
 export {t};
 
 // Frontend of the Ingress UI.
@@ -30,8 +31,26 @@ const VAR_NAME = /^--[A-Za-z0-9_-]{1,100}$/;
 const MAX_VARS = 3000;
 let themed = new Set();           // variables currently copied from HA
 
-/** Copy the CSS variables of the active HA theme into this document. */
+/** Mark the root element with the scheme of the theme in use (data-scheme light or dark):
+ *  light when the card background is light. The tinted surfaces of style.css are weaker in
+ *  light themes. The resolved colour is read from the page background (the card background). */
+function markScheme() {
+  const color = getComputedStyle(document.body || document.documentElement).backgroundColor;
+  const parts = (color.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+  if (parts.length < 3) return;
+  const scale = color.startsWith("color(") ? 255 : 1;   // color(srgb r g b) of color-mix: 0..1
+  const [r, g, b] = parts.map(v => v * scale);
+  document.documentElement.dataset.scheme = 0.2126 * r + 0.7152 * g + 0.0722 * b > 128 ? "light" : "dark";
+}
+
+/** Copy the CSS variables of the active HA theme into this document, then mark its scheme. */
 function applyTheme() {
+  copyTheme();
+  markScheme();
+}
+
+/** Copy the CSS variables of the active HA theme (only inside HA on the same origin). */
+function copyTheme() {
   let src;
   try {
     if (window.parent === window) return;            // not embedded: keep the fallbacks
@@ -59,7 +78,7 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme
 // ---------------------------------------------------------------- Helpers
 /** Error of a refused request: the server text, the HTTP status in `status`. */
 async function httpError(r) {
-  const e = new Error(await r.text() || r.status); e.status = r.status;
+  const e = new Error(serverText(await r.text()) || r.status); e.status = r.status;
   return e;
 }
 /** GET without body, otherwise POST with JSON and CSRF token; errors throw with the server text. */
@@ -84,7 +103,7 @@ export async function uploadFile(file, path = "api/firmware/upload", onProgress)
       "X-Upload-Total": String(file.size), "X-Upload-Offset": String(offset)};
     if (transfer) headers["X-Upload-Transfer"] = transfer;
     const r = await fetch(path, {method: "POST", body: file.slice(offset, offset + UPLOAD_PART), headers});
-    if (!r.ok) throw new Error(await r.text() || r.status);
+    if (!r.ok) throw new Error(serverText(await r.text()) || r.status);
     answer = await r.json(); transfer = answer.transfer || null;
     if (onProgress) onProgress(Math.min(offset + UPLOAD_PART, file.size), file.size);
     if (!transfer) break;
@@ -92,13 +111,18 @@ export async function uploadFile(file, path = "api/firmware/upload", onProgress)
   return answer;
 }
 let stateTag = null;
-/** Device state; conditional request: an unchanged state (304) reuses the last one. */
+/** Device state; conditional request: an unchanged state (304) reuses the last one. The
+ *  status messages of the devices and the reason of the download base URL arrive in
+ *  English and are translated here once, for every place that shows them. */
 export async function getState() {
   const r = await fetch("api/state", stateTag && ui.state ? {headers: {"If-None-Match": stateTag}} : {});
   if (r.status === 304) return ui.state;
   if (!r.ok) throw await httpError(r);
   stateTag = r.headers.get("ETag");
-  return r.json();
+  const s = await r.json();
+  for (const d of s.devices || []) d.message = serverText(d.message);
+  if (s.download_base) s.download_base.message = serverText(s.download_base.message);
+  return s;
 }
 /** Create an element with optional text (always textContent) and class. */
 export function el(tag, text, cls) { const e = document.createElement(tag); if (text != null) e.textContent = String(text); if (cls) e.className = cls; return e; }
@@ -515,6 +539,10 @@ export function valueList(pairs, cls) {
 }
 /** Titled block of a dialog (small uppercase heading). */
 export const section = (title, ...nodes) => box("section", "dsec", el("h3", title), ...nodes);
+/** Warning box of a dialog with one paragraph per text: warnings of one colour stand in one
+ *  box, never in two boxes below each other. danger: the red box. Empty texts are left out. */
+export const warnBox = (texts, danger = false) => box("div", "warnbox" + (danger ? " danger" : ""),
+  ...texts.filter(Boolean).map((text, i) => el(i ? "p" : "span", text)));
 /** SHA-256 row of a value list (small, monospace). */
 export const shaRow = sha => ["SHA-256", sha, "mono sha"];
 

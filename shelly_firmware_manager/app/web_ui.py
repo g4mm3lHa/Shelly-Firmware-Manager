@@ -41,6 +41,7 @@ from collections.abc import Coroutine
 from pathlib import Path
 from typing import Any
 
+import app_options
 from aiohttp import web
 from aiohttp.typedefs import Handler
 from download_server import strip_server_header
@@ -69,10 +70,11 @@ STATIC_CACHE = "private, max-age=31536000, immutable"
 
 
 def asset_version() -> str:
-    """Short content hash of app.js and style.css – part of their URLs in index.html."""
+    """Short content hash of the scripts (loader, app, dictionaries) and style.css – part
+    of their URLs (index.html; the loader passes it on to the scripts it adds)."""
     digest = hashlib.sha256()
-    for name in ("app.js", "style.css"):
-        digest.update((STATIC_DIR / name).read_bytes())
+    for path in [*sorted(STATIC_DIR.glob("*.js")), STATIC_DIR / "style.css"]:
+        digest.update(path.read_bytes())
     return digest.hexdigest()[:16]
 
 
@@ -143,8 +145,12 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
         return response
 
     async def page(_request: web.Request) -> web.StreamResponse:
-        """The single-page UI with the CSRF token embedded."""
-        return web.Response(text=index_html, content_type="text/html")
+        """The single-page UI with the CSRF token embedded and the saved base colour on the
+        root element (data-base-color), so the page shows it from the first paint."""
+        color = mgr.options.get("base_color")
+        if color not in app_options.CHOICES["base_color"]:
+            color = app_options.DEFAULTS["base_color"]
+        return web.Response(text=index_html.replace("__BASE_COLOR__", str(color)), content_type="text/html")
 
     async def state(request: web.Request) -> web.StreamResponse:
         """Device list and status – no credentials. The devices' LAN addresses are

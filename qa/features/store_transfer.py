@@ -89,7 +89,13 @@ def _bulk_passwords(c, page, f, out):
     check(f"{c}: set is the default action", f.locator('#dlg-body input[value="set"]').is_checked())
     fits = f.locator("#dlg-body .bulk-row:not(.off)").count()
     check(f"{c}: count of fitting devices", f"All devices that fit ({fits} of 25)" in d["body"], d["body"][:200])
-    check(f"{c}: protected without stored password greyed out", "store the current password first" in d["body"])
+    unfit = f.evaluate("""() => { const det = document.querySelector('#dlg-body .bulk-off');
+      return det && {last: det === det.parentElement.lastElementChild, open: det.open, rows: det.querySelectorAll('.bulk-row.off').length,
+        title: det.querySelector('summary').textContent}; }""")
+    check(f"{c}: devices that do not fit collapsed at the end", bool(unfit) and unfit["last"] and not unfit["open"]
+          and unfit["rows"] == 25 - fits and unfit["title"] == f"{25 - fits} not possible", str(unfit))
+    f.click("#dlg-body .bulk-off summary")
+    check(f"{c}: protected without stored password greyed out", "store the current password first" in dialog(f)["body"])
     check(f"{c}: step per device", "→ enable protection" in d["body"])
     # Step 1 is "Continue" in blue; the red button with the count follows in the confirmation
     check(f"{c}: step 1 Continue in blue", d["buttons"][-1][0] == "Continue"

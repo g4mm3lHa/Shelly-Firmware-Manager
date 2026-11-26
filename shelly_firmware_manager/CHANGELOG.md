@@ -1,5 +1,50 @@
 # Changelog
 
+## 3.13.0
+
+Released 2026-11-26. New look with tinted cards and a choice of base colour, an access
+point form, status messages in the page language and a faster start.
+
+Added
+- Access point (Gen2+): one form for on/off, network name, password (8 to 63 characters)
+  or open after an accepted risk, range extender; the app never stores the password.
+- Status "Shelly server …" while a check waits for the Shelly update server; it turns
+  yellow after 5 s.
+- Status "Restarting …" after "Restart" until the Shelly answers again (at most 2
+  minutes); without an answer the device shows the error.
+- Devices table (desktop): a click on the NTP server opens its dialog.
+- Status messages of the devices, errors of the app and the result of the connection
+  test are shown in the page language; the log entry of the test stays English.
+- Device settings: if the Shelly needs a restart to apply a change, the success message
+  offers to restart it right away.
+- Settings tab, card "Display": base colour of the app – Default (neutral grey surfaces,
+  buttons in the Home Assistant theme colour) or Blue, Teal, Green, Violet, Orange.
+- Saving only the base colour keeps the app running (no restart).
+- Settings tab: leaving the tab or choosing another language with unsaved changes asks
+  first – discard them or save them before going on.
+- Settings tab: "Save settings" with the "Unsaved changes" hint also above the cards
+  (phone: full width over the first card).
+
+Changed
+- New look: cards and rows on a tint of the theme colour, softer corners, tonal buttons,
+  segmented tabs, own checkboxes and radio buttons, more compact phone tiles.
+- Settings tab: the options of each card stand on one inner surface, like the rows of
+  the other tabs.
+- Dialogs: one warning box per colour; install dialog in two columns (desktop), the
+  changelog folded, several devices per finding in a folded list.
+- Several devices in the password dialog: devices that cannot take part folded at the
+  end; long device lists scroll inside the dialog.
+- Logs: new entries marked by a bar on the left, no grouping by device.
+- Faster start: backups are verified in the background; the page loads only the
+  dictionary of its language.
+- Errors of a Shelly show its message with the code once ("Timed out (code -104)")
+  instead of the raw error object.
+
+Fixed
+- Settings: "Test connection" drops the old result after a change of the address or the
+  host port.
+- Settings tab: a new language reloads the page on the Settings tab instead of Devices.
+
 ## 3.12.1
 
 Released 2026-11-24. A device that needs a password the app does not have is shown as

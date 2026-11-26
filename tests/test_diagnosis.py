@@ -58,10 +58,10 @@ async def test_connection_test_failures(mgr, monkeypatch):
     """No connection (the device's -104), another server answering, a request from
     another address: not reachable, with the reason."""
     await mgr.scan()
-    monkeypatch.setattr(shelly, "fetch_test", fetching(mgr, error=ShellyError("Device reports: -104 Deadline Exceeded")))
+    monkeypatch.setattr(shelly, "fetch_test", fetching(mgr, error=ShellyError("Device reports: Deadline Exceeded (code -104)")))
     result = await mgr.run_connection_test(A)
     assert result["ok"] is False and "timeout after" in result["error"] and "Shelly code -104" in result["error"]
-    raw = "Device reports: {'code': -114, 'message': '-1: Connection error: -14'}"
+    raw = "Device reports: -1: Connection error: -14 (code -114)"
     monkeypatch.setattr(shelly, "fetch_test", fetching(mgr, error=ShellyError(raw)))
     result = await mgr.run_connection_test(A)
     assert result["error"] == f"No connection to {URL}: connection error (Shelly code -114 / -14)"
@@ -79,18 +79,22 @@ async def test_connection_test_failures(mgr, monkeypatch):
 
 
 def test_fetch_error_texts():
-    """The device's raw error object becomes a readable text with its codes; other texts stay."""
+    """The device's error (message and code) becomes a readable text with its codes; other texts stay."""
     url = "http://192.168.1.20:8098"
-    assert shelly.fetch_error("Device reports: {'code': -114, 'message': '-1: Connection error: -14'}", url) == (
+    assert shelly.fetch_error("Device reports: -1: Connection error: -14 (code -114)", url) == (
         f"No connection to {url}: connection error (Shelly code -114 / -14)"
     )
-    assert shelly.fetch_error("Device reports: -104 Deadline Exceeded", url) == (
+    assert shelly.fetch_error("Device reports: Deadline Exceeded (code -104)", url) == (
         f"No connection to {url}: timeout after {shelly.FETCH_TEST_TIMEOUT_S} s (Shelly code -104)"
     )
-    assert shelly.fetch_error("Device reports: {'code': -103, 'message': 'Invalid argument'}", url) == (
+    assert shelly.fetch_error(f"Device reports: {shelly.device_error({'code': -104, 'message': '-104: Timed out'})}", url) == (
+        f"No connection to {url}: timeout after {shelly.FETCH_TEST_TIMEOUT_S} s (Shelly code -104)"
+    )
+    assert shelly.fetch_error("Device reports: Invalid argument (code -103)", url) == (
         f"The device could not fetch {url} (Shelly code -103)"
     )
     assert shelly.fetch_error("Password required", url) == "Password required"
+    assert shelly.fetch_error("Device reports: code -104 (code -104) x", url) == "Device reports: code -104 (code -104) x"
 
 
 async def test_connection_test_tries_the_next_device(mgr, monkeypatch):

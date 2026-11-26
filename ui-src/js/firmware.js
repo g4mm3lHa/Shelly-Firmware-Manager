@@ -1,8 +1,9 @@
 // Firmware tab: stored files, changelog, Install button per device, delete and upload.
 import {
-  $, api, attachTip, box, checkbox, closeModal, collator, confirmDialog, copyText, el, field, filterControl, fmt, fmtSize, guarded,
-  formError, icon, iconButton, input, keptDetails, loadLocal, matches, mb, message, modal, radio, saveLocal, searchText, searchTool, section,
-  setTip, shaRow, sortControl, t, tn, toast, ui, uploadFile, valueList,
+  $, api, attachTip, box, checkbox, closeModal, collator, confirmDialog, copyText, el, field, filterControl, fmt,
+  fmtSize, formError, guarded, icon, iconButton, input, keptDetails, loadLocal, matches, mb, message, modal, radio,
+  saveLocal, searchText, searchTool, section, setTip, shaRow, sortControl, t, tn, toast, ui, uploadFile, valueList,
+  warnBox,
 } from "./core.js";
 import {installable, installBlocker} from "./devices.js";
 import {changelogNodes, downgradeConfirm, downgradeWarning, fwSource, IMPORT_WARNING, openInstall, UPLOAD_HINT} from "./install.js";
@@ -223,11 +224,11 @@ function deleteFirmware(f) {
   // A version devices run now: without the file they cannot return to it after the next update
   const users = f.installed || [];
   const names = `${users.slice(0, 3).join(", ")}${users.length > 3 ? ", …" : ""}`;
-  const wayBack = users.length ? el("div", tn(users.length, "Installed on 1 device ({names}): without this file it cannot return to its previous version after the next update.",
-    "Installed on {n} devices ({names}): without this file they cannot return to their previous version after the next update.", {names}), "warnbox") : null;
+  const wayBack = users.length ? tn(users.length, "Installed on 1 device ({names}): without this file it cannot return to its previous version after the next update.",
+    "Installed on {n} devices ({names}): without this file they cannot return to their previous version after the next update.", {names}) : null;
   const lose = tn(held.length, "Provided for {names}: this device loses the provided update and is shown as “Available” until it is checked again.",
     "Provided for {names}: these devices lose the provided update and are shown as “Available” until they are checked again.", {names: held.join(", ")});
-  modal(title, [details, wayBack, held.length ? el("div", lose, "warnbox") : null,
+  modal(title, [details, wayBack || held.length ? warnBox([wayBack, held.length ? lose : null]) : null,
     // What cannot be restored: red warning box
     el("div", f.source === "upload" ? t("An uploaded file can only be restored by uploading it again.") :
     f.source === "import" ? t("An imported file can only be restored by importing its export again.") :

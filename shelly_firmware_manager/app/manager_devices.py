@@ -16,8 +16,8 @@ import shelly
 from shelly import UNSUPPORTED, AuthError, DeviceAuth, ShellyError, clip, error_text
 
 from manager_core import (
-    ACTIVITY_CHECKING, ACTIVITY_DOWNLOADING, ACTIVITY_RELOADING, BATTERY_FROM_DEVICE, Device, STATUS_AVAILABLE,
-    STATUS_CURRENT, STATUS_INSTALLING, STATUS_READY, STATUS_UNCLEAR, severity_of, unexpected_text,
+    ACTIVITY_CHECKING, ACTIVITY_DOWNLOADING, ACTIVITY_RELOADING, ACTIVITY_SERVER, BATTERY_FROM_DEVICE, Device,
+    STATUS_AVAILABLE, STATUS_CURRENT, STATUS_INSTALLING, STATUS_READY, STATUS_UNCLEAR, severity_of, unexpected_text,
 )
 from manager_transfer import Transfers
 
@@ -29,7 +29,8 @@ BULK_MODES = ("store", "set")  # several devices: store the existing password, o
 
 # Settings returned after a change (the device dialogs show what the device stored)
 SETTINGS_ANSWER = (
-    "shelly_name", "ntp", "eco", "ap", "ble", "ble_proxy", "cloud", "cloud_connected", "debug_ws", "outputs",
+    "shelly_name", "ntp", "eco", "ap", "ap_config", "ble", "ble_proxy", "cloud", "cloud_connected", "debug_ws",
+    "outputs",
 )
 
 
@@ -81,11 +82,15 @@ class DeviceSettings(Transfers):
         return True
 
     def _settings_device(self, device_id: str) -> Device:
-        """Device whose settings may be read/changed now (reachable, not installing)."""
+        """Device whose settings may be read/changed now (reachable; not installing,
+        reloading, restoring or being checked – in a full check also while it waits for
+        the Shelly update server or downloads its firmware)."""
         dev = self.devices[device_id]
         if device_id in self.installing or dev.get("status") == STATUS_INSTALLING:
             raise ShellyError("Installation in progress – please try again afterwards")
-        if device_id in self.device_checks or self.activity.get(device_id) in (ACTIVITY_CHECKING, ACTIVITY_DOWNLOADING):
+        if device_id in self.device_checks or self.activity.get(device_id) in (
+            ACTIVITY_CHECKING, ACTIVITY_SERVER, ACTIVITY_DOWNLOADING
+        ):
             raise ShellyError("Device is being checked – please try again afterwards")
         if device_id in self.reloading:
             raise ShellyError("Device info is being reloaded – please try again in a moment")
@@ -202,8 +207,20 @@ class DeviceSettings(Transfers):
         schedule writes one entry for all its devices)."""
         dev = self._settings_device(device_id)
         clean = shelly.validate_settings(changes, dev.get("outputs") or [])
-        if "ap" in clean and dev.get("gen") == 1:
+        if ("ap" in clean or "ap_config" in clean) and dev.get("gen") == 1:
             raise ValueError(shelly.GEN1_AP_NOTE)
+        if "ap_config" in clean:
+            if dev.get("ap") == UNSUPPORTED:
+                raise ValueError("This device/firmware has no access point switch")
+            if "range_extender" in clean["ap_config"] and (dev.get("ap_config") or {}).get("range_extender") is None:
+                raise ValueError("This device/firmware has no range extender")
+            # "keep" leaves the protection as it is: only for a running access point the
+            # device reports with a password (as the form offers it, read just before).
+            # Otherwise an access point that is open by default would be turned on open
+            # without the accepted risk.
+            protected = dev.get("ap") is True and (dev.get("ap_config") or {}).get("open") is False
+            if clean["ap_config"].get("security") == "keep" and not protected:
+                raise ValueError("Choose a password or an open access point")
         for key, label in (
             ("ap", "an access point switch"),
             ("ble", "a global Bluetooth switch"),
@@ -259,6 +276,7 @@ class DeviceSettings(Transfers):
                 stored = stored or ""  # no name reported = empty name
             if stored != wanted:
                 labels.append(label)
+        labels += DeviceSettings._ap_not_applied(dev, clean.get("ap_config"))
         outputs = {o["key"]: o for o in dev.get("outputs") or []}
         for key, value in clean.get("aop", {}).items():
             output = outputs.get(key, {})
@@ -268,8 +286,46 @@ class DeviceSettings(Transfers):
         return labels
 
     @staticmethod
+    def _ap_not_applied(dev: Device, wanted: dict[str, Any] | None) -> list[str]:
+        """Labels of the access point form the read-back does not show (an unknown value,
+        None, counts as applied: the device does not report it)."""
+        if wanted is None:
+            return []
+        stored = dev.get("ap_config") or {}
+        labels = ["Access point"] if dev.get("ap") != wanted["enable"] else []
+        if wanted.get("ssid") and stored.get("ssid") not in (None, wanted["ssid"]):
+            labels.append("Access point name")
+        is_open = {"password": False, "open": True}.get(wanted.get("security", "keep"))
+        if is_open is not None and stored.get("open") not in (None, is_open):
+            labels.append("Access point security")
+        if "range_extender" in wanted and stored.get("range_extender") not in (None, wanted["range_extender"]):
+            labels.append("Range extender")
+        return labels
+
+    @staticmethod
+    def _ap_diff(dev: Device, wanted: dict[str, Any]) -> list[dict[str, Any]]:
+        """Old -> new of the access point form for the log – never the password itself,
+        only that one was set."""
+        onoff: dict[object, str] = {True: "on", False: "off"}
+        stored = dev.get("ap_config") or {}
+        diff = [{"setting": "Access point", "old": onoff.get(dev.get("ap")), "new": onoff[wanted["enable"]]}]
+        if "ssid" in wanted and wanted["ssid"] != stored.get("ssid"):
+            diff.append({"setting": "Access point name", "old": stored.get("ssid") or "default",
+                         "new": wanted["ssid"] or "default"})
+        security = wanted.get("security", "keep")
+        if security != "keep":
+            old = "open" if stored.get("open") is True else "password" if stored.get("open") is False else None
+            diff.append({"setting": "Access point security", "old": old,
+                         "new": "open" if security == "open" else "new password"})
+        if "range_extender" in wanted:
+            diff.append({"setting": "Range extender", "old": onoff.get(stored.get("range_extender")),
+                         "new": onoff[wanted["range_extender"]]})
+        return diff
+
+    @staticmethod
     def _settings_diff(dev: Device, clean: dict[str, Any]) -> list[dict[str, Any]]:
-        """Old -> new values of a settings change, readable for the log."""
+        """Old -> new values of a settings change, readable for the log; a value the
+        change leaves as it is (e.g. "Access point: on -> on") gets no line."""
         onoff: dict[object, str] = {True: "on", False: "off"}
         diff: list[dict[str, Any]] = []
         if "name" in clean:
@@ -285,6 +341,8 @@ class DeviceSettings(Transfers):
         ):
             if key in clean:
                 diff.append({"setting": label, "old": onoff.get(dev.get(key)), "new": onoff[clean[key]]})
+        if "ap_config" in clean:
+            diff += DeviceSettings._ap_diff(dev, clean["ap_config"])
         outputs = {o["key"]: o for o in dev.get("outputs") or []}
         for key, value in clean.get("aop", {}).items():
             old = outputs.get(key, {})
@@ -292,7 +350,7 @@ class DeviceSettings(Transfers):
             diff.append(
                 {"setting": f"Power-on action {clip(label, 64)}", "old": old.get("aop"), "new": value}
             )
-        return diff
+        return [line for line in diff if line["old"] != line["new"]]
 
     async def wifi_signal(self, device_id: str) -> dict[str, int | None]:
         """Wi-Fi signal of the device in dBm, read now for the installation dialog
