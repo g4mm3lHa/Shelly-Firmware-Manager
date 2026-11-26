@@ -75,6 +75,9 @@ const SERVER_TEXTS = [
   // Access point form (answer of the server; the form checks the same before)
   "The password contains a character the Shelly cannot use: {char}",
   "Invalid access point password (8 to 63 characters)",
+  // Access point form refused by the Shelly (the device's answer stays in brackets)
+  "An open access point is no longer possible on this Shelly once a password was set – use a password instead (device answer: {error})",
+  "The Shelly refused these access point settings as invalid (device answer: {error})",
   "A connection test is already running",
   "This device cannot run the test now (Gen 2 or newer, checked, not busy)",
   "No Shelly of Gen 2 or newer is known yet – run a check first",

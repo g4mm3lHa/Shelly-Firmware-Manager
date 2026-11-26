@@ -302,9 +302,12 @@ password is not stored here.
   WPA2 demands), because some phones and computers cannot connect otherwise.
   The password goes to the Shelly only; the app does not store or log it. The Shelly
   decides whether it accepts a password or an open access point; its refusal is shown in
-  the form. **Range extender** is offered if the device has it. Only the access point is
-  changed; the Wi-Fi connection to your network stays as it is. Gen1 devices cannot
-  change it here: turning on their access point turns off their Wi-Fi client mode.
+  the form. According to the Shelly API documentation, firmware 1.7.5 and newer keeps an
+  access point password once one was set. If the Shelly refuses an open access point
+  that had a password, the form names this reason. **Range extender** is offered if the
+  device has it. Only the access point is changed; the Wi-Fi connection to your network
+  stays as it is. Gen1 devices cannot change it here: turning on their access point
+  turns off their Wi-Fi client mode.
 - **Cloud** (cloud icon): yellow while the Shelly cloud is on, with the connection in
   the tooltip. With the cloud off, the Shelly app and other Shelly cloud services no
   longer reach the device from outside your network; Home Assistant and this app keep
@@ -874,6 +877,8 @@ Gen2+ firmware is downloaded over HTTPS only.
 | The Shelly rejected the stored current password – nothing was changed | The password stored in this app no longer works, e.g. because it was changed elsewhere. The device is meant to keep its password. Store the current password with **Store existing password**, then change it again (see [Device passwords](#device-passwords)) |
 | The Shelly requires HTTPS (Enhanced Security) – not supported by this app yet | The Shelly answers plain HTTP only with a redirect to HTTPS. According to Shelly, devices shipped with firmware 2.0 or later always do this. Older ones do it after Enhanced Security was switched on and an HTTPS certificate was installed. The app never follows the redirect and cannot check, update or back up this Shelly yet. Until then, update it in its own web interface (`https://<IP>`) |
 | The Shelly answered with a redirect (HTTP …) – redirects are not followed | Something at the device address sends the request elsewhere, e.g. another web server or a proxy. The app never follows a redirect: check the address of the device in the Shelly integration |
+| An open access point is no longer possible on this Shelly once a password was set – use a password instead (device answer: …) | According to the Shelly API documentation, firmware 1.7.5 and newer cannot set an access point password back to empty (Secure provisioning). Keep the current password or set a new one. The app shows this text for every refusal of an open access point that had a password: if the device answer in brackets names another reason, correct that entry |
+| The Shelly refused these access point settings as invalid (device answer: … (code -103)) | The Shelly did not accept the values the form sent (code -103: invalid argument). Check the network name and the password; the device answer in brackets may name the value |
 | Device reports: … (code n) | The Shelly refused the request; the text and the code come from the device itself (English). Correct the entry the text names, e.g. an access point password of 8 to 63 characters; the code helps when you report the problem |
 | A Shelly is missing from the list | Open the line "N of M Shellys listed · Why are K missing?" above the list: it names the reason (disabled, not set up or ignored in Home Assistant). Shellys behind a gateway and unsupported kinds are not listed as devices (see the [FAQ](#faq)) |
 | No usable address (tile in the Devices tab) | The host name does not resolve, the IP address is outside the private networks or the device has no address. Set an address in the Shelly integration (IP address or a host name that Home Assistant resolves) |

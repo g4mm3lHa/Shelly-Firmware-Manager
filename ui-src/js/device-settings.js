@@ -137,7 +137,8 @@ export function editCloud(d) {
 }
 // Access point form (Gen2+): on/off, network name, protection and range extender in one
 // step. The password goes to the Shelly only (never stored or logged by the app); the
-// Shelly decides whether it accepts it, its refusal stays in the form with the inputs.
+// Shelly decides whether it accepts it, its refusal (also of an open access point once
+// a password was set) stays in the form with the inputs.
 const AP_OPEN_WARNING = t("Anyone within Wi-Fi range can connect to this Shelly and – without a device password – change its settings.");
 // Length of an access point password the Shelly accepts (it refuses others with -113)
 const AP_PASSWORD_MIN = 8, AP_PASSWORD_MAX = 63;

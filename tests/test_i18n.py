@@ -185,7 +185,7 @@ def _texts_of(node: ast.expr) -> list[str]:
 ERRORS = {"ShellyError", "AuthError", "AuthBlockedError", "AddressError", "HttpsRequiredError", "OtaError",
           "UnsupportedError"}
 # Functions whose returned text is a status message or the error of a connection test
-MESSAGE_FUNCTIONS = {"_install_diagnosis", "_ota_error_text", "fetch_error"}
+MESSAGE_FUNCTIONS = {"_install_diagnosis", "_ota_error_text", "fetch_error", "ap_refusal"}
 # Functions whose "error" values (keyword or ["error"]) are the result of a connection test
 RESULT_FUNCTIONS = {"_test_with"}
 # Sources of status messages; the errors of the other modules answer dialogs

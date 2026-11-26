@@ -206,8 +206,10 @@ class DeviceSettings(Transfers):
         if the read-back failed (the change is then unconfirmed); not_applied names the
         settings the device accepted but reports with another value afterwards. Every
         attempt that reaches the device is written to the activity log – as failed if
-        a value was not applied. log_entry False: no entry of its own (the run of a
-        schedule writes one entry for all its devices)."""
+        a value was not applied. An access point form the Shelly refused raises a
+        ShellyError with a readable text that keeps the device's answer (_ap_refusal).
+        log_entry False: no entry of its own (the run of a schedule writes one entry for
+        all its devices)."""
         dev = self._settings_device(device_id)
         clean = shelly.validate_settings(changes, dev.get("outputs") or [])
         if ("ap" in clean or "ap_config" in clean) and dev.get("gen") == 1:
@@ -238,9 +240,13 @@ class DeviceSettings(Transfers):
                 self.session, dev["gen"], dev["origin"], clean, self._auth(device_id, dev)
             )
         except (TimeoutError, ShellyError, aiohttp.ClientError, ValueError) as err:
-            error = error_text(err, 300) or type(err).__name__
+            readable = self._ap_refusal(err, dev, clean)
+            # A readable refusal keeps the device's answer (up to 160 characters): 400 hold it in full
+            error = (error_text(readable, 400) if readable else error_text(err, 300)) or type(err).__name__
             if log_entry:
                 self.events.add("setting", ok=False, device=dev.get("name"), changes=diff, user=user, error=error)
+            if readable:
+                raise ShellyError(readable) from err
             raise
         if "eco" in clean:  # the device may restart and miss the read-back
             dev["eco"] = clean["eco"]
@@ -258,6 +264,22 @@ class DeviceSettings(Transfers):
         self.save()
         settings = {k: dev.get(k) for k in SETTINGS_ANSWER}
         return settings, restart, verified, not_applied
+
+    @staticmethod
+    def _ap_refusal(err: BaseException, dev: Device, clean: dict[str, Any]) -> str:
+        """Readable text of an access point form the Shelly refused (shelly.ap_refusal), or ""
+        if err is no such refusal or keeps its text. Only the device's own refusal (a plain
+        ShellyError of the RPC answer) is rewritten; a password, sign-in or HTTPS error keeps
+        its kind and text. dev is not read again after a failed write, so its ap_config is
+        the state read just before the dialog opened: open False means the access point had
+        a password."""
+        if "ap_config" not in clean or type(err) is not ShellyError:
+            return ""
+        text = str(err)
+        readable = shelly.ap_refusal(
+            text, clean["ap_config"].get("security") == "open", (dev.get("ap_config") or {}).get("open") is False
+        )
+        return readable if readable != text else ""
 
     @staticmethod
     def _not_applied(dev: Device, clean: dict[str, Any]) -> list[str]:

@@ -987,3 +987,98 @@ async def test_access_point_form_logs_no_password(mgr, net, monkeypatch, caplog)
     mgr.devices[A]["gen"] = 1
     with pytest.raises(ValueError):
         await mgr.change_settings(A, {"ap_config": {"enable": False}}, "u")
+
+
+# Readable texts of a refused access point form (shelly.ap_refusal), the device's answer in brackets
+AP_OPEN_REFUSED = ("An open access point is no longer possible on this Shelly once a password was set – use a password"
+                   " instead (device answer: {})")
+AP_INVALID = "The Shelly refused these access point settings as invalid (device answer: {})"
+
+
+@pytest.mark.parametrize(("text", "open_requested", "had_password", "expected"), [
+    ("Device reports: Invalid argument (code -103)", True, True,
+     AP_OPEN_REFUSED.format("Invalid argument (code -103)")),
+    ("Device reports: Failed precondition (code -109)", True, True,
+     AP_OPEN_REFUSED.format("Failed precondition (code -109)")),
+    ("Device reports: code -103", True, True, AP_OPEN_REFUSED.format("code -103")),
+    ("The Shelly rejected the password", True, True, "The Shelly rejected the password"),
+    ("Device reports: Invalid argument (code -103)", False, True, AP_INVALID.format("Invalid argument (code -103)")),
+    ("Device reports: Invalid argument (code -103)", True, False, AP_INVALID.format("Invalid argument (code -103)")),
+    ("Device reports: code -103", False, False, AP_INVALID.format("code -103")),
+    ("Device reports: x (code -113)", False, True, "Device reports: x (code -113)"),
+    ("Device reports: out of memory", True, True, "Device reports: out of memory"),
+    ("Device reports: code -103 later", False, False, "Device reports: code -103 later"),
+    ("Invalid argument (code -103)", True, True, "Invalid argument (code -103)"),
+])
+def test_access_point_refusal_text(text, open_requested, had_password, expected):
+    """A coded refusal of an open access point that had a password names the kept password
+    (any code: the Shelly docs name none); another -103 names the settings as invalid; any
+    other text (no device answer, no code, another code) stays as it is."""
+    assert shelly.ap_refusal(text, open_requested, had_password) == expected
+
+
+async def test_access_point_refusal_comes_from_the_device_answer(monkeypatch):
+    """The text ap_refusal reads is the one a refused Wifi.SetConfig raises (_rpc, device_error)."""
+    async def call(*_args, **_kwargs):
+        return 200, {"id": 1, "error": {"code": -103, "message": "Invalid argument"}}
+
+    monkeypatch.setattr(shelly, "_call", call)
+    form = shelly.validate_settings({"ap_config": {"enable": True, "security": "open", "accept_open": True}}, [])
+    with pytest.raises(ShellyError) as err:
+        await shelly.write_settings(None, 2, "http://1.2.3.4", form)
+    assert shelly.ap_refusal(str(err.value), True, True) == AP_OPEN_REFUSED.format("Invalid argument (code -103)")
+
+
+async def test_access_point_open_refused_after_a_password(client, mgr, net, monkeypatch):
+    """The Shelly refuses an open access point while it reported one with a password: the
+    readable text is raised, logged in full and answered with 409; a refused password form
+    gets the -103 text; sign-in errors and other refusals keep their kind and text; nothing
+    is read back after a refusal."""
+    await mgr.scan()
+    refusal: list[Exception] = [ShellyError("Device reports: Invalid argument (code -103)")]
+    reads = []
+
+    async def write(*_args, **_kwargs):
+        raise refusal[0]
+
+    async def read(*_args, **_kwargs):
+        reads.append(1)
+        return {}
+
+    monkeypatch.setattr(shelly, "write_settings", write)
+    monkeypatch.setattr(shelly, "read_settings", read)
+    mgr.devices[A].update(ap=True, ap_config={"ssid": "Garden", "open": False, "range_extender": None})
+    open_form = {"ap_config": {"enable": True, "security": "open", "accept_open": True}}
+    with pytest.raises(ShellyError, match="^An open access point is no longer possible") as err:
+        await mgr.change_settings(A, open_form, "u")
+    assert type(err.value) is ShellyError and isinstance(err.value.__cause__, ShellyError)
+    entry = mgr.events.entries[-1]
+    assert entry["kind"] == "setting" and entry["ok"] is False
+    assert entry["error"] == AP_OPEN_REFUSED.format("Invalid argument (code -103)")
+    # A long device message stays in the log entry in full
+    long_answer = "x" * 160 + " (code -109)"
+    refusal[0] = ShellyError(f"Device reports: {long_answer}")
+    with pytest.raises(ShellyError):
+        await mgr.change_settings(A, open_form, "u")
+    assert mgr.events.entries[-1]["error"] == AP_OPEN_REFUSED.format(long_answer)
+    # Without a message the device answer is the bare code
+    refusal[0] = ShellyError("Device reports: code -103")
+    with pytest.raises(ShellyError, match=re.escape(AP_OPEN_REFUSED.format("code -103"))):
+        await mgr.change_settings(A, open_form, "u")
+    # A refused password form: the -103 text
+    refusal[0] = ShellyError("Device reports: Invalid argument (code -103)")
+    password_form = {"ap_config": {"enable": True, "security": "password", "password": "secret 12"}}
+    with pytest.raises(ShellyError, match=re.escape(AP_INVALID.format("Invalid argument (code -103)"))):
+        await mgr.change_settings(A, password_form, "u")
+    # A sign-in error and another code of a password form pass unchanged
+    for form, error in ((open_form, shelly.AuthError("The Shelly rejected the password")),
+                        (password_form, ShellyError("Device reports: x (code -113)"))):
+        refusal[0] = error
+        with pytest.raises(ShellyError) as err:
+            await mgr.change_settings(A, form, "u")
+        assert err.value is error and mgr.events.entries[-1]["error"] == str(error)
+    assert reads == []
+    # The UI answer: 409 with the readable text
+    refusal[0] = ShellyError("Device reports: Invalid argument (code -103)")
+    r = await client.post(f"/api/devices/{A}/settings", json=open_form, headers={"X-CSRF-Token": client.csrf})
+    assert r.status == 409 and AP_OPEN_REFUSED.format("Invalid argument (code -103)") in await r.text()

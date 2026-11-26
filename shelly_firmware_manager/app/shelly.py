@@ -1409,6 +1409,38 @@ def fetch_error(text: str, url: str) -> str:
     return f"The device could not fetch {url} (Shelly code {codes})"
 
 
+# Prefix of a refusal the device sent as an RPC error (_rpc)
+_DEVICE_REPORTS = "Device reports: "
+# Error code of a device answer (device_error) at its end: "Invalid argument (code -103)"
+# with a message, the bare "code -103" without one
+_AP_CODE_RE = re.compile(r"(?:\(code (-?\d+)\)|^code (-?\d+))$")
+
+
+def ap_refusal(text: str, open_requested: bool, had_password: bool) -> str:
+    """Readable text of an access point form (Wifi.SetConfig) the Shelly refused.
+
+    text is the text of the refusal ("Device reports: <device answer>"); open_requested
+    is True for an open access point, had_password True if the device reported its
+    access point with a password before the change. Secure provisioning (Shelly API docs,
+    firmware 1.7.5 and newer) keeps an access point password once one was set, and the
+    docs name no error code for it: so every coded refusal of an open access point that
+    had a password gets that reason. Another refusal with code -103 (INVALID ARGUMENT)
+    names the settings as invalid. Both keep the device's answer in brackets; any other
+    text (no device answer, no code, another code) stays as it is."""
+    answer = text.removeprefix(_DEVICE_REPORTS)
+    match = _AP_CODE_RE.search(answer) if answer != text else None
+    if not match:
+        return text
+    if open_requested and had_password:
+        return (
+            "An open access point is no longer possible on this Shelly once a password was set – use a password"
+            f" instead (device answer: {answer})"
+        )
+    if (match.group(1) or match.group(2)) == "-103":
+        return f"The Shelly refused these access point settings as invalid (device answer: {answer})"
+    return text
+
+
 async def port_open(ip: str, port: int) -> float:
     """Seconds needed to open a TCP connection to ip:port (closed at once, nothing is
     sent). TimeoutError or OSError if the device does not accept it within
