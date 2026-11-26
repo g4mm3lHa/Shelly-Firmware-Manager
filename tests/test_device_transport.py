@@ -184,9 +184,8 @@ async def test_every_request_of_a_settings_read_answers_its_own_challenge(sessio
     results = {
         "Shelly.GetConfig": {"sys": {"device": {"name": "Kitchen"}}, "ble": {"enable": True}, "cloud": {"enable": True},
                              "switch:0": {"name": "Light", "initial_state": "off"}},
-        "Cloud.GetStatus": {"connected": True},
+        "Shelly.GetStatus": {"sys": {"wakeup_period": 0}, "cloud": {"connected": True}},
         "Script.List": {"scripts": [{"name": "aioshelly_ble_integration", "running": True}]},
-        "Sys.GetStatus": {"wakeup_period": 0},
         "Webhook.List": {"hooks": [{"enable": True}]},
         "Schedule.List": {"jobs": []},
     }

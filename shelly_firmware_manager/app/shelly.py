@@ -828,6 +828,31 @@ async def _battery_status(session: aiohttp.ClientSession, origin: str, auth: Dev
     return {"battery": _positive(status.get("wakeup_period"))}
 
 
+async def _sys_and_cloud(
+    session: aiohttp.ClientSession, origin: str, auth: DeviceAuth | None
+) -> tuple[dict[str, bool], bool | None]:
+    """Gen2+ battery flag and cloud connection from one Shelly.GetStatus, whose result
+    holds the status of every component under its key ("sys", "cloud"); used by an
+    extended read while the cloud is on and the sys config reports no wakeup_period.
+
+    Returns ({"battery": bool}, connected): battery from sys.wakeup_period as in
+    _battery_status, connected from cloud.connected as in _cloud_connected. battery is
+    left out (stored value kept) when the request fails in any way, unsupported
+    included, or the answer has no "sys" object; connected is None when it fails or
+    reports no boolean. Only these two values are taken: the rest of the answer (for
+    example sys.available_updates, Wi-Fi addresses, other component states) is
+    neither kept nor logged."""
+    try:
+        status = await _rpc(session, origin, "Shelly.GetStatus", auth=auth)
+    except (TimeoutError, ShellyError, aiohttp.ClientError):
+        return {}, None
+    sys_status = status.get("sys")
+    battery = {"battery": _positive(sys_status.get("wakeup_period"))} if isinstance(sys_status, dict) else {}
+    cloud = status.get("cloud")
+    connected = cloud.get("connected") if isinstance(cloud, dict) else None
+    return battery, connected if isinstance(connected, bool) else None
+
+
 async def _list_active(
     read: Callable[[], Awaitable[dict[str, Any]]], key: str, active: Callable[[dict[str, Any]], bool]
 ) -> bool | str | None:
@@ -861,21 +886,23 @@ async def read_settings(
     Shelly.GetConfig, Gen1 /settings).
 
     cloud_connected: whether the device is connected to the Shelly cloud while the
-    cloud is on (Gen2+ one more request, Cloud.GetStatus; None if unknown or off).
+    cloud is on (Gen2+ one more request, Cloud.GetStatus – when extended and the sys
+    status is read too, both come from one Shelly.GetStatus; None if unknown or off).
     ble_proxy: Gen2+ with Bluetooth on – whether Home Assistant's Bluetooth proxy
     script runs (one more request, Script.List; None if unknown).
 
     battery is True for a battery device that sleeps between wake-ups (Gen2+
-    wakeup_period > 0 in the sys status – read with Sys.GetStatus only when extended –
-    or in the sys config; Gen1 sleep_mode.period > 0) – such a device answers only
-    while it is awake, so it is only ever detected from the device itself. Gen2+
-    leaves battery out (stored value kept) when it could not be read.
+    wakeup_period > 0 in the sys status – read only when extended, with Sys.GetStatus
+    or, while the cloud is on, Shelly.GetStatus – or in the sys config; Gen1
+    sleep_mode.period > 0) – such a device answers only while it is awake, so it is
+    only ever detected from the device itself. Gen2+ leaves battery out (stored value
+    kept) when it could not be read.
 
-    Switch values are True/False or UNSUPPORTED. extended=True (checks and Reload
-    Device Info only) also reads whether actions/webhooks and schedules are active:
-    Gen2+ needs Webhook.List and Schedule.List (no batch RPC exists), Gen1 needs
-    /settings/actions; schedules of Gen1 are part of /settings. Only the boolean
-    "has an active entry" is kept – never URLs, calls or scripts."""
+    Switch values are True/False or UNSUPPORTED. extended=True (checks, Reload Device
+    Info and the read after a restore) also reads whether actions/webhooks and
+    schedules are active: Gen2+ needs Webhook.List and Schedule.List (no batch RPC
+    exists), Gen1 needs /settings/actions; schedules of Gen1 are part of /settings.
+    Only the boolean "has an active entry" is kept – never URLs, calls or scripts."""
     outputs: list[dict[str, Any]] = []
     extra: dict[str, Any] = {}
     if gen >= 2:
@@ -892,15 +919,25 @@ async def read_settings(
         extra["ble"] = _flag((config.get("ble") or {}).get("enable"))
         extra["debug_ws"] = _flag(((system.get("debug") or {}).get("websocket") or {}).get("enable"))
         extra["cloud"] = _flag((config.get("cloud") or {}).get("enable"))
-        extra["cloud_connected"] = (
-            await _cloud_connected(session, origin, auth) if extra["cloud"] is True else None
-        )
+        # The sys status is read only when extended and the sys config gives no wakeup_period.
+        sys_wanted = extended and not _positive(system.get("wakeup_period"))
+        if extra["cloud"] is True and sys_wanted:
+            # Both values wanted: one Shelly.GetStatus instead of Cloud.GetStatus and Sys.GetStatus;
+            # after a failure no second request (battery then stays as stored).
+            battery, extra["cloud_connected"] = await _sys_and_cloud(session, origin, auth)
+            sys_wanted = False
+        else:
+            battery = {}
+            extra["cloud_connected"] = (
+                await _cloud_connected(session, origin, auth) if extra["cloud"] is True else None
+            )
         extra["ble_proxy"] = await _ble_proxy(session, origin, auth) if extra["ble"] is True else False
         if _positive(system.get("wakeup_period")):
             extra["battery"] = True
         if extended:
-            if "battery" not in extra:
-                extra.update(await _battery_status(session, origin, auth))
+            if sys_wanted:
+                battery = await _battery_status(session, origin, auth)
+            extra.update(battery)
             extra["actions"] = await _list_active(
                 lambda: _rpc(session, origin, "Webhook.List", auth=auth), "hooks", lambda e: e.get("enable") is True
             )

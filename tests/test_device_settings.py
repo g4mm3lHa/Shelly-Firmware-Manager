@@ -110,7 +110,8 @@ async def test_gen1_capabilities(device_api):
 
 async def test_battery_device_detected_from_the_device(device_api):
     """A battery device is detected only from its own answer: Gen2+ wakeup_period above
-    0 in the sys status (Sys.GetStatus, checks and Reload Device Info only) or in the sys
+    0 in the sys status (extended reads only: Sys.GetStatus, with the cloud on
+    Shelly.GetStatus, see test_gen2_sys_and_cloud_status_in_one_request) or in the sys
     config, Gen1 sleep_mode.period above 0; missing or 0 means no battery device. An
     unreadable sys status leaves the flag out (the stored value stays)."""
     calls, answers = device_api
@@ -131,6 +132,51 @@ async def test_battery_device_detected_from_the_device(device_api):
     assert (await shelly.read_settings(None, 1, "http://1.2.3.4", "SHHT-1", None))["battery"] is True
     answers["/settings"] = {}
     assert (await shelly.read_settings(None, 1, "http://1.2.3.4", "SHSW-1", None))["battery"] is False
+
+
+async def test_gen2_sys_and_cloud_status_in_one_request(device_api):
+    """Extended read with the cloud on and no wakeup_period in the sys config: battery flag
+    and cloud connection come from one Shelly.GetStatus (no Cloud.GetStatus, no
+    Sys.GetStatus, also none after a failure); only these two values are kept, never
+    sys.available_updates or other status data (the update server decides). Not extended
+    or with wakeup_period in the sys config, Cloud.GetStatus alone as before."""
+    calls, answers = device_api
+    answers["Shelly.GetConfig"] = {"cloud": {"enable": True}, "sys": {}}
+    answers["Shelly.GetStatus"] = {
+        "sys": {"wakeup_period": 86400, "uptime": 1234, "restart_required": True,
+                "available_updates": {"stable": {"version": "9.9.9"}, "beta": {"version": "9.9.10-beta1"}}},
+        "cloud": {"connected": True},
+        "wifi": {"sta_ip": "192.168.1.10", "status": "got ip", "ssid": "HomeNet", "rssi": -60},
+    }
+    got = await shelly.read_settings(None, 2, "http://1.2.3.4", "PlusSmoke", None, extended=True)
+    assert (got["battery"], got["cloud_connected"]) == (True, True)
+    assert [c[0] for c in calls] == ["Shelly.GetConfig", "Shelly.GetStatus", "Webhook.List", "Schedule.List"]
+    dumped = json.dumps(got)
+    for leaked in ("available_updates", "9.9.9", "restart_required", "uptime", "1234", "HomeNet", "192.168.1.10"):
+        assert leaked not in dumped
+    calls.clear()
+    answers["Shelly.GetStatus"] = ShellyError("busy")
+    got = await shelly.read_settings(None, 2, "http://1.2.3.4", "PlusSmoke", None, extended=True)
+    assert "battery" not in got and got["cloud_connected"] is None
+    assert [c[0] for c in calls] == ["Shelly.GetConfig", "Shelly.GetStatus", "Webhook.List", "Schedule.List"]
+    answers["Shelly.GetStatus"] = shelly.UnsupportedError("no handler")
+    got = await shelly.read_settings(None, 2, "http://1.2.3.4", "Plus1", None, extended=True)
+    assert "battery" not in got and got["cloud_connected"] is None
+    answers["Shelly.GetStatus"] = {"sys": {"wakeup_period": 0}}
+    got = await shelly.read_settings(None, 2, "http://1.2.3.4", "Plus1", None, extended=True)
+    assert (got["battery"], got["cloud_connected"]) == (False, None)
+    answers["Shelly.GetStatus"] = {"sys": None, "cloud": {"connected": False}}
+    got = await shelly.read_settings(None, 2, "http://1.2.3.4", "Plus1", None, extended=True)
+    assert "battery" not in got and got["cloud_connected"] is False
+    answers["Cloud.GetStatus"] = {"connected": True}
+    calls.clear()
+    got = await shelly.read_settings(None, 2, "http://1.2.3.4", "Plus1", None)
+    assert got["cloud_connected"] is True and [c[0] for c in calls] == ["Shelly.GetConfig", "Cloud.GetStatus"]
+    answers["Shelly.GetConfig"] = {"cloud": {"enable": True}, "sys": {"wakeup_period": 7200}}
+    calls.clear()
+    got = await shelly.read_settings(None, 2, "http://1.2.3.4", "HTG3", None, extended=True)
+    assert (got["battery"], got["cloud_connected"]) == (True, True)
+    assert [c[0] for c in calls] == ["Shelly.GetConfig", "Cloud.GetStatus", "Webhook.List", "Schedule.List"]
 
 
 async def test_gen1_device_id_from_the_settings(device_api):
@@ -515,7 +561,8 @@ async def test_bulk_validation(mgr, several):
 
 async def test_gen2_cloud_and_bluetooth_proxy(device_api):
     """Cloud switch (Shelly.GetConfig) and its connection (Cloud.GetStatus, only while
-    on); Home Assistant's Bluetooth proxy script (Script.List, only while Bluetooth is
+    on; extended reads may take it from Shelly.GetStatus, see
+    test_gen2_sys_and_cloud_status_in_one_request); Home Assistant's Bluetooth proxy script (Script.List, only while Bluetooth is
     on: running script with exactly that name)."""
     calls, answers = device_api
     answers["Shelly.GetConfig"] = {"cloud": {"enable": True}, "ble": {"enable": True}}
