@@ -688,7 +688,7 @@ entry a warning or error. Removed devices are counted too ("1 removed"); each on
 warning if it still answers at its last address and an error if not. A device that does not
 answer is an error; a battery device that is asleep is a warning. Filters and a device search help to find entries; **Hide successful entries** leaves only warnings and errors. Passwords never appear in the log.
 
-The tab updates itself when a new entry is written. A red "!" on the tab marks error
+The tab updates itself when a new entry is written. A red dot on the tab icon marks error
 entries written since you last opened it in this browser; when you open the tab, the
 entries that are new since then are marked by a bar on the left.
 

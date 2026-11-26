@@ -126,7 +126,7 @@ class Manager(Schedules):
             "busy": self.busy,
             "schedule_running": self.schedule_running,  # name of the schedule whose run is going on
             # mark of the newest log entry (EventLog.latest): the Logs tab reloads and marks unread
-            # entries; the "!" of the tab follows the newest error entry
+            # entries; the red dot of the tab follows the newest error entry
             "log_latest": self.events.latest(),
             "log_latest_error": self.events.latest("error"),
             # Backups of the device settings: options, a change counter of the list (the
