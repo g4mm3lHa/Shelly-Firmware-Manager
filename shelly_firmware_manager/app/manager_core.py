@@ -912,6 +912,7 @@ class ManagerCore:
                 error = f"Settings could not be stored: {err.strerror or type(err).__name__}"
                 self.events.add("options", ok=False, changes=diff, user=user, error=error)
                 raise ShellyError(error) from None
+            self.settings_warning = None  # the stored set is complete and valid now
         log.info("App options changed by %s (%s)%s", user, ", ".join(changed), " – restarting" if restart else "")
         self.events.add("options", changes=diff, user=user)
         self.options = new

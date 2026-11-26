@@ -118,11 +118,12 @@ async def test_base_color_alone_saves_without_a_restart(net, monkeypatch):
     client = await web_client(m)
     try:
         hdr = {"X-CSRF-Token": client.csrf}
+        m.settings_warning = app_options.SETTINGS_INVALID   # cleared by a successful save
         m.schedule_running = "Night"   # running work blocks only a save with a restart
         r = await client.post("/api/settings", json={"base_color": "teal"}, headers=hdr)
         assert r.status == 200 and await r.json() == {"changed": ["base_color"], "restarting": False}
         await asyncio.sleep(0.05)
-        assert restarts == [] and m.options["base_color"] == "teal"
+        assert restarts == [] and m.options["base_color"] == "teal" and m.settings_warning is None
         assert json.loads(data_paths.SETTINGS_FILE.read_text())["base_color"] == "teal"
         assert '<html lang="en" data-base-color="teal">' in await (await client.get("/")).text()
         entry = [e for e in m.events.entries if e["kind"] == "options"][-1]
