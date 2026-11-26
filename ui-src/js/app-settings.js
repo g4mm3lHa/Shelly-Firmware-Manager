@@ -157,7 +157,8 @@ function optionHelp(lab, id, label, desc) {
   attachTip(lab, () => desc, true); attachTip(info, () => desc, true);
   return [info, help];
 }
-/** Build the grouped settings cards with one common Save button. */
+/** Build the grouped settings cards with the common save area ("Unsaved changes" hint and
+ *  "Save settings") above and below them. */
 export function renderSettings() {
   const o = ui.options; settingsInputs = {};
   if (!o) { $("settings-form").replaceChildren(box("div", "card", box("div", "card-body", el("p", t("Loading …"), "hint")))); return; }
@@ -330,8 +331,8 @@ function saveOptions(next) {
     [{text: t("Cancel")}, {text: restart ? t("Save & restart") : t("Save"), kind: "primary", action: () => guarded(t("Save settings?"), undefined, async () => {
       const r = await api("api/settings", changes);
       if (!r.changed.length) { message(t("Settings"), t("Nothing changed.")); return; }
+      ui.options = {...ui.options, ...changes};   // saved: the form no longer counts as changed (also while the app restarts)
       if (!r.restarting) {
-        ui.options = {...ui.options, ...changes};
         closeModal(); renderSettings(); toast(t("Settings saved"));
         if (next && next.language) setLanguage(next.language);
         else if (next) next.go();

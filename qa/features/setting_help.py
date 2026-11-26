@@ -24,17 +24,21 @@ def _unsaved_dialog(case, f, title="Unsaved changes", buttons=(("Discard", False
     return d
 
 
-def _save_areas(case, page, f):
+def _save_areas(case, page, f, changed):
     """Save area twice in the same state: above the cards (desktop: right; phones: full
-    width over the first card) and below them."""
+    width over the first card, a bar that is not sticky) and below them; changed: the form
+    holds a change (both hints shown), else both are hidden."""
     geo = f.evaluate("""() => { const r = e => e.getBoundingClientRect(), top = document.querySelector('#settings-form > .form-actions-top'),
       grid = document.querySelector('#settings-form .settings-grid'), card = grid.querySelector('.card'), save = top.querySelector('button.primary');
       return {first: document.getElementById('settings-form').firstElementChild === top, above: r(top).bottom <= r(card).top,
         right: Math.abs(r(save).right - r(grid).right), width: Math.abs(r(top).width - r(grid).width), text: save.textContent,
-        hints: [...document.querySelectorAll('#settings-form .unsaved')].map(u => u.hidden)}; }""")
-    edge = geo["width"] if page.viewport_size["width"] <= 700 else geo["right"]
-    check(f"{case}: save area above the first card, same state as below", geo["first"] and geo["above"] and edge < 2
-          and geo["text"] == "Save settings" and len(geo["hints"]) == 2 and geo["hints"][0] == geo["hints"][1], str(geo))
+        hints: [...document.querySelectorAll('#settings-form .unsaved')].map(u => u.hidden),
+        sticky: getComputedStyle(top).position === 'sticky', border: getComputedStyle(top).borderTopWidth}; }""")
+    phone = page.viewport_size["width"] <= 700
+    edge = geo["width"] if phone else geo["right"]
+    check(f"{case}: save area above the first card, same state as below ({'changed' if changed else 'unchanged'})",
+          geo["first"] and geo["above"] and edge < 2 and geo["text"] == "Save settings" and geo["hints"] == [not changed, not changed]
+          and not geo["sticky"] and (geo["border"] == "1px") == phone, str(geo))
 
 
 def _leave_dialog(case, page, f):
@@ -51,6 +55,11 @@ def _leave_dialog(case, page, f):
     f.click("#dlg-x")
     check(f"{case}: unsaved: the X stays on the tab", wait_until(lambda: not f.evaluate(DIALOG_OPEN))
           and f.evaluate(SETTINGS_SHOWN) and f.evaluate(CHOSEN) == ["teal", "Teal"])
+    f.click("#tab-settings")
+    _unsaved_dialog(case, f)
+    page.keyboard.press("Escape")
+    check(f"{case}: unsaved: the Settings tab again asks too, Escape keeps the changes", wait_until(lambda: not f.evaluate(DIALOG_OPEN))
+          and f.evaluate(CHOSEN) == ["teal", "Teal"])
     f.click("#tab-devices")
     _unsaved_dialog(case, f)
     f.locator("#dlg-btns button", has_text="Discard").click()
@@ -162,6 +171,65 @@ def _language(case, page, f):
     check(f"{case}: language: Discard reloads in the new language on the Settings tab, changes dropped",
           f.evaluate("document.documentElement.lang") == "en" and f.evaluate(SETTINGS_SHOWN)
           and wait_until(lambda: f.input_value("#opt-check_interval_days") == saved), f.input_value("#opt-check_interval_days"))
+    # "Save" (a change without a restart): saved first, then the new language on the Settings tab
+    try:
+        f.wait_for_selector("#opt-base_color")
+        f.locator("#opt-base_color label.swatch", has=f.locator("input[value=violet]")).click()
+        f.select_option("#set-language", "de")
+        _unsaved_dialog(case, f)
+        f.locator("#dlg-btns button.primary").click()
+        wait_until(lambda: dialog(f)["title"] == "Save settings?")
+        with f.expect_navigation():
+            f.locator("#dlg-btns button.primary").click()
+        f.wait_for_selector("#opt-base_color")
+        check(f"{case}: language: Save stores the change, then the new language on the Settings tab",
+              f.evaluate("document.documentElement.lang") == "de" and f.evaluate(SETTINGS_SHOWN)
+              and f.evaluate(CHOSEN)[0] == "violet" and f.evaluate("location.hash") == "", str(f.evaluate(CHOSEN)))
+    finally:
+        check(f"{case}: language: demo reset to Default", f.evaluate(SAVE_BASE, "default") == 200)
+
+
+def _restart_to_tab(case, page, f):
+    """"Save" in the dialog "Unsaved changes" with a change that restarts the app: after the
+    restart the page opens the chosen tab (the page is German after _language; the answers of the save and of the new start are
+    played by routes, so the demo keeps its settings)."""
+    posted = []
+
+    def settings(route):
+        if route.request.method == "POST":
+            posted.append(route.request.post_data_json)
+            route.fulfill(json={"changed": list(route.request.post_data_json), "restarting": True})
+        else:
+            route.continue_()
+
+    def state(route):
+        if not posted:
+            route.continue_()
+            return
+        answer = route.fetch().json()
+        answer["start_id"] = "restarted"
+        route.fulfill(json=answer)
+
+    page.route("**/api/settings", settings)
+    page.route("**/api/state", state)
+    try:
+        f.click("#tab-settings")
+        f.wait_for_selector("#opt-log_retention_days")
+        value = f.input_value("#opt-log_retention_days")
+        f.fill("#opt-log_retention_days", "31" if value != "31" else "32")
+        f.click("#tab-firmware")
+        _unsaved_dialog(case, f, "Ungespeicherte Änderungen", (("Verwerfen", False), ("Speichern", False)))
+        f.locator("#dlg-btns button.primary").click()
+        wait_until(lambda: dialog(f)["title"] == "Einstellungen speichern?")
+        check(f"{case}: restart: Save settings? restarts", dialog(f)["buttons"][1] == ["Speichern & neu starten", False], str(dialog(f)))
+        with f.expect_navigation(timeout=15000):
+            f.locator("#dlg-btns button.primary").click()
+        check(f"{case}: restart: after the restart the chosen tab opens, marker removed",
+              wait_until(lambda: not f.locator("#view-firmware").is_hidden()) and f.evaluate("location.hash") == ""
+              and posted and list(posted[0]) == ["log_retention_days"], str(posted))
+    finally:
+        page.unroute("**/api/settings")
+        page.unroute("**/api/state")
 
 
 def setting_help(browser, out):
@@ -224,9 +292,15 @@ def setting_help(browser, out):
         f.fill("#opt-download_base_url", "http://192.168.1.2:8098")
         page.mouse.move(5, 5)
         page.screenshot(path=out / f"setting-help-{case}.png", full_page=True)
-        _save_areas(case, page, f)
+        _save_areas(case, page, f, changed=False)
+        days = f.input_value("#opt-check_interval_days")
+        f.fill("#opt-check_interval_days", "9" if days != "9" else "8")
+        _save_areas(case, page, f, changed=True)
+        f.fill("#opt-check_interval_days", days)
         _base_color(case, page, f, save=width > 700)
         _language(case, page, f)
+        if width > 700:
+            _restart_to_tab(case, page, f)
         check(f"{case}: no horizontal overflow", f.evaluate(OVERFLOW_JS) <= 0)
         check(f"{case}: no console errors", not errors, str(errors[:2]))
         ctx.close()
