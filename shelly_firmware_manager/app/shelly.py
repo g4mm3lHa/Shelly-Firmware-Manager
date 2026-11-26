@@ -63,7 +63,10 @@ NTP_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(:\d{1,5})?$
 # characters (None = the default name, the device ID), protected with a password or
 # open; the password is write-only on the device and only passed through by this app
 AP_SSID_RE = re.compile(r"^[^\x00-\x1f\x7f]{0,29}$")
-AP_PASSWORD_RE = re.compile(r"^[^\x00-\x1f\x7f]{8,63}$")  # the length the Shelly accepts (WPA2 passphrase)
+# WPA2 passphrase: 8 to 63 printable ASCII characters (no umlauts or accents: their byte
+# length differs and some phones and PCs cannot connect then)
+AP_PASSWORD_RE = re.compile(r"^[\x20-\x7e]{8,63}$")
+AP_PASSWORD_BAD_RE = re.compile(r"[^\x20-\x7e]")  # first character outside printable ASCII
 AP_SECURITY = ("keep", "password", "open")  # keep: the protection the access point has now
 # Gen2+: config key prefix -> (RPC namespace, documented "initial_state" values)
 GEN2_OUTPUTS = {
@@ -647,8 +650,8 @@ def _ap_config(access_point: dict[str, Any]) -> dict[str, Any]:
 def _valid_ap_config(value: object) -> dict[str, Any]:
     """Checks the access point form: {"enable", "ssid", "security", "password",
     "accept_open", "range_extender"}. Turning it off changes nothing else. An open
-    access point needs accept_open; the password needs 8 to 63 printable characters as
-    the Shelly demands (anything else the Shelly decides, its refusal is shown in the
+    access point needs accept_open; the password needs 8 to 63 printable ASCII
+    characters (WPA2; anything else the Shelly decides, its refusal is shown in the
     form)."""
     if not isinstance(value, dict) or not isinstance(value.get("enable"), bool):
         raise ValueError("Invalid access point settings")
@@ -668,8 +671,12 @@ def _valid_ap_config(value: object) -> dict[str, Any]:
         password = value.get("password")
         if not isinstance(password, str) or not password:
             raise ValueError("Enter a password for the access point")
+        bad = AP_PASSWORD_BAD_RE.search(password)
+        if bad:
+            shown = bad.group() if bad.group().isprintable() else "?"  # a control character is not shown
+            raise ValueError(f"The password contains a character the Shelly cannot use: {shown}")
         if not AP_PASSWORD_RE.fullmatch(password):
-            raise ValueError("Invalid access point password (8 to 63 printable characters)")
+            raise ValueError("Invalid access point password (8 to 63 characters)")
         clean["password"] = password
     if security == "open" and value.get("accept_open") is not True:
         raise ValueError("Open access point not confirmed")
@@ -770,6 +777,38 @@ async def wifi_signal(
     if isinstance(rssi, bool) or not isinstance(rssi, (int, float)) or not -120 <= rssi <= 0:
         raise ShellyError("The device reported no usable Wi-Fi signal")  # shown as "unknown"
     return int(rssi)
+
+
+def _rssi(status: object) -> int | None:
+    """dBm of a Wi-Fi status object (Gen2+ wifi, Gen1 wifi_sta) while it is connected;
+    None if not connected or no usable value."""
+    if not isinstance(status, dict):
+        return None
+    connected = status.get("status") == "got ip" or status.get("connected") is True
+    rssi = status.get("rssi")
+    if not connected or isinstance(rssi, bool) or not isinstance(rssi, (int, float)) or not -120 <= rssi <= 0:
+        return None
+    return int(rssi)
+
+
+async def link_status(
+    session: aiohttp.ClientSession, gen: int, origin: str, auth: DeviceAuth | None = None
+) -> dict[str, int | None]:
+    """Running time and Wi-Fi signal in one request, read during an installation:
+    {"uptime": seconds since the device started, "rssi": dBm}; a value is None if the
+    device reports none (e.g. on the cable). Gen2+ Shelly.GetStatus (sys.uptime,
+    wifi.rssi), Gen1 /status (uptime, wifi_sta.rssi). Errors are raised as usual."""
+    if gen >= 2:
+        status = await _rpc(session, origin, "Shelly.GetStatus", auth=auth)
+        sys_status = status.get("sys")
+        uptime = sys_status.get("uptime") if isinstance(sys_status, dict) else None
+        wifi = status.get("wifi")
+    else:
+        status = await _device_json(session, origin, "/status", auth)
+        uptime, wifi = status.get("uptime"), status.get("wifi_sta")
+    if isinstance(uptime, bool) or not isinstance(uptime, (int, float)) or uptime < 0:
+        uptime = None
+    return {"uptime": int(uptime) if uptime is not None else None, "rssi": _rssi(wifi)}
 
 
 def _positive(value: object) -> bool:

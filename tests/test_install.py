@@ -24,11 +24,14 @@ from helpers import store
 def test_install_timing_constants():
     """Polling (devices without OTA events): first look after 30 s, every 10 s, early
     abort after 2 min without download, at most 5 min. OTA events: 60 s without
-    progress, 30 s for the restart, 30 s after it, polled every 5 s."""
+    progress (120 s with a weak Wi-Fi signal), 30 s for the restart, 90 s after it, polled
+    every 5 s. Before the update command: 5 attempts within 60 s while the Shelly does not
+    answer."""
     assert (manager_installs.INSTALL_FIRST_CHECK_S, manager_installs.INSTALL_POLL_S) == (30, 10)
     assert (manager_installs.INSTALL_NO_DOWNLOAD_S, manager_installs.INSTALL_WAIT_S) == (120, 300)
-    assert (manager_installs.OTA_STALL_S, manager_installs.OTA_RESTART_WAIT_S) == (60, 30)
-    assert (manager_installs.OTA_BOOT_WAIT_S, manager_installs.OTA_POLL_S) == (30, 5)
+    assert (manager_installs.OTA_STALL_S, manager_installs.OTA_STALL_WEAK_S, manager_installs.OTA_RESTART_WAIT_S) == (60, 120, 30)
+    assert (manager_installs.OTA_BOOT_WAIT_S, manager_installs.OTA_POLL_S) == (90, 5)
+    assert (manager_installs.PRECHECK_ATTEMPTS, manager_installs.PRECHECK_WINDOW_S, manager_installs.WEAK_RSSI) == (5, 60, -80)
 
 
 @pytest.fixture
@@ -694,3 +697,182 @@ async def test_restart_from_the_row_shows_restarting(mgr, monkeypatch):
     dev = mgr.devices[A]
     assert A not in mgr.activity and dev["status"] == "error" and dev["unreachable"] is True
     assert "after the restart" in dev["message"]
+
+
+# ---- Weak Wi-Fi: tolerance before the update command, restart or lost connection, steps
+
+
+@pytest.fixture
+def weak_wifi(mgr, monkeypatch, quick_install):
+    """Installs over HTTP (no WebSocket) with short pauses before the update command;
+    answers: one item per pre-check (an exception is raised), then the version 1.5.0.
+    link: the answer of link_status (running time, Wi-Fi signal)."""
+    monkeypatch.setattr(manager_installs, "PRECHECK_PAUSE_S", 0.01)
+    monkeypatch.setattr(shelly_cloud, "file_sha256", lambda *_a: "s")
+    state = {"answers": [], "link": {"uptime": 3600, "rssi": -84}, "sent": 0, "trigger": [], "steps": []}
+
+    async def device_info(*_args, **_kwargs):
+        state["steps"].append(mgr.install_step_view(A))
+        answer = state["answers"].pop(0) if state["answers"] else {"version": "1.5.0"}
+        if isinstance(answer, BaseException):
+            raise answer
+        return {"mac": "AA", "build": "b-old", "version": "1.4.0", **answer}
+
+    async def link(*_args, **_kwargs):
+        return state["link"]
+
+    async def trigger(*_args):
+        state["sent"] += 1
+        if state["trigger"]:
+            raise state["trigger"].pop(0)
+
+    class NoChannel:
+        """The device WebSocket is not usable: the command goes over HTTP."""
+
+        def __init__(self, *_args):
+            pass
+
+        async def __aenter__(self):
+            raise OSError("refused")
+
+    monkeypatch.setattr(shelly, "device_info", device_info)
+    monkeypatch.setattr(shelly, "link_status", link)
+    monkeypatch.setattr(shelly, "trigger_update", trigger)
+    monkeypatch.setattr(shelly, "OtaChannel", NoChannel)
+    return state
+
+
+async def run_weak(mgr, monkeypatch):
+    """Install the ready device A through the whole path (log entries, steps)."""
+    dev = install_device(mgr)
+    dev["sha256"] = "s"
+    monkeypatch.setattr(mgr, "approval_matches", lambda *_a: True)
+    ok = await mgr.install(A, "s", "u")
+    return ok, dev, mgr.events.entries[-1]
+
+
+async def test_lost_connection_before_the_command_is_tried_again(mgr, monkeypatch, weak_wifi):
+    """No answer twice, then an answer with a running time longer than the gap: one lost
+    connection – the command is sent once, the result is green with a hint line."""
+    weak_wifi["answers"] = [TimeoutError(), OSError("unreachable"), {}]
+    ok, dev, entry = await run_weak(mgr, monkeypatch)
+    assert ok and weak_wifi["sent"] == 1 and entry["event"] == "confirmed"
+    assert entry["detail"] == "Connection to the Shelly lost once while waiting – tried again (weak Wi-Fi: -84 dBm)"
+    precheck = [s for s in weak_wifi["steps"] if s and s["step"] == "precheck"]
+    assert [s["attempt"] for s in precheck] == [1, 2, 3] and precheck[1]["late"]
+    assert any(s and s["step"] == "install" and s["rssi"] == -84 for s in weak_wifi["steps"]) and precheck[0]["n"] == 3 and precheck[0]["of"] == 6
+    assert mgr.install_step_view(A) is None and dev["status"] == manager_core.STATUS_CURRENT
+
+
+async def test_restart_before_the_command_installs_nothing(mgr, monkeypatch, weak_wifi):
+    """An answer after the gap with a running time shorter than the gap: the Shelly
+    restarted on its own – nothing is sent, the installation fails with the time."""
+    weak_wifi["answers"] = [TimeoutError(), {}]
+
+    async def link(*_args, **_kwargs):
+        return {"uptime": 0 if weak_wifi["answers"] == [] else 3600, "rssi": None}
+
+    monkeypatch.setattr(shelly, "link_status", link)
+    ok, dev, entry = await run_weak(mgr, monkeypatch)
+    assert not ok and weak_wifi["sent"] == 0 and entry["event"] == "failed"
+    assert entry["detail"] == ("The Shelly restarted unexpectedly before the update command (running for 0 s). "
+                               "Nothing was installed.")
+    assert dev["status"] == manager_core.STATUS_ERROR
+
+
+async def test_no_answer_in_all_attempts_installs_nothing(mgr, monkeypatch, weak_wifi):
+    """Five unanswered pre-checks: error with the attempts, nothing sent; the Wi-Fi
+    signal is named when it was read and weak."""
+    weak_wifi["answers"] = [TimeoutError()] * 5
+    ok, _dev, entry = await run_weak(mgr, monkeypatch)
+    assert not ok and weak_wifi["sent"] == 0
+    assert entry["detail"].startswith("Connection to the Shelly lost before the update command – no answer in 5 attempts")
+    assert entry["detail"].endswith("Nothing was installed.")
+    # Signal read at the first answer, then the connection is lost while the command is refused
+    weak_wifi["answers"] = [{}] + [TimeoutError()] * 4
+    weak_wifi["trigger"] = [aiohttp_connector_error()]
+    ok, _dev, entry = await run_weak(mgr, monkeypatch)
+    assert not ok and entry["detail"].endswith("Nothing was installed. Wi-Fi signal: -84 dBm (weak).")
+
+
+async def test_window_limits_the_attempts(mgr, monkeypatch, weak_wifi):
+    """The attempts end with the window even before the fifth one."""
+    monkeypatch.setattr(manager_installs, "PRECHECK_WINDOW_S", 0.005)
+    weak_wifi["answers"] = [TimeoutError()] * 5
+    ok, _dev, entry = await run_weak(mgr, monkeypatch)
+    assert not ok and "no answer in 1 attempts" in entry["detail"]
+
+
+async def test_a_refusal_is_not_tried_again(mgr, monkeypatch, weak_wifi):
+    """The device answers with a refusal (other firmware): no further attempt."""
+    weak_wifi["answers"] = [{"build": "b-new"}, {}]
+    ok, _dev, entry = await run_weak(mgr, monkeypatch)
+    assert not ok and weak_wifi["sent"] == 0 and "changed since the check" in entry["detail"]
+    assert weak_wifi["answers"] == [{}]
+
+
+def aiohttp_connector_error():
+    """A connection that was never made (nothing was sent)."""
+    import aiohttp
+    from aiohttp.client_reqrep import ConnectionKey
+
+    key = ConnectionKey("192.168.1.10", 80, False, None, None, None, None)
+    return aiohttp.ClientConnectorError(key, OSError(113, "No route to host"))
+
+
+async def test_command_is_resent_only_if_it_never_left(mgr, monkeypatch, weak_wifi):
+    """HTTP: no connection = the command did not leave, it is sent again after a new
+    pre-check; no answer to a sent command = never sent twice, the installation waits."""
+    weak_wifi["answers"] = [{}, {}]
+    weak_wifi["trigger"] = [aiohttp_connector_error()]
+    ok, *_ = await run_weak(mgr, monkeypatch)
+    assert ok and weak_wifi["sent"] == 2
+    weak_wifi.update(answers=[{}], sent=0, trigger=[TimeoutError()])
+    ok, *_ = await run_weak(mgr, monkeypatch)
+    assert ok and weak_wifi["sent"] == 1
+
+
+async def test_weak_signal_doubles_the_stall_limit(mgr):
+    """60 s without progress, 120 s with a weak Wi-Fi signal at the start (-80 dBm and lower)."""
+    for rssi, limit in ((None, 60), (-79, 60), (-80, 120), (-90, 120)):
+        mgr.install_steps[A] = {"rssi": rssi}
+        assert mgr._stall_limit(A) == limit
+
+
+def test_step_view_turns_late(mgr):
+    """The pill turns yellow once a step takes longer than usual, or from the second attempt."""
+    install_device(mgr)
+    mgr._set_step(A, "verify", give_up=90)
+    view = mgr.install_step_view(A)
+    assert (view["step"], view["n"], view["usual"], view["give_up"], view["late"]) == ("verify", 6, 30, 90, False)
+    mgr.install_steps[A]["quiet"] -= 31
+    assert mgr.install_step_view(A)["late"] and mgr.install_step_view(A)["seconds"] == 31
+    mgr._set_step(A, "precheck", give_up=60)
+    mgr._update_step(A, attempt=2)
+    assert mgr.install_step_view(A)["late"] and mgr.install_step_view(A)["attempts"] == 5
+    shown = next(d for d in mgr.public_state()["devices"] if d["id"] == A)
+    assert shown["install_step"]["step"] == "precheck"
+
+
+async def test_link_status_reads_uptime_and_signal(monkeypatch):
+    """Gen2+ Shelly.GetStatus (sys.uptime, wifi.rssi while connected), Gen1 /status."""
+    from conftest import REAL_LINK_STATUS
+
+    async def rpc(_session, _origin, method, *_a, **_k):
+        assert method == "Shelly.GetStatus"
+        return {"sys": {"uptime": 273600}, "wifi": {"status": "got ip", "rssi": -84}}
+
+    async def get(_session, _origin, path, *_a, **_k):
+        assert path == "/status"
+        return {"uptime": 14, "wifi_sta": {"connected": True, "rssi": -61}}
+
+    monkeypatch.setattr(shelly, "_rpc", rpc)
+    monkeypatch.setattr(shelly, "_device_json", get)
+    assert await REAL_LINK_STATUS(None, 2, "http://h") == {"uptime": 273600, "rssi": -84}
+    assert await REAL_LINK_STATUS(None, 1, "http://h") == {"uptime": 14, "rssi": -61}
+
+    async def odd(*_a, **_k):
+        return {"sys": {"uptime": True}, "wifi": {"status": "disconnected", "rssi": -50}}
+
+    monkeypatch.setattr(shelly, "_rpc", odd)
+    assert await REAL_LINK_STATUS(None, 2, "http://h") == {"uptime": None, "rssi": None}

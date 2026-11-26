@@ -161,7 +161,7 @@ function logContent(e) {
       return [box("div", null, `${e.device}: ${e.downgrade ? "downgrade" : "installation"} ${INSTALL_EVENTS[e.event] || e.event} · ${arrow(e.old, e.new)} `,
         e.unverified ? el("span", "Not verified by the update server", "tag warn") : null, e.beta ? el("span", "Beta", "tag beta") : null),
         e.at ? el("div", `Install at ${e.at}`, "sub") : null,
-        e.restarted ? el("div", "Device restarted before the installation", "sub") : null, e.detail ? el("div", e.detail, "sub") : null].filter(Boolean);
+        e.restarted ? el("div", "Restarted by the app before the installation (Restart & install)", "sub") : null, e.detail ? el("div", e.detail, "sub") : null].filter(Boolean);
     case "delete":
       if (e.unknown) return [el("div", `Unknown file deleted · ${mb(e.size || 0)} · SHA ${(e.sha256 || "").slice(0, 12)}…`)];
       return [el("div", `Firmware deleted: ${e.type} ${e.version}${e.source === "upload" ? " (uploaded)" : e.source === "import" ? " (imported)" : ""}`),

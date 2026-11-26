@@ -64,7 +64,10 @@ const versionStep = (from, to) => `${from || "–"}  →  ${to || "–"}`;
 const WEAK_RSSI = -80, FAIR_RSSI = -70;
 const dbm = rssi => `${String(rssi).replace("-", "−")} dBm`;
 const weak = rssi => typeof rssi === "number" && rssi <= WEAK_RSSI;
-const signalText = rssi => `${dbm(rssi)} · ${weak(rssi) ? t("weak") : rssi <= FAIR_RSSI ? t("fair") : t("good")}.`;
+const signalClass = rssi => weak(rssi) ? t("weak") : rssi <= FAIR_RSSI ? t("fair") : t("good");
+const signalText = rssi => `${dbm(rssi)} · ${signalClass(rssi)}.`;
+/** Wi-Fi signal with its class, e.g. "−84 dBm (weak)" (status of a running installation). */
+export const signalLabel = rssi => `${dbm(rssi)} (${signalClass(rssi)})`;
 const WEAK_TEXT = rssi => t("Weak Wi-Fi signal ({dbm}). The Shelly downloads the firmware over Wi-Fi – the download may fail.", {dbm: dbm(rssi)});
 const BACK_OK = d => t("{version} is stored – a downgrade stays possible.", {version: d.way_back.version});
 const BACK_NO = d => t("{version} is not stored and Shelly no longer offers it – after this update there is no downgrade to it.", {version: d.way_back.version});

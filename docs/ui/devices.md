@@ -89,8 +89,10 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
 - Phone tiles: "Ignored" label wrap and truncated names accepted.
 
 ## Action icons
-- Power-on action = lightning, green if all outputs are "Restore last state" (Gen1
-  "Restore last mode"), red if any differs, "?" unknown.
+- Power-on action = lightning, green if every output is "Restore last state" or "Match
+  input" (Gen1 "Restore last mode" or "Switch"; mixed green values stay green), yellow if
+  any output has another value (never red; 3.13.1, mockups `3.13.1`, approved
+  2026-11-26), "?" unknown; the popup's status strip uses the same colour.
 - Lock green = protected and password stored in the app, yellow = protected without
   stored password, else grey.
 - Access point (MDI "access-point"), actions (link icon) and schedules red while
@@ -288,3 +290,25 @@ Wordings: `mockups/3.9.0/TEXTE.md`.
   the shown list at once (search, filter, area filter, sort order): Name, Shelly name, Area,
   Model, Generation, IP, Firmware, Available, Status, Last check; semicolon, UTF-8.
 - **Empty times (T7, 11 a):** "Last update" and "Last backup" without a value show "never".
+
+## Running installation and weak Wi-Fi (3.13.1, mockups `3.13.1`, approved 2026-11-26)
+- **Status pill (F3.9–F3.11, variant A):** a running installation names its step: "Queued"
+  (blue, no spinner, waiting for a free slot), then with spinner "Backup …", "Restarting …"
+  (Restart & install), "Waiting for device …" (check before the update command), "Installing"
+  / "Installing n %" (a downgrade "Downgrading n %"), "Restarting …" (after the update),
+  "Verifying …". Blue while it runs, yellow while the step takes longer than usual (the
+  pre-check also from its second attempt). No step counter in the pill.
+- **Tooltip (desktop) / device details (phones, tap on the pill):** "Step n of 6: <step>",
+  "Running for n s (usually under n s)" or, when late, "No answer / No progress for n s –
+  longer than expected (usually under n s)" (other steps "Takes n s – …"), when late the
+  limit ("Attempt n of 5 · the app gives up after n s" / "The app gives up after n s"),
+  "Wi-Fi signal at the start: −84 dBm (weak)" when read, "Installed: …", "Target: …".
+  Pills and tooltip texts are translated (F3.12); log texts stay English.
+- **Log (F3.2–F3.4):** the line of an installation started with Restart & install reads
+  "Restarted by the app before the installation (Restart & install)"; a confirmed
+  installation with lost connections stays green with the line "Connection to the Shelly
+  lost n times while waiting – tried again (weak Wi-Fi: −n dBm)".
+- **Access point password (F4.1):** hint "8 to 63 characters, letters without umlauts or
+  accents, digits and common symbols only. Sent to the Shelly only – …"; a character
+  outside printable ASCII is named at once below the field ("The password contains a
+  character the Shelly cannot use: ä", red) and Save stays disabled.
