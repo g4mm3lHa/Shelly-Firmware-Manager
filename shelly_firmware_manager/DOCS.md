@@ -173,7 +173,8 @@ available version, status and last check.
 **Areas:** as soon as a device is in an area of Home Assistant, the **Area** column
 (after **Device**; on a phone the first row of the details) and the area icon next to
 **Filter** appear. The area filter takes several areas at once, also **Without area**;
-search finds the area too. The app reads the areas at every check.
+search finds the area too. The app reads the areas at every check; a single check
+may use the areas read up to 60 seconds before (see [How a check works](#how-a-check-works)).
 
 **Security:** a strip above the list counts the devices without password protection
 and with the cloud, the access point or the websocket debug log switched on (unknown
@@ -367,6 +368,14 @@ A check (all devices, a single device or the schedule) works in this order:
    devices without one – one request for all Gen1 types. Imported files are not
    provided this way: only while the Shelly list cannot be asked, for a manual
    installation at your own risk like on Gen2+.
+
+Each check reads the device registry, the areas and the battery sensors from Home
+Assistant; a full check also reads the Shelly config entries and discoveries. This is
+meant to go over one connection per check. A single check (**Check for updates**,
+**Offer update now**, the check after an intermediate version) reuses what Home Assistant
+answered up to 60 seconds before. A device renamed or moved to another area in that
+minute shows the change with the next check after it. A full check (**Check now** or the
+schedule) and **Try again** always ask Home Assistant anew. A failed answer is never reused.
 
 Every check that asks the Shelly update server also makes one reference request with
 fixed values (Plus1 1.0.7, which must be offered 1.3.3 – no data of your devices). If
@@ -1055,8 +1064,9 @@ The app connects only to:
   official changelog pages. Only the firmware ID (e.g. `Plus1`) and, for Gen2+ devices,
   the installed firmware version are part of the request; no other information about
   your devices or Home Assistant is sent.
-- **Home Assistant** via the Supervisor – device registry, area registry (for the
-  **Area** column), the Shelly config entries and discovery flows (for **Shellys not
+- **Home Assistant** via the Supervisor – device registry, entity registry (battery
+  sensors of the Shelly integration), area registry (for the **Area** column), the
+  Shelly config entries and discovery flows (for **Shellys not
   listed**), notifications, the app's own settings, its slug (for the link to the app
   page) and its host port (read for the **Settings** tab, set when you change **Host
   port**), and the Home Assistant version (only for **Details for a bug ticket**).

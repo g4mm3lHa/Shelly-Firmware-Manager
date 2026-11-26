@@ -31,7 +31,7 @@ provided for a retry, same lifetime as `updated`), `store_fallback` (Gen2+: serv
 newer stored version offered for a manual installation; cleared by the next check of the device),
 `step_target` (Gen2+: provided version is an intermediate version; newest version or ""), `beta` (provided version is a beta of the update server), `planned` ("Install at": `{at, by, on, sha256, version, target, beta, restart, fallback_ack}`, see `manager_schedules`), `offer_date` (build date of the provided version, ISO date), `hold` (`{version, built, until}` while option `offer_after_days` holds a new version back; the device stays up to date), `hold_released` (version "Offer update now" released for this device), `backup_failed` (`{at, reason: password|asleep|unreachable|failed, message}` after a failed backup, until the next successful one). Memory only: `Manager.activity` (`waiting|checking|server|downloading|reloading|restarting`), `progress`,
 `installing`, `install_steps` (running step of an installation), `reloading`, `device_checks`, `downloads`, `_provisions` / `_provision_waiters` / `_fetching`, `_upload` / `_import` / `_export` / `_backup_download` / `_backup_import` (`Pending`), `_scan_user` / `_check_users` / `_verifying` /
-`_fresh` (running checks only).
+`_fresh` (running checks only), `_ha_cache` / `_ha_drop` / `_ha_reading` (answers of Home Assistant reused by single checks for `HA_CACHE_S`, see `ManagerCore._ha_cached`).
 
 Firmware entry (`state.firmware[<file name>]`): `type`, `gen`, `version`, `sha256`,
 `size`, `downloaded`, `https` (downloads), `source` (`download|upload|import`; `import`: every

@@ -8,6 +8,8 @@ greeting, token and request of the WebSocket API, registry answers of every size
 the app accepts, failures of single requests, persistent notifications and the
 app's own options and restart. The Shellys themselves stay FakeNet."""
 
+import asyncio
+import contextvars
 import json
 
 import aiohttp
@@ -34,14 +36,17 @@ class FakeSupervisor:
     type -> error object (success false); reply: request type -> raw answer
     instead (a str is sent as text, bytes as a binary frame). greeting/auth_reply
     replace the first two messages; before: messages sent ahead of every answer.
-    Every WebSocket connection, request and POST is recorded."""
+    A WebSocket connection answers requests until the app closes it. Every
+    connection (its requests in order), token, request and POST is recorded; open
+    counts the connections not closed yet."""
 
     def __init__(self):
         self.lists = {name: [] for name in REQUESTS}
         self.failures, self.reply, self.before = {}, {}, []
         self.greeting = {"type": "auth_required", "ha_version": "2026.11.1"}
         self.auth_reply = {"type": "auth_ok", "ha_version": "2026.11.1"}
-        self.tokens, self.requests, self.posts = [], [], []
+        self.tokens, self.requests, self.posts, self.connections = [], [], [], []
+        self.open = 0
         self.post_status, self.post_answer = 200, {"result": "ok", "data": {}}
         self.info_status, self.info, self.info_requests = 200, {"result": "ok", "data": {"options": {}}}, 0
 
@@ -52,32 +57,41 @@ class FakeSupervisor:
     async def websocket(self, request):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
+        self.open += 1
+        try:
+            await self.serve(ws)
+        finally:
+            self.open -= 1
+        return ws
+
+    async def serve(self, ws):
         await ws.send_json(self.greeting)
         msg = await ws.receive()
         if msg.type is not WSMsgType.TEXT:  # the app closed the connection after the greeting
-            return ws
+            return
         self.tokens.append(json.loads(msg.data).get("access_token"))
         await ws.send_json(self.auth_reply)
         if self.auth_reply.get("type") != "auth_ok":
             await ws.close()
-            return ws
-        msg = await ws.receive()
-        if msg.type is not WSMsgType.TEXT:
-            return ws
-        call = json.loads(msg.data)
-        self.requests.append(call)
-        kind = call["type"]
-        for message in self.before:
-            await ws.send_json(message)
-        if kind in self.reply:
-            raw = self.reply[kind]
-            await (ws.send_bytes(raw) if isinstance(raw, bytes) else ws.send_str(raw))
-        elif kind in self.failures:
-            await ws.send_json({"id": call["id"], "type": "result", "success": False, "error": self.failures[kind]})
-        else:
-            await ws.send_json({"id": call["id"], "type": "result", "success": True, "result": self.lists[kind]})
-        await ws.receive()  # until the app closes the connection
-        return ws
+            return
+        calls = []
+        self.connections.append(calls)
+        async for msg in ws:  # until the app closes the connection
+            if msg.type is not WSMsgType.TEXT:
+                return
+            call = json.loads(msg.data)
+            calls.append(call)
+            self.requests.append(call)
+            kind = call["type"]
+            for message in self.before:
+                await ws.send_json(message)
+            if kind in self.reply:
+                raw = self.reply[kind]
+                await (ws.send_bytes(raw) if isinstance(raw, bytes) else ws.send_str(raw))
+            elif kind in self.failures:
+                await ws.send_json({"id": call["id"], "type": "result", "success": False, "error": self.failures[kind]})
+            else:
+                await ws.send_json({"id": call["id"], "type": "result", "success": True, "result": self.lists[kind]})
 
     async def post(self, request):
         body = await request.json() if request.can_read_body else None
@@ -115,19 +129,188 @@ def last_check(m):
     return [e for e in m.events.entries if e["kind"] == "check"][-1]
 
 
-async def test_check_reads_home_assistant_over_the_websocket(ha):
-    """A full check: one connection per list request, each with the token after the
-    greeting, one request with ID 1; the Shelly config entries are asked for by
-    domain; answers of other IDs before the answer are skipped."""
+async def test_check_reads_home_assistant_over_the_websocket(ha, net):
+    """A full check: all list requests over one connection with the token after the
+    greeting, with IDs counted from 1; the Shelly config entries are asked for by
+    domain; messages of other IDs before an answer are skipped (the battery sensor of
+    the entity registry still arrives)."""
     m, sup = ha
-    sup.before = [{"id": 2, "type": "event", "event": {}}, {"type": "pong"}]
+    net.asleep = {C}
+    sup.lists["config/entity_registry/list"] = [
+        {"platform": "shelly", "unique_id": "aabbcc00000c-devicepower:0-battery", "entity_id": "sensor.garage_battery",
+         "device_id": C}]
+    sup.before = [{"id": 99, "type": "event", "event": {}}, {"type": "pong"}]
     assert await m.scan() is True
     assert set(m.devices) == {A, B, C} and m.devices[A]["name"] == "Kitchen"
-    assert last_check(m)["severity"] != "error" and m.devices[A]["status"] == manager_core.STATUS_READY
+    assert m.devices[A]["status"] == manager_core.STATUS_READY
+    assert m.devices[C]["battery_source"] == manager_core.BATTERY_FROM_HA
     assert [r["type"] for r in sup.requests] == list(REQUESTS)
-    assert {r["id"] for r in sup.requests} == {1}
+    assert [r["id"] for r in sup.requests] == [1, 2, 3, 4, 5]
     assert sup.requests[3]["domain"] == "shelly"
-    assert sup.tokens == [TOKEN] * len(REQUESTS)
+    assert sup.tokens == [TOKEN] and len(sup.connections) == 1
+    await until(lambda: sup.open == 0)   # closed at the end of the Home Assistant part
+
+
+async def until(condition):
+    """Wait (at most 2 s) until condition() is true."""
+    for _ in range(200):
+        if condition():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("condition not reached")
+
+
+def forget_answers(m):
+    """Drop every answer of Home Assistant the manager keeps (as if their time was up)."""
+    for key in list(m._ha_cache):
+        m._ha_forget(key)
+
+
+async def test_single_checks_reuse_the_answers(ha, monkeypatch):
+    """A single check within HA_CACHE_S of another check reuses its answers and opens no
+    connection; afterwards it asks for device, entity and area registry over one new
+    connection."""
+    m, sup = ha
+    await m.scan()
+    asked = len(sup.requests)
+    assert (await m.check_device(A))["error"] is None
+    assert len(sup.requests) == asked and len(sup.connections) == 1
+    monkeypatch.setattr(manager_core, "HA_CACHE_S", 0)
+    assert (await m.check_device(B))["error"] is None
+    assert len(sup.connections) == 2 and sup.tokens == [TOKEN, TOKEN]
+    assert [(r["id"], r["type"]) for r in sup.connections[1]] == list(enumerate(REQUESTS[:3], 1))
+
+
+def renamed(entries, device_id, **change):
+    """Copy of the device registry with changed fields of one entry."""
+    return [{**e, **change} if e["id"] == device_id else dict(e) for e in entries]
+
+
+async def test_check_now_and_try_again_read_anew(ha, monkeypatch):
+    """Check now and Try again ask Home Assistant anew even right after a single
+    check; what they read refreshes the answers the next single check reuses."""
+    m, sup = ha
+    await m.scan()
+    registry = "config/device_registry/list"
+    sup.lists[registry] = renamed(sup.lists[registry], A, name_by_user="Pantry")
+    await m.check_device(A)
+    assert m.devices[A]["name"] == "Kitchen"   # the answer of the full check is reused
+    await m.scan()
+    assert m.devices[A]["name"] == "Pantry"
+    sup.lists[registry] = renamed(sup.lists[registry], A, configuration_url="http://192.168.1.77/")
+
+    async def port_open(_ip, _port):
+        raise TimeoutError()
+
+    monkeypatch.setattr(shelly, "port_open", port_open)
+    asked = len(sup.requests)
+    steps = await m.probe_device(A)
+    assert [r["type"] for r in sup.requests[asked:]] == [registry]
+    assert steps["address"] == {"state": "ok", "ip": "192.168.1.77", "moved": True}
+    assert [e["configuration_url"] for e in await m._registry() if e["id"] == A] == ["http://192.168.1.77/"]
+    assert len(sup.requests) == asked + 1   # Try again refreshed the answer single checks reuse
+
+
+async def test_parallel_single_checks_share_one_read(ha):
+    """Single checks started together share one read of each answer: one device, one
+    entity and one area registry request over one connection."""
+    m, sup = ha
+    await m.scan()
+    forget_answers(m)
+    asked, connections = len(sup.requests), len(sup.connections)
+    results = await asyncio.gather(m.check_device(A), m.check_device(B), m.check_device(C))
+    assert [r["error"] for r in results] == [None, None, None]
+    assert sorted(r["type"] for r in sup.requests[asked:]) == sorted(REQUESTS[:3])
+    assert len(sup.connections) == connections + 1
+
+
+async def test_failures_are_not_reused(ha, net):
+    """A failed answer is never kept: the next single check asks again at once – for the
+    entity registry (battery hint left out meanwhile) and for the device registry (the
+    check fails with the reason, the next one succeeds)."""
+    m, sup = ha
+    net.asleep = {A}   # never answered: the battery hint of Home Assistant applies
+    await m.scan()
+    forget_answers(m)
+    entities, registry = "config/entity_registry/list", "config/device_registry/list"
+    sup.failures = {entities: {"code": "unknown_error", "message": "Entity registry busy"}}
+    sup.lists[entities] = [{"platform": "shelly", "unique_id": "aabbcc00000a-devicepower:0-battery",
+                            "entity_id": "sensor.kitchen_battery", "device_id": A}]
+    await m.check_device(A)
+    assert "battery_source" not in m.devices[A]
+    sup.failures = {}
+    await m.check_device(A)
+    assert m.devices[A]["battery_source"] == manager_core.BATTERY_FROM_HA
+    assert [r["type"] for r in sup.requests].count(entities) == 3   # scan, failed, asked again
+    forget_answers(m)
+    sup.failures = {registry: {"code": "unknown_error", "message": "Registry busy"}}
+    assert "Registry busy" in (await m.check_device(B))["error"]
+    sup.failures = {}
+    assert (await m.check_device(B))["error"] is None
+    assert m._ha_reading == {}
+
+
+async def test_concurrent_waiters_share_a_failure(ha):
+    """Checks waiting for the same failing read get its failure and ask no second time;
+    nothing of it is kept afterwards."""
+    m, sup = ha
+    await m.scan()
+    forget_answers(m)
+    registry = "config/device_registry/list"
+    asked = [r["type"] for r in sup.requests].count(registry)
+    sup.failures = {registry: {"code": "unknown_error", "message": "Registry busy"}}
+    results = await asyncio.gather(m.check_device(A), m.check_device(B))
+    assert all("Registry busy" in r["error"] for r in results)
+    assert [r["type"] for r in sup.requests].count(registry) == asked + 1
+    assert m._ha_reading == {} and "devices" not in m._ha_cache
+
+
+async def test_cancelled_reads_hand_over():
+    """A cancelled reader hands over to the caller waiting for it, which reads itself; a
+    cancelled waiter leaves the read running, and its answer is kept."""
+    m = manager.Manager(dict(OPTIONS), session=None, token="t")
+    gate, reads = asyncio.Event(), []
+
+    async def read():
+        reads.append(len(reads))
+        await gate.wait()
+        return ["answer", len(reads)]
+
+    first = asyncio.ensure_future(m._ha_cached("devices", read))
+    await until(lambda: reads == [0])
+    second = asyncio.ensure_future(m._ha_cached("devices", read))
+    await asyncio.sleep(0.01)
+    first.cancel()
+    await until(lambda: reads == [0, 1])   # the waiting caller reads itself
+    third = asyncio.ensure_future(m._ha_cached("devices", read))
+    await asyncio.sleep(0.01)
+    third.cancel()
+    gate.set()
+    assert await second == ["answer", 2]
+    assert first.cancelled() and third.cancelled()
+    assert m._ha_reading == {} and m._ha_cache["devices"][1] == ["answer", 2]
+    assert await m._ha_cached("devices", read) == ["answer", 2] and len(reads) == 2
+
+
+async def test_a_finished_scope_keeps_no_connection(ha):
+    """A task that inherited the scope of a check after it ended does not reopen its
+    connection: its request uses a connection of its own that is closed right after."""
+    m, sup = ha
+    sup.lists["config/area_registry/list"] = [{"area_id": "kitchen", "name": "Kitchen"}]
+    async with m._ha_reads():
+        inherited = contextvars.copy_context()
+    task = asyncio.get_running_loop().create_task(m._ha_list("config/area_registry/list"), context=inherited)
+    assert await task == [{"area_id": "kitchen", "name": "Kitchen"}]
+    assert len(sup.connections) == 1
+    await until(lambda: sup.open == 0)
+
+
+async def test_answers_are_dropped_after_their_time(ha, monkeypatch):
+    """The answers kept for single checks are freed by a timer once HA_CACHE_S is up."""
+    m, _sup = ha
+    monkeypatch.setattr(manager_core, "HA_CACHE_S", 0.05)
+    await m.scan()
+    await until(lambda: m._ha_cache == {} and m._ha_drop == {})
 
 
 async def test_entity_registry_and_config_entries_reach_the_check(ha, net):
@@ -205,12 +388,23 @@ async def test_token_only_after_the_greeting(ha):
 
 async def test_failed_side_requests_do_not_stop_the_check(ha):
     """Entity registry, area registry, config entries and flows are hints: their failure
-    leaves the check as it is."""
+    leaves the check as it is. A refused request keeps the connection; a broken one
+    (binary frame) is replaced for the next request, which still gets its answer."""
     m, sup = ha
     sup.failures = {name: {"code": "unknown_command", "message": "Unknown command."} for name in REQUESTS[1:]}
     await m.scan()
     assert set(m.devices) == {A, B, C}
     assert last_check(m)["severity"] != "error" and m.listing["missing"] == []
+    assert sup.tokens == [TOKEN]
+    registry = "config/device_registry/list"
+    sup.failures = {}
+    sup.reply = {"config/entity_registry/list": b"\x00\x01"}
+    sup.lists[registry] = renamed(sup.lists[registry], A, area_id="kitchen")
+    sup.lists["config/area_registry/list"] = [{"area_id": "kitchen", "name": "Kitchen"}]
+    await m.scan()
+    assert last_check(m)["severity"] != "error" and m.devices[A]["area"] == "Kitchen"
+    assert sup.tokens == [TOKEN] * 3
+    assert [[r["type"] for r in c] for c in sup.connections[1:]] == [list(REQUESTS[:2]), list(REQUESTS[2:])]
 
 
 async def test_notification(ha):

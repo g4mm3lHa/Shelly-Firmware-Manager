@@ -384,7 +384,9 @@ class Checks(Backups):
         value ("device", or "step" for the check after an intermediate version, which
         keeps the comparison after that update).
         A device that is no longer in the registry is marked removed and checked at
-        its last address if it still answers there (finding in the log either way)."""
+        its last address if it still answers there (finding in the log either way).
+        Home Assistant is read in one scope (_ha_reads) that ends before the device is
+        contacted; answers of up to HA_CACHE_S are reused (see ManagerCore._ha_cached)."""
         if device_id not in self.devices:
             raise KeyError(device_id)
         if not self._reserved("device", device_id):
@@ -401,9 +403,14 @@ class Checks(Backups):
         header_ignored: bool | None = None
         removed: list[str] = []
         try:
-            registry = await self._registry()
-            entry = self._shelly_entries(registry).get(device_id)
-            self.others = other_shellys(registry, (d.get("mac") for d in self.devices.values()))
+            async with self._ha_reads():
+                registry = await self._registry()
+                entry = self._shelly_entries(registry).get(device_id)
+                self.others = other_shellys(registry, (d.get("mac") for d in self.devices.values()))
+                battery = False
+                if entry is not None:
+                    battery = device_id in await self._battery_devices()
+                    await self._apply_areas({device_id: entry})
             checked = False
             if entry is None:
                 self._mark_removed(dev)
@@ -415,8 +422,7 @@ class Checks(Backups):
             else:
                 dev.pop("removed", None)
                 dev.pop("removed_reachable", None)
-                self._apply_ha_battery(dev, device_id in await self._battery_devices())
-                await self._apply_areas({device_id: entry})
+                self._apply_ha_battery(dev, battery)
                 await self._check_entry(device_id, self._entry_name(entry), entry.get("configuration_url"), {})
                 checked = True
             if checked:
@@ -446,31 +452,34 @@ class Checks(Backups):
         """Check all Shelly main devices from the HA device registry.
         Returns the IDs of the checked devices, the names of the ignored
         (registered, not contacted) devices and the IDs of the removed devices
-        (no longer in the registry: only tested whether they still answer)."""
+        (no longer in the registry: only tested whether they still answer).
+        Home Assistant is read anew in one scope (_ha_reads, one connection) that ends
+        before the devices are contacted; its answers refresh those single checks reuse."""
         offers: OfferTasks = {}  # shared manufacturer requests: one per firmware ID
-        registry = await self._registry()
-        entries = self._shelly_entries(registry)
-        self.others = other_shellys(registry, (d.get("mac") for d in self.devices.values()))
-        batteries = await self._battery_devices()
-        self._readopt_removed(entries)
-        await self._apply_areas(entries)
-        for dev in self.devices.values():  # A full check ends the "just updated" display
-            dev.pop("updated", None)  # and the retry of a failed installation
-            dev.pop("after_update", None)  # and the comparison after the update
-            dev.pop("install_failed", None)
-        # Ignored devices count as registered (seen) but are not contacted
-        seen = set(entries)
-        ignored: list[str] = []
-        for device_id in seen:
-            dev = self.devices.setdefault(device_id, {})
-            dev.pop("removed", None)  # back in Home Assistant: the stored data stays
-            dev.pop("removed_reachable", None)
-            self._apply_ha_battery(dev, device_id in batteries)
-            if dev.get("ignored"):
-                entry = entries.pop(device_id)
-                dev["name"] = self._entry_name(entry)
-                ignored.append(dev["name"])
-        await self._update_listing(registry, len(seen))
+        async with self._ha_reads(fresh=True):
+            registry = await self._registry()
+            entries = self._shelly_entries(registry)
+            self.others = other_shellys(registry, (d.get("mac") for d in self.devices.values()))
+            batteries = await self._battery_devices()
+            self._readopt_removed(entries)
+            await self._apply_areas(entries)
+            for dev in self.devices.values():  # A full check ends the "just updated" display
+                dev.pop("updated", None)  # and the retry of a failed installation
+                dev.pop("after_update", None)  # and the comparison after the update
+                dev.pop("install_failed", None)
+            # Ignored devices count as registered (seen) but are not contacted
+            seen = set(entries)
+            ignored: list[str] = []
+            for device_id in seen:
+                dev = self.devices.setdefault(device_id, {})
+                dev.pop("removed", None)  # back in Home Assistant: the stored data stays
+                dev.pop("removed_reachable", None)
+                self._apply_ha_battery(dev, device_id in batteries)
+                if dev.get("ignored"):
+                    entry = entries.pop(device_id)
+                    dev["name"] = self._entry_name(entry)
+                    ignored.append(dev["name"])
+            await self._update_listing(registry, len(seen))
         removed = sorted(i for i in self.devices if i not in seen)
         for device_id in removed:
             self._mark_removed(self.devices[device_id])
@@ -554,7 +563,8 @@ class Checks(Backups):
     async def _apply_areas(self, entries: dict[str, dict[str, Any]]) -> None:
         """Area of Home Assistant per device of these registry entries ("area": its
         name, None without area). If the area registry cannot be read, the areas of
-        the last check stay (logged)."""
+        the last check stay (logged). A single check may use an area registry read up
+        to HA_CACHE_S before (see ManagerCore._ha_cached)."""
         try:
             listed = await self._area_registry()
         except (TimeoutError, ShellyError, aiohttp.ClientError, OSError) as err:
@@ -1227,7 +1237,8 @@ class Checks(Backups):
         """"Try again" in the details of a device that did not answer: the address Home
         Assistant reports now, whether its port accepts a connection and whether the
         device answers, with the times. Nothing is stored or logged and no check is
-        started; the device keeps its status until the next check. Each step:
+        started; the device keeps its status until the next check. The device registry
+        is read anew (it also refreshes the one single checks reuse). Each step:
         {"state": "ok" | "error" | "skipped", "text"}."""
         dev = self.devices[device_id]
         if device_id in self.installing or device_id in self.restoring or device_id in self.device_checks:
@@ -1236,7 +1247,8 @@ class Checks(Backups):
         skipped = {"state": "skipped", "text": "Not tested"}
         origin = None
         try:
-            registry = await self._registry()
+            async with self._ha_reads(fresh=True):
+                registry = await self._registry()
             entry = next((e for e in registry if isinstance(e, dict) and e.get("id") == device_id), None)
             if entry is None:
                 raise ShellyError("The device is no longer in the device registry of Home Assistant")
