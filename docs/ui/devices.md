@@ -140,8 +140,9 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
   an open access point refused by a Shelly that had a password reads "An open access point
   is no longer possible on this Shelly once a password was set – use a password instead
   (device answer: …)"; another refusal with code -103 reads "The Shelly refused these
-  access point settings as invalid (device answer: …)". The password is never stored or logged; the log names "new password" and
-  only settings that change (no "on → on"). Gen1 stays locked (A7).
+  access point settings as invalid (device answer: …)".
+  The password is never stored or logged; the log names "new password" and only settings
+  that change (no "on → on"). Gen1 stays locked (A7).
 - Websocket debug popup: explanation, link `<web_url>#/diagnostics` (new tab,
   noopener), warning below firmware 1.0.0.
 

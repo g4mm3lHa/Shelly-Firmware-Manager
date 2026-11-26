@@ -194,20 +194,19 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   Icons that are links or mark a chosen entry (link icons, tick of the chosen filter,
   "Kept" pin, opened toolbar icon) use the link text colour.
 - **CSS building blocks (3.11.0, approved 2026-11-23):**
-  `ui-src/style.css` is one file in the order tokens, base, building blocks, page head
-  and tabs, then one section per tab with its own phone block. A coloured state reads
-  `--tone` (pills, action icons, status strips, message and check-list icons), set by a
-  state class mapped to a tone (`p-`, `s-`/`c-`, `t-`, `msg-`, `prechk`); there is no
-  separate tone class. Neutral is the default (2026-11-26). Rows of a list in a dialog share one line rule (fine line, none under the last
-  row), rows of a tab list one band rule; phone tiles have the card background, no line
-  and the tile radius (one rule
-  for Devices and Schedules; Logs and Backups set it in their tab, after their own rules
-  for the last row). The
-  Devices table is `:where(.dev-table)`, so its rules never reach a table in a dialog.
-  A button with an icon before its text is `.icon-text` (`.sm`: 16 px icon). Tokens
-  also cover the monospace font, shadows, layers, icon sizes, the beta colour and the
-  success text; `[hidden]` always hides. New UI uses these blocks and adds CSS only for
-  its own grid or layout.
+  `ui-src/style.css` is one file in the order tokens, base, building blocks, page head and
+  tabs, then one section per tab with its own phone block. A coloured state reads `--tone`
+  (pills, action icons, status strips, message and check-list icons), set by a state class
+  mapped to a tone (`p-`, `s-`/`c-`, `t-`, `msg-`, `prechk`); there is no separate tone
+  class (2026-11-26). Neutral is the default. Rows of a list in a dialog share one line
+  rule (fine line, none under the last row), rows of a tab list one band rule; phone tiles
+  have the card background, no line and the tile radius (one rule for Devices and
+  Schedules; Logs and Backups set it in their tab, after their own rules for the last
+  row). The Devices table is `:where(.dev-table)`, so its rules never reach a table in a
+  dialog. A button with an icon before its text is `.icon-text` (`.sm`: 16 px icon).
+  Tokens also cover the monospace font, shadows, layers, icon sizes, the beta colour and
+  the success text; `[hidden]` always hides. New UI uses these blocks and adds CSS only
+  for its own grid or layout.
 
 ## Tooltips
 - **One tooltip (2026-11-22, U4):** every tooltip is the app's own dark tooltip, none
