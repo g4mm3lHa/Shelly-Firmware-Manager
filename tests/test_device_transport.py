@@ -44,12 +44,15 @@ class FakeDevice:
     (method, path with query, Authorization header, JSON body). With a password
     every path but /shelly asks for it like the real devices: Gen2+ with a Digest
     challenge (a new nonce each time, SHA-256), Gen1 with Basic; the server checks
-    the answer itself. challenge overrides the WWW-Authenticate header. blocked(signed,
-    body) -> bool answers HTTP 429 before the password check (the sign-in block of
-    firmware 2.0+); signed tells whether the request carries an Authorization header."""
+    the answer itself. realm is the Digest realm the device challenges with and binds
+    its password to (normally its ID). challenge overrides the WWW-Authenticate header.
+    blocked(signed, body) -> bool answers HTTP 429 before the password check (the
+    sign-in block of firmware 2.0+); signed tells whether the request carries an
+    Authorization header."""
 
-    def __init__(self, gen=2, password=None, routes=None, challenge=None, blocked=None):
+    def __init__(self, gen=2, password=None, routes=None, challenge=None, blocked=None, realm=REALM):
         self.gen, self.password, self.challenge, self.blocked = gen, password, challenge, blocked
+        self.realm = realm
         self.routes = dict(routes or {})
         self.requests = []
         self.nonces = []
@@ -61,13 +64,13 @@ class FakeDevice:
             return header == "Basic " + base64.b64encode(f"admin:{self.password}".encode()).decode()
         scheme, _, params = header.partition(" ")
         values = {m[0]: m[1] or m[2] for m in DIGEST_RE.findall(params)}
-        ha1 = sha256(f"admin:{REALM}:{self.password}")
+        ha1 = sha256(f"admin:{self.realm}:{self.password}")
         ha2 = sha256(f"{request.method}:{values.get('uri')}")
         expected = sha256(f"{ha1}:{values.get('nonce')}:{values.get('nc')}:{values.get('cnonce')}:auth:{ha2}")
         return (
             scheme == "Digest"
             and values.get("uri") == request.path_qs  # signed for exactly this request
-            and values.get("realm") == REALM
+            and values.get("realm") == self.realm
             and values.get("nonce") == self.nonces[-1]  # the nonce of the last challenge
             and values.get("algorithm") == "SHA-256"
             and values.get("response") == expected
@@ -78,7 +81,7 @@ class FakeDevice:
             challenge = 'Basic realm="shelly1-B929CC"'
         elif self.challenge is None:
             self.nonces.append(str(1700000000 + len(self.nonces)))
-            challenge = f'Digest qop="auth", realm="{REALM}", nonce="{self.nonces[-1]}", algorithm=SHA-256'
+            challenge = f'Digest qop="auth", realm="{self.realm}", nonce="{self.nonces[-1]}", algorithm=SHA-256'
         else:
             challenge = self.challenge
         return web.Response(status=401, headers={"WWW-Authenticate": challenge})
@@ -299,6 +302,50 @@ async def test_stored_ha1_of_another_device(session):
         with pytest.raises(shelly.ShellyError, match="another device ID"):
             await shelly.restart(session, 2, dev.origin, auth)
     assert len(dev.requests) == 1
+
+
+FORMER = "shellymini1pmg3-a8032ab12345"  # the same device under the renamed 2.2.0 ID (same MAC suffix)
+
+
+@pytest.mark.parametrize(("answer", "expected", "realm"), [
+    ({**GEN2_INFO, "auth_domain": REALM}, shelly.Protection(True, REALM, REALM), REALM),
+    ({**GEN2_INFO, "auth_domain": FORMER}, shelly.Protection(True, REALM, FORMER), FORMER),
+    ({**GEN2_INFO, "auth_en": False, "auth_domain": None}, shelly.Protection(False, REALM, None), REALM),
+    ({**GEN2_INFO, "auth_en": False, "auth_domain": FORMER}, shelly.Protection(False, REALM, FORMER), REALM),
+    ({**GEN2_INFO, "auth_domain": "a" * 51 + "-a8032ab12345"}, None, "a" * 51 + "-a8032ab12345"),  # 64 characters
+    ({**GEN2_INFO, "auth_domain": "a" * 52 + "-a8032ab12345"}, None, REALM),  # 65: never shortened to fit
+    ({**GEN2_INFO, "auth_domain": "shellymini1pmg3-a8032ab12346"}, None, REALM),  # another MAC
+    ({**GEN2_INFO, "auth_domain": FORMER + "\n"}, None, REALM),
+    ({**GEN2_INFO, "auth_domain": 12}, shelly.Protection(True, REALM, None), REALM),
+    ({**GEN2_INFO, "id": "", "auth_domain": FORMER}, shelly.Protection(True, None, FORMER), None),
+    ({"type": "SHSW-1", "auth": True, "auth_domain": FORMER}, shelly.Protection(True), None),  # Gen1
+])
+async def test_protection_status_reports_id_and_auth_domain(session, answer, expected, realm):
+    """/shelly gives the protection, the Gen2+ device ID (an empty one is None) and the
+    auth domain as sent; realm is the auth domain only for a valid one of the same MAC
+    suffix while the protection is on, else the device ID."""
+    async with FakeDevice(password=PASSWORD, routes={"/shelly": answer}) as dev:
+        state = await shelly.protection_status(session, dev.origin)
+    assert expected is None or state == expected
+    assert state.realm == realm and dev.requests == [("GET", "/shelly", None, None)]
+
+
+async def test_password_bound_to_the_former_id_answers_its_challenge(session):
+    """A Shelly whose password stays bound to the 2.2.0 ID challenges with that realm: an
+    HA1 built from Protection.realm signs the request, one bound to the device ID is
+    never sent."""
+    routes = {"/shelly": {**GEN2_INFO, "auth_domain": FORMER}, "/rpc": rpc(None)}
+    async with FakeDevice(password=PASSWORD, routes=routes, realm=FORMER) as dev:
+        realm = (await shelly.protection_status(session, dev.origin)).realm
+        assert realm == FORMER
+        await shelly.restart(session, 2, dev.origin, shelly.DeviceAuth(
+            gen=2, ha1=sha256(f"admin:{realm}:{PASSWORD}"), realm=realm))
+        assert dev.requests[-1][2] is not None and f'realm="{FORMER}"' in dev.requests[-1][2]
+        sent = len(dev.requests)
+        with pytest.raises(shelly.ShellyError, match="another device ID"):
+            await shelly.restart(session, 2, dev.origin, shelly.DeviceAuth(
+                gen=2, ha1=sha256(f"admin:{REALM}:{PASSWORD}"), realm=REALM))
+    assert [h for _m, _p, h, _b in dev.requests[sent:]] == [None]
 
 
 @pytest.mark.parametrize("challenge", [

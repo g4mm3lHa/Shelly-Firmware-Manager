@@ -343,25 +343,56 @@ async def test_gen1_password_errors_never_contain_the_url(monkeypatch):
     assert "topsecret" not in str(err.value)
 
 
+def challenge_realm(box):
+    """Realm a fake protected device challenges with: its auth domain, else its ID."""
+    return box["auth_domain"] or box["device_id"]
+
+
+def fake_read_refused(box, auth):
+    """Error of an authenticated read on a fake device, None if it is accepted. A stored
+    HA1 of another realm is refused like DeviceAuth does before anything is sent."""
+    if not box["protected"]:
+        return None
+    if auth is None or auth.ha1 != box["ha1"]:
+        return shelly.AuthError("The Shelly rejected the password")
+    if auth.realm != challenge_realm(box):
+        return shelly.ShellyError("Stored device password belongs to another device ID – enter it again")
+    return None
+
+
+def fake_set_auth(box, realm, new_auth):
+    """Shelly.SetAuth on a fake device: the realm becomes its auth domain."""
+    if new_auth:
+        assert new_auth.gen == 1 or new_auth.realm == realm  # the HA1 is derived from the realm sent
+        box.update(protected=True, ha1=new_auth.ha1, auth_domain=realm)
+    else:
+        box.update(protected=False, ha1=None, auth_domain=None)
+
+
 @pytest.fixture
 async def device(mgr, net, monkeypatch):
-    """Checked Gen2 device A with a fake protection state on the device."""
+    """Checked Gen2 device A with a fake protection state on the device: device_id is the
+    ID its /shelly answer reports, auth_domain the realm its password is bound to (None
+    while unprotected), realms the realms Shelly.SetAuth received."""
     await mgr.scan()
-    box = {"protected": False, "ha1": None, "fail_write": None, "apply": True, "writes": 0}
+    box = {"protected": False, "ha1": None, "fail_write": None, "apply": True, "writes": 0,
+           "device_id": mgr.devices[A]["shelly_id"], "auth_domain": None, "realms": []}
 
     async def status(_session, _origin):
-        return box["protected"]
+        domain = box["auth_domain"] if box["protected"] else None
+        return shelly.Protection(box["protected"], box["device_id"], domain)
 
     async def protect(_session, gen, _origin, realm, new_auth, auth=None):
         box["writes"] += 1
+        box["realms"].append(realm)
         if box["apply"]:
-            box["protected"], box["ha1"] = (True, new_auth.ha1) if new_auth else (False, None)
+            fake_set_auth(box, realm, new_auth)
         if box["fail_write"]:
             raise box["fail_write"]
 
     async def read(_session, gen, _origin, _type, auth=None, extended=False):
-        if box["protected"] and (auth is None or auth.ha1 != box["ha1"]):
-            raise shelly.AuthError("The Shelly rejected the password")
+        if error := fake_read_refused(box, auth):
+            raise error
         return {}
 
     monkeypatch.setattr(shelly, "protection_status", status)
@@ -377,6 +408,7 @@ async def test_enable_protection_verified_and_confirmed(mgr, device):
     assert device["writes"] == 0
     result = await mgr.set_device_password(A, "enable", "pw-1", confirm=True, acknowledged=True, user="u")
     assert result == {"protected": True} and mgr.credentials.has_device_password(A)
+    assert device["realms"] == [mgr.devices[A]["shelly_id"]] == [mgr.credentials.entries[A]["realm"]]
     assert mgr.events.entries[-1]["action"] == "enabled"
 
 
@@ -503,6 +535,80 @@ async def test_store_requires_protected_device(mgr, device):
     assert mgr.credentials.has_device_password(A)
 
 
+def former_id(device_id, name="shellymini1pmg3"):
+    """The 2.2.0 form of a device ID: another name before the same MAC suffix."""
+    return f"{name}-{device_id.rpartition('-')[2]}"
+
+
+async def test_store_uses_auth_domain_after_id_change(mgr, device, caplog):
+    """A password set under the renamed 2.2.0 ID stays bound to it (auth_domain differs
+    from id): "store" tests and stores it against that realm, says so once in the log
+    (no ID) and leaves the device untouched."""
+    sid = mgr.devices[A]["shelly_id"]
+    former = former_id(sid)
+    device.update(protected=True, auth_domain=former, ha1=shelly.gen2_ha1(former, "right"))
+    with caplog.at_level("INFO", logger="sfm.manager"):
+        result = await mgr.set_device_password(A, "store", "right", confirm=True, user="u")
+    assert result == {"protected": True, "realm_outdated": True}
+    assert mgr.credentials.entries[A]["realm"] == former and device["writes"] == 0
+    assert mgr.events.entries[-1]["action"] == "stored" and mgr.devices[A]["shelly_id"] == sid
+    lines = [r.getMessage() for r in caplog.records if "former device ID" in r.getMessage()]
+    assert lines == [
+        "Kitchen: stored password is bound to the former device ID of the Shelly – change it once to fix this"
+    ]
+    blobs = [json.dumps(mgr.events.entries), json.dumps(mgr.public_state()), caplog.text]
+    assert not any(former in b or device["ha1"] in b for b in blobs)
+
+
+async def test_change_binds_password_to_device_id(mgr, device):
+    """Change password (the same one is fine) after a store with the former realm:
+    Shelly.SetAuth gets the device ID, the HA1 is derived from it and the stored entry
+    moves to it; the stored former HA1 still signs the change."""
+    sid = mgr.devices[A]["shelly_id"]
+    former = former_id(sid)
+    device.update(protected=True, auth_domain=former, ha1=shelly.gen2_ha1(former, "right"))
+    await mgr.set_device_password(A, "store", "right", confirm=True)
+    result = await mgr.set_device_password(A, "change", "right", confirm=True, acknowledged=True)
+    assert result == {"protected": True} and device["realms"] == [sid] and device["auth_domain"] == sid
+    assert mgr.credentials.entries[A]["realm"] == sid and device["ha1"] == shelly.gen2_ha1(sid, "right")
+    assert await mgr.set_device_password(A, "store", "right", confirm=True) == {"protected": True}
+
+
+async def test_live_device_id_replaces_an_outdated_one(mgr, device):
+    """The device ID of the live /shelly answer is the SetAuth realm: a known ID from
+    before the update (here the 2.2.0 one) is replaced, so a change really moves the
+    password to the restored ID. An answer without ID keeps the known one."""
+    sid = mgr.devices[A]["shelly_id"]
+    former = former_id(sid)
+    device.update(protected=True, auth_domain=former, ha1=shelly.gen2_ha1(former, "right"))
+    await mgr.set_device_password(A, "store", "right", confirm=True)
+    mgr.devices[A]["shelly_id"] = former   # known ID from a check under 2.2.0
+    await mgr.set_device_password(A, "change", "new-pw", confirm=True, acknowledged=True)
+    assert device["realms"] == [sid] and mgr.devices[A]["shelly_id"] == sid
+    device["device_id"] = None
+    await mgr.set_device_password(A, "store", "new-pw", confirm=True)
+    assert mgr.devices[A]["shelly_id"] == sid and mgr.credentials.entries[A]["realm"] == sid
+
+
+@pytest.mark.parametrize("domain", [
+    "shellymini1pmg3-ffffffffffff",     # another MAC suffix: another device
+    "shelly mini-{suffix}",            # a character a realm never has
+    "a" * 32 + "-{suffix}",            # 65 characters: one over 64 (never shortened to fit)
+    "-{suffix}",                       # no name before the suffix
+    "{suffix}",                        # no hyphen at all
+])
+async def test_foreign_auth_domain_is_ignored(mgr, device, domain):
+    """Only an auth domain of 1-64 letters, digits or hyphens with the device's MAC
+    suffix is tried; any other one leaves the device ID as realm, so the password of a
+    device bound to it is rejected and nothing is stored."""
+    sid = mgr.devices[A]["shelly_id"]
+    domain = domain.format(suffix=sid.rpartition("-")[2])
+    device.update(protected=True, auth_domain=domain, ha1=shelly.gen2_ha1(domain, "right"))
+    with pytest.raises(shelly.AuthError, match="^The Shelly rejected the password$"):
+        await mgr.set_device_password(A, "store", "right", confirm=True)
+    assert not mgr.credentials.has_device_password(A)
+
+
 async def test_secrets_never_in_state_or_logs(mgr, device):
     """Neither password nor HA1 appear in the log, state file or public state."""
     await mgr.set_device_password(A, "enable", "Very-Secret-1", confirm=True, acknowledged=True)
@@ -525,11 +631,16 @@ async def test_public_state_fields(mgr, net):
 async def several(mgr, net, monkeypatch):
     """Checked devices A, B, C, each with its own fake protection state."""
     await mgr.scan()
-    boxes = {f"http://{d[1]}": {"protected": False, "ha1": None, "fail": None} for d in net.devices.values()}
+    boxes = {
+        f"http://{d[1]}": {"protected": False, "ha1": None, "fail": None, "auth_domain": None,
+                           "device_id": mgr.devices[i]["shelly_id"]}
+        for i, d in net.devices.items()
+    }
     running = {"now": 0, "max": 0}
 
     async def status(_session, origin):
-        return boxes[origin]["protected"]
+        box = boxes[origin]
+        return shelly.Protection(box["protected"], box["device_id"], box["auth_domain"] if box["protected"] else None)
 
     async def protect(_session, gen, origin, realm, new_auth, auth=None):
         running["now"] += 1
@@ -539,12 +650,11 @@ async def several(mgr, net, monkeypatch):
         box = boxes[origin]
         if box["fail"]:
             raise box["fail"]
-        box["protected"], box["ha1"] = (True, new_auth.ha1) if new_auth else (False, None)
+        fake_set_auth(box, realm, new_auth)
 
     async def read(_session, gen, origin, _type, auth=None, extended=False):
-        box = boxes[origin]
-        if box["protected"] and (auth is None or auth.ha1 != box["ha1"]):
-            raise shelly.AuthError("The Shelly rejected the password")
+        if error := fake_read_refused(boxes[origin], auth):
+            raise error
         return {}
 
     monkeypatch.setattr(shelly, "protection_status", status)
@@ -599,6 +709,17 @@ async def test_bulk_store_existing_password(mgr, several):
     results = {r["id"]: r["result"] for r in await mgr.set_passwords("store", [A, B, C], "shared", confirm=True)}
     assert results == {A: "ok", B: "error", C: "skipped"}
     assert mgr.credentials.has_device_password(A) and not mgr.credentials.has_device_password(B)
+
+
+async def test_bulk_store_after_id_change(mgr, several):
+    """Store on several devices also tests a password bound to the former 2.2.0 ID
+    against that realm."""
+    mgr.devices[A]["auth_enabled"] = True
+    former = former_id(mgr.devices[A]["shelly_id"])
+    several["boxes"][several["origin"][A]].update(
+        protected=True, auth_domain=former, ha1=shelly.gen2_ha1(former, "shared"))
+    results = await mgr.set_passwords("store", [A], "shared", confirm=True)
+    assert [r["result"] for r in results] == ["ok"] and mgr.credentials.entries[A]["realm"] == former
 
 
 async def test_bulk_validation(mgr, several):

@@ -534,19 +534,38 @@ class DeviceSettings(Transfers):
         realm: str | None,
         keep: bool = True,
     ) -> dict[str, Any]:
-        """Device part of set_device_password (see there); raises on any failure."""
-        protected = await shelly.protection_status(self.session, origin)
+        """Device part of set_device_password (see there); raises on any failure.
+
+        Gen2+: the device ID of the live /shelly answer replaces the known one (as a
+        check does) and is the realm sent to Shelly.SetAuth – a known ID from before a
+        firmware update could be outdated. "store" tests the password against the
+        realm the device's current password is bound to (shelly.Protection.realm);
+        after the 2.2.0 ID change of the 1PM Mini Gen3/Gen4 that is the former ID, the
+        result then carries realm_outdated=True and a log line says to change the
+        password once, which binds it to the device ID again. Nothing is changed on
+        the device by "store"."""
+        state = await shelly.protection_status(self.session, origin)
+        protected = state.enabled
         dev["auth_enabled"] = protected
+        if gen >= 2 and state.device_id:
+            dev["shelly_id"] = realm = state.device_id  # an empty ID never replaces a known one
         current = self._auth(device_id, dev)
         candidate = None
         if mode in ("store", "enable", "change"):
-            candidate = self.credentials.candidate(gen, realm, password)
+            tested = (state.realm or realm) if mode == "store" else realm
+            candidate = self.credentials.candidate(gen, tested, password)
         if mode == "store" and candidate is not None:
             if protected is False:
                 raise ShellyError("The device is not password protected – use 'Enable password protection' instead")
             if not await self._auth_works(dev, candidate):
                 raise AuthError("The Shelly rejected the password")
             self.credentials.store(device_id, candidate)
+            if gen >= 2 and candidate.realm != realm:
+                log.info(
+                    "%s: stored password is bound to the former device ID of the Shelly – change it once to fix this",
+                    dev.get("name"),
+                )
+                return {"protected": protected, "realm_outdated": True}
             return {"protected": protected}
         if mode == "enable" and protected is not False:
             raise ShellyError(
@@ -576,9 +595,10 @@ class DeviceSettings(Transfers):
                 raise AuthError("The Shelly rejected the stored current password – nothing was changed") from None
         except (TimeoutError, ShellyError, aiohttp.ClientError) as err:
             answer = err  # the change may still have been applied: verify below
-        # Verification against the device itself
+        # Verification against the device itself: a new password counts only once it
+        # answers the device's challenge, whose realm DeviceAuth compares with its own
         try:
-            protected = await shelly.protection_status(self.session, origin)
+            protected = (await shelly.protection_status(self.session, origin)).enabled
         except (TimeoutError, ShellyError, aiohttp.ClientError):
             protected = None
         dev["auth_enabled"] = protected

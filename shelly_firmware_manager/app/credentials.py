@@ -4,8 +4,9 @@ password option and no fallback).
 Storage rules:
 - Per-device passwords live only in /data/credentials.json (mode 0600), never in
   the state file, logs or API answers.
-- Gen2+ devices: only HA1 = SHA-256("admin:<device ID>:<password>") is stored; the
-  plain password is discarded right after the hash has been computed.
+- Gen2+ devices: only HA1 = SHA-256("admin:<realm>:<password>") is stored with its
+  realm (the device's auth domain, normally its device ID); the plain password is
+  discarded right after the hash has been computed.
 - Gen1 devices (Basic Auth) inevitably need the plain text; the file is part of
   Home Assistant backups (see README).
 """
@@ -38,7 +39,8 @@ class Credentials:
     def __init__(self, path: Path) -> None:
         """Load stored device passwords; a missing or broken file means none."""
         self.path = path
-        # HA device ID -> {"gen": 1, "password"} | {"gen": 2, "realm", "ha1"}
+        # HA device ID -> {"gen": 1, "password"} | {"gen": 2, "realm", "ha1"}; realm = the
+        # auth domain the password was tested against, normally the Shelly device ID
         self.entries: dict[str, dict[str, Any]] = {}
         try:
             data = json.loads(path.read_text())
@@ -68,7 +70,10 @@ class Credentials:
 
     @staticmethod
     def candidate(gen: int, realm: str | None, password: object) -> DeviceAuth:
-        """DeviceAuth for a password that is about to be stored (used to test it)."""
+        """DeviceAuth for a password that is about to be stored (used to test it).
+
+        Gen2+: realm is the realm the device's current password is bound to when an
+        existing password is stored, and the device ID when a new one is set."""
         password = validate_password(password)
         if gen == 1:
             return DeviceAuth(gen=1, password=password)

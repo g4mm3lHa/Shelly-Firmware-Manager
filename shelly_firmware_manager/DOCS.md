@@ -739,6 +739,15 @@ password**, or the lock icon):
 After enabling, changing or removing the protection, change the password in the Home
 Assistant Shelly integration as well.
 
+**1PM Mini Gen3/Gen4 and firmware 2.2.0:** 2.2.0 changed the device ID of these models,
+2.2.1 restores it. A password set or changed under 2.2.0 stays bound to the 2.2.0 ID.
+According to Shelly, its web UI then refuses the password. You can see this in
+`http://<IP>/shelly`: `auth_domain` differs from `id`.
+
+In that case **Store existing password** is meant to accept the correct password anyway.
+Then use **Change password** once (the same password is fine): the app sets it with the
+restored ID, so the device binds it to that ID again.
+
 **Failed sign-ins:** the app sends a stored password once per request. Once the Shelly
 refused it, a check, a backup or an installation sends nothing more with it. A Gen2+
 Shelly that refuses the change or removal of its protection is expected to have changed
@@ -859,6 +868,8 @@ Gen2+ firmware is downloaded over HTTPS only.
 | The Shelly reports X instead of the target version Y | Check the device; run "Check for updates" again |
 | Certificate of … is not publicly trusted | See [Certificate pinning](#certificate-pinning) |
 | The Shelly requires a password | Store the device password (see [Device passwords](#device-passwords)) |
+| The Shelly rejected the password | The password entered or stored in this app is not the current one of the device, e.g. it was changed elsewhere. Store the current password with **Store existing password**. For a 1PM Mini Gen3/Gen4 whose password was set under firmware 2.2.0, see [Device passwords](#device-passwords) |
+| Stored device password belongs to another device ID – enter it again | The Shelly asks for its password under another device ID than the stored one was tested with: another Shelly answers at the address, or the password was set again under another ID (1PM Mini Gen3/Gen4, firmware 2.2.0 and 2.2.1). Check the address, then use **Store existing password** again |
 | The Shelly temporarily blocks sign-ins (too many attempts) – wait a few minutes and try again | Firmware 2.0 and newer counts failed password attempts over 10 minutes. After more than 10 it answers sign-ins only with a delay between attempts (10 s, rising to 5 minutes). Every client counts: this app, the Shelly integration of Home Assistant, a browser or a script. Make sure each one uses the current device password, wait a few minutes and check again. A restart of the Shelly or the next accepted sign-in resets the count |
 | The Shelly rejected the stored current password – nothing was changed | The password stored in this app no longer works, e.g. because it was changed elsewhere. The device is meant to keep its password. Store the current password with **Store existing password**, then change it again (see [Device passwords](#device-passwords)) |
 | The Shelly requires HTTPS (Enhanced Security) – not supported by this app yet | The Shelly answers plain HTTP only with a redirect to HTTPS. According to Shelly, devices shipped with firmware 2.0 or later always do this. Older ones do it after Enhanced Security was switched on and an HTTPS certificate was installed. The app never follows the redirect and cannot check, update or back up this Shelly yet. Until then, update it in its own web interface (`https://<IP>`) |

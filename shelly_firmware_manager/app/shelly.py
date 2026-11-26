@@ -58,6 +58,8 @@ DEVICE_TIMEOUT = aiohttp.ClientTimeout(total=15)
 MAX_DEVICE_BODY = 1024 * 1024  # upper limit for a device response
 AUTH_USER = "admin"  # fixed user name of Gen2+ devices, also the Gen1 default
 DIGEST_PARAM_RE = re.compile(r'(\w+)=(?:"([^"]*)"|([^,\s]*))')
+# auth_domain of a Gen2+ /shelly answer accepted as a Digest realm: 1-64 letters, digits, hyphens
+AUTH_DOMAIN_RE = re.compile(r"^[A-Za-z0-9-]{1,64}$")
 # Wait before a request without credentials is sent once more after an HTTP 429: firmware
 # 2.0+ answers 429 to new sign-ins for about 2 s while its table of open sign-ins is full;
 # 2.5 s lies just past that window
@@ -240,7 +242,8 @@ def _sha256(text: str) -> str:
 
 
 def gen2_ha1(realm: str, password: str) -> str:
-    """HA1 of the Gen2+ Digest Auth: SHA-256('admin:<device id>:<password>')."""
+    """HA1 of the Gen2+ Digest Auth: SHA-256('admin:<realm>:<password>'). The realm is
+    the device's auth domain, which is normally its device ID (see Protection)."""
     return _sha256(f"{AUTH_USER}:{realm}:{password}")
 
 
@@ -250,7 +253,9 @@ class DeviceAuth:
     can never end up in a log line or an error message by accident.
 
     gen1 uses password (Basic Auth). Gen2+ uses either a stored ha1 bound to
-    realm (= Shelly device ID) or a plain password from which HA1 is derived.
+    realm (the device's auth domain, normally its device ID) or a plain password
+    from which HA1 is derived. A stored ha1 only answers a challenge of exactly
+    that realm.
     """
 
     gen: int
@@ -463,7 +468,8 @@ async def device_info(
 
     auth_for(gen) returns the credentials once the generation is known (/shelly
     itself never needs authentication). shelly_id is the Gen2+ device ID, which is
-    also the Digest Auth realm. on_identity(gen, shelly_id) is called right after
+    the realm Shelly.SetAuth takes and normally also the Digest Auth realm (see
+    Protection for the exception). on_identity(gen, shelly_id) is called right after
     /shelly – so a device whose password is missing or wrong is still identified
     and a device password can be set for it.
 
@@ -1247,12 +1253,55 @@ GEN1_AP_NOTE = (
 GEN1_DEBUG_WS_NOTE = "Gen1 devices have no websocket debug log"
 
 
-async def protection_status(session: aiohttp.ClientSession, origin: str) -> bool | None:
-    """Password protection as reported by /shelly (no authentication needed):
-    True/False, None if the device does not report it."""
+@dataclass(frozen=True, slots=True)
+class Protection:
+    """Password protection of a device as its /shelly answer reports it.
+
+    enabled: True/False, None if the device does not report it. device_id: the Gen2+
+    device ID (None for Gen1 or when the answer has none); it is the realm a new
+    password is set with (Shelly.SetAuth accepts only the device ID). auth_domain:
+    the Gen2+ realm the device's current password is bound to (Shelly.GetDeviceInfo,
+    null without a password) exactly as the device sent it – never shortened, checked
+    by realm before it is used. It normally equals device_id; firmware 2.2.0 renamed
+    the ID of the 1PM Mini Gen3/Gen4, and a password set during that time stays bound
+    to the 2.2.0 ID after 2.2.1 restored the former one."""
+
+    enabled: bool | None
+    device_id: str | None = None
+    auth_domain: str | None = None
+
+    @property
+    def realm(self) -> str | None:
+        """Realm the device's current password is bound to: auth_domain while the
+        protection is on, if it is 1-64 letters, digits or hyphens and differs from
+        device_id only before the last hyphen (the same MAC suffix, as the 2.2.0
+        rename keeps it); otherwise device_id. A realm the device does not challenge
+        with is still refused by DeviceAuth."""
+        domain, device_id = self.auth_domain, self.device_id
+        if self.enabled is not True or not domain or not device_id or not AUTH_DOMAIN_RE.fullmatch(domain):
+            return device_id
+        prefix, _, suffix = domain.rpartition("-")
+        id_prefix, _, id_suffix = device_id.rpartition("-")
+        # rpartition gives an empty prefix without a hyphen: both need a name and a suffix
+        return domain if prefix and id_prefix and suffix and suffix == id_suffix else device_id
+
+
+async def protection_status(session: aiohttp.ClientSession, origin: str) -> Protection:
+    """Password protection as reported by /shelly (no authentication needed), with
+    the Gen2+ device ID and auth domain of the same answer (see Protection). An empty
+    device ID becomes None, so it never replaces a known one."""
     info = await _device_json(session, origin, "/shelly")
-    value = info.get("auth_en" if int_field(info, "gen", 1) >= 2 else "auth")
-    return value if isinstance(value, bool) else None
+    gen = int_field(info, "gen", 1)
+    value = info.get("auth_en" if gen >= 2 else "auth")
+    enabled = value if isinstance(value, bool) else None
+    if gen < 2:
+        return Protection(enabled)
+    domain = info.get("auth_domain")
+    return Protection(
+        enabled,
+        clip(info.get("id"), 64) or None,
+        domain if isinstance(domain, str) else None,
+    )
 
 
 async def set_protection(
@@ -1266,10 +1315,12 @@ async def set_protection(
     """Enable/change (new_auth = DeviceAuth of the new password) or disable
     (new_auth None) the device's password protection.
 
-    Gen2+: Shelly.SetAuth with user admin, realm = device ID and the HA1 (null
-    disables; realm = Shelly device ID). Gen1: /settings/login with user admin. The caller must verify the
-    result – a lost or ambiguous answer proves nothing. Network errors are
-    re-raised without any URL (Gen1 carries the password in the query)."""
+    Gen2+: Shelly.SetAuth with user admin, the realm and the HA1 (null disables).
+    The realm must be the device ID, never its auth domain: Shelly.SetAuth accepts
+    only the device ID, and new_auth.ha1 must be derived from the same realm. Gen1:
+    /settings/login with user admin. The caller must verify the result – a lost or
+    ambiguous answer proves nothing. Network errors are re-raised without any URL
+    (Gen1 carries the password in the query)."""
     try:
         if gen >= 2:
             if not realm:
