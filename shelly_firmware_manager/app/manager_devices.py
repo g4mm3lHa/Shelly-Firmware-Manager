@@ -16,8 +16,8 @@ import shelly
 from shelly import UNSUPPORTED, AuthError, DeviceAuth, ShellyError, clip, error_text
 
 from manager_core import (
-    ACTIVITY_CHECKING, ACTIVITY_DOWNLOADING, ACTIVITY_RELOADING, BATTERY_FROM_DEVICE, Device, STATUS_AVAILABLE,
-    STATUS_CURRENT, STATUS_INSTALLING, STATUS_READY, STATUS_UNCLEAR, severity_of, unexpected_text,
+    ACTIVITY_CHECKING, ACTIVITY_DOWNLOADING, ACTIVITY_RELOADING, ACTIVITY_SERVER, BATTERY_FROM_DEVICE, Device,
+    STATUS_AVAILABLE, STATUS_CURRENT, STATUS_INSTALLING, STATUS_READY, STATUS_UNCLEAR, severity_of, unexpected_text,
 )
 from manager_transfer import Transfers
 
@@ -82,11 +82,15 @@ class DeviceSettings(Transfers):
         return True
 
     def _settings_device(self, device_id: str) -> Device:
-        """Device whose settings may be read/changed now (reachable, not installing)."""
+        """Device whose settings may be read/changed now (reachable; not installing,
+        reloading, restoring or being checked – in a full check also while it waits for
+        the Shelly update server or downloads its firmware)."""
         dev = self.devices[device_id]
         if device_id in self.installing or dev.get("status") == STATUS_INSTALLING:
             raise ShellyError("Installation in progress – please try again afterwards")
-        if device_id in self.device_checks or self.activity.get(device_id) in (ACTIVITY_CHECKING, ACTIVITY_DOWNLOADING):
+        if device_id in self.device_checks or self.activity.get(device_id) in (
+            ACTIVITY_CHECKING, ACTIVITY_SERVER, ACTIVITY_DOWNLOADING
+        ):
             raise ShellyError("Device is being checked – please try again afterwards")
         if device_id in self.reloading:
             raise ShellyError("Device info is being reloaded – please try again in a moment")
@@ -210,6 +214,13 @@ class DeviceSettings(Transfers):
                 raise ValueError("This device/firmware has no access point switch")
             if "range_extender" in clean["ap_config"] and (dev.get("ap_config") or {}).get("range_extender") is None:
                 raise ValueError("This device/firmware has no range extender")
+            # "keep" leaves the protection as it is: only for a running access point the
+            # device reports with a password (as the form offers it, read just before).
+            # Otherwise an access point that is open by default would be turned on open
+            # without the accepted risk.
+            protected = dev.get("ap") is True and (dev.get("ap_config") or {}).get("open") is False
+            if clean["ap_config"].get("security") == "keep" and not protected:
+                raise ValueError("Choose a password or an open access point")
         for key, label in (
             ("ap", "an access point switch"),
             ("ble", "a global Bluetooth switch"),

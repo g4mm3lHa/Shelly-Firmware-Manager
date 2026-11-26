@@ -70,7 +70,7 @@ def js_keys() -> set[str]:
 def server_texts() -> list[str]:
     """English texts of the server the UI translates (SERVER_TEXTS of server-texts.js)."""
     src = (JS_DIR / "server-texts.js").read_text()
-    start = src.index("export const SERVER_TEXTS = [")
+    start = src.index("const SERVER_TEXTS = [")
     block = src[start : src.index("\n];", start)]
     return [json.loads(f'"{s}"') for s in STRING.findall(block)]
 

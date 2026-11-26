@@ -4,8 +4,9 @@
 // (ui-src/start.js) loads only the dictionary of the page language, before this script:
 // it sets SFM_LANG (the code) and the dictionary file SFM_TEXTS; without a loaded
 // dictionary the page is English.
-// Texts from the server or a Shelly (messages, log entries) stay English; dates and
-// times keep the form "2026-11-23 03:00" in every language.
+// Status messages and errors of the server are translated by server-texts.js; log
+// entries and texts of a Shelly stay English. Dates and times keep the form
+// "2026-11-23 03:00" in every language.
 import {resolve, STORE_KEY} from "./lang.js";
 
 /** Store the language choice for the next page load (this browser only). */

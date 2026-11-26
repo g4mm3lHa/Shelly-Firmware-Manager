@@ -401,13 +401,15 @@ downloads, and the free disk space.
 1. Tick the devices under "Updates Available" and click **Review & install** (or use
    "Install update" in the row menu, or **Install** behind a device in the Firmware tab).
 2. The dialog shows installed and target version, build date, size, SHA-256, source and
-   the changelog (security entries and entries for this model are highlighted). The
+   the changelog, folded – the chevron opens it (security entries and entries for this
+   model are highlighted). The
    section **Before installing** checks two points: **Previous version** (Gen2+: is the
    installed version stored, so a downgrade stays possible?) and **Wi-Fi signal** (read
    from the device when the dialog opens; −80 dBm and below is weak, the download may
    fail). Devices on the cable have no signal line; "unknown" means the device did not
    report a value. For several devices only the
-   findings per device are listed.
+   findings are listed, one line per check; a check that concerns more than one device
+   shows their number and opens to list them.
 3. **Approve installation.** The Shelly downloads the firmware from the app and restarts.
 
 Gen2+ devices report their progress over the device connection (the status label shows
@@ -669,12 +671,11 @@ the user of the check that fetched it; scheduled checks and their downloads name
 in its details in the normal text colour – they are not contacted and never make the
 entry a warning or error. Removed devices are counted too ("1 removed"); each one is a
 warning if it still answers at its last address and an error if not. A device that does not
-answer is an error; a battery device that is asleep is a warning. Filters and a device search help to find entries; **Hide successful entries** leaves only warnings and errors. Passwords never appear in the log. Consecutive
-entries of the same device are marked by a bar at the side.
+answer is an error; a battery device that is asleep is a warning. Filters and a device search help to find entries; **Hide successful entries** leaves only warnings and errors. Passwords never appear in the log.
 
 The tab updates itself when a new entry is written. A red "!" on the tab marks error
 entries written since you last opened it in this browser; when you open the tab, the
-entries that are new since then are lightly highlighted.
+entries that are new since then are marked by a bar on the left.
 
 The bin icon deletes a single entry, **Delete all logs** the whole log (each after a
 confirmation). After clearing, one entry remains that names who cleared the log.
@@ -682,7 +683,7 @@ confirmation). After clearing, one entry remains that names who cleared the log.
 ### Settings
 
 First the card **Device Passwords**, then all options from [Configuration](#configuration) in the cards **Checks**, **Download
-Server** (with **Test connection**, see [Download base URL](#download-base-url)), **Firmware & Storage**, **Backups**, **Logs**, **Advanced** and **Display** (Base colour). **Save settings** stands above and below the
+Server** (with **Test connection**, see [Download base URL](#download-base-url)), **Firmware & Storage**, **Backups**, **Logs**, **Advanced** and **Display** (**Base colour**). **Save settings** stands above and below the
 cards and saves all of them. If you leave the tab or choose another language with unsaved
 changes, the app asks first: **Discard** drops them, **Save** saves them before it goes on. The
 i-icon next to a setting shows its help (on touch devices with a tap). While you type, a
@@ -724,7 +725,8 @@ Assistant Shelly integration as well.
 **Store the existing device password in this app** or **Set password** (enables the
 protection of unprotected devices, changes it on protected devices whose password is
 stored) – tick the devices ("All devices that fit") and enter one password for all of
-them. Devices the action does not fit are greyed out with the reason (e.g. protected
+them. Devices the action does not fit are folded at the end under **n not possible**,
+each with the reason (e.g. protected
 without stored password: store the current password first; state unknown: reload the
 device info). Each device is still set, verified, stored and logged on its own, as in
 the single-device dialog; up to **Max. parallel installations** devices at the same time. A

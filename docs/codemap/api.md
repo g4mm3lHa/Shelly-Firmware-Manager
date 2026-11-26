@@ -58,7 +58,7 @@ Part of `docs/CODEMAP.md`; read when you change routes: the table and the middle
 | `POST /api/settings/connection-test` | `run_connection_test` (`device`: ID or null = automatic; one test at a time, else 409; answer: the result as in `connection_test`) |
 | `POST /api/settings/download-base/confirm` | `confirm_download_base` |
 | `GET /api/settings/app-page` | `app_page` (link to the app page, changelog) |
-| `GET /static/…` | `app.js`, `style.css` (immutable cache with `?v=`) |
+| `GET /static/…` | `start.js` (loader), `app.js`, `i18n-<code>.js`, `style.css` (immutable cache with `?v=`) |
 
 Download server (port 8098): `GET|HEAD /<sha256>.<zip|bin|gbl>` → `may_download`,
 `record_download` (GET only); `GET|HEAD /connection-test/<32 hex>` → `test_fetched` (only the

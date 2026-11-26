@@ -454,11 +454,13 @@ async def demo_refresh(device_id):
     values["outputs"] = [{**o, "name": o.get("name") or o["key"]} for o in values["outputs"]]
     values.setdefault("ntp", "time.local")
     # Access point details of a Gen2+ device: the default name, protected while it is on
-    # (every second device also has a range extender)
+    # (every second device also has a range extender); stored like a real read, so the
+    # app decides on the same values as the form
     if dev.get("gen", 1) >= 2 and "ap_config" not in values:
-        values["ap_config"] = {"ssid": f"{dev.get('type') or 'Shelly'}-{device_id[-12:].upper()}",
-                               "open": False if dev.get("ap") is True else True,
-                               "range_extender": False if int(device_id, 16) % 2 else None}
+        values["ap_config"] = dev["ap_config"] = {
+            "ssid": f"{dev.get('type') or 'Shelly'}-{device_id[-12:].upper()}",
+            "open": False if dev.get("ap") is True else True,
+            "range_extender": False if int(device_id, 16) % 2 else None}
     return values
 
 m.refresh_settings = demo_refresh
