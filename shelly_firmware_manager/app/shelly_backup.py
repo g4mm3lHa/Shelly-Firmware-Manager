@@ -361,11 +361,12 @@ def _show(value: object) -> str:
 
 def _holder(path: tuple[str, ...], gen: int) -> tuple[str, ...]:
     """Path of the object that holds a setting: the component for Gen2+ ("ble" for
-    ble.observer.enable, so a removed sub-object counts as well); for Gen1 the channel
-    entry ("relays", "0") of a channel list, else the top-level object, or () – /settings
-    itself – for a top-level value."""
-    if gen < 2 and len(path) >= 3 and path[0] in GEN1_CHANNELS and path[1].isdigit():
-        return path[:2]
+    ble.observer.enable, so a removed sub-object counts as well; () for a value outside a
+    component); for Gen1 the channel entry ("relays", "0") of a channel list, else () –
+    /settings itself, so an object the firmware dropped from /settings counts as removed
+    as well."""
+    if gen < 2:
+        return path[:2] if len(path) >= 3 and path[0] in GEN1_CHANNELS and path[1].isdigit() else ()
     return path[:1] if len(path) >= 2 else ()
 
 
@@ -594,7 +595,7 @@ def after_update(gen: int, before: dict[str, Any], now: dict[str, Any]) -> dict[
     "scripts": {"before", "again", "stopped"}}.
 
     changed: settings with another value now ("now" "–": the whole component or Gen1
-    object that held the setting is no longer reported); new: settings the backup did
+    channel that held the setting is no longer reported); new: settings the backup did
     not have – the new firmware brought them, with Shelly's default value; gone: settings
     the backup had that the device no longer reports although it still reports their
     holder (_holder) – only the firmware changes the shape of the config, so the new

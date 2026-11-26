@@ -265,13 +265,15 @@ def no_update_nsteps(monkeypatch):
 def quick_install(monkeypatch):
     """Short installation timings for installs that run to the end in a test
     (first poll at once, then every 10 ms, limits of 0.1 s and 0.3 s, also for the second
-    pass of a two-step update)."""
+    pass of a two-step update, which polls every 10 ms as well)."""
     monkeypatch.setattr(manager_installs, "INSTALL_FIRST_CHECK_S", 0)
     monkeypatch.setattr(manager_installs, "INSTALL_POLL_S", 0.01)
     monkeypatch.setattr(manager_installs, "INSTALL_NO_DOWNLOAD_S", 0.1)
     monkeypatch.setattr(manager_installs, "INSTALL_WAIT_S", 0.3)
     monkeypatch.setattr(manager_installs, "TWO_STEP_START_S", 0.3)  # second pass of a two-step update
     monkeypatch.setattr(manager_installs, "TWO_STEP_FINISH_S", 0.3)
+    monkeypatch.setattr(manager_installs, "OTA_POLL_S", 0.01)
+    monkeypatch.setattr(manager_installs, "OTA_BOOT_WAIT_S", 0.3)
 
 
 @pytest.fixture

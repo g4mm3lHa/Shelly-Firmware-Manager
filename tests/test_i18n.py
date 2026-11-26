@@ -2,6 +2,7 @@
 dictionary (i18n-<code>.js), and the entries keep the {placeholders} of their English text."""
 
 import ast
+import itertools
 import json
 import re
 from html.parser import HTMLParser
@@ -144,6 +145,15 @@ def test_translations_keep_the_placeholders():
         for en, text in dictionary.items():
             assert sorted(re.findall(r"\{\w+\}", en)) == sorted(re.findall(r"\{\w+\}", text)), (code, en)
             assert text.strip(), (code, en)
+
+
+def test_dictionaries_are_sorted_case_insensitively():
+    """The entries of every dictionary stay in the case-insensitive order of their English text
+    (so a new entry has one place and the files of all languages compare line by line)."""
+    for code, dictionary in dictionaries().items():
+        keys = list(dictionary)
+        unsorted = [(a, b) for a, b in itertools.pairwise(keys) if a.casefold() > b.casefold()]
+        assert not unsorted, (code, unsorted[:3])
 
 
 def test_dictionaries_have_no_unused_entries():

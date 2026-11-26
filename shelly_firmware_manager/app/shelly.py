@@ -949,12 +949,15 @@ async def update_nsteps(
     pass – it is never used to choose an offer.
 
     None when the device reports no such entry, nsteps is no plain integer from 0 to
-    NSTEPS_MAX (a bool or a text is refused), or the request fails in any way within
-    NSTEPS_TIMEOUT_S (a sign-in block included: no further request is sent)."""
+    NSTEPS_MAX (a bool or a text is refused), or the request fails in any other way
+    within NSTEPS_TIMEOUT_S. A refused or blocked sign-in (AuthError) is raised, so the
+    caller sends no further signed request (no retry is made here)."""
     try:
         wanted = parse_version(version)
         async with asyncio.timeout(NSTEPS_TIMEOUT_S):
             status = await _rpc(session, origin, "Sys.GetStatus", auth=auth)
+    except AuthError:
+        raise
     except (TimeoutError, ShellyError, aiohttp.ClientError, OSError):
         return None
     updates = status.get("available_updates")

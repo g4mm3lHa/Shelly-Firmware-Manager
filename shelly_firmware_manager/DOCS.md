@@ -173,7 +173,7 @@ available version, status and last check.
 **Areas:** as soon as a device is in an area of Home Assistant, the **Area** column
 (after **Device**; on a phone the first row of the details) and the area icon next to
 **Filter** appear. The area filter takes several areas at once, also **Without area**;
-search finds the area too. The app reads the areas at every check; a single check is
+search finds the area too. The app reads the areas at every check. A single check is
 meant to use the areas read up to 60 seconds before (see [How a check works](#how-a-check-works)).
 
 **Security:** a strip above the list counts the devices without password protection
@@ -370,7 +370,7 @@ A check (all devices, a single device or the schedule) works in this order:
    installation at your own risk like on Gen2+.
 
 Each check reads the device registry, the areas and the battery sensors from Home
-Assistant; a full check also reads the Shelly config entries and discoveries. This is
+Assistant. A full check also reads the Shelly config entries and discoveries. This is
 meant to go over one connection per check.
 
 A single check (**Check for updates**, **Offer update now**, after an intermediate
@@ -462,7 +462,18 @@ the Shelly off meanwhile.
 
 If the second step does not start or finish in time, the installation fails: start it
 again. A missed answer only counts as a restart when the running time of the Shelly shows
-one. Without the device connection the result is "Unconfirmed": check the device, then install.
+one. Without the device connection the same times apply, but the result is "Unconfirmed":
+check the device, then install.
+
+The app recognises the new download by the address of the Shelly. Behind network address
+translation (NAT, e.g. Docker or a router between the networks) every download comes from
+another address. Such a download is meant to count for the Shelly while no other device
+installs the same file. While several do, the app cannot tell them apart. It then waits up
+to 5 minutes after that download instead of failing.
+
+After the update command the app reads the running time only as a hint. If the Shelly
+refuses or blocks the sign-in for it, the installation goes on without it. The app then
+sends no further signed request to the Shelly during this installation.
 
 Devices without this connection (Gen1, or when it is not available) are checked every
 10 seconds until they report exactly the target version (at most 5 minutes). If that
@@ -702,10 +713,11 @@ first changed settings (without their values, which may hold e.g. a server addre
 stopped scripts. Downgrades and
 installations without a backup **Before update** get no comparison.
 
-Settings the new firmware no longer has, such as `ble.enable` (removed in Gen2+ firmware 2.0.0),
-are meant to be listed apart under **Removed with the firmware**. They do not count as changed,
-add no line below the firmware and are only counted in the log. A component the device no
-longer reports at all still counts as changed.
+Settings the new firmware no longer has are meant to be listed apart under **Removed with the
+firmware**, for example `ble.enable` (removed in Gen2+ firmware 2.0.0). They do not count as
+changed, add no line below the firmware and are only counted in the log. A component the device
+no longer reports at all still counts as changed. On Gen1 this is a channel; an object missing
+from the settings counts as removed.
 
 ### Logs
 
@@ -895,7 +907,7 @@ Gen2+ firmware is downloaded over HTTPS only.
 | Download does not match the SHA-256 named by the manufacturer's URL | The download was damaged or altered and was not stored – check again |
 | Many "Download rejected" lines in the app log | Only the first rejected request per address and 10 minutes is logged; the others are counted in one line |
 | Connection to the Shelly lost before the update command – no answer in n attempts within n s. Nothing was installed. | The Shelly did not answer the check right before the update command, usually because of weak Wi-Fi. Improve the reception (access point, antenna position) and try the installation again |
-| Connection to the Shelly lost before the update command – nothing was installed | The Shelly asked for its password, or briefly blocked sign-ins, over the WebSocket, and the connection ended before the app could send the update command again. Nothing reached the device as a command. Try the installation again |
+| Connection to the Shelly lost before the update command – nothing was installed | The Shelly asked for its password, or briefly blocked sign-ins, over the WebSocket. The connection then ended before the app could send the update command again. Nothing reached the device as a command. Try the installation again |
 | The Shelly restarted unexpectedly before the update command (running for n s). Nothing was installed. | The Shelly restarted on its own while the app was waiting for it (power supply, firmware fault, Wi-Fi loss). Check the device and try the installation again |
 | The password contains a character the Shelly cannot use: … (access point form) | Use only letters without umlauts or accents, digits and common symbols (printable ASCII) |
 | The device did not answer within 2 minutes after its restart – nothing was installed | **Restart the device first** restarted the Shelly, but it did not come back in time. Check that it is online, then try the installation again |

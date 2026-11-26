@@ -1352,6 +1352,17 @@ def test_after_update_of_a_gen1_device():
     assert result["scripts"] == {"before": 0, "again": 0, "stopped": []}
 
 
+def test_after_update_of_a_gen1_device_that_dropped_an_object():
+    """Gen1: a whole object of /settings the device no longer reports (here mqtt) while it still
+    reports /settings was removed by the firmware – removed fields, no change (only a channel that
+    is no longer reported counts as changed)."""
+    before = {"settings": {"mqtt": {"enable": False, "keep_alive": 60}, "mode": "relay"}, "actions": None}
+    now = {"settings": {"mode": "relay"}, "actions": None}
+    result = shelly_backup.after_update(1, before, now)
+    assert result["changed"] == [] and result["changed_count"] == 0
+    assert result["gone"] == [{"key": "mqtt · enable", "before": "false"}, {"key": "mqtt · keep_alive", "before": "60"}]
+
+
 async def test_comparison_of_an_update_that_only_removed_fields(net, shellys, monkeypatch, quick_install):
     """Fields the firmware removed are kept and counted, but raise no warning; the log
     names neither them nor their values."""

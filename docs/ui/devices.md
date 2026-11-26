@@ -330,8 +330,10 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
   (two-step update)" (the counter goes back from 6 to 4), the time line, then "Two-step
   update: the Shelly restarted on <version> and installs the update again. Do not switch it
   off.", "Installed: …", "Target: …". No second pass within 180 s, or no target version
-  within 300 s after the new download: red "Error" with "Install" for the retry. Log line of
-  a confirmed one: "Installed in two steps (the Shelly reorganised its memory)".
+  within 300 s after the new download: red "Error" with "Install" for the retry. Without the
+  device connection (polling) the same steps, colours and times apply; the result there is
+  "Unconfirmed" (check the device, then install). Log line of a confirmed one: "Installed in
+  two steps (the Shelly reorganised its memory)".
 - **Access point password (F4.1):** hint "8 to 63 characters, letters without umlauts or
   accents, digits and common symbols only. Sent to the Shelly only – …"; a character
   outside printable ASCII is named at once below the field ("The password contains a

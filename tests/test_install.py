@@ -42,10 +42,11 @@ def test_install_timing_constants():
 @pytest.fixture
 def run_install(mgr, monkeypatch, quick_install):
     """Run Manager._install against a device answering with the given versions (None: no
-    answer, e.g. while it restarts)."""
+    answer, e.g. while it restarts). served: the file was served to the device once (at the
+    first poll); hook(version) is called before each answer after the pre-check."""
     monkeypatch.setattr(manager_installs, "INSTALL_NO_DOWNLOAD_S", 0.08)  # clearly before the upper limit
 
-    async def run(old, target, answers, gen=2, served=False):
+    async def run(old, target, answers, gen=2, served=False, hook=None):
         dev = {"name": "Kitchen", "gen": gen, "origin": "http://192.168.1.10", "mac": "AA", "file": "x.zip",
                "version": old, "pending_version": target, "pending_build": "b-old"}
         mgr.devices[A] = dev
@@ -56,9 +57,11 @@ def run_install(mgr, monkeypatch, quick_install):
                 calls.append("pre")
                 return {"mac": "AA", "build": "b-old", "version": old}
             calls.append("poll")
-            if served:
+            if served and "x.zip" not in mgr.downloads:
                 mgr.downloads["x.zip"] = {"served": {"192.168.1.10": 1}, "rejected": set()}
             version = answers[min(len(calls) - 2, len(answers) - 1)]
+            if hook is not None:
+                hook(version)
             if version is None:
                 raise shelly.ShellyError("not reachable")
             return {"mac": "AA", "build": "b-old", "version": version}
@@ -629,18 +632,200 @@ async def test_second_pass_total_limit_after_the_new_download(mgr, ota_install, 
     assert downloading and downloading[-1]["usual"] < downloading[-1]["give_up"]
 
 
-async def test_second_pass_ignores_downloads_of_other_addresses(mgr, ota_install, monkeypatch):
-    """A download from an address of no known device (another Shelly behind Docker without the
-    sender IP) does not start the second pass: the start window stays."""
-    monkeypatch.setattr(manager_installs, "TWO_STEP_FINISH_S", 0.1)
+def other_device(mgr, status=manager_core.STATUS_CURRENT, file=None):
+    """A second known device B at 192.168.1.11 (installing the same file x.zip with file)."""
+    mgr.devices[B] = {"name": "Hall", "gen": 2, "origin": "http://192.168.1.11", "mac": "BB", "status": status,
+                      "file": file, "version": "2.1.1"}
+
+
+async def test_second_pass_counts_an_unattributable_download_of_the_only_installation(mgr, ota_install,
+                                                                                      monkeypatch):
+    """NAT (Docker without the sender IP, restrict_downloads_to_devices off): the download comes
+    from an address of no known device. While no other device installs the file it can only be
+    this device's: the second pass started, so the total limit after it applies and the target
+    version after the start window is confirmed."""
+    monkeypatch.setattr(manager_installs, "TWO_STEP_FINISH_S", 3)
+    mgr.restrict_downloads = False
+    versions = [None, *["2.1.1"] * 30, "2.2.0"]
+    started = time.monotonic()
+    result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, versions, old="2.1.1", target="2.2.0",
+                                          hook=serve_again(mgr, address="172.30.32.1"))
+    assert result == (True, None)
+    assert time.monotonic() - started > manager_installs.TWO_STEP_START_S  # confirmed after the start window
+
+
+async def test_second_pass_never_counts_the_download_of_another_known_device(mgr, ota_install, monkeypatch):
+    """A download from the address of another known Shelly is that device's: the start window stays."""
+    monkeypatch.setattr(manager_installs, "TWO_STEP_FINISH_S", 3)
+    mgr.restrict_downloads = False
+    other_device(mgr)
+    result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, [None, "2.1.1"], old="2.1.1", target="2.2.0",
+                                          hook=serve_again(mgr, address="192.168.1.11"))
+    assert isinstance(result, shelly.ShellyError) and "did not start within 0.4 s" in str(result)
+
+
+async def test_second_pass_waits_longer_for_an_ambiguous_download(mgr, ota_install, monkeypatch):
+    """NAT while another device installs the same file: the download cannot be attributed, so it
+    does not start the second pass, but the start window grows to the total limit after it – an
+    error only when the second pass still has not shown itself then."""
+    mgr.restrict_downloads = False
+    other_device(mgr, manager_core.STATUS_INSTALLING, "x.zip")
+    started = time.monotonic()
     result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, [None, "2.1.1"], old="2.1.1", target="2.2.0",
                                           hook=serve_again(mgr, address="172.30.32.1"))
-    assert isinstance(result, shelly.ShellyError) and "did not start within 0.4 s" in str(result)
+    assert isinstance(result, shelly.ShellyError) and "did not start within 1 s" in str(result)
+    assert time.monotonic() - started > 0.6  # longer than the start window of 0.4 s
+
+
+def test_the_address_of_an_installing_device_is_always_counted(mgr):
+    """The diagnosis keeps MAX_SERVED_IPS addresses per file, but the download of a device that
+    installs the file is counted even when they are taken (earlier installations of a batch)."""
+    dev = install_device(mgr)
+    dev["status"] = manager_core.STATUS_INSTALLING
+    mgr.downloads["x.zip"] = {"served": {f"192.168.2.{n}": 1 for n in range(manager_installs.MAX_SERVED_IPS)},
+                              "rejected": set()}
+    mgr.record_download("x.zip", "192.168.3.1")  # another client: not recorded
+    mgr.record_download("x.zip", "192.168.1.10")
+    assert "192.168.3.1" not in mgr.downloads["x.zip"]["served"]
+    assert mgr.downloads["x.zip"]["served"]["192.168.1.10"] == 1
+
+
+async def test_second_pass_download_during_a_gap_is_checked_for_a_restart(mgr, ota_install, monkeypatch):
+    """The device downloads the file again while it does not answer (weak Wi-Fi), then answers
+    on its old version and runs shorter than the gap: it restarted after the new download, so
+    the update was not applied – at once, not after the total limit."""
+    monkeypatch.setattr(manager_installs, "TWO_STEP_FINISH_S", 3)
+    reads = running_for(monkeypatch, 0)
+    gaps = []
+
+    def hook(version):
+        if version is None:
+            gaps.append(version)
+            if len(gaps) == 2:  # the gap of the second pass (the first one is the restart of the first pass)
+                mgr.may_download("x.zip", "192.168.1.10")
+                mgr.record_download("x.zip", "192.168.1.10")
+
+    started = time.monotonic()
+    result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, [None, "2.1.1", "2.1.1", None, "2.1.1"],
+                                          old="2.1.1", target="2.2.0", hook=hook)
+    assert isinstance(result, shelly.ShellyError) and "still reports 2.1.1 – the update was not applied" in str(result)
+    assert time.monotonic() - started < 2 and reads[-1] == 0
+
+
+def refused_after(monkeypatch, refusal, first=1):
+    """shelly.link_status answers the first reads (the pre-check before the update command),
+    then raises refusal (a refused or blocked sign-in). Returns the list of reads."""
+    reads = []
+
+    async def link(*_args, **_kwargs):
+        reads.append(len(reads) + 1)
+        if len(reads) > first:
+            raise refusal
+        return {"uptime": None, "rssi": None}
+
+    monkeypatch.setattr(shelly, "link_status", link)
+    return reads
+
+
+@pytest.mark.parametrize("refusal", [shelly.AuthBlockedError("blocked"), shelly.AuthError("password")])
+async def test_refused_running_time_after_the_command_keeps_the_installation(mgr, ota_install, monkeypatch,
+                                                                            refusal):
+    """Second pass over the device connection: the running time after a gap meets a refused or
+    blocked sign-in. That is an unknown running time (no restart), the second pass goes on and
+    is confirmed; no further signed request goes to the device (later gaps read nothing)."""
+    reads = refused_after(monkeypatch, refusal)
+    versions = [None, "2.1.1", "2.1.1", None, "2.1.1", None, "2.1.1", "2.2.0"]
+    result, dev, _phases = await ota_run(mgr, monkeypatch, DONE, versions, old="2.1.1", target="2.2.0",
+                                         hook=serve_again(mgr), full=True)
+    assert result is True and dev["status"] == manager_core.STATUS_CURRENT and not dev.get("install_failed")
+    assert mgr.events.entries[-1]["event"] == "confirmed" and reads == [1, 2]  # pre-check, then one refused read
+
+
+async def test_refused_update_steps_end_the_signed_requests(mgr, ota_install, monkeypatch):
+    """A refused sign-in while the device steps are read (two-step signal): no signal from the
+    device, and the running time after a later gap is not read either."""
+    reads = running_for(monkeypatch, 0)
+    asked = []
+
+    async def nsteps(*_args, **_kwargs):
+        asked.append(True)
+        raise shelly.AuthBlockedError("blocked")
+
+    monkeypatch.setattr(shelly, "update_nsteps", nsteps)
+    versions = [None, "2.1.1", "2.1.1", None, "2.1.1", "2.2.0"]
+    result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, versions, old="2.1.1", target="2.2.0",
+                                          hook=serve_again(mgr))
+    assert result == (True, None) and asked == [True] and reads == [0]  # only the pre-check read
+    assert mgr.install_steps[A]["signin_refused"]
+
+
+def test_no_signed_version_query_after_a_refusal(mgr, monkeypatch):
+    """After a refused sign-in in the installation the version queries carry no credentials."""
+    monkeypatch.setattr(mgr.credentials, "auth_for", lambda *_a: "credentials")
+    mgr._set_step(A, "install")
+    assert mgr._poll_auth(A)(2) == "credentials"
+    mgr._update_step(A, signin_refused=True)
+    mgr._set_step(A, "reboot")  # stays with the installation
+    assert mgr._poll_auth(A)(2) is None and mgr._signin_refused(A)
+
+
+async def test_polling_refused_running_time_is_no_error(run_install, monkeypatch, mgr):
+    """Without the device connection: a refused or blocked running-time read after the gap is an
+    unknown running time – the wait goes on (here: the target version), never an error, and no
+    further signed request is sent."""
+    reads = refused_after(monkeypatch, shelly.AuthBlockedError("blocked"))
+    answers = ["2.1.1", None, "2.1.1", None, "2.1.1", "2.2.0"]
+    ok, diagnosis, dev, _polls = await run_install("2.1.1", "2.2.0", answers, served=True)
+    assert ok and diagnosis is None and dev["status"] == manager_core.STATUS_CURRENT
+    assert reads == [1, 2] and mgr.install_steps[A]["signin_refused"]
+
+
+async def test_polling_second_pass_steps_follow_the_events_path(run_install, monkeypatch, mgr):
+    """Without the device connection the second pass shows the same steps: "install" with
+    second_pass and the usual time of the second pass counted from its start (not yellow at
+    once), "reboot" while the device does not answer, "install" again after it."""
+    running_for(monkeypatch, 0)
+    seen = []
+    answers = ["2.1.1", None, "2.1.1", "2.1.1", None, None, "2.1.1", "2.2.0"]
+    ok, _diagnosis, _dev, _polls = await run_install("2.1.1", "2.2.0", answers, served=True,
+                                                     hook=lambda _v: seen.append(mgr.install_step_view(A)))
+    assert ok
+    second = [view for view in seen if view["second_pass"]]
+    assert [view["step"] for view in second] == ["install", "install", "reboot", "reboot", "install"]
+    assert (second[0]["usual"], second[0]["late"], second[0]["give_up"]) == (
+        manager_installs.TWO_STEP_USUAL_S, False, manager_installs.TWO_STEP_START_S)
+    assert second[0]["seconds"] == 0 and second[-1]["usual"] == manager_installs.TWO_STEP_USUAL_S
+
+
+async def test_polling_second_pass_has_the_total_limit_after_its_new_download(run_install, monkeypatch, mgr):
+    """Without the device connection: once the device downloads the file again, the second pass
+    has TWO_STEP_FINISH_S – the target version after the start window is still confirmed."""
+    monkeypatch.setattr(manager_installs, "TWO_STEP_START_S", 0.2)
+    monkeypatch.setattr(manager_installs, "TWO_STEP_FINISH_S", 3)
+    running_for(monkeypatch, 0)
+    seen = []
+    answers = ["2.1.1", None, *["2.1.1"] * 40, "2.2.0"]
+    ok, diagnosis, dev, _polls = await run_install("2.1.1", "2.2.0", answers, served=True,
+                                                   hook=serve_again(mgr, at=12, seen=seen))
+    assert ok and diagnosis is None and dev["status"] == manager_core.STATUS_CURRENT
+    downloading = [view for view in seen if view and view["give_up"] == 3]
+    assert downloading and downloading[-1]["usual"] == manager_installs.STEP_USUAL_POLLING_S
+
+
+async def test_polling_second_pass_other_version_is_unconfirmed(run_install, monkeypatch):
+    """Another version during the second pass without the device connection: unconfirmed with
+    that version as hint (as on the rest of the polling path)."""
+    running_for(monkeypatch, 0)
+    ok, diagnosis, dev, _polls = await run_install("2.1.1", "2.2.0", ["2.1.1", None, "2.1.1", "2.1.5"],
+                                                   served=True)
+    assert not ok and dev["status"] == manager_core.STATUS_UNCLEAR
+    assert diagnosis == "The Shelly reports 2.1.5 instead of the target version 2.2.0"
 
 
 async def test_update_nsteps_reads_the_available_updates(monkeypatch):
     """Sys.GetStatus available_updates: nsteps of the entry with the target version (stable or
-    beta, compared as version numbers); 0 is a value; anything else, or a failed request, is None."""
+    beta, compared as version numbers); 0 is a value; anything else, or a failed request, is None –
+    except a refused or blocked sign-in, which is raised."""
     from conftest import REAL_UPDATE_NSTEPS
 
     answer = {}
@@ -670,9 +855,13 @@ async def test_update_nsteps_reads_the_available_updates(monkeypatch):
     for status, expected in cases:
         answer.update(status=status)
         assert await REAL_UPDATE_NSTEPS(None, "http://h", "2.2.0") == expected, status
-    for failure in (shelly.ShellyError("x"), shelly.AuthBlockedError("blocked"), TimeoutError()):
+    for failure in (shelly.ShellyError("x"), TimeoutError()):
         answer["raise"] = failure
         assert await REAL_UPDATE_NSTEPS(None, "http://h", "2.2.0") is None
+    for refusal in (shelly.AuthBlockedError("blocked"), shelly.AuthError("password")):
+        answer["raise"] = refusal  # the caller must know: no further signed request
+        with pytest.raises(type(refusal)):
+            await REAL_UPDATE_NSTEPS(None, "http://h", "2.2.0")
     answer.update(slow=True, status=cases[0][0])
     answer["raise"] = None
     assert await REAL_UPDATE_NSTEPS(None, "http://h", "2.2.0") is None  # own time limit
