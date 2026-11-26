@@ -150,7 +150,7 @@ export function editAccessPoint(d) {
     const conf = live.ap_config;
     if (typeof live.ap !== "boolean" || !conf) { message(title, t("This device does not offer an access point switch.")); return; }
     const protectedNow = live.ap && conf.open === false, error = formError();
-    // Ticked also while it is off (mockup H1): the form is opened to set it up and turn it on
+    // Ticked also while it is off: the form is opened to set it up and turn it on
     const [enable, enableLabel] = checkbox(t("Access point on"), true);
     const ssid = input("text", {value: conf.ssid || "", maxLength: 29, autocomplete: "off", spellcheck: false});
     // Security: a running protected access point keeps its password unless changed

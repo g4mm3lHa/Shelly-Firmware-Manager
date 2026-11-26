@@ -131,7 +131,7 @@ function beforeInstalling(devs) {
   readSignals(devs).then(fill);
   return block;
 }
-// Imported files (V1): offered only while Shelly cannot be asked (store fallback)
+// Imported files: offered only while Shelly cannot be asked (store fallback)
 export const IMPORT_WARNING = t("This file comes from an imported firmware store. The Shelly update server has not confirmed it – it is only as trustworthy as the export you imported.");
 const IMPORT_FALLBACK = d => (d.gen === 1 ? t("Shelly's firmware list could not be loaded.") : t("The Shelly update server could not be asked.")) +
   " " + t("This stored version comes from an imported firmware store and Shelly has not confirmed it – it is only as trustworthy as the export you imported. It is offered for a manual installation at your own risk.") +

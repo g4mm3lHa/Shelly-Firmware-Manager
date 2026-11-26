@@ -8,6 +8,7 @@ import json
 import data_paths
 import pytest
 import shelly
+import shelly_cloud
 from conftest import A, B, C
 from shelly import ShellyError
 
@@ -21,6 +22,36 @@ async def test_settings_refused_while_device_checked(mgr, net):
     with pytest.raises(ShellyError):
         mgr._settings_device(B)
     net.gate.set()
+    await task
+    mgr._settings_device(B)  # allowed again
+
+
+async def test_settings_refused_while_full_check_waits_for_the_server(mgr, net, monkeypatch):
+    """A full check (no single-device reservation) blocks settings, restart and password of
+    a device also while its check waits for the Shelly update server ("server")."""
+    await mgr.scan()
+    server = asyncio.Event()
+    original = shelly_cloud.fetch_offer
+
+    async def fetch_offer(*args, **kwargs):
+        await server.wait()
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(shelly_cloud, "fetch_offer", fetch_offer)
+    task = asyncio.create_task(mgr.scan())
+    for _ in range(100):
+        if mgr.activity.get(B) == "server":
+            break
+        await asyncio.sleep(0.01)
+    assert mgr.activity.get(B) == "server" and mgr.device_checks == {}
+    for action in (
+        lambda: mgr.change_settings(B, {"eco": True}, "u"),
+        lambda: mgr.restart_device(B),
+        lambda: mgr.set_device_password(B, "remove", confirm=True),
+    ):
+        with pytest.raises(ShellyError, match="being checked"):
+            await action()
+    server.set()
     await task
     mgr._settings_device(B)  # allowed again
 
@@ -667,6 +698,17 @@ async def test_access_point_form_logs_no_password(mgr, net, monkeypatch, caplog)
     assert mgr.events.entries[-1]["changes"] == []
     with pytest.raises(ValueError, match="range extender"):
         await mgr.change_settings(A, {"ap_config": {"enable": True, "security": "keep", "range_extender": True}}, "u")
+    # "keep" only for a running access point with a password: an open one, one that is
+    # off (open by default) or one whose protection is not reported is refused unwritten
+    count = len(written)
+    for ap, is_open in ((True, True), (False, True), (False, False), (True, None)):
+        mgr.devices[A].update(ap=ap, ap_config={"ssid": "Garden", "open": is_open, "range_extender": None})
+        with pytest.raises(ValueError, match="Choose a password or an open access point"):
+            await mgr.change_settings(A, {"ap_config": {"enable": True, "security": "keep"}}, "u")
+    assert len(written) == count
+    mgr.devices[A].update(ap=True, ap_config={"ssid": "Garden", "open": False, "range_extender": None})
+    await mgr.change_settings(A, {"ap_config": {"enable": True, "security": "keep", "ssid": "Yard"}}, "u")
+    assert written[-1]["ap_config"] == {"enable": True, "ssid": "Yard", "security": "keep"}
     mgr.devices[A]["gen"] = 1
     with pytest.raises(ValueError):
         await mgr.change_settings(A, {"ap_config": {"enable": False}}, "u")
