@@ -6,7 +6,7 @@ import {lang} from "./i18n.js";
 import {buildChooser, closeRowMenu, loadPrefs, renderDevices, syncChooser} from "./devices.js";
 import {renderFirmware} from "./firmware.js";
 import {mobileQuery, renderLogs} from "./logs.js";
-import {IMPORT_OWN, importDialog, renderSettings} from "./app-settings.js";
+import {IMPORT_OWN, importDialog, renderSettings, resetBaseColor} from "./app-settings.js";
 import "./install.js";
 import {renderSchedules} from "./schedules.js";
 import {renderBackups} from "./backups.js";
@@ -153,6 +153,7 @@ export function showView(v) {
   // "Check now" belongs to the device data, not to the settings: hidden there, its place
   // is kept so the header does not move when the tab changes
   $("scan").classList.toggle("off-view", v === "settings");
+  if (v !== "settings") resetBaseColor();   // a base colour previewed in the Settings tab was not saved
   if (v === "settings") { ui.options = null; renderSettings(); api("api/settings").then(o => { ui.options = o; renderSettings(); }).catch(e => message(t("Settings"), e.message, "error")); }
   load(true);
 }

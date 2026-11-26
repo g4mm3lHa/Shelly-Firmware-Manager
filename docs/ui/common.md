@@ -161,7 +161,10 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   (`--surf`, `--surf-hi`), one warning text colour (`--warn-text`), control height
   (33 / 44 px). New styles use these tokens.
 - **Design E4 (3.13.0, mockups `design-modern`, approved 2026-11-24):** surfaces tinted
-  with the theme's primary colour instead of lines: page in the card background, cards
+  instead of lines – with the base colour of the Settings tab (3.13.0, approved 2026-11-26):
+  "Default" tints them from the text colour (neutral grey) while the accents (lines, fills,
+  icons, link text, focus outline, ticks) keep the theme's primary colour; a chosen colour
+  replaces the primary colour for surfaces and accents together. Page in the card background, cards
   `--surf` (light themes 4 %, dark 7 %), buttons, tool icons and the tab strip `--surf-hi`
   (10 % / 16 %; the scheme is read from the HA theme). Buttons tonal (tint, link text
   colour, no line), "primary" filled. Tabs: one rounded tinted strip, the active tab
@@ -238,7 +241,8 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   successes never set it; opening the tab clears it. The entries that were unread at that
   moment carry a bar in the primary colour on the left until the tab is left; entries of
   one device are not grouped (design E4, approved 2026-11-24).
-- **Language (F20–F25):** card "Display" at the end of the Settings tab with "Language":
+- **Language (F20–F25):** card "Display" at the end of the Settings tab with "Language"
+  (below it "Base colour", an app option saved with "Save settings", see `settings.md`):
   "Same as Home Assistant" (default, fallback English), English, Deutsch, and since 3.12.0
   Nederlands, Français, Italiano, Español, Polski, Português (own names); applies at once,
   per browser, not part of "Save settings". German uses "du" (without address where

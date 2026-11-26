@@ -74,6 +74,32 @@ def test_keep_installed_and_offer_after_days():
     assert changed == ["keep_installed", "offer_after_days"]
 
 
+
+async def test_base_color_choice(net):
+    """base_color: "default" by default, only the listed values (also over HTTP and in a
+    stored set); the page carries the saved value on its root element, an invalid one the default."""
+    assert app_options.public_view(OPTIONS)["base_color"] == "default"
+    for bad in ("red", "Teal", "#00897b", "", None, 1, True, ["teal"]):
+        with pytest.raises(ValueError):
+            app_options.merge(OPTIONS, {"base_color": bad})
+    new, changed = app_options.merge(OPTIONS, {"base_color": "teal"})
+    assert new["base_color"] == "teal" and changed == ["base_color"]
+    assert app_options.change_list(app_options.with_defaults(OPTIONS), new, changed) == [
+        {"option": "base_color", "old": "default", "new": "teal"}]
+    options, dropped = app_options.take_over({"base_color": "<b>"})
+    assert dropped == ["base_color"] and options["base_color"] == "default"
+    for stored, shown in (("violet", "violet"), ('"><script>', "default"), (None, "default")):
+        client = await web_client(make_manager(net, base_color=stored))
+        try:
+            page = await (await client.get("/")).text()
+            assert f'<html lang="en" data-base-color="{shown}">' in page and "__BASE_COLOR__" not in page
+            if stored == "violet":
+                r = await client.post("/api/settings", json={"base_color": "red"}, headers={"X-CSRF-Token": client.csrf})
+                assert r.status == 400 and "base_color: one of default, blue" in await r.text()
+                assert (await (await client.get("/api/settings")).json())["base_color"] == "violet"
+        finally:
+            await client.close()
+
 def test_allow_downgrade_is_an_optional_switch():
     """allow_downgrade: no default (missing = off), only true/false accepted."""
     without = {k: v for k, v in OPTIONS.items() if k != "allow_downgrade"}

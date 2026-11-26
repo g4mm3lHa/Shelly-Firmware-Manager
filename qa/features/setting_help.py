@@ -1,6 +1,59 @@
-"""Feature suite setting_help: help texts of the Settings tab as tooltips (demo "idle" on 8801)."""
+"""Feature suite setting_help: help texts of the Settings tab as tooltips and the base colour
+of the card Display (demo "idle" on 8801)."""
 
-from features.base import IDLE, OVERFLOW_JS, check, open_page, tip_text
+from features.base import IDLE, OVERFLOW_JS, check, dialog, open_page, tip_text, wait_until
+
+ROOT_COLOR = "() => [document.documentElement.dataset.baseColor, getComputedStyle(document.documentElement).getPropertyValue('--primary-color').trim()]"
+CHOSEN = "() => [document.querySelector('#opt-base_color input:checked').value, document.querySelector('#opt-base_color .swatch-name').textContent]"
+THEME = "#ff0000"  # primary colour of the HA theme, played by an inline style as core.js copies it
+SAVE_BASE = """value => fetch('api/settings', {method: 'POST', body: JSON.stringify({base_color: value}),
+  headers: {'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name=csrf]').content}}).then(r => r.status)"""
+
+
+def _base_color(case, page, f, save):
+    """Card Display: the base colour dots preview at once, mark the form as changed, are
+    dropped by leaving the tab and (save) are stored, kept after a reload."""
+    names = f.evaluate("() => [...document.querySelectorAll('#opt-base_color input')].map(i => [i.value, i.getAttribute('aria-label'), i.dataset.tip])")
+    check(f"{case}: base colour: six named radios", [n[0] for n in names] == ["default", "blue", "teal", "green", "violet", "orange"]
+          and all(n[1] == n[2] for n in names) and names[2][1] == "Teal", str(names))
+    group = f.evaluate("() => { const g = document.getElementById('opt-base_color'); return [g.getAttribute('role'), document.getElementById(g.getAttribute('aria-labelledby')).textContent]; }")
+    check(f"{case}: base colour: one radio group named by its label", group == ["radiogroup", "Base colour"], str(group))
+    f.evaluate(f"() => document.documentElement.style.setProperty('--primary-color', '{THEME}')")
+    check(f"{case}: base colour: Default keeps the theme colour", f.evaluate(ROOT_COLOR) == ["default", THEME]
+          and f.evaluate(CHOSEN) == ["default", "Default"], str(f.evaluate(ROOT_COLOR)))
+    teal = f.locator("#opt-base_color label.swatch", has=f.locator("input[value=teal]"))
+    size = teal.bounding_box()
+    check(f"{case}: base colour: touch target", size["width"] >= (44 if page.viewport_size["width"] <= 700 else 32)
+          and size["height"] >= size["width"] - 0.5, str(size))
+    if page.viewport_size["width"] > 700:
+        f.locator("#opt-base_color input[value=teal]").hover()
+        check(f"{case}: base colour: tooltip with the name", tip_text(f) == "Teal", str(tip_text(f)))
+    teal.click()
+    check(f"{case}: base colour: a dot previews the colour in the whole page",
+          wait_until(lambda: f.evaluate(ROOT_COLOR) == ["teal", "#00897b"]) and f.evaluate(CHOSEN) == ["teal", "Teal"], str(f.evaluate(ROOT_COLOR)))
+    check(f"{case}: base colour: Unsaved changes", f.locator(".form-actions .unsaved").is_visible())
+    f.click("#tab-devices")
+    check(f"{case}: base colour: leaving the tab shows the saved colour", f.evaluate(ROOT_COLOR) == ["default", THEME], str(f.evaluate(ROOT_COLOR)))
+    f.click("#tab-settings")
+    f.wait_for_selector("#opt-base_color")
+    check(f"{case}: base colour: form from the saved settings", f.evaluate(CHOSEN) == ["default", "Default"]
+          and f.locator(".form-actions .unsaved").is_hidden(), str(f.evaluate(CHOSEN)))
+    if not save:
+        return
+    f.locator("#opt-base_color input[value=teal]").focus()   # keyboard: arrows move the choice within the group
+    page.keyboard.press("ArrowRight")
+    check(f"{case}: base colour: arrow key chooses the next dot", wait_until(lambda: f.evaluate(ROOT_COLOR)[0] == "green"), str(f.evaluate(ROOT_COLOR)))
+    try:
+        f.click("#settings-form .form-actions button.primary")
+        check(f"{case}: base colour: named in Save settings?", "Changed: Base colour" in dialog(f)["body"], dialog(f)["body"])
+        f.locator("#dlg-btns button", has_text="Save & restart").click()
+        check(f"{case}: base colour: saved", wait_until(lambda: dialog(f)["title"] == "Settings saved"))
+        page.reload()   # as after the restart: the page of the server carries the saved colour, the Settings tab opens again
+        check(f"{case}: base colour: a reload keeps it", f.evaluate(ROOT_COLOR) == ["green", "#558b2f"], str(f.evaluate(ROOT_COLOR)))
+        f.wait_for_selector("#opt-base_color")
+        check(f"{case}: base colour: chosen dot after the reload", f.evaluate(CHOSEN) == ["green", "Green"], str(f.evaluate(CHOSEN)))
+    finally:
+        check(f"{case}: base colour: demo reset to Default", f.evaluate(SAVE_BASE, "default") == 200)
 
 
 def setting_help(browser, out):
@@ -17,7 +70,7 @@ def setting_help(browser, out):
         described = f.get_attribute("#opt-check_interval_days", "aria-describedby")
         check(f"{case}: help text stays the description of the field", described == "opt-check_interval_days-help", str(described))
         icons = f.locator(".set-name button.help")
-        check(f"{case}: one i-icon per setting", icons.count() == 18, str(icons.count()))
+        check(f"{case}: one i-icon per setting", icons.count() == 19, str(icons.count()))
         name = f.locator("label[for=opt-check_interval_days]")
         info = f.locator(".set-name", has=name).locator("button.help")
         geo = f.evaluate("""() => { const l = document.querySelector('label[for=opt-check_interval_days]'), i = l.nextElementSibling;
@@ -63,6 +116,7 @@ def setting_help(browser, out):
         f.fill("#opt-download_base_url", "http://192.168.1.2:8098")
         page.mouse.move(5, 5)
         page.screenshot(path=out / f"setting-help-{case}.png", full_page=True)
+        _base_color(case, page, f, save=width > 700)
         check(f"{case}: no horizontal overflow", f.evaluate(OVERFLOW_JS) <= 0)
         check(f"{case}: no console errors", not errors, str(errors[:2]))
         ctx.close()
