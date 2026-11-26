@@ -143,8 +143,9 @@ const AP_OPEN_WARNING = t("Anyone within Wi-Fi range can connect to this Shelly 
 const AP_PASSWORD_MIN = 8, AP_PASSWORD_MAX = 63;
 // WPA2: printable ASCII only (no umlauts or accents), as the server checks it
 const AP_PASSWORD_BAD = /[^\x20-\x7e]/u;
-/** First character of the password the Shelly cannot use (a control character as "?"), or null. */
-const apPasswordBad = text => { const m = AP_PASSWORD_BAD.exec(text); return m ? (/\p{Cc}/u.test(m[0]) ? "?" : m[0]) : null; };
+/** First character of the password the Shelly cannot use (an invisible one – control,
+ *  format, separator – as "?", as the server names it), or null. */
+const apPasswordBad = text => { const m = AP_PASSWORD_BAD.exec(text); return m ? (/[\p{C}\p{Z}]/u.test(m[0]) ? "?" : m[0]) : null; };
 /** A password of that length in printable ASCII characters. */
 const apPasswordFits = text => !apPasswordBad(text) && text.length >= AP_PASSWORD_MIN && text.length <= AP_PASSWORD_MAX;
 /** State pill of the access point strip: off, on and open, on with a password. */

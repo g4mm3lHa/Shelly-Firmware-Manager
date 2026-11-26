@@ -673,7 +673,7 @@ def _valid_ap_config(value: object) -> dict[str, Any]:
             raise ValueError("Enter a password for the access point")
         bad = AP_PASSWORD_BAD_RE.search(password)
         if bad:
-            shown = bad.group() if bad.group().isprintable() else "?"  # a control character is not shown
+            shown = bad.group() if bad.group().isprintable() else "?"  # an invisible character is not shown
             raise ValueError(f"The password contains a character the Shelly cannot use: {shown}")
         if not AP_PASSWORD_RE.fullmatch(password):
             raise ValueError("Invalid access point password (8 to 63 characters)")
@@ -806,8 +806,8 @@ async def link_status(
     else:
         status = await _device_json(session, origin, "/status", auth)
         uptime, wifi = status.get("uptime"), status.get("wifi_sta")
-    if isinstance(uptime, bool) or not isinstance(uptime, (int, float)) or uptime < 0:
-        uptime = None
+    if isinstance(uptime, bool) or not isinstance(uptime, (int, float)) or not 0 <= uptime < 2**40:
+        uptime = None  # also NaN and infinity (JSON allows them)
     return {"uptime": int(uptime) if uptime is not None else None, "rssi": _rssi(wifi)}
 
 

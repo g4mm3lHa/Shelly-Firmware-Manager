@@ -477,6 +477,7 @@ export default {
   "Intermediate": "Intermédia",
   "Intermediate version: required step before newer firmware can be installed safely": "Versão intermédia: passo necessário antes de se poder instalar com segurança um firmware mais recente",
   "interrupted – the app stopped": "interrompido – a app parou",
+  "Invalid access point password (8 to 63 characters)": "Palavra-passe do ponto de acesso inválida (de 8 a 63 caracteres)",
   "Invalid authentication request from the Shelly": "Pedido de autenticação inválido do Shelly",
   "Invalid device address": "Endereço de dispositivo inválido",
   "Invalid response from the device": "Resposta inválida do dispositivo",

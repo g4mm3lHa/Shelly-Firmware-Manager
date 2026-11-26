@@ -477,6 +477,7 @@ export default {
   "Intermediate": "Tussenversie",
   "Intermediate version: required step before newer firmware can be installed safely": "Tussenversie: vereiste stap voordat nieuwere firmware veilig kan worden geïnstalleerd",
   "interrupted – the app stopped": "onderbroken – de app is gestopt",
+  "Invalid access point password (8 to 63 characters)": "Ongeldig wachtwoord voor het toegangspunt (8 tot 63 tekens)",
   "Invalid authentication request from the Shelly": "Ongeldig aanmeldverzoek van de Shelly",
   "Invalid device address": "Ongeldig apparaatadres",
   "Invalid response from the device": "Ongeldig antwoord van het apparaat",

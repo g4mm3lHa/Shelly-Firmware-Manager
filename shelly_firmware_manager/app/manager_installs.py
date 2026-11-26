@@ -288,8 +288,8 @@ class Installs(Checks):
     def _set_step(self, device_id: str, step: str, usual: float | None = None, give_up: float | None = None) -> None:
         """The installation of device_id enters step (one of INSTALL_STEPS). usual:
         longer = late (default STEP_USUAL_S); give_up: when the app reports an error
-        (None: no fixed limit). The Wi-Fi signal and the connection losses read so far
-        stay with the installation."""
+        (None: no fixed limit). The Wi-Fi signal, the connection losses and a restart
+        the app asked for but did not see stay with the installation."""
         now = time.monotonic()
         before = self.install_steps.get(device_id) or {}
         self.install_steps[device_id] = {
@@ -301,6 +301,7 @@ class Installs(Checks):
             "attempt": None,
             "rssi": before.get("rssi"),
             "losses": before.get("losses", 0),
+            "restart_unseen": before.get("restart_unseen", False),
         }
 
     def _update_step(self, device_id: str, **fields: Any) -> None:
@@ -375,31 +376,36 @@ class Installs(Checks):
 
         After the first answer the Wi-Fi signal is read (longer download tolerance when
         it is weak). After an answer that followed unanswered attempts, the running time
-        tells a restart of the device (it then runs shorter than the gap) from a lost
-        connection: a restart stops the installation, a lost connection is counted for
-        the hint line of the result. Returns the OTA event reader (Gen2+ WebSocket) or
-        None (HTTP: the version is polled)."""
+        tells a restart of the device (it runs shorter than the time since its last
+        answer) from a lost connection: a restart stops the installation, a lost
+        connection is counted for the hint line of the result. Only the pre-check is
+        bounded by the window; a command on its way is never cut off. Returns the OTA
+        event reader (Gen2+ WebSocket) or None (HTTP: the version is polled)."""
         self._set_step(device_id, "precheck", give_up=PRECHECK_WINDOW_S)
         started = time.monotonic()
-        gap: float | None = None  # time of the first unanswered attempt since the last answer
+        last_alive = started  # last answer of the device (before the first one: the start of the step)
+        missed = False  # unanswered attempts since the last answer
         linked = False  # running time and signal read after the first answer
         attempt = 0
         while True:
             attempt += 1
             self._update_step(device_id, attempt=attempt)
             try:
-                await self._verify_unchanged(device_id, dev)
-                self._update_step(device_id, quiet=time.monotonic())  # it answered
-                if gap is not None or not linked:
-                    await self._after_answer(device_id, dev, gap)
-                gap, linked = None, True
+                left = max(PRECHECK_PAUSE_S, PRECHECK_WINDOW_S - (time.monotonic() - started))
+                async with asyncio.timeout(left):
+                    await self._verify_unchanged(device_id, dev)
+                answered = time.monotonic()
+                self._update_step(device_id, quiet=answered)
+                if missed or not linked:
+                    await self._after_answer(device_id, dev, last_alive if missed else None)
+                last_alive, missed, linked = answered, False, True
                 reader = await self._update_over_websocket(dev, url, auth, ota) if dev["gen"] >= 2 else None
                 if reader is None:
                     await self._update_over_http(dev, url, auth)
                 return reader
             except (TimeoutError, aiohttp.ClientError, OSError) as err:
                 # No answer, or the command never left: try again while the window lasts
-                gap = gap if gap is not None else time.monotonic()
+                missed = True
                 elapsed = time.monotonic() - started
                 log.info("%s: no answer before the update command (attempt %d): %s",
                          dev["name"], attempt, error_text(err, 120) or type(err).__name__)
@@ -412,23 +418,30 @@ class Installs(Checks):
                     ) from None
                 await asyncio.sleep(PRECHECK_PAUSE_S)
 
-    async def _after_answer(self, device_id: str, dev: Device, gap: float | None) -> None:
+    async def _after_answer(self, device_id: str, dev: Device, last_alive: float | None) -> None:
         """The device answered the pre-check: read its running time and Wi-Fi signal
-        once, and after unanswered attempts (gap: time of the first one) decide between
-        a lost connection (counted) and a restart (ShellyError: nothing is installed)."""
+        once, and after unanswered attempts (last_alive: time of its answer before them,
+        or the start of the step) decide between a lost connection (counted) and a
+        restart (ShellyError: nothing is installed) – it restarted if it runs shorter
+        than the time since last_alive. Restart & install: a restart the app asked for
+        but did not see (the device kept answering) is the expected one, once."""
         link = await self._read_link(device_id, dev)
         if link.get("rssi") is not None:
             self._update_step(device_id, rssi=link["rssi"])
-        if gap is None:
+        if last_alive is None:
             return
         uptime = link.get("uptime")
-        if uptime is not None and uptime < time.monotonic() - gap:
+        step = self.install_steps.get(device_id) or {}
+        if uptime is not None and uptime < time.monotonic() - last_alive:
+            if step.get("restart_unseen"):
+                step["restart_unseen"] = False
+                log.info("%s: the restart before the installation happened now", dev["name"])
+                return
             raise ShellyError(
                 f"The Shelly restarted unexpectedly before the update command (running for {uptime} s). "
                 "Nothing was installed."
             )
-        step = self.install_steps.get(device_id)
-        if step is not None:
+        if step:
             step["losses"] += 1
 
     async def _update_over_http(self, dev: Device, url: str, auth: DeviceAuth | None) -> None:
@@ -472,6 +485,7 @@ class Installs(Checks):
                     return True
                 if time.monotonic() - started >= RESTART_DOWN_S:
                     log.info("%s: no pause seen after the restart command", dev["name"])
+                    self._update_step(device_id, restart_unseen=True)  # Restart & install: it may still come
                     return True
             except (TimeoutError, ShellyError, aiohttp.ClientError, OSError):
                 went_down = True
@@ -566,6 +580,7 @@ class Installs(Checks):
             if result is not None:
                 return result
             log.info("%s: device WebSocket ended before the update was applied – polling the version", dev["name"])
+            self._set_step(device_id, "install", usual=STEP_USUAL_POLLING_S, give_up=INSTALL_WAIT_S)
         return await self._await_by_polling(device_id, dev, ota)
 
     async def _await_over_events(

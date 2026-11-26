@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import json
 import time
+from types import SimpleNamespace
 
 import data_paths
 import download_server
@@ -347,10 +348,29 @@ async def test_ota_stall_without_progress_is_an_error(mgr, ota_install, monkeypa
     assert isinstance(result, shelly.ShellyError) and "stopped at 40 %" in str(result)
 
 
+async def test_ota_stall_limit_is_longer_with_a_weak_signal(mgr, ota_install, monkeypatch):
+    """A weak Wi-Fi signal at the start (-80 dBm or lower): the longer stall limit applies."""
+    monkeypatch.setattr(manager_installs, "OTA_STALL_WEAK_S", 0.8)
+
+    async def link(*_args, **_kwargs):
+        return {"uptime": 100, "rssi": -85}
+
+    monkeypatch.setattr(shelly, "link_status", link)
+    events = [{"event": "ota_progress", "msg": "", "progress_percent": 40}]
+    started = time.monotonic()
+    result, _dev, _phases = await ota_run(mgr, monkeypatch, events, ["1.4.0"], keep_open=True)
+    assert isinstance(result, shelly.ShellyError) and "for 0.8 s" in str(result)
+    assert time.monotonic() - started >= 0.8 and mgr.install_step_view(A) is not None  # _install alone keeps it
+
+
 async def test_ota_websocket_lost_before_applied_falls_back_to_polling(mgr, ota_install, monkeypatch):
     events = [{"event": "ota_progress", "msg": "", "progress_percent": 40}]
     result, _dev, phases = await ota_run(mgr, monkeypatch, events, ["1.4.0", "1.4.0", "1.5.0"])
     assert result == (True, None) and "restarting" not in phases
+    # The step shows the limits of the polling, not those of the device events
+    view = mgr.install_step_view(A)
+    assert view["step"] == "install" and view["usual"] == manager_installs.STEP_USUAL_POLLING_S
+    assert view["give_up"] == manager_installs.INSTALL_WAIT_S
 
 
 async def test_no_websocket_falls_back_to_http(mgr, ota_install, monkeypatch):
@@ -876,3 +896,98 @@ async def test_link_status_reads_uptime_and_signal(monkeypatch):
 
     monkeypatch.setattr(shelly, "_rpc", odd)
     assert await REAL_LINK_STATUS(None, 2, "http://h") == {"uptime": None, "rssi": None}
+
+
+async def test_restart_is_measured_from_the_last_answer(mgr, monkeypatch, weak_wifi):
+    """The unanswered attempt itself takes time (time-outs): a running time shorter than
+    the time since the last answer is a restart, even if it is longer than the pause."""
+    clock = [1000.0]
+    # Only the clock of the installation (the event loop keeps the real one)
+    monkeypatch.setattr(manager_installs, "time", SimpleNamespace(monotonic=lambda: clock[0], time=time.time))
+
+    async def device_info(*_args, **_kwargs):
+        if not weak_wifi["answers"]:
+            clock[0] += 5  # the second attempt answers 20 s after the start
+            return {"mac": "AA", "build": "b-old", "version": "1.4.0"}
+        weak_wifi["answers"].pop()
+        clock[0] += 15  # the first attempt times out after 15 s
+        raise TimeoutError
+
+    async def link(*_args, **_kwargs):
+        return {"uptime": 16, "rssi": None}  # restarted 16 s ago: after the start, before the answer
+
+    weak_wifi["answers"] = [object()]
+    monkeypatch.setattr(shelly, "device_info", device_info)
+    monkeypatch.setattr(shelly, "link_status", link)
+    dev = install_device(mgr)
+    with pytest.raises(shelly.ShellyError, match="restarted unexpectedly"):
+        await mgr._install(A, dev, "s")
+    assert weak_wifi["sent"] == 0
+
+
+async def test_restart_and_install_accepts_its_own_late_restart(mgr, monkeypatch, weak_wifi):
+    """Restart & install whose restart was not seen: a restart found by the running time
+    is the one the app asked for – once; the installation goes on."""
+    weak_wifi["answers"] = [TimeoutError(), {}]
+    mgr._set_step(A, "restart")
+    mgr._update_step(A, restart_unseen=True)
+
+    async def link(*_args, **_kwargs):
+        return {"uptime": 0, "rssi": None}
+
+    monkeypatch.setattr(shelly, "link_status", link)
+    dev = install_device(mgr)
+    assert await mgr._command_update(A, dev, "http://h/x.zip", None, {"dev": dev}) is None
+    assert weak_wifi["sent"] == 1 and mgr.install_steps[A]["losses"] == 0
+    assert mgr.install_steps[A]["restart_unseen"] is False
+
+
+async def test_gen1_tolerates_a_weak_wifi_too(mgr, monkeypatch, weak_wifi):
+    """Gen1 (HTTP only): the same attempts before the command."""
+    weak_wifi["answers"] = [OSError("unreachable"), {}]
+    dev = install_device(mgr, gen=1)
+    dev["sha256"] = "s"
+    monkeypatch.setattr(mgr, "approval_matches", lambda *_a: True)
+    assert await mgr.install(A, "s", "u") and weak_wifi["sent"] == 1
+    assert mgr.events.entries[-1]["detail"].startswith("Connection to the Shelly lost once")
+
+
+async def test_step_is_cleared_after_a_failure(mgr, monkeypatch, weak_wifi):
+    """No step stays behind: after a failed and after an unexpected error."""
+    weak_wifi["answers"] = [{"build": "b-new"}]
+    ok, *_ = await run_weak(mgr, monkeypatch)
+    assert not ok and mgr.install_step_view(A) is None and A not in mgr.install_steps
+    weak_wifi["answers"] = [RuntimeError("boom")]
+    ok, *_ = await run_weak(mgr, monkeypatch)
+    assert not ok and A not in mgr.install_steps and A not in mgr.installing
+
+
+async def test_websocket_command_without_answer_is_never_sent_again(mgr, monkeypatch, weak_wifi):
+    """Gen2+ over the device WebSocket: no answer to Shelly.Update = it may run; never a
+    second command (neither WebSocket nor HTTP), the version is polled."""
+    updates = []
+
+    class SilentChannel:
+        """Opens, takes the command, never answers, then closes (no OTA events)."""
+
+        def __init__(self, *_args):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def update(self, url):
+            updates.append(url)
+            return None
+
+        async def events(self):
+            return
+            yield
+
+    monkeypatch.setattr(shelly, "OtaChannel", SilentChannel)
+    weak_wifi["answers"] = [{}]
+    ok, *_ = await run_weak(mgr, monkeypatch)
+    assert ok and len(updates) == 1 and weak_wifi["sent"] == 0

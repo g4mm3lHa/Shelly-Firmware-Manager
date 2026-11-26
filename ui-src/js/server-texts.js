@@ -71,6 +71,9 @@ const SERVER_TEXTS = [
   "Connection to the Shelly lost before the update command – no answer in {attempts} attempts within {seconds} s. Nothing was installed.",
   "Connection to the Shelly lost before the update command – no answer in {attempts} attempts within {seconds} s. Nothing was installed. Wi-Fi signal: {rssi} dBm (weak).",
   "The Shelly restarted unexpectedly before the update command (running for {seconds} s). Nothing was installed.",
+  // Access point form (answer of the server; the form checks the same before)
+  "The password contains a character the Shelly cannot use: {char}",
+  "Invalid access point password (8 to 63 characters)",
   "A connection test is already running",
   "This device cannot run the test now (Gen 2 or newer, checked, not busy)",
   "No Shelly of Gen 2 or newer is known yet – run a check first",
