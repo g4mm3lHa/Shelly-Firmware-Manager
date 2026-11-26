@@ -192,6 +192,8 @@ RESULT_FUNCTIONS = {"_test_with"}
 SOURCES = ("manager_checks.py", "manager_installs.py", "manager_store.py", "manager_schedules.py",
            "shelly.py", "shelly_net.py")
 MESSAGE_ONLY = ("manager_core.py", "manager_devices.py", "manager_backups.py")
+# Functions that build an error text from their first argument, alone or with the device's answer in brackets
+ANSWER_FUNCTIONS = {"_unverified"}
 
 
 def _result_errors(func: ast.AsyncFunctionDef) -> list[str]:
@@ -211,8 +213,8 @@ def _result_errors(func: ast.AsyncFunctionDef) -> list[str]:
 def _sent_texts() -> list[str]:
     """Texts the server sends as status messages and errors: the message constants, the
     values of "message" (keyword or dev["message"]), the texts of Shelly errors, of the
-    diagnosis functions and the errors of the connection test – with every value of an
-    f-string as "X"."""
+    diagnosis functions, of the answer functions (plain and with an answer) and the errors
+    of the connection test – with every value of an f-string as "X"."""
     import manager_checks
     import manager_core
     import manager_store
@@ -241,6 +243,8 @@ def _sent_texts() -> list[str]:
                 called = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else ""
                 if called in ERRORS and node.args and name in SOURCES:
                     texts += _texts_of(node.args[-1])
+                if called in ANSWER_FUNCTIONS and node.args:
+                    texts += [form for text in _texts_of(node.args[0]) for form in (text, f"{text} (X)")]
             elif isinstance(node, ast.Assign):
                 target = node.targets[0]
                 if isinstance(target, ast.Subscript) and isinstance(target.slice, ast.Constant) and target.slice.value == "message":

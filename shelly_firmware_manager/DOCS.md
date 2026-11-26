@@ -741,13 +741,14 @@ Assistant Shelly integration as well.
 
 **Failed sign-ins:** the app sends a stored password once per request. Once the Shelly
 refused it, a check, a backup or an installation sends nothing more with it. A Gen2+
-Shelly that refuses the change or removal of its protection changed nothing, so the app
-stops there too. Each of these actions counts one failed attempt at most.
+Shelly that refuses the change or removal of its protection is expected to have changed
+nothing, so the app stops there too. Each of these actions counts one failed attempt at
+most.
 
-Firmware 2.0 and newer delays sign-ins after repeated failed attempts. The app then shows
-"The Shelly temporarily blocks sign-ins" as an error. It is meant to wait only for the
-short block of about 2 seconds that many sign-ins at once can cause, without sending a
-password.
+Firmware 2.0 and newer delays sign-ins after repeated failed attempts. In that case the
+app is meant to show "The Shelly temporarily blocks sign-ins" as an error. It is meant to
+wait only for the short block of about 2 seconds that many sign-ins at once can cause,
+without sending a password.
 
 **Several devices at once:** Settings tab → **Device Passwords** → **Device passwords**. Choose the action –
 **Store the existing device password in this app** or **Set password** (enables the
@@ -849,7 +850,7 @@ Gen2+ firmware is downloaded over HTTPS only.
 | Download does not match the SHA-256 named by the manufacturer's URL | The download was damaged or altered and was not stored – check again |
 | Many "Download rejected" lines in the app log | Only the first rejected request per address and 10 minutes is logged; the others are counted in one line |
 | Connection to the Shelly lost before the update command – no answer in n attempts within n s. Nothing was installed. | The Shelly did not answer the check right before the update command, usually because of weak Wi-Fi. Improve the reception (access point, antenna position) and try the installation again |
-| Connection to the Shelly lost before the update command – nothing was installed | The Shelly asked for its password over the WebSocket, and the connection ended before the app could answer. Nothing reached the device as a command. Try the installation again |
+| Connection to the Shelly lost before the update command – nothing was installed | The Shelly asked for its password, or briefly blocked sign-ins, over the WebSocket, and the connection ended before the app could send the update command again. Nothing reached the device as a command. Try the installation again |
 | The Shelly restarted unexpectedly before the update command (running for n s). Nothing was installed. | The Shelly restarted on its own while the app was waiting for it (power supply, firmware fault, Wi-Fi loss). Check the device and try the installation again |
 | The password contains a character the Shelly cannot use: … (access point form) | Use only letters without umlauts or accents, digits and common symbols (printable ASCII) |
 | The device did not answer within 2 minutes after its restart – nothing was installed | **Restart the device first** restarted the Shelly, but it did not come back in time. Check that it is online, then try the installation again |
@@ -859,7 +860,7 @@ Gen2+ firmware is downloaded over HTTPS only.
 | Certificate of … is not publicly trusted | See [Certificate pinning](#certificate-pinning) |
 | The Shelly requires a password | Store the device password (see [Device passwords](#device-passwords)) |
 | The Shelly temporarily blocks sign-ins (too many attempts) – wait a few minutes and try again | Firmware 2.0 and newer counts failed password attempts over 10 minutes. After more than 10 it answers sign-ins only with a delay between attempts (10 s, rising to 5 minutes). Every client counts: this app, the Shelly integration of Home Assistant, a browser or a script. Make sure each one uses the current device password, wait a few minutes and check again. A restart of the Shelly or the next accepted sign-in resets the count |
-| The Shelly rejected the stored current password – nothing was changed | The password stored in this app no longer works, e.g. because it was changed elsewhere. The device kept its password. Store the current password with **Store existing password**, then change it again (see [Device passwords](#device-passwords)) |
+| The Shelly rejected the stored current password – nothing was changed | The password stored in this app no longer works, e.g. because it was changed elsewhere. The device is meant to keep its password. Store the current password with **Store existing password**, then change it again (see [Device passwords](#device-passwords)) |
 | The Shelly requires HTTPS (Enhanced Security) – not supported by this app yet | The Shelly answers plain HTTP only with a redirect to HTTPS. According to Shelly, devices shipped with firmware 2.0 or later always do this. Older ones do it after Enhanced Security was switched on and an HTTPS certificate was installed. The app never follows the redirect and cannot check, update or back up this Shelly yet. Until then, update it in its own web interface (`https://<IP>`) |
 | The Shelly answered with a redirect (HTTP …) – redirects are not followed | Something at the device address sends the request elsewhere, e.g. another web server or a proxy. The app never follows a redirect: check the address of the device in the Shelly integration |
 | Device reports: … (code n) | The Shelly refused the request; the text and the code come from the device itself (English). Correct the entry the text names, e.g. an access point password of 8 to 63 characters; the code helps when you report the problem |
