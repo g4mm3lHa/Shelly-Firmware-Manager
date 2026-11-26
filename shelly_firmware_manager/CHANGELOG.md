@@ -1,5 +1,33 @@
 # Changelog
 
+## 3.13.2
+
+Release candidate. Fixes for Shelly firmware 2.x (two-step update, HTTPS, sign-in block,
+access point, removed settings) and fewer requests to Home Assistant and the Shellys.
+
+Changes in rc1
+
+Changed
+- Installation (Gen2+): a Shelly that comes back on its old version during a two-step
+  update (firmware 2.2.0) is given time for its second pass instead of failing at once.
+- Checks read Home Assistant over one connection; a check of one device reuses its
+  answers for up to 60 s, Check now and Try again always read anew.
+- Download base URL: the former example address of the 3.0.0 release candidates is
+  checked like any other address; its confirmation is gone.
+
+Fixed
+- Devices: a Shelly that requires HTTPS (Enhanced Security) is named as such instead of
+  an invalid answer; other redirects name their status. Redirects are never followed.
+- Device sign-in: a Shelly that blocks sign-ins after failed attempts (HTTP 429) is
+  named as such; after a refused password no further attempt follows in the same action.
+- Change password: a refused current password stops at once; nothing was changed.
+- Device passwords: storing an existing password works on a 1PM Mini Gen3/Gen4 that
+  still binds it to its 2.2.0 device ID; "Change password" moves it to the current ID.
+- Access point form: a refused open access point after a password, and other refused
+  values (code -103), get a readable text.
+- Comparison after an update: settings the new firmware dropped are listed apart and no
+  longer count as changed.
+
 ## 3.13.1
 
 Released 2026-11-26. Installations tolerate a weak Wi-Fi and show their current step;
