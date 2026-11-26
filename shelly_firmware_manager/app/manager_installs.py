@@ -12,7 +12,6 @@ import asyncio
 import contextlib
 import hmac
 import logging
-import math
 import secrets
 import time
 from collections.abc import Callable
@@ -98,6 +97,10 @@ PRECHECK_PAUSE_S = 5  # pause between two attempts
 # same way). After the command such a refusal counts as an unknown running time, and no
 # further signed request goes to the device in this installation (_read_link).
 LINK_TIMEOUT_S = 5
+# The comparison after a confirmed update is not made then (its reads are signed): its reason
+SIGNIN_REFUSED_COMPARISON = (
+    "The Shelly refused or blocked the sign-in during the installation – settings not read again"
+)
 WEAK_RSSI = -80  # dBm and lower: weak signal (as the check list of the installation dialog)
 
 # Steps of an installation as the status pill shows them (install_step_view), in their
@@ -137,14 +140,19 @@ class Installs(Checks):
         if the target version is confirmed. Normally no check follows: the device
         keeps its result until the next full check or a single check of the device.
         After a confirmed update with a backup right before it, the device is compared
-        with that backup (compare_after_update); after a confirmed intermediate version
-        the device is checked again at once (see _check_step). restart_first: restart the
-        device and wait until it answers again before the installation starts (see
-        _restart_and_wait)."""
-        ok = await self._install_approved(device_id, sha, approved_by, downgrade, restart_first)
+        with that backup (compare_after_update) – unless the device refused or blocked a
+        sign-in after the update command: no further signed request goes to it in this
+        action, the comparison is kept as failed with that reason instead. After a
+        confirmed intermediate version the device is checked again at once (see
+        _check_step). restart_first: restart the device and wait until it answers again
+        before the installation starts (see _restart_and_wait)."""
+        ok, refused = await self._install_approved(device_id, sha, approved_by, downgrade, restart_first)
         before = self._before_backups.pop(device_id, None)
         if ok and before is not None and not downgrade:
-            await self.compare_after_update(device_id, before, approved_by)
+            if refused:
+                self._comparison_failed(self.devices[device_id], SIGNIN_REFUSED_COMPARISON, approved_by)
+            else:
+                await self.compare_after_update(device_id, before, approved_by)
         await self._check_step(device_id, approved_by)
         return ok
 
@@ -163,8 +171,11 @@ class Installs(Checks):
 
     async def _install_approved(
         self, device_id: str, sha: str, approved_by: str, downgrade: bool = False, restart_first: bool = False
-    ) -> bool:
-        """Install an approved update. True only if the target version is confirmed.
+    ) -> tuple[bool, bool]:
+        """Install an approved update: (confirmed, refused). confirmed is True only if
+        the target version is confirmed; refused: the device refused or blocked a
+        sign-in after the update command (signin_refused of the steps, read before they
+        are cleared), so the caller sends no further signed request.
 
         Several installations run in parallel, at most max_parallel_installs at a
         time; others wait for a free slot. Nothing starts during the full check or
@@ -185,14 +196,14 @@ class Installs(Checks):
             or device_id in self.restoring
             or device_id in self.device_checks
         ):
-            return False
+            return False, False
         target = None
         if downgrade:
             target = self.downgrade_match(device_id, sha) if device_id in self.devices else None
             if target is None or self.downgrade_blocker(device_id):
-                return False
+                return False, False
         elif not self.approval_matches(device_id, sha):
-            return False
+            return False, False
         dev = self.devices[device_id]
         self.installing.add(device_id)  # no await before this: no double starts possible
         dev.pop("updated", None)  # a new installation: the former "just updated" mark is obsolete
@@ -261,15 +272,15 @@ class Installs(Checks):
                     entry["two_step"] = True  # installed in two passes (the log shows a hint line)
                 event = "confirmed" if ok else "unconfirmed"
                 self.events.add("install", ok=ok, event=event, detail=diagnosis, **entry)
-                return ok
+                return ok, self._signin_refused(device_id)
         except (TimeoutError, ShellyError, aiohttp.ClientError, OSError, KeyError, ValueError) as err:
             self._install_failed(dev, entry, downgrade, error_text(err, 500) or type(err).__name__)
-            return False
+            return False, False
         except Exception as err:
             # An error no code path expects must not leave the device "installing"
             log.exception("%s: unexpected error during the installation", dev.get("name"))
             self._install_failed(dev, entry, downgrade, unexpected_text(err))
-            return False
+            return False, False
         finally:
             self.installing.discard(device_id)
             self.install_steps.pop(device_id, None)
@@ -797,11 +808,12 @@ class Installs(Checks):
 
         Two phases:
         - the second pass must start within TWO_STEP_START_S: the device downloads the
-          file again (_second_pass_downloads), or it stops answering (it restarts). A
-          download that cannot be told apart from another device's (several devices
-          install the file behind NAT) does not start it, but the start window then
-          lasts at least TWO_STEP_FINISH_S from that download – the app waits longer
-          rather than report an error while the second pass may run;
+          file again, or it stops answering (it restarts). Every poll compares the
+          downloads with the last poll (_served_counts): a new GET from the device's own
+          address counts, and one from an address of no known device (NAT) counts only
+          while no other device installs the same file at that poll (_installs_alone) –
+          else it may be that device's and the start window stays as it is. A change
+          of "alone" alone (another device finished) never counts as a download;
         - once the device downloaded the file again, the whole second pass (download,
           writing, restart) must end within TWO_STEP_FINISH_S – the download server
           reports no progress; after going down the device must answer within
@@ -834,8 +846,7 @@ class Installs(Checks):
         dev.pop("ota_progress", None)  # the progress of the first pass is over
         dev.pop("ota_phase", None)
         started = time.monotonic()
-        window: float = TWO_STEP_START_S  # the second pass must have started by then (from started)
-        served, unknown = self._second_pass_downloads(dev)  # downloads of the file so far
+        own, unknown = self._served_counts(dev)  # downloads so far: own address (fixed), NAT (each poll)
         served_at: float | None = None  # time the device downloaded the file again
         down_since: float | None = None  # time the device stopped answering
         last_alive = started  # last answer of the device (it just answered on its old version)
@@ -846,6 +857,15 @@ class Installs(Checks):
             await asyncio.sleep(OTA_POLL_S)
             info = await self._poll_version(device_id, dev)
             now = time.monotonic()
+            if served_at is None:
+                own_now, unknown_now = self._served_counts(dev)
+                if own_now > own or (unknown_now > unknown and self._installs_alone(dev)):
+                    served_at = now
+                    log.info("%s: second pass – the Shelly downloads the file again from the app", dev["name"])
+                    if info is not None and down_since is None:  # answering: the step shows the new limit
+                        self._update_step(device_id, quiet=now, usual=STEP_USUAL_POLLING_S,
+                                          give_up=TWO_STEP_FINISH_S)
+                unknown = unknown_now  # the NAT downloads up to this poll are judged (counted or not)
             if info is None:
                 if down_since is None:  # the device restarts (or the connection is lost)
                     down_since = now
@@ -866,12 +886,8 @@ class Installs(Checks):
                 ), unexpected=info["version"])  # fmt: skip
             if down_since is not None:  # answers again on the old version
                 down_since = None
-                if served_at is None and self._second_pass_downloads(dev)[0] > served:
-                    served_at = now  # downloaded during the gap: the gap followed the new download
-                    log.info("%s: second pass – the Shelly downloaded the file again while it did not answer",
-                             dev["name"])
-                if served_at is None:  # no new download seen: the first window goes on
-                    self._set_step(device_id, "install", usual=TWO_STEP_USUAL_S, give_up=round(window, 1))
+                if served_at is None:  # no new download seen (also none in the gap): the first window goes on
+                    self._set_step(device_id, "install", usual=TWO_STEP_USUAL_S, give_up=TWO_STEP_START_S)
                     self._update_step(device_id, since=started, quiet=started)
                 elif await self._restarted(device_id, dev, last_alive):
                     return failed(ShellyError(
@@ -881,19 +897,6 @@ class Installs(Checks):
                     self._set_step(device_id, "install", usual=STEP_USUAL_POLLING_S, give_up=TWO_STEP_FINISH_S)
                     self._update_step(device_id, since=served_at, quiet=served_at)
             last_alive = time.monotonic()
-            if served_at is None:
-                attributed, unattributed = self._second_pass_downloads(dev)
-                if attributed > served:
-                    served_at = now
-                    log.info("%s: second pass – the Shelly downloads the file again from the app", dev["name"])
-                    self._update_step(device_id, quiet=now, usual=STEP_USUAL_POLLING_S, give_up=TWO_STEP_FINISH_S)
-                elif unattributed > unknown:
-                    # Maybe this device's download, maybe another one's: wait, never report an error meanwhile
-                    unknown = unattributed
-                    window = max(window, math.ceil(now - started + TWO_STEP_FINISH_S))
-                    log.info("%s: second pass – a download that cannot be attributed (several devices install the "
-                             "file): waiting up to %d s for the second pass", dev["name"], window)
-                    self._update_step(device_id, give_up=round(window, 1))
             if served_at is not None:
                 if now - served_at >= TWO_STEP_FINISH_S:
                     return failed(ShellyError(
@@ -901,11 +904,11 @@ class Installs(Checks):
                         f"{dev['pending_version']} can run in two steps, but the second step did not finish within "
                         f"{TWO_STEP_FINISH_S} s – start the update again"
                     ))  # fmt: skip
-            elif now - started >= window:
+            elif now - started >= TWO_STEP_START_S:
                 return failed(ShellyError(
                     f"After the restart the Shelly still reports {info['version']}. The update to "
                     f"{dev['pending_version']} can run in two steps, but the second step did not start within "
-                    f"{window} s – start the update again"
+                    f"{TWO_STEP_START_S} s – start the update again"
                 ))  # fmt: skip
 
     async def _poll_version(self, device_id: str, dev: Device) -> dict[str, Any] | None:
@@ -1154,20 +1157,14 @@ class Installs(Checks):
         of that file, for the download diagnosis."""
         return sum(self._served_counts(dev))
 
-    def _second_pass_downloads(self, dev: Device) -> tuple[int, int]:
-        """Downloads of the device's file that tell the start of the second pass of a
-        two-step update: (attributed, unattributed). attributed: the GETs from the
-        device's own address, plus those from an address that belongs to no known device
-        (NAT, see _served_counts) while no other device installs the same file – then
-        they can only be this device's. unattributed: the GETs from addresses of no known
-        device (while several devices install the file they cannot be told apart; the
-        caller then waits longer instead of reporting an error)."""
-        own, unknown = self._served_counts(dev)
-        alone = not any(
+    def _installs_alone(self, dev: Device) -> bool:
+        """No other device installs the same file now: a download from an address of no
+        known device (NAT, see _served_counts) can then only be this device's (second
+        pass of a two-step update)."""
+        return not any(
             other is not dev and other.get("status") == STATUS_INSTALLING and other.get("file") == dev.get("file")
             for other in self.devices.values()
         )
-        return own + (unknown if alone else 0), unknown
 
     def _reset_download(self, dev: Device) -> None:
         """Forget earlier downloads of this device only (installation start)."""

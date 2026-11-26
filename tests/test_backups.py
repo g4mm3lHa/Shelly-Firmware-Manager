@@ -11,6 +11,7 @@ import time
 import backup_store
 import manager_backups
 import manager_core
+import manager_installs
 import pytest
 import shelly
 import shelly_backup
@@ -1446,6 +1447,29 @@ async def test_comparison_that_cannot_read_the_device(net, shellys, monkeypatch,
     await mgr.scan()
     assert await mgr.install(A, mgr.devices[A]["sha256"], "alice") is True
     assert "error" in mgr.devices[A]["after_update"]
+    assert backup_events(mgr, "compared")[-1]["severity"] == "warning"
+
+
+async def test_no_comparison_after_a_refused_sign_in(net, shellys, monkeypatch, quick_install):
+    """The device refused or blocked a sign-in after the update command: no further signed
+    request in this action, so the comparison is not made and names that reason instead."""
+    mgr = manager_with(net, shellys, backup_before_install=True)
+    compared = []
+
+    async def trigger(_session, _gen, origin, url, _auth=None):
+        device = net.by_origin(origin)
+        net.devices[device] = (*net.devices[device][:2], "1.5.0", "1.5.0")
+        mgr._update_step(A, signin_refused=True)  # as a refused read of the running time does
+
+    async def compare(*args):
+        compared.append(args)
+
+    monkeypatch.setattr(shelly, "trigger_update", trigger)
+    mgr.compare_after_update = compare
+    await mgr.scan()
+    assert await mgr.install(A, mgr.devices[A]["sha256"], "alice") is True
+    assert not compared
+    assert mgr.devices[A]["after_update"]["error"] == manager_installs.SIGNIN_REFUSED_COMPARISON
     assert backup_events(mgr, "compared")[-1]["severity"] == "warning"
 
 

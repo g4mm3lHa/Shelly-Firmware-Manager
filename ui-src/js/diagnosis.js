@@ -269,7 +269,7 @@ export function openComparison(d) {
   const head = valueList([[t("Device"), [d.name, modelGen(d)].filter(Boolean).join(" · ")], [t("Update"), a.from_version || a.to_version ? `${a.from_version || "–"} → ${a.to_version || "–"}` : null],
     [t("Compared with"), a.backup_at ? t("Backup “Before update” · {time}", {time: fmt(a.backup_at)}) : null]]);
   if (a.error) {
-    modal(COMPARE_TITLE, [head, messageBody(t("The comparison could not be made: {error}", {error: a.error}), "warning")], undefined, "backup");
+    modal(COMPARE_TITLE, [head, messageBody(t("The comparison could not be made: {error}", {error: serverText(a.error)}), "warning")], undefined, "backup");
     return;
   }
   const scripts = a.scripts || {before: 0, again: 0, stopped: []}, lines = [

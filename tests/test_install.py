@@ -664,17 +664,74 @@ async def test_second_pass_never_counts_the_download_of_another_known_device(mgr
     assert isinstance(result, shelly.ShellyError) and "did not start within 0.4 s" in str(result)
 
 
-async def test_second_pass_waits_longer_for_an_ambiguous_download(mgr, ota_install, monkeypatch):
+async def test_second_pass_never_counts_an_ambiguous_download(mgr, ota_install, monkeypatch):
     """NAT while another device installs the same file: the download cannot be attributed, so it
-    does not start the second pass, but the start window grows to the total limit after it – an
-    error only when the second pass still has not shown itself then."""
+    does not start the second pass and the start window stays as it is."""
+    monkeypatch.setattr(manager_installs, "TWO_STEP_FINISH_S", 3)
     mgr.restrict_downloads = False
     other_device(mgr, manager_core.STATUS_INSTALLING, "x.zip")
     started = time.monotonic()
     result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, [None, "2.1.1"], old="2.1.1", target="2.2.0",
                                           hook=serve_again(mgr, address="172.30.32.1"))
-    assert isinstance(result, shelly.ShellyError) and "did not start within 1 s" in str(result)
-    assert time.monotonic() - started > 0.6  # longer than the start window of 0.4 s
+    assert isinstance(result, shelly.ShellyError) and "did not start within 0.4 s" in str(result)
+    assert time.monotonic() - started < 2  # not the total limit of a started second pass
+
+
+def nat_batch(mgr, own=None, finish=4):
+    """hook for ota_run behind NAT while device B installs the same file: before the 2nd old
+    answer of A the download server serves the file to the NAT address (B's download), before
+    the finish-th old answer B leaves the installing status; own: before that old answer A
+    downloads the file again (NAT, B is done)."""
+    old_answers = []
+
+    def hook(version):
+        if version != "2.1.1":
+            return
+        old_answers.append(version)
+        if len(old_answers) in (2, own):
+            mgr.may_download("x.zip", "172.30.32.1")
+            mgr.record_download("x.zip", "172.30.32.1")
+        if len(old_answers) == finish:
+            mgr.devices[B]["status"] = manager_core.STATUS_CURRENT
+
+    return hook
+
+
+async def test_second_pass_behind_nat_counts_from_its_own_download(mgr, ota_install, monkeypatch):
+    """NAT while B installs the same file: B's download does not count for A, and B leaving the
+    installing status is no download either. A's own later download (B done) starts the second
+    pass, so its total limit counts from there and the target version is confirmed."""
+    monkeypatch.setattr(manager_installs, "TWO_STEP_START_S", 5)
+    monkeypatch.setattr(manager_installs, "TWO_STEP_FINISH_S", 0.6)
+    mgr.restrict_downloads = False
+    other_device(mgr, manager_core.STATUS_INSTALLING, "x.zip")
+    seen = []
+    hook = nat_batch(mgr, own=40)
+
+    def watched(version):
+        hook(version)
+        seen.append(mgr.install_step_view(A))
+
+    versions = [None, *["2.1.1"] * 50, "2.2.0"]
+    result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, versions, old="2.1.1", target="2.2.0",
+                                          hook=watched)
+    assert result == (True, None)
+    limits = [view["give_up"] for view in seen if view and view["second_pass"]]
+    assert limits.index(0.6) > 30  # the total limit only from A's own download (the 40th old answer) on
+
+
+async def test_second_pass_a_finished_batch_is_no_download(mgr, ota_install, monkeypatch):
+    """NAT while B installs the same file: after B finished, A goes down and answers on its old
+    version again, having restarted. Without a download of its own that is no "not applied":
+    the start window goes on and ends with its own error."""
+    monkeypatch.setattr(manager_installs, "TWO_STEP_FINISH_S", 3)
+    running_for(monkeypatch, 0)
+    mgr.restrict_downloads = False
+    other_device(mgr, manager_core.STATUS_INSTALLING, "x.zip")
+    versions = [None, *["2.1.1"] * 5, None, "2.1.1"]
+    result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, versions, old="2.1.1", target="2.2.0",
+                                          hook=nat_batch(mgr))
+    assert isinstance(result, shelly.ShellyError) and "did not start within 0.4 s" in str(result)
 
 
 def test_the_address_of_an_installing_device_is_always_counted(mgr):

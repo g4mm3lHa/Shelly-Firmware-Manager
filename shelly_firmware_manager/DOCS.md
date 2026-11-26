@@ -468,8 +468,8 @@ check the device, then install.
 The app recognises the new download by the address of the Shelly. Behind network address
 translation (NAT, e.g. Docker or a router between the networks) every download comes from
 another address. Such a download is meant to count for the Shelly while no other device
-installs the same file. While several do, the app cannot tell them apart. It then waits up
-to 5 minutes after that download instead of failing.
+installs the same file. While several do, the app cannot tell them apart and does not count
+it. The second step then shows itself only by the restart of the Shelly within 3 minutes.
 
 After the update command the app reads the running time only as a hint. If the Shelly
 refuses or blocks the sign-in for it, the installation goes on without it. The app then
@@ -711,7 +711,9 @@ version keeps it). Counters that change with every update (`sys.cfg_rev`) are no
 compared. Nothing is changed on the device; the result is logged with the names of the
 first changed settings (without their values, which may hold e.g. a server address) and the
 stopped scripts. Downgrades and
-installations without a backup **Before update** get no comparison.
+installations without a backup **Before update** get no comparison. If the Shelly refused
+or blocked the sign-in during the installation, the app does not read it again: the
+comparison shows that reason instead.
 
 Settings the new firmware no longer has are meant to be listed apart under **Removed with the
 firmware**, for example `ble.enable` (removed in Gen2+ firmware 2.0.0). They do not count as
@@ -896,6 +898,7 @@ Gen2+ firmware is downloaded over HTTPS only.
 | Device not reachable (connection test) | The chosen test device did not answer Home Assistant. Choose another device or **Automatic** |
 | Not reachable (device details) | The device did not answer its last check. **Try again** shows whether Home Assistant still knows its address, whether the port is open and whether the device answers; check the device, its network and its address in the Shelly integration |
 | The comparison could not be made (Comparison after update) | The device could not be read again after the update or its backup **Before update** is gone. The update itself is not affected; check the device's settings in its web interface if in doubt |
+| The comparison could not be made: The Shelly refused or blocked the sign-in during the installation – settings not read again | The app sends no further signed request after a refused sign-in. Check the device password (row menu ⋮ → **Device password**), then compare the settings in the web interface of the Shelly |
 | The Shelly downloaded the firmware but still reports … | The device did not install it – check the log in the Shelly web UI |
 | After the restart the Shelly still reports … – the update was not applied | The Shelly restarted but kept its old version. Check the log in the Shelly web UI, then try the installation again from **Updates Available** |
 | After the restart the Shelly still reports … The update to … can run in two steps, but the second step did not start within 180 s | The Shelly came back on its old version and did not start the second step of a [two-step update](#installing-updates). Start the installation again from **Updates Available**; do not switch the Shelly off while it installs |

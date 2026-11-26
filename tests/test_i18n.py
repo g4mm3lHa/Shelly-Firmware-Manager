@@ -227,6 +227,7 @@ def _sent_texts() -> list[str]:
     of the connection test – with every value of an f-string as "X"."""
     import manager_checks
     import manager_core
+    import manager_installs
     import manager_store
     import shelly
 
@@ -240,6 +241,7 @@ def _sent_texts() -> list[str]:
         manager_core.unexpected_text(KeyError("X")),
         manager_core.FIRST_START_BLOCK,
         shelly.HTTPS_REQUIRED,
+        manager_installs.SIGNIN_REFUSED_COMPARISON,
     ]
     app = ROOT / "shelly_firmware_manager" / "app"
     for name in SOURCES + MESSAGE_ONLY:

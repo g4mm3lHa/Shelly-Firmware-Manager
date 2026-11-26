@@ -1,5 +1,6 @@
 // Translation of texts the server sends in English: status messages of the devices (the
-// pill tooltip and the device details), install errors, the reasons of the download base
+// pill tooltip and the device details), install errors, the reason of a comparison after an
+// update that was not made, the reasons of the download base
 // URL, the results of the connection test and the error texts of API answers. Each text of SERVER_TEXTS is the English
 // original as the server builds it, a value of its own as a {placeholder}; a dictionary
 // entry keyed by it translates every text of this form. A placeholder of NESTED holds a
@@ -75,6 +76,7 @@ const SERVER_TEXTS = [
   "Connection to the Shelly lost before the update command – no answer in {attempts} attempts within {seconds} s. Nothing was installed. Wi-Fi signal: {rssi} dBm (weak).",
   "The Shelly restarted unexpectedly before the update command (running for {seconds} s). Nothing was installed.",
   "Connection to the Shelly lost before the update command – nothing was installed",
+  "The Shelly refused or blocked the sign-in during the installation – settings not read again",
   // Access point form (answer of the server; the form checks the same before)
   "The password contains a character the Shelly cannot use: {char}",
   "Invalid access point password (8 to 63 characters)",

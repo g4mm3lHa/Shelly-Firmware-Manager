@@ -986,6 +986,7 @@ export default {
   "The Shelly is restarting": "Shelly uruchamia się ponownie",
   "The Shelly may restart to apply the change.": "Shelly może się zrestartować, aby zastosować zmianę.",
   "The Shelly never requested the firmware – is {url} reachable from the Shelly (IP of Home Assistant, port from the Network section)?": "Shelly nigdy nie zażądał firmware – czy {url} jest osiągalny z Shelly (IP Home Assistant, port z sekcji Sieć)?",
+  "The Shelly refused or blocked the sign-in during the installation – settings not read again": "Shelly odrzucił lub zablokował logowanie podczas instalacji – ustawienia nie zostały ponownie odczytane",
   "The Shelly refused these access point settings as invalid (device answer: {error})": "Shelly odrzucił te ustawienia punktu dostępu jako nieprawidłowe (odpowiedź urządzenia: {error})",
   "The Shelly rejected the password": "Shelly odrzucił hasło",
   "The Shelly rejected the stored current password – nothing was changed": "Shelly odrzucił zapisane bieżące hasło – nic nie zostało zmienione",
