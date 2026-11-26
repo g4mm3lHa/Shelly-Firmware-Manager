@@ -24,7 +24,7 @@ from manager import Manager
 from tls import CertificatePins
 from web_ui import build_ui_app
 
-VERSION = "3.13.1"  # must match config.yaml
+VERSION = "3.13.2-rc1"  # must match config.yaml
 
 OPTIONS_FILE = Path("/data/options.json")
 UI_PORT = 8099  # Ingress (internal)
@@ -70,13 +70,8 @@ async def supervisor_options(session: aiohttp.ClientSession, token: str) -> dict
     """Options the Supervisor keeps for this app (/addons/self/info), also those no longer
     in config.yaml; None if they cannot be read (logged)."""
     try:
-        async with session.get(
-            f"{manager_core.SUPERVISOR}/addons/self/info",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=manager_core.SUPERVISOR_TIMEOUT,
-        ) as resp:
-            resp.raise_for_status()
-            options = ((await resp.json(content_type=None)).get("data") or {}).get("options")
+        info = await manager_core.supervisor_get(session, token, "/addons/self/info")
+        options = (info.get("data") or {}).get("options")
     except (TimeoutError, aiohttp.ClientError, ValueError, AttributeError) as err:
         log.warning("App options not readable from the Supervisor: %s", err or type(err).__name__)
         return None
@@ -111,7 +106,7 @@ async def load_settings(session: aiohttp.ClientSession, token: str) -> tuple[dic
     try:
         async with session.post(
             f"{manager_core.SUPERVISOR}/addons/self/options",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=manager_core.supervisor_headers(token),
             json={"options": {}},
             timeout=manager_core.SUPERVISOR_TIMEOUT,
         ) as resp:
@@ -157,9 +152,7 @@ async def main() -> None:
             schedule.iso_utc(schedule.next_run(mgr.schedule, time.time(), mgr.tz)),
             mgr.download_base or "(not set – installations disabled)",
         )
-        if mgr.download_base_issue == "unconfirmed":
-            log.warning("download_base_url is the former example value – confirm it in the Settings tab")
-        elif mgr.download_base_issue in ("not_private", "invalid"):
+        if mgr.download_base_issue in ("not_private", "invalid"):
             log.warning("download_base_url is not allowed – installations are disabled (see the notice in the app)")
         for host, pin in sorted(pins.pins.items()):
             log.info("Certificate pinning active for %s (%d fingerprint(s))", host, len(pin.digests))

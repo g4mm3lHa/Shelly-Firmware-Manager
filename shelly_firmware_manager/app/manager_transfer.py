@@ -31,10 +31,9 @@ import data_paths
 import shelly
 import shelly_cloud
 import store_transfer
-from shelly import ShellyError, clip
-
 from manager_core import PART_PREFIX, SOURCE_DOWNLOAD, SOURCE_IMPORT, SOURCE_UPLOAD, FirmwareMeta
 from manager_store import STABLE_VERSION_RE, FirmwareStore
+from shelly import ShellyError, clip
 
 log = logging.getLogger("sfm.manager")
 
@@ -172,17 +171,6 @@ class Transfers(FirmwareStore):
             if (dev.get("gen") or 1) >= 2 and dev.get("type"):
                 types[dev["type"]] = max(types.get(dev["type"], 0), dev["gen"])
         return types
-
-    async def stage_upload(
-        self, chunks: AsyncIterator[bytes], filename: str, length: int | None, user: str = "unknown"
-    ) -> dict[str, Any]:
-        """Step 1 of a manual upload in one request (the whole file as one part)."""
-        if not isinstance(length, int) or length < 1:
-            raise ValueError("Firmware file implausibly small")
-        result = await self.stage_upload_part(chunks, filename, length, length, 0, None, user)
-        if "token" not in result:
-            raise ValueError("Upload incomplete")
-        return result
 
     async def stage_upload_part(
         self,
@@ -426,15 +414,6 @@ class Transfers(FirmwareStore):
         if staged is None:
             raise ShellyError("No pending import – please choose the file again")
         return staged
-
-    async def stage_import(self, chunks: AsyncIterator[bytes], length: int | None) -> dict[str, Any]:
-        """Step 1 of an import in one request (the whole file as one part)."""
-        if not isinstance(length, int) or length < 1:
-            raise ValueError("Empty file")
-        result = await self.stage_import_part(chunks, length, length, 0, None)
-        if "token" not in result:
-            raise ValueError("Transfer incomplete")
-        return result
 
     async def stage_import_part(
         self, chunks: AsyncIterator[bytes], length: int | None, total: object, offset: object, transfer: object

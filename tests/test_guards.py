@@ -17,6 +17,7 @@ from pathlib import Path
 import aiohttp
 import app_options
 import manager
+import manager_core
 import pytest
 import shelly
 import shelly_cloud
@@ -408,9 +409,10 @@ def test_host_name_of_the_registry_entry():
     assert shelly_net.host_name_of(None) is None and shelly_net.host_name_of("http://[::1") is None
 
 
-async def test_battery_sensors_of_the_entity_registry(net):
+async def test_battery_sensors_of_the_entity_registry(net, monkeypatch):
     """Battery hint of HA: sensor entities of the Shelly integration whose unique ID ends
-    in -battery (Gen1 device_0, Gen2+ devicepower:0); a failed request gives no hint."""
+    in -battery (Gen1 device_0, Gen2+ devicepower:0), reused for HA_CACHE_S; a failed
+    request gives no hint and is not kept (the next request is answered again)."""
     m = manager.Manager(dict(OPTIONS), session=None, token="t")
     entities = [
         {"platform": "shelly", "entity_id": "sensor.ht_battery", "unique_id": "AABB-devicepower:0-battery", "device_id": "d1"},
@@ -421,15 +423,23 @@ async def test_battery_sensors_of_the_entity_registry(net):
         {"platform": "shelly", "entity_id": "sensor.y_battery", "unique_id": "y-battery", "device_id": None},
     ]
 
+    calls = []
+
     async def answer(request):
         assert request == "config/entity_registry/list"
+        calls.append(request)
         return entities
 
     m._ha_list = answer
     assert await m._battery_devices() == {"d1", "d2"}
+    assert await m._battery_devices() == {"d1", "d2"} and len(calls) == 1   # reused
 
     async def failing(_request):
         raise ShellyError("no connection")
 
+    monkeypatch.setattr(manager_core, "HA_CACHE_S", 0)   # the kept answer is out of time
     m._ha_list = failing
     assert await m._battery_devices() == set()
+    monkeypatch.setattr(manager_core, "HA_CACHE_S", 60)   # the failure stored nothing, the old answer is gone
+    m._ha_list = answer
+    assert await m._battery_devices() == {"d1", "d2"} and len(calls) == 2

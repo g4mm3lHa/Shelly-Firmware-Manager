@@ -6,14 +6,13 @@ class only.
 
 import logging
 import platform
-import shelly_net
 import time
 from typing import Any
 
 import diagnostics
 import schedule
+import shelly_net
 from backup_store import normalize_mac
-
 from manager_core import BATTERY_FROM_DEVICE, DOWNLOAD_BASE_MESSAGES, section_of
 from manager_schedules import Schedules
 
@@ -82,8 +81,8 @@ class Manager(Schedules):
             "after_update",
         )
         devices: list[dict[str, Any]] = []
-        stored = self._downgrade_candidates()
         kept = self._stored_versions()
+        stored = self._downgrade_candidates(kept)
         backups = self.backup_counts()
         for key, dev in self.devices.items():
             origin = dev.get("origin")  # checked by resolve_device_origin: private IP

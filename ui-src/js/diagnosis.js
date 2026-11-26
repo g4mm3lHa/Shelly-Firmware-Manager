@@ -223,8 +223,9 @@ export async function openReport(d) {
 // ---------------------------------------------------------------- Comparison after an update
 // After a confirmed update the server compares the device with its backup "Before update"
 // (device field after_update): changed values, settings new with the firmware (collapsed,
-// they have Shelly's default value) and the scripts that ran before. Counters that change
-// with every update (sys.cfg_rev) are never compared.
+// they have Shelly's default value), settings the firmware removed (collapsed, no changes:
+// they raise no line below the firmware and no "Seen") and the scripts that ran before.
+// Counters that change with every update (sys.cfg_rev) are never compared.
 const COMPARE_TITLE = t("Comparison after update");
 /** True if the comparison found something to look at: changed values or stopped scripts. */
 const hasFindings = a => !!a && !a.error && (a.changed_count > 0 || (a.scripts && a.scripts.stopped.length > 0));
@@ -240,14 +241,15 @@ export function afterUpdateNote(d) {
   b.onclick = () => openComparison(d);
   return b;
 }
-/** Table of a comparison: heads and rows (first cell the setting, last cell highlighted). */
-function compareTable(heads, rows) {
+/** Table of a comparison: heads and rows (first cell the setting, last cell in the class
+ *  last: highlighted as a new value by default, "muted" for values that no longer apply). */
+function compareTable(heads, rows, last = "bk-new") {
   const table = el("table", null, "bk-diff"), head = el("tr");
   for (const h of heads) head.append(el("th", h));
   table.append(head);
   for (const row of rows) {
     const tr = el("tr");
-    row.forEach((v, i) => tr.append(el("td", v, i === 0 ? "bk-key" : i === row.length - 1 ? "bk-new" : "")));
+    row.forEach((v, i) => tr.append(el("td", v, i === 0 ? "bk-key" : i === row.length - 1 ? last : "")));
     table.append(tr);
   }
   return table;
@@ -267,7 +269,7 @@ export function openComparison(d) {
   const head = valueList([[t("Device"), [d.name, modelGen(d)].filter(Boolean).join(" · ")], [t("Update"), a.from_version || a.to_version ? `${a.from_version || "–"} → ${a.to_version || "–"}` : null],
     [t("Compared with"), a.backup_at ? t("Backup “Before update” · {time}", {time: fmt(a.backup_at)}) : null]]);
   if (a.error) {
-    modal(COMPARE_TITLE, [head, messageBody(t("The comparison could not be made: {error}", {error: a.error}), "warning")], undefined, "backup");
+    modal(COMPARE_TITLE, [head, messageBody(t("The comparison could not be made: {error}", {error: serverText(a.error)}), "warning")], undefined, "backup");
     return;
   }
   const scripts = a.scripts || {before: 0, again: 0, stopped: []}, lines = [
@@ -278,6 +280,9 @@ export function openComparison(d) {
   } else if (scripts.before) lines.push(checkLine("ok", t("Scripts"), t("{again} of {before} run again.", {again: scripts.again, before: scripts.before})));
   if (a.new_count) lines.push(checkLine("ok", t("New fields"), tn(a.new_count, "1 setting exists only since this firmware. It has Shelly's default value.",
     "{n} settings exist only since this firmware. They have Shelly's default value.")));
+  // Comparisons stored without gone_count (made before the removed fields were told apart) show no line
+  if (a.gone_count) lines.push(checkLine("ok", t("Removed fields"), tn(a.gone_count, "1 setting no longer exists in this firmware.",
+    "{n} settings no longer exist in this firmware.")));
   const more = (shown, total) => total > shown ? el("p", t("The first {n} are shown.", {n: shown}), "hint") : null;
   const content = [head, section(t("Result"), box("ul", "prechk", ...lines))];
   if (a.changed_count) {
@@ -287,6 +292,11 @@ export function openComparison(d) {
   if (a.new_count) {
     const fold = el("details"); fold.append(el("summary", t("Show fields")), compareTable([t("Setting"), t("Default value")], a.new.map(r => [r.key, r.value])));
     content.push(section(`${t("New with the firmware")} · ${a.new_count}`, fold, more(a.new.length, a.new_count)));
+  }
+  if (a.gone_count) {
+    // The values before the update stay plain: they no longer apply, unlike the default values of new fields
+    const fold = el("details"); fold.append(el("summary", t("Show fields")), compareTable([t("Setting"), t("Before the update")], a.gone.map(r => [r.key, r.before]), "muted"));
+    content.push(section(`${t("Removed with the firmware")} · ${a.gone_count}`, fold, more(a.gone.length, a.gone_count)));
   }
   if (d.gen >= 2) content.push(el("p", t("Not compared: counters that change with every update (sys.cfg_rev)."), "hint"));
   modal(COMPARE_TITLE, content, compareButtons(d), "backup");

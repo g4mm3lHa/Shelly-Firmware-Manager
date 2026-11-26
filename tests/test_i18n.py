@@ -2,6 +2,7 @@
 dictionary (i18n-<code>.js), and the entries keep the {placeholders} of their English text."""
 
 import ast
+import itertools
 import json
 import re
 from html.parser import HTMLParser
@@ -146,6 +147,15 @@ def test_translations_keep_the_placeholders():
             assert text.strip(), (code, en)
 
 
+def test_dictionaries_are_sorted_case_insensitively():
+    """The entries of every dictionary stay in the case-insensitive order of their English text
+    (so a new entry has one place and the files of all languages compare line by line)."""
+    for code, dictionary in dictionaries().items():
+        keys = list(dictionary)
+        unsorted = [(a, b) for a, b in itertools.pairwise(keys) if a.casefold() > b.casefold()]
+        assert not unsorted, (code, unsorted[:3])
+
+
 def test_dictionaries_have_no_unused_entries():
     """Every entry belongs to an English text the UI still uses."""
     used = js_keys() | html_keys()
@@ -182,15 +192,18 @@ def _texts_of(node: ast.expr) -> list[str]:
 
 
 # Errors that become a status message of a device (or the answer of an install dialog)
-ERRORS = {"ShellyError", "AuthError", "AddressError", "OtaError", "UnsupportedError"}
+ERRORS = {"ShellyError", "AuthError", "AuthBlockedError", "AddressError", "HttpsRequiredError", "OtaError",
+          "UnsupportedError"}
 # Functions whose returned text is a status message or the error of a connection test
-MESSAGE_FUNCTIONS = {"_install_diagnosis", "_ota_error_text", "fetch_error"}
+MESSAGE_FUNCTIONS = {"_install_diagnosis", "_ota_error_text", "fetch_error", "ap_refusal"}
 # Functions whose "error" values (keyword or ["error"]) are the result of a connection test
 RESULT_FUNCTIONS = {"_test_with"}
 # Sources of status messages; the errors of the other modules answer dialogs
 SOURCES = ("manager_checks.py", "manager_installs.py", "manager_store.py", "manager_schedules.py",
            "shelly.py", "shelly_net.py")
 MESSAGE_ONLY = ("manager_core.py", "manager_devices.py", "manager_backups.py")
+# Functions that build an error text from their first argument, alone or with the device's answer in brackets
+ANSWER_FUNCTIONS = {"_unverified"}
 
 
 def _result_errors(func: ast.AsyncFunctionDef) -> list[str]:
@@ -210,11 +223,13 @@ def _result_errors(func: ast.AsyncFunctionDef) -> list[str]:
 def _sent_texts() -> list[str]:
     """Texts the server sends as status messages and errors: the message constants, the
     values of "message" (keyword or dev["message"]), the texts of Shelly errors, of the
-    diagnosis functions and the errors of the connection test – with every value of an
-    f-string as "X"."""
+    diagnosis functions, of the answer functions (plain and with an answer) and the errors
+    of the connection test – with every value of an f-string as "X"."""
     import manager_checks
     import manager_core
+    import manager_installs
     import manager_store
+    import shelly
 
     texts = [
         *manager_checks.OFFER_MESSAGES.values(),
@@ -225,6 +240,8 @@ def _sent_texts() -> list[str]:
             manager_checks.STORE_FALLBACK_HINT, manager_checks.IMPORT_FALLBACK_HINT, manager_checks.IMPORT_FALLBACK_HINT_GEN1)),
         manager_core.unexpected_text(KeyError("X")),
         manager_core.FIRST_START_BLOCK,
+        shelly.HTTPS_REQUIRED,
+        manager_installs.SIGNIN_REFUSED_COMPARISON,
     ]
     app = ROOT / "shelly_firmware_manager" / "app"
     for name in SOURCES + MESSAGE_ONLY:
@@ -238,6 +255,8 @@ def _sent_texts() -> list[str]:
                 called = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else ""
                 if called in ERRORS and node.args and name in SOURCES:
                     texts += _texts_of(node.args[-1])
+                if called in ANSWER_FUNCTIONS and node.args:
+                    texts += [form for text in _texts_of(node.args[0]) for form in (text, f"{text} (X)")]
             elif isinstance(node, ast.Assign):
                 target = node.targets[0]
                 if isinstance(target, ast.Subscript) and isinstance(target.slice, ast.Constant) and target.slice.value == "message":

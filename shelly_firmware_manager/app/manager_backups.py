@@ -33,10 +33,9 @@ import store_transfer
 import timetable
 from backup_store import BackupError, normalize_mac
 from events import worst
-from shelly import AuthError, ShellyError, clip, error_text
-
-from manager_core import Device, STATUS_ERROR, STATUS_INSTALLING, severity_of, unexpected_text, unreachable
+from manager_core import STATUS_ERROR, STATUS_INSTALLING, Device, severity_of, unexpected_text, unreachable
 from manager_devices import DeviceSettings
+from shelly import AuthBlockedError, AuthError, ShellyError, clip, error_text
 
 log = logging.getLogger("sfm.manager")
 
@@ -218,8 +217,11 @@ class Backups(DeviceSettings):
         log_entry: bool,
     ) -> None:
         """Note a failed backup on the device and in the log. Before an installation
-        it is always an error: the installation does not start."""
-        if isinstance(err, AuthError):
+        it is always an error: the installation does not start. A sign-in block is no
+        password problem: it is noted as failed, so "Back up now" stays usable."""
+        if isinstance(err, AuthBlockedError):
+            code = NONE_FAILED
+        elif isinstance(err, AuthError):
             code = NONE_PASSWORD
         elif unreachable(err):
             code = NONE_ASLEEP if dev.get("battery") is True else NONE_UNREACHABLE
@@ -273,8 +275,10 @@ class Backups(DeviceSettings):
         "to_version", ...}, or {"at", "error"}) until the next check of the device (the
         check after an intermediate version keeps it) or its next installation, and
         logged with the names of the changed settings (no values) and the stopped
-        scripts. Nothing is changed on the device. Never raises: an unexpected error is
-        logged and kept as the error of the comparison, so the caller goes on."""
+        scripts. Fields the new firmware removed ("gone") are kept and counted, but are
+        no changes and raise no warning. Nothing is changed on the device. Never raises:
+        an unexpected error is logged and kept as the error of the comparison, so the
+        caller goes on."""
         await asyncio.sleep(AFTER_UPDATE_WAIT_S)
         dev = self.devices.get(device_id)
         if dev is None or not self._comparison_current(device_id, dev):
@@ -323,18 +327,20 @@ class Backups(DeviceSettings):
             "from_version": entry.get("fw"), "to_version": dev.get("version"), **result,
         }  # fmt: skip
         scripts = result["scripts"]
+        # Fields the new firmware removed ("gone") are no findings: only changes and stopped scripts warn
         severity = "warning" if result["changed_count"] or scripts["stopped"] else "success"
         # The log entry keeps the names of the first changed settings, never their values
         # (they may hold e.g. a server address with a token); the dialog of the device shows the values
         changed_keys = [row["key"] for row in result["changed"][:LOG_CHANGED_ROWS]]
         self.events.add(
             "backup", severity=severity, event="compared", device=name, changed=result["changed_count"],
-            new_fields=result["new_count"], scripts_before=scripts["before"], scripts_stopped=scripts["stopped"],
-            changed_keys=changed_keys or None, user=user,
+            new_fields=result["new_count"], gone_fields=result["gone_count"], scripts_before=scripts["before"],
+            scripts_stopped=scripts["stopped"], changed_keys=changed_keys or None, user=user,
         )  # fmt: skip
         log.info(
-            "%s: compared after the update: %d changed, %d new", name, result["changed_count"], result["new_count"]
-        )
+            "%s: compared after the update: %d changed, %d new, %d removed",
+            name, result["changed_count"], result["new_count"], result["gone_count"],
+        )  # fmt: skip
         self.save()
 
     def after_update_seen(self, device_id: str) -> bool:

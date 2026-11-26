@@ -2,7 +2,15 @@
 (demo "features" on 8805)."""
 
 from features.base import (
-    OVERFLOW_JS, check, dialog, filter_entries, menu_items, pick_filter, refresh_state, tip_text, wait_until,
+    OVERFLOW_JS,
+    check,
+    dialog,
+    filter_entries,
+    menu_items,
+    pick_filter,
+    refresh_state,
+    tip_text,
+    wait_until,
 )
 
 
@@ -608,8 +616,9 @@ STEPS = [
      "attempts": None, "rssi": None},
     {"step": "precheck", "n": 3, "of": 6, "seconds": 24, "usual": 5, "late": True, "give_up": 60, "attempt": 3,
      "attempts": 5, "rssi": -84},
-    {"step": "install", "n": 4, "of": 6, "seconds": 3, "usual": 30, "late": False, "give_up": 60, "attempt": None,
-     "attempts": None, "rssi": -62},
+    # Second pass of a two-step update: "Installing again …", the progress of the first pass ignored
+    {"step": "install", "n": 4, "of": 6, "seconds": 40, "usual": 150, "late": False, "give_up": 180, "attempt": None,
+     "attempts": None, "rssi": None, "second_pass": True},
     {"step": "verify", "n": 6, "of": 6, "seconds": 34, "usual": 30, "late": True, "give_up": 90, "attempt": None,
      "attempts": None, "rssi": None},
 ]
@@ -618,7 +627,8 @@ STEPS = [
 def _install_steps(c):
     """Status pill of a running installation: the step as text, blue with a spinner,
     yellow while it takes longer than usual; the tooltip (phones: the device details)
-    explains the step, the time, the limit, the Wi-Fi signal and the versions."""
+    explains the step, the time, the limit, the Wi-Fi signal and the versions. The second pass of
+    a two-step update reads "Installing again …" without a percentage and adds its line."""
     case, f, page, out, width = c.case, c.f, c.page, c.out, c.width
     names = []
 
@@ -640,7 +650,7 @@ def _install_steps(c):
     # The demo has three ready devices: the first three steps are shown
     texts = [p[0] for p in pills.values()]
     check(f"{case}: install steps – pill texts", len(texts) >= 3
-          and texts == ["Backup …", "Waiting for device …", "Installing 42 %", "Verifying …"][:len(texts)], str(pills))
+          and texts == ["Backup …", "Waiting for device …", "Installing again …", "Verifying …"][:len(texts)], str(pills))
     late = [("p-late" in p[1]) for p in pills.values()]
     check(f"{case}: install steps – yellow only when late, spinner", late == [False, True, False, True][:len(late)]
           and all("p-step" in p[1] and p[2] == 1 for p in pills.values()), str(pills))
@@ -660,6 +670,17 @@ def _install_steps(c):
             "No answer for 24 s – longer than expected (usually under 5 s)",
             "Attempt 3 of 5 · the app gives up after 60 s", "Wi-Fi signal at the start: −84 dBm (weak)", "Target: ")), tip)
         page.screenshot(path=out / f"{case}-install-steps-tip.png")
+        page.mouse.move(0, 0)
+        f.locator("#dev-cards tr", has_text=names[2]).first.locator(".status-cell .pill").hover()
+        wait_until(lambda: "two-step" in (tip_text(f) or ""))
+        tip = tip_text(f) or ""
+        lines = tip.split("\n")
+        check(f"{case}: install steps – second pass lines in order", len(lines) >= 5 and lines[:2] == [
+            "Step 4 of 6: the Shelly installs the update a second time (two-step update)",
+            "Running for 40 s (usually under 150 s)"]
+            and lines[2].startswith("Two-step update: the Shelly restarted on ")
+            and lines[2].endswith(" and installs the update again. Do not switch it off.")
+            and lines[3].startswith("Installed: ") and lines[4].startswith("Target: "), tip)
         page.mouse.move(0, 0)
     else:
         waiting.click()

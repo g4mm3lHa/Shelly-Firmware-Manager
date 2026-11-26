@@ -109,20 +109,20 @@ async def test_notification_counts_betas_separately(net):
 
 async def test_beta_upload_only_while_the_option_is_on(net):
     """A manual upload may name a beta version only while the option is on."""
-    from helpers import chunks, firmware_zip
+    from helpers import chunks, firmware_zip, stage_upload
 
     m = await beta_manager(net)
     await m.scan()
     m.beta_firmware = False
     data = firmware_zip()
-    staged = await m.stage_upload(chunks(data), "fw.zip", len(data))
+    staged = await stage_upload(m, chunks(data), "fw.zip", len(data))
     with pytest.raises(ValueError):
         m.confirm_upload(staged["token"], "Plus1", "1.7.0-beta1")
     m.beta_firmware = True
     entry = m.confirm_upload(staged["token"], "Plus1", "1.7.0-beta1")
     assert entry["version"] == "1.7.0-beta1"
     with pytest.raises(ValueError):
-        staged = await m.stage_upload(chunks(firmware_zip(size=6000)), "fw.zip", len(firmware_zip(size=6000)))
+        staged = await stage_upload(m, chunks(firmware_zip(size=6000)), "fw.zip", len(firmware_zip(size=6000)))
         m.confirm_upload(staged["token"], "Plus1", "1.7.0-dev1")
 
 

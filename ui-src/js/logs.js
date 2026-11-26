@@ -79,7 +79,7 @@ function backupLine(e) {
     // Comparison with the backup "Before update" once the update was confirmed
     case "compared": return e.error ? `${e.device}: comparison after the update failed`
       : `${e.device}: compared after the update · ${plural(e.changed ?? 0, "setting")} changed · ${plural(e.new_fields ?? 0, "new field")}` +
-        (e.scripts_before ? ` · ${plural(e.scripts_before, "script")} ran before` : "");
+        (e.gone_fields ? ` · ${plural(e.gone_fields, "removed field")}` : "") + (e.scripts_before ? ` · ${plural(e.scripts_before, "script")} ran before` : "");
     default: return `${e.device}: backup ${e.event}`;
   }
 }
@@ -161,7 +161,8 @@ function logContent(e) {
       return [box("div", null, `${e.device}: ${e.downgrade ? "downgrade" : "installation"} ${INSTALL_EVENTS[e.event] || e.event} · ${arrow(e.old, e.new)} `,
         e.unverified ? el("span", "Not verified by the update server", "tag warn") : null, e.beta ? el("span", "Beta", "tag beta") : null),
         e.at ? el("div", `Install at ${e.at}`, "sub") : null,
-        e.restarted ? el("div", "Restarted by the app before the installation (Restart & install)", "sub") : null, e.detail ? el("div", e.detail, "sub") : null].filter(Boolean);
+        e.restarted ? el("div", "Restarted by the app before the installation (Restart & install)", "sub") : null,
+        e.two_step ? el("div", "Installed in two steps (the Shelly reorganised its memory)", "sub") : null, e.detail ? el("div", e.detail, "sub") : null].filter(Boolean);
     case "delete":
       if (e.unknown) return [el("div", `Unknown file deleted · ${mb(e.size || 0)} · SHA ${(e.sha256 || "").slice(0, 12)}…`)];
       return [el("div", `Firmware deleted: ${e.type} ${e.version}${e.source === "upload" ? " (uploaded)" : e.source === "import" ? " (imported)" : ""}`),
@@ -173,6 +174,7 @@ function logContent(e) {
     case "password":
       return [el("div", `${e.device}: ${passwordAction(e)}`), e.error ? el("div", e.error, "bad") : null].filter(Boolean);
     case "options":
+      // confirmed: entry of an earlier version (confirmation of the former example download address)
       if (e.confirmed) return [el("div", "Download base URL confirmed as the address of Home Assistant")];
       return [el("div", e.ok ? "App settings saved – app restarted" : "App settings could not be saved"),
         ...(e.changes || []).map(c => el("div", c.redacted ? `${optionLabel(c.option)}: changed` : `${optionLabel(c.option)}: ${arrow(c.old, c.new)}`, "sub")),

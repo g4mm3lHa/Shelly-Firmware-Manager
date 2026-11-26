@@ -7,6 +7,7 @@ the server, Gen1 Basic), no downgrade of the authentication, no redirects, the
 size limit of an answer and the translation of HTTP and RPC errors. Last part: the
 Gen1 write-back of a backup restore over the same requests."""
 
+import asyncio
 import base64
 import hashlib
 import inspect
@@ -43,10 +44,15 @@ class FakeDevice:
     (method, path with query, Authorization header, JSON body). With a password
     every path but /shelly asks for it like the real devices: Gen2+ with a Digest
     challenge (a new nonce each time, SHA-256), Gen1 with Basic; the server checks
-    the answer itself. challenge overrides the WWW-Authenticate header."""
+    the answer itself. realm is the Digest realm the device challenges with and binds
+    its password to (normally its ID). challenge overrides the WWW-Authenticate header.
+    blocked(signed, body) -> bool answers HTTP 429 before the password check (the
+    sign-in block of firmware 2.0+); signed tells whether the request carries an
+    Authorization header."""
 
-    def __init__(self, gen=2, password=None, routes=None, challenge=None):
-        self.gen, self.password, self.challenge = gen, password, challenge
+    def __init__(self, gen=2, password=None, routes=None, challenge=None, blocked=None, realm=REALM):
+        self.gen, self.password, self.challenge, self.blocked = gen, password, challenge, blocked
+        self.realm = realm
         self.routes = dict(routes or {})
         self.requests = []
         self.nonces = []
@@ -58,13 +64,13 @@ class FakeDevice:
             return header == "Basic " + base64.b64encode(f"admin:{self.password}".encode()).decode()
         scheme, _, params = header.partition(" ")
         values = {m[0]: m[1] or m[2] for m in DIGEST_RE.findall(params)}
-        ha1 = sha256(f"admin:{REALM}:{self.password}")
+        ha1 = sha256(f"admin:{self.realm}:{self.password}")
         ha2 = sha256(f"{request.method}:{values.get('uri')}")
         expected = sha256(f"{ha1}:{values.get('nonce')}:{values.get('nc')}:{values.get('cnonce')}:auth:{ha2}")
         return (
             scheme == "Digest"
             and values.get("uri") == request.path_qs  # signed for exactly this request
-            and values.get("realm") == REALM
+            and values.get("realm") == self.realm
             and values.get("nonce") == self.nonces[-1]  # the nonce of the last challenge
             and values.get("algorithm") == "SHA-256"
             and values.get("response") == expected
@@ -75,7 +81,7 @@ class FakeDevice:
             challenge = 'Basic realm="shelly1-B929CC"'
         elif self.challenge is None:
             self.nonces.append(str(1700000000 + len(self.nonces)))
-            challenge = f'Digest qop="auth", realm="{REALM}", nonce="{self.nonces[-1]}", algorithm=SHA-256'
+            challenge = f'Digest qop="auth", realm="{self.realm}", nonce="{self.nonces[-1]}", algorithm=SHA-256'
         else:
             challenge = self.challenge
         return web.Response(status=401, headers={"WWW-Authenticate": challenge})
@@ -84,6 +90,8 @@ class FakeDevice:
         body = await request.json() if request.can_read_body else None
         header = request.headers.get("Authorization")
         self.requests.append((request.method, request.path_qs, header, body))
+        if self.blocked is not None and self.blocked(header is not None, body):
+            return web.Response(status=429, text="Too Many Requests")
         if self.password is not None and request.path != "/shelly" and not self.authorized(request, header):
             return self.ask_password()
         answer = self.routes.get(request.path, self.routes.get("*"))
@@ -184,9 +192,8 @@ async def test_every_request_of_a_settings_read_answers_its_own_challenge(sessio
     results = {
         "Shelly.GetConfig": {"sys": {"device": {"name": "Kitchen"}}, "ble": {"enable": True}, "cloud": {"enable": True},
                              "switch:0": {"name": "Light", "initial_state": "off"}},
-        "Cloud.GetStatus": {"connected": True},
+        "Shelly.GetStatus": {"sys": {"wakeup_period": 0}, "cloud": {"connected": True}},
         "Script.List": {"scripts": [{"name": "aioshelly_ble_integration", "running": True}]},
-        "Sys.GetStatus": {"wakeup_period": 0},
         "Webhook.List": {"hooks": [{"enable": True}]},
         "Schedule.List": {"jobs": []},
     }
@@ -216,6 +223,78 @@ async def test_wrong_password(session):
     assert len(dev.requests) == 2 and dev.requests[1][2].startswith("Digest ")
 
 
+@pytest.fixture
+def short_block_wait(monkeypatch):
+    """The wait after a 429 to a request without credentials, shortened for the tests."""
+    monkeypatch.setattr(shelly, "AUTH_BLOCK_WAIT_S", 0.01)
+
+
+async def test_429_before_credentials_waits_once(session, short_block_wait):
+    """The short block of new sign-ins (429 to a request without credentials): one wait,
+    the request is sent again without credentials, then signed once as usual."""
+    unsigned = []
+
+    def blocked(signed, _body):
+        """Only the first request (without credentials) is blocked."""
+        if not signed:
+            unsigned.append(1)
+        return not signed and len(unsigned) == 1
+
+    async with FakeDevice(password=PASSWORD, routes={"/rpc": rpc(None)}, blocked=blocked) as dev:
+        await shelly.restart(session, 2, dev.origin, gen2_auth())
+    assert [h is not None for _m, _p, h, _b in dev.requests] == [False, False, True]
+
+
+async def test_429_twice_before_credentials_raises_blocked(session, short_block_wait):
+    """A 429 still there after the one wait: AuthBlockedError, and no password was sent."""
+    async with FakeDevice(password=PASSWORD, routes={"/rpc": rpc(None)}, blocked=lambda signed, _b: not signed) as dev:
+        with pytest.raises(shelly.AuthBlockedError, match="temporarily blocks sign-ins"):
+            await shelly.restart(session, 2, dev.origin, gen2_auth())
+    assert [h for _m, _p, h, _b in dev.requests] == [None, None]
+
+
+async def test_429_to_signed_request_is_not_repeated(session, monkeypatch):
+    """A 429 to the signed request (the brute-force block): raised at once without a wait,
+    the request is not repeated. The error is an AuthError (severity error, the run stops)."""
+    monkeypatch.setattr(shelly, "AUTH_BLOCK_WAIT_S", 30)  # a wait would end the test by its time-out
+    async with FakeDevice(password=PASSWORD, routes={"/rpc": rpc(None)}, blocked=lambda signed, _b: signed) as dev:
+        with pytest.raises(shelly.AuthBlockedError) as err:
+            await asyncio.wait_for(shelly.restart(session, 2, dev.origin, gen2_auth()), 5)
+    assert isinstance(err.value, shelly.AuthError)
+    assert len(dev.requests) == 2 and dev.requests[1][2].startswith("Digest ")
+
+
+async def test_429_without_credentials_is_an_ordinary_refusal(session, monkeypatch):
+    """Without stored credentials a 429 is not a sign-in block (it can come from a busy
+    endpoint, and the request may be a command): the general text, no second request."""
+    monkeypatch.setattr(shelly, "AUTH_BLOCK_WAIT_S", 30)
+    async with FakeDevice(routes={"/rpc": rpc(None)}, blocked=lambda _signed, _b: True) as dev:
+        with pytest.raises(shelly.ShellyError, match=r"rejected the request \(HTTP 429\)") as err:
+            await asyncio.wait_for(shelly.restart(session, 2, dev.origin, None), 5)
+    assert not isinstance(err.value, shelly.AuthError) and len(dev.requests) == 1
+
+
+@pytest.mark.parametrize(("config", "extended", "method"), [
+    ({"cloud": {"enable": True}}, True, "Shelly.GetStatus"),  # battery and cloud from one request
+    ({"cloud": {"enable": True}}, False, "Cloud.GetStatus"),
+    ({}, True, "Sys.GetStatus"),
+    ({"ble": {"enable": True}}, False, "Script.List"),
+    ({}, True, "Webhook.List"),
+    ({}, True, "Schedule.List"),
+])
+async def test_block_during_an_optional_request_ends_the_settings_read(session, config, extended, method):
+    """A sign-in block in an optional request of a settings read is raised (not taken
+    for an unknown value): the device gets no further request in this read."""
+    results = {"Shelly.GetConfig": {"sys": {"device": {"name": "Kitchen"}}, **config}, "Shelly.GetStatus": {},
+               "Cloud.GetStatus": {}, "Sys.GetStatus": {}, "Script.List": {"scripts": []},
+               "Webhook.List": {"hooks": []}, "Schedule.List": {"jobs": []}}
+    blocked = lambda signed, body: signed and body["method"] == method
+    async with FakeDevice(password=PASSWORD, routes={"/rpc": rpc_by_method(results)}, blocked=blocked) as dev:
+        with pytest.raises(shelly.AuthBlockedError):
+            await shelly.read_settings(session, 2, dev.origin, "Plus1", gen2_auth(), extended=extended)
+    assert dev.requests[-1][3]["method"] == method and dev.requests[-1][2] is not None
+
+
 async def test_stored_ha1_of_another_device(session):
     """A stored HA1 of another device ID is never sent."""
     auth = shelly.DeviceAuth(gen=2, ha1=sha256(f"admin:other:{PASSWORD}"), realm="other")
@@ -223,6 +302,66 @@ async def test_stored_ha1_of_another_device(session):
         with pytest.raises(shelly.ShellyError, match="another device ID"):
             await shelly.restart(session, 2, dev.origin, auth)
     assert len(dev.requests) == 1
+
+
+FORMER = "shellymini1pmg3-a8032ab12345"  # the same device under the renamed 2.2.0 ID (same MAC suffix)
+
+
+@pytest.mark.parametrize(("answer", "expected", "realm"), [
+    ({**GEN2_INFO, "auth_domain": REALM}, shelly.Protection(True, REALM, REALM), REALM),
+    ({**GEN2_INFO, "auth_domain": FORMER}, shelly.Protection(True, REALM, FORMER), FORMER),
+    ({**GEN2_INFO, "auth_en": False, "auth_domain": None}, shelly.Protection(False, REALM, None), REALM),
+    ({**GEN2_INFO, "auth_en": False, "auth_domain": FORMER}, shelly.Protection(False, REALM, FORMER), REALM),
+    ({**GEN2_INFO, "auth_domain": "a" * 51 + "-a8032ab12345"}, None, "a" * 51 + "-a8032ab12345"),  # 64 characters
+    ({**GEN2_INFO, "auth_domain": "a" * 52 + "-a8032ab12345"}, None, REALM),  # 65: never shortened to fit
+    ({**GEN2_INFO, "auth_domain": "shellymini1pmg3-a8032ab12346"}, None, REALM),  # another MAC
+    ({**GEN2_INFO, "auth_domain": FORMER + "\n"}, None, REALM),
+    ({**GEN2_INFO, "auth_domain": 12}, shelly.Protection(True, REALM, None), REALM),
+    ({**GEN2_INFO, "id": "", "auth_domain": FORMER}, shelly.Protection(True, None, FORMER), None),
+    ({"type": "SHSW-1", "auth": True, "auth_domain": FORMER}, shelly.Protection(True), None),  # Gen1
+])
+async def test_protection_status_reports_id_and_auth_domain(session, answer, expected, realm):
+    """/shelly gives the protection, the Gen2+ device ID (an empty one is None) and the
+    auth domain as sent; realm is the auth domain only for a valid one of the same MAC
+    suffix while the protection is on, else the device ID."""
+    async with FakeDevice(password=PASSWORD, routes={"/shelly": answer}) as dev:
+        state = await shelly.protection_status(session, dev.origin)
+    assert expected is None or state == expected
+    assert state.realm == realm and dev.requests == [("GET", "/shelly", None, None)]
+
+
+@pytest.mark.parametrize(("device_id", "known_id", "mac", "same"), [
+    (REALM, REALM, None, True),
+    (REALM, FORMER, None, True),                              # 2.2.0 rename: the MAC suffix stays
+    (REALM, "shellyplus1-ffffffffffff", None, False),         # another Shelly at the address
+    (REALM, None, "A8:03:2A:B1:23:45", True),                 # no known ID: the MAC decides
+    (REALM, None, "FF:FF:FF:FF:FF:FF", False),
+    (REALM, "shellyplus1-ffffffffffff", "A8032AB12345", True),  # the known MAC matches
+    (REALM, None, None, True),                                # nothing known to compare with
+    (None, REALM, None, False),
+])
+def test_protection_same_device(device_id, known_id, mac, same):
+    """A live device ID belongs to the known device if its MAC suffix equals that of the
+    known ID or the known MAC (case ignored)."""
+    assert shelly.Protection(True, device_id).same_device(known_id, mac) is same
+
+
+async def test_password_bound_to_the_former_id_answers_its_challenge(session):
+    """A Shelly whose password stays bound to the 2.2.0 ID challenges with that realm: an
+    HA1 built from Protection.realm signs the request, one bound to the device ID is
+    never sent."""
+    routes = {"/shelly": {**GEN2_INFO, "auth_domain": FORMER}, "/rpc": rpc(None)}
+    async with FakeDevice(password=PASSWORD, routes=routes, realm=FORMER) as dev:
+        realm = (await shelly.protection_status(session, dev.origin)).realm
+        assert realm == FORMER
+        await shelly.restart(session, 2, dev.origin, shelly.DeviceAuth(
+            gen=2, ha1=sha256(f"admin:{realm}:{PASSWORD}"), realm=realm))
+        assert dev.requests[-1][2] is not None and f'realm="{FORMER}"' in dev.requests[-1][2]
+        sent = len(dev.requests)
+        with pytest.raises(shelly.ShellyError, match="another device ID"):
+            await shelly.restart(session, 2, dev.origin, shelly.DeviceAuth(
+                gen=2, ha1=sha256(f"admin:{REALM}:{PASSWORD}"), realm=REALM))
+    assert [h for _m, _p, h, _b in dev.requests[sent:]] == [None]
 
 
 @pytest.mark.parametrize("challenge", [
@@ -256,21 +395,58 @@ async def test_gen1_basic_auth_and_query(session):
     assert len(dev.requests) == 1
 
 
-@pytest.mark.parametrize("status", [301, 302, 307, 308])
+@pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
 async def test_redirects_are_never_followed(session, status):
     """A redirect could lead out of the LAN: the target never gets a request, for
-    GET (device info) and POST (RPC) alike."""
+    GET (device info) and POST (RPC) alike; the error names the status, not the target."""
     async with FakeDevice(routes={"/shelly": GEN2_INFO, "/rpc": rpc(None)}) as target:
         def moved(_request, _body):
             return web.Response(status=status, headers={"Location": target.origin + "/shelly"})
 
         async with FakeDevice(routes={"/shelly": moved, "/rpc": moved}) as dev:
-            with pytest.raises(shelly.ShellyError, match="Invalid response"):
+            text = rf"answered with a redirect \(HTTP {status}\) – redirects are not followed"
+            with pytest.raises(shelly.ShellyError, match=text) as err:
                 await shelly.device_info(session, dev.origin)
-            with pytest.raises(shelly.ShellyError, match="Invalid response"):
+            assert type(err.value) is shelly.ShellyError and target.origin not in str(err.value)
+            with pytest.raises(shelly.ShellyError, match=text):
                 await shelly.restart(session, 2, dev.origin)
         assert target.requests == []
     assert len(dev.requests) == 2
+
+
+@pytest.mark.parametrize("location", ["https://{host}/shelly", "HTTPS://{host}/rpc", " wss://{host}/rpc"])
+async def test_redirect_to_https_is_named(session, location):
+    """A Shelly that sends plain HTTP to HTTPS (Enhanced Security) raises
+    HttpsRequiredError for GET and POST; the redirect is not followed and its target
+    is not part of the message."""
+    async with FakeDevice(routes={"/shelly": GEN2_INFO, "/rpc": rpc(None)}) as target:
+        host = target.origin.removeprefix("http://")
+        def moved(_request, _body):
+            return web.Response(status=301, headers={"Location": location.format(host=host)})
+
+        async with FakeDevice(routes={"/shelly": moved, "/rpc": moved}) as dev:
+            with pytest.raises(shelly.HttpsRequiredError, match="requires HTTPS") as err:
+                await shelly.device_info(session, dev.origin)
+            assert str(err.value) == shelly.HTTPS_REQUIRED and host not in str(err.value)
+            with pytest.raises(shelly.HttpsRequiredError):
+                await shelly.restart(session, 2, dev.origin)
+            with pytest.raises(shelly.HttpsRequiredError):  # Try again: before "No device information"
+                await shelly.answers(session, dev.origin)
+        assert target.requests == []
+    assert len(dev.requests) == 3
+
+
+async def test_redirect_is_never_an_answer(session):
+    """A redirect without a target gets the general text; a redirect whose body is a
+    JSON object is not taken as the device's answer."""
+    no_target = web.Response(status=302)
+    with_body = web.json_response(GEN2_INFO, status=301, headers={"Location": "/elsewhere"})
+    async with FakeDevice(routes={"/shelly": no_target, "/rpc": with_body}) as dev:
+        with pytest.raises(shelly.ShellyError, match=r"redirect \(HTTP 302\)") as err:
+            await shelly.device_info(session, dev.origin)
+        assert not isinstance(err.value, shelly.HttpsRequiredError)
+        with pytest.raises(shelly.ShellyError, match=r"redirect \(HTTP 301\)"):
+            await shelly.device_rpc(session, dev.origin, "Shelly.GetDeviceInfo")
 
 
 async def test_answer_size_limit(session):

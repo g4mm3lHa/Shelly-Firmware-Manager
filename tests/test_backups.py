@@ -11,6 +11,7 @@ import time
 import backup_store
 import manager_backups
 import manager_core
+import manager_installs
 import pytest
 import shelly
 import shelly_backup
@@ -18,7 +19,7 @@ import store_transfer
 from backup_store import BackupError, BackupStore
 from conftest import A, B, C
 from fake_shelly import SCRIPT, FakeGen1, FakeShelly
-from helpers import chunks, make_manager, web_client
+from helpers import chunks, make_manager, stage_import, web_client
 from shelly import AuthError, ShellyError
 
 
@@ -566,6 +567,25 @@ async def test_refused_values_are_named_and_the_rest_is_written(one):
     assert result["restart"] is None and result["confirmed"]
 
 
+async def test_restore_skips_settings_a_newer_firmware_removed(one):
+    """A backup made before an update that removed fields (ble.enable since Gen2+ 2.0.0):
+    the preview and the restore skip them as unknown, write the rest and report no error."""
+    one.config["ble"] = {"enable": True, "rpc": {"enable": True}, "observer": {"enable": False}}
+    backup = await shelly_backup.read(target_of(one))
+    one.config["ble"] = {"rpc": {"enable": False}}
+    skipped = [
+        {"key": "ble · enable", "reason": "unknown"},
+        {"key": "ble · observer.enable", "reason": "unknown"},
+    ]
+    preview = shelly_backup.compare(2, backup, await shelly_backup.read(target_of(one)))
+    assert preview["settings"]["skipped"] == skipped
+    assert [row["key"] for row in preview["settings"]["rows"]] == ["ble · rpc.enable"]
+    result = await shelly_backup.restore(target_of(one), backup, ["settings"], lambda _s: None)
+    settings = result["parts"][0]
+    assert (settings["total"], settings["open"], settings["skipped"]) == (1, [], skipped)
+    assert one.config["ble"] == {"rpc": {"enable": True}} and result["confirmed"]
+
+
 async def test_restore_reports_a_device_that_stops_answering(one):
     backup = await shelly_backup.read(target_of(one))
     one.config["wifi"]["sta"]["ssid"] = "Guest"
@@ -585,6 +605,60 @@ async def test_restore_reports_a_device_that_stops_answering(one):
     with pytest.raises(AuthError):
         one.rpc = lambda *_a: (_ for _ in ()).throw(AuthError("The Shelly rejected the password"))
         await shelly_backup.restore(target_of(one), backup, ["settings"], lambda _s: None)
+
+
+def failing(device, method, error):
+    """Let one RPC method of the fake raise error; every other method still answers."""
+    real = device.rpc
+
+    async def rpc(name, params=None):
+        if name == method:
+            raise error
+        return await real(name, params)
+
+    device.rpc = rpc
+
+
+async def test_refused_script_is_named_and_the_rest_is_restored(one):
+    """A script the device refuses to write is named under its key; the other scripts are
+    still made equal to the backup and the restore goes on."""
+    backup = await shelly_backup.read(target_of(one))
+    one.scripts[1].update(code="broken")
+    one.scripts[5] = {"name": "test.js", "enable": True, "running": True, "code": "x"}
+    failing(one, "Script.PutCode", ShellyError("Device reports: out of memory"))
+    result = await shelly_backup.restore(target_of(one), backup, ["scripts"], lambda _s: None)
+    scripts = result["parts"][0]
+    assert [o["key"] for o in scripts["open"]] == ["auto-light.js"]
+    assert "out of memory" in scripts["open"][0]["error"]
+    assert 5 not in one.scripts and result["lost"] is None
+
+
+@pytest.mark.parametrize(
+    ("part", "method"),
+    [("settings", "Switch.SetConfig"), ("scripts", "Script.PutCode"), ("webhooks", "Webhook.Create")],
+)
+async def test_a_password_refused_while_writing_ends_the_restore(one, part, method):
+    """A sign-in refusal of a write (after the read succeeded) is no refused value of one
+    row: it ends the restore with the AuthError."""
+    backup = await shelly_backup.read(target_of(one))
+    one.config["switch:0"]["initial_state"] = "on"
+    one.scripts[1].update(code="broken")
+    one.hooks.clear()
+    failing(one, method, AuthError("The Shelly rejected the password"))
+    with pytest.raises(AuthError):
+        await shelly_backup.restore(target_of(one), backup, [part], lambda _s: None)
+
+
+async def test_a_write_without_an_answer_is_a_lost_device(one):
+    """A timeout while writing one row is no refusal of that row: the writing stops, the
+    device is named as lost and the row stays open without a device answer."""
+    backup = await shelly_backup.read(target_of(one))
+    one.config["switch:0"]["initial_state"] = "on"
+    one.hooks.clear()
+    failing(one, "Switch.SetConfig", TimeoutError())
+    result = await shelly_backup.restore(target_of(one), backup, ["settings", "webhooks"], lambda _s: None)
+    assert result["lost"] == "TimeoutError" and "Webhook.Create" not in one.calls
+    assert result["parts"][0]["open"] == [{"key": "switch:0 · initial_state", "error": None}]
 
 
 async def test_new_scripts_are_created_in_small_parts(one):
@@ -692,8 +766,8 @@ async def test_backup_now_stores_logs_and_applies_the_retention(net, shellys):
 
 
 async def test_failed_backups_name_the_reason(backed, net, shellys):
-    """Not reachable, asleep (battery device) and a missing password are told apart;
-    a removed device is not backed up; nothing is stored."""
+    """Not reachable, asleep (battery device), a missing password and a sign-in block are
+    told apart; a removed device is not backed up; nothing is stored."""
     mgr = backed
     fake(shellys, net, A).down = True
     with pytest.raises(ShellyError, match="Device not reachable"):
@@ -714,6 +788,17 @@ async def test_failed_backups_name_the_reason(backed, net, shellys):
     with pytest.raises(ShellyError, match="requires a password"):
         await mgr.backup_now(B, "alice")
     assert mgr.devices[B]["backup_failed"]["reason"] == "password"
+    assert backup_events(mgr, "failed")[-1]["severity"] == "error"
+
+    async def blocked(_method, _params=None):
+        raise shelly.AuthBlockedError("The Shelly temporarily blocks sign-ins (too many attempts) – wait a few "
+                                      "minutes and try again")
+
+    # A sign-in block is no password problem: noted as failed ("Back up now" stays usable)
+    fake(shellys, net, B).rpc = blocked
+    with pytest.raises(ShellyError, match="temporarily blocks sign-ins"):
+        await mgr.backup_now(B, "alice")
+    assert mgr.devices[B]["backup_failed"]["reason"] == "failed"
     assert backup_events(mgr, "failed")[-1]["severity"] == "error"
     mgr.devices[C]["removed"] = 1
     with pytest.raises(ShellyError, match="Removed from Home Assistant"):
@@ -1078,7 +1163,7 @@ async def test_store_export_carries_the_backups(backed, net, shellys, tmp_path):
     assert b"Backups/AABBCC00000A/" in raw and b"auto-light" not in raw
     assert mgr.events.entries[-1]["kind"] == "export" and mgr.events.entries[-1]["backups"] == 2
     mgr.delete_backup(first["id"], True, "alice")
-    staged = await mgr.stage_import(chunks(raw), len(raw))
+    staged = await stage_import(mgr, chunks(raw), len(raw))
     path.unlink()
     summary = await mgr.check_import(staged["token"], prepared["password"])
     assert summary["backups"] == 2 and summary["backups_new"] == 1
@@ -1146,7 +1231,8 @@ async def test_http_backups(backed, net, shellys):
         r = await c.post(f"/api/backups/{bid}/preview", json={}, headers=hdr)
         assert [len(p["rows"]) for p in (await r.json())["parts"]] == [1, 0, 0, 0, 0]
         body = {"parts": ["settings"]}
-        assert (await c.post(f"/api/backups/{bid}/restore", json=body, headers=hdr)).status == 400
+        r = await c.post(f"/api/backups/{bid}/restore", json=body, headers=hdr)
+        assert r.status == 400 and await r.text() == "Confirmation incomplete"
         r = await c.post(f"/api/backups/{bid}/restore", json={"parts": ["network"], "confirm": True}, headers=hdr)
         assert r.status == 400 and "not confirmed" in await r.text()
         r = await c.post(f"/api/backups/{bid}/restore", json={**body, "confirm": True}, headers=hdr)
@@ -1200,8 +1286,9 @@ async def test_error_mark_of_the_log_and_unreachable_devices(mgr, net):
 
 
 def test_after_update_splits_changed_and_new_settings():
-    """Changed values and settings the backup did not have are listed apart; counters
-    such as sys.cfg_rev are never compared; scripts that ran before and stopped are named."""
+    """Changed values, settings the backup did not have and settings the firmware removed
+    are listed apart; counters such as sys.cfg_rev are never compared; scripts that ran
+    before and stopped are named."""
     before = FakeShelly()
     now = FakeShelly()
     now.config["switch:0"]["initial_state"] = "restore_last"
@@ -1211,23 +1298,92 @@ def test_after_update_splits_changed_and_new_settings():
     data_before = {"config": before.config, "scripts": [{"id": 1, "name": "a", "running": True}, {"id": 2, "name": "b", "running": True}]}
     data_now = {"config": now.config, "scripts": [{"id": 1, "name": "a", "running": True}, {"id": 2, "name": "b", "running": False}]}
     result = shelly_backup.after_update(2, data_before, data_now)
-    assert result["changed"] == [
-        {"key": "mqtt · server", "before": "–", "now": "–"},
-        {"key": "switch:0 · initial_state", "before": "off", "now": "restore_last"},
-    ]
+    assert result["changed"] == [{"key": "switch:0 · initial_state", "before": "off", "now": "restore_last"}]
     assert result["new"] == [{"key": "switch:0 · reverse", "value": "false"}]
-    assert (result["changed_count"], result["new_count"]) == (2, 1)
+    # mqtt is still reported, only its field is not: the firmware removed it
+    assert result["gone"] == [{"key": "mqtt · server", "before": "–"}]
+    assert (result["changed_count"], result["new_count"], result["gone_count"]) == (1, 1, 1)
     assert result["scripts"] == {"before": 2, "again": 1, "stopped": ["b"]}
 
 
+def test_after_update_names_fields_the_firmware_removed():
+    """A field missing after the update while its component is still reported counts as
+    removed by the firmware (ble.enable and ble.observer since Gen2+ 1.5.0/2.0.0, access of
+    virtual components) and not as a change; a whole missing component does."""
+    before = FakeShelly()
+    before.config["ble"] = {"enable": True, "rpc": {"enable": True}, "observer": {"enable": False}}
+    before.config["boolean:200"] = {"id": 200, "name": "x", "access": "*"}
+    now = FakeShelly()
+    now.config["ble"] = {"rpc": {"enable": True}}
+    now.config["boolean:200"] = {"id": 200, "name": "x"}
+    del now.config["input:0"]
+    result = shelly_backup.after_update(2, {"config": before.config}, {"config": now.config})
+    assert result["gone"] == [
+        {"key": "ble · enable", "before": "true"},
+        {"key": "ble · observer.enable", "before": "false"},
+        {"key": "boolean:200 · access", "before": "*"},
+    ]
+    assert result["changed"] == [
+        {"key": "input:0 · id", "before": "0", "now": "–"},
+        {"key": "input:0 · type", "before": "switch", "now": "–"},
+    ]
+    assert (result["changed_count"], result["new_count"], result["gone_count"]) == (2, 0, 3)
+
+
 def test_after_update_of_a_gen1_device():
-    """Gen1: the settings are compared, there are no scripts."""
-    before = {"settings": {"relays": [{"default_state": "off"}], "mode": "relay"}, "actions": None}
+    """Gen1: the settings are compared, there are no scripts. A field missing in a channel
+    or in /settings that is still reported was removed by the firmware; a missing channel
+    is a change."""
+    before = {
+        "settings": {"relays": [{"default_state": "off", "auto_on": 0}, {"default_state": "off"}],
+                     "mode": "relay", "led_status_disable": False},
+        "actions": None,
+    }  # fmt: skip
     now = {"settings": {"relays": [{"default_state": "on", "schedule": False}], "mode": "relay"}, "actions": None}
     result = shelly_backup.after_update(1, before, now)
-    assert result["changed"] == [{"key": "relays.0 · default_state", "before": "off", "now": "on"}]
+    assert result["changed"] == [
+        {"key": "relays.0 · default_state", "before": "off", "now": "on"},
+        {"key": "relays.1 · default_state", "before": "off", "now": "–"},
+    ]
     assert result["new"] == [{"key": "relays.0 · schedule", "value": "false"}]
+    assert result["gone"] == [
+        {"key": "led_status_disable", "before": "false"},
+        {"key": "relays.0 · auto_on", "before": "0"},
+    ]
     assert result["scripts"] == {"before": 0, "again": 0, "stopped": []}
+
+
+def test_after_update_of_a_gen1_device_that_dropped_an_object():
+    """Gen1: a whole object of /settings the device no longer reports (here mqtt) while it still
+    reports /settings was removed by the firmware – removed fields, no change (only a channel that
+    is no longer reported counts as changed)."""
+    before = {"settings": {"mqtt": {"enable": False, "keep_alive": 60}, "mode": "relay"}, "actions": None}
+    now = {"settings": {"mode": "relay"}, "actions": None}
+    result = shelly_backup.after_update(1, before, now)
+    assert result["changed"] == [] and result["changed_count"] == 0
+    assert result["gone"] == [{"key": "mqtt · enable", "before": "false"}, {"key": "mqtt · keep_alive", "before": "60"}]
+
+
+async def test_comparison_of_an_update_that_only_removed_fields(net, shellys, monkeypatch, quick_install):
+    """Fields the firmware removed are kept and counted, but raise no warning; the log
+    names neither them nor their values."""
+    mgr = manager_with(net, shellys, backup_before_install=True)
+    fake(shellys, net, A).config["mqtt"]["user"] = "user-x7"
+
+    async def trigger(_session, _gen, origin, url, _auth=None):
+        device = net.by_origin(origin)
+        net.devices[device] = (*net.devices[device][:2], "1.5.0", "1.5.0")
+        shellys[origin].config["mqtt"].pop("user")
+
+    monkeypatch.setattr(shelly, "trigger_update", trigger)
+    await mgr.scan()
+    assert await mgr.install(A, mgr.devices[A]["sha256"], "alice") is True
+    after = mgr.devices[A]["after_update"]
+    assert after["gone"] == [{"key": "mqtt · user", "before": "user-x7"}] and after["gone_count"] == 1
+    assert after["changed"] == [] and after["changed_count"] == 0
+    entry = backup_events(mgr, "compared")[-1]
+    assert (entry["severity"], entry["gone_fields"], entry["changed"]) == ("success", 1, 0)
+    assert "changed_keys" not in entry and "user-x7" not in json.dumps(entry)
 
 
 async def test_comparison_after_a_confirmed_update(net, shellys, monkeypatch, quick_install):
@@ -1291,6 +1447,29 @@ async def test_comparison_that_cannot_read_the_device(net, shellys, monkeypatch,
     await mgr.scan()
     assert await mgr.install(A, mgr.devices[A]["sha256"], "alice") is True
     assert "error" in mgr.devices[A]["after_update"]
+    assert backup_events(mgr, "compared")[-1]["severity"] == "warning"
+
+
+async def test_no_comparison_after_a_refused_sign_in(net, shellys, monkeypatch, quick_install):
+    """The device refused or blocked a sign-in after the update command: no further signed
+    request in this action, so the comparison is not made and names that reason instead."""
+    mgr = manager_with(net, shellys, backup_before_install=True)
+    compared = []
+
+    async def trigger(_session, _gen, origin, url, _auth=None):
+        device = net.by_origin(origin)
+        net.devices[device] = (*net.devices[device][:2], "1.5.0", "1.5.0")
+        mgr._update_step(A, signin_refused=True)  # as a refused read of the running time does
+
+    async def compare(*args):
+        compared.append(args)
+
+    monkeypatch.setattr(shelly, "trigger_update", trigger)
+    mgr.compare_after_update = compare
+    await mgr.scan()
+    assert await mgr.install(A, mgr.devices[A]["sha256"], "alice") is True
+    assert not compared
+    assert mgr.devices[A]["after_update"]["error"] == manager_installs.SIGNIN_REFUSED_COMPARISON
     assert backup_events(mgr, "compared")[-1]["severity"] == "warning"
 
 

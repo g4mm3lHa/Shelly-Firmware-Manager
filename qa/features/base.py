@@ -6,11 +6,8 @@ import sys
 import time
 import zipfile
 
-
-
-
-IDLE, LEGACY, MISSING, FEATURES, FIRST, PUBLIC, BACKUPS = (
-    f"http://127.0.0.1:{p}" for p in (8801, 8803, 8804, 8805, 8806, 8807, 8808))
+IDLE, MISSING, FEATURES, FIRST, PUBLIC, BACKUPS = (
+    f"http://127.0.0.1:{p}" for p in (8801, 8804, 8805, 8806, 8807, 8808))
 OVERFLOW_JS = "document.documentElement.scrollWidth - document.documentElement.clientWidth"
 results = []  # (suite: name, ok, detail)
 SUITE = [""]  # name of the running suite (prefix of the result names)

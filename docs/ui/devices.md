@@ -8,7 +8,7 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
   with explanation. Ignored: own group, yellow "Ignored" label, no install until
   resumed; name, IP, firmware and icons dimmed (70 %), status and "Ignored" at full
   strength (2026-11-22, L3).
-- **Columns (2026-11-22, mockup `reports/3.8.0-design/M7`):** round icon at the right end
+- **Columns (2026-11-22):** round icon at the right end
   of the toolbar (desktop only); popover like sort and filter: title "Columns", one entry
   per data column with ✓ while shown (a click keeps the popover open), "Reset columns"
   last; blue dot on the icon while the shown columns or their order differ from the
@@ -136,13 +136,17 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
   without a password of 8 to 63 characters (the Shelly refuses others; the server checks
   it too, live test 3.13.0-rc1) or the accepted risk; the app checks nothing else, a
   refusal of the Shelly stays in the form with the inputs, as "Device reports: <message>
-  (code n)". The password is never stored or logged; the log names "new password" and
-  only settings that change (no "on → on"). Gen1 stays locked (A7).
+  (code n)". Two refusals of the form sent alone read differently (approved 2026-11-26):
+  an open access point refused by a Shelly that had a password reads "An open access point
+  is no longer possible on this Shelly once a password was set – use a password instead
+  (device answer: …)"; another refusal with code -103 reads "The Shelly refused these
+  access point settings as invalid (device answer: …)".
+  The password is never stored or logged; the log names "new password" and only settings
+  that change (no "on → on"). Gen1 stays locked (A7).
 - Websocket debug popup: explanation, link `<web_url>#/diagnostics` (new tab,
   noopener), warning below firmware 1.0.0.
 
 ## Cloud, Bluetooth proxy, offer delay, missing Shellys, installation (3.9.0, mockups `3.9.0`, approved 2026-11-22)
-Wordings: `mockups/3.9.0/TEXTE.md`.
 - **Cloud (F13, F14):** tenth icon of the action column after Bluetooth (MDI cloud),
   yellow while on, grey off, "?" unknown; tooltip "Cloud: on – connected to the Shelly
   cloud" / "… – not connected at the moment" / "Cloud: off"; phones: button "Cloud" in the
@@ -258,7 +262,7 @@ Wordings: `mockups/3.9.0/TEXTE.md`.
   (short names; the filter entries keep "Cloud on", "Access point on", "Debug log on"), each
   only while above 0 (an active filter keeps its tile); unknown states do not count; all 0:
   one green check tile "No findings". Phones (≤ 700 px): symbol and number only, the name in
-  the tooltip (variant A, `mockups/3.12.0-rc2`). A click sets the filter, a second click
+  the tooltip (variant A). A click sets the filter, a second click
   clears it (tile marked while active). Filter entries "Access point on" and "Debug log on"
   after "Cloud on".
 - **Area (C1, 7 a, 8 c):** column "Area" after "Device" while at least one device has an
@@ -276,16 +280,24 @@ Wordings: `mockups/3.9.0/TEXTE.md`.
 - **Details for a bug ticket (A3, 10):** button bottom left in the device details; dialog
   (copy icon) with intro, the masked text (monospace box; English, plus language and
   browser), hint "Please read it before pasting …", Close / blue "Copy text".
-- **Comparison after update (B3, 5 a, 6 b; rc2 2026-11-24):** while a device shows "Updated"
+- **Comparison after update (B3, 5 a, 6 b; rc2 2026-11-24; removed fields 2026-11-26):** while a device shows "Updated"
   and the comparison found changed values or stopped scripts: yellow link line "n settings
   changed" (or "n scripts stopped") under the firmware until "Seen"; row menu "Comparison
   after update" after "Device details" as long as the comparison exists (until the next check
   of the device; the check after an intermediate version keeps it). Dialog buttons: Close /
   blue "Seen" while the line is shown (removes it), else Close only. Dialog (backup icon): Device, Update a → b, Compared with "Backup “Before
-  update” · <time>"; section Result (check lines Settings, Scripts, New fields); "Changed · n"
-  table (Setting, Before the update, Now); "New with the firmware · n" collapsed ("Show
-  fields", Setting, Default value); hint "Not compared: counters that change with every
-  update (sys.cfg_rev)." (Gen2+). No "Restore backup" button.
+  update” · <time>"; section Result (check lines Settings, Scripts, New fields, Removed fields);
+  "Changed · n" table (Setting, Before the update, Now); "New with the firmware · n" collapsed
+  ("Show fields", Setting, Default value); "Removed with the firmware · n" collapsed ("Show
+  fields", Setting, Before the update; old values plain grey, not blue like new values); hint
+  "Not compared: counters that change with every update (sys.cfg_rev)." (Gen2+). No "Restore
+  backup" button.
+- **Removed fields (2026-11-26, mockup `fw6-backup-vergleich`):** a field of the backup the device
+  no longer reports while it still reports its component (Gen1: its channel or /settings) was
+  removed by the firmware (e.g. ble · enable): green check line "Removed fields – n settings no
+  longer exist in this firmware." (1: "1 setting no longer exists in this firmware.") and the
+  section above. Not a change: no yellow line, no "Seen", log entry not a warning. A component
+  that is no longer reported at all still counts as changed (Now "–").
 - **CSV (C3, 10 a):** download icon in the toolbar before Columns (wide screens only) saves
   the shown list at once (search, filter, area filter, sort order): Name, Shelly name, Area,
   Model, Generation, IP, Firmware, Available, Status, Last check; semicolon, UTF-8.
@@ -308,6 +320,20 @@ Wordings: `mockups/3.9.0/TEXTE.md`.
   "Restarted by the app before the installation (Restart & install)"; a confirmed
   installation with lost connections stays green with the line "Connection to the Shelly
   lost n times while waiting – tried again (weak Wi-Fi: −n dBm)".
+- **Two-step update (2026-11-26, mockup `fw1-zwei-schritt-update`):** a Gen2+ Shelly that
+  comes back on its old version while a second pass is expected installs the update again
+  by itself. The pill reads "Installing again …" (no percentage), blue, yellow after the usual
+  150 s; once the Shelly downloads the file again, yellow after 120 s and the app gives up
+  after 300 s. "Restarting …" while it does not answer; "Installing again …" again when it
+  answers on its old version without a restart (running time: a lost connection). The
+  tooltip / details start with "Step 4 of 6: the Shelly installs the update a second time
+  (two-step update)" (the counter goes back from 6 to 4), the time line, then "Two-step
+  update: the Shelly restarted on <version> and installs the update again. Do not switch it
+  off.", "Installed: …", "Target: …". No second pass within 180 s, or no target version
+  within 300 s after the new download: red "Error" with "Install" for the retry. Without the
+  device connection (polling) the same steps, colours and times apply; the result there is
+  "Unconfirmed" (check the device, then install). Log line of a confirmed one: "Installed in
+  two steps (the Shelly reorganised its memory)".
 - **Access point password (F4.1):** hint "8 to 63 characters, letters without umlauts or
   accents, digits and common symbols only. Sent to the Shelly only – …"; a character
   outside printable ASCII is named at once below the field ("The password contains a

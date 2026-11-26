@@ -110,7 +110,8 @@ async def test_gen1_capabilities(device_api):
 
 async def test_battery_device_detected_from_the_device(device_api):
     """A battery device is detected only from its own answer: Gen2+ wakeup_period above
-    0 in the sys status (Sys.GetStatus, checks and Reload Device Info only) or in the sys
+    0 in the sys status (extended reads only: Sys.GetStatus, with the cloud on
+    Shelly.GetStatus, see test_gen2_sys_and_cloud_status_in_one_request) or in the sys
     config, Gen1 sleep_mode.period above 0; missing or 0 means no battery device. An
     unreadable sys status leaves the flag out (the stored value stays)."""
     calls, answers = device_api
@@ -131,6 +132,51 @@ async def test_battery_device_detected_from_the_device(device_api):
     assert (await shelly.read_settings(None, 1, "http://1.2.3.4", "SHHT-1", None))["battery"] is True
     answers["/settings"] = {}
     assert (await shelly.read_settings(None, 1, "http://1.2.3.4", "SHSW-1", None))["battery"] is False
+
+
+async def test_gen2_sys_and_cloud_status_in_one_request(device_api):
+    """Extended read with the cloud on and no wakeup_period in the sys config: battery flag
+    and cloud connection come from one Shelly.GetStatus (no Cloud.GetStatus, no
+    Sys.GetStatus, also none after a failure); only these two values are kept, never
+    sys.available_updates or other status data (the update server decides). Not extended
+    or with wakeup_period in the sys config, Cloud.GetStatus alone as before."""
+    calls, answers = device_api
+    answers["Shelly.GetConfig"] = {"cloud": {"enable": True}, "sys": {}}
+    answers["Shelly.GetStatus"] = {
+        "sys": {"wakeup_period": 86400, "uptime": 1234, "restart_required": True,
+                "available_updates": {"stable": {"version": "9.9.9"}, "beta": {"version": "9.9.10-beta1"}}},
+        "cloud": {"connected": True},
+        "wifi": {"sta_ip": "192.168.1.10", "status": "got ip", "ssid": "HomeNet", "rssi": -60},
+    }
+    got = await shelly.read_settings(None, 2, "http://1.2.3.4", "PlusSmoke", None, extended=True)
+    assert (got["battery"], got["cloud_connected"]) == (True, True)
+    assert [c[0] for c in calls] == ["Shelly.GetConfig", "Shelly.GetStatus", "Webhook.List", "Schedule.List"]
+    dumped = json.dumps(got)
+    for leaked in ("available_updates", "9.9.9", "restart_required", "uptime", "1234", "HomeNet", "192.168.1.10"):
+        assert leaked not in dumped
+    calls.clear()
+    answers["Shelly.GetStatus"] = ShellyError("busy")
+    got = await shelly.read_settings(None, 2, "http://1.2.3.4", "PlusSmoke", None, extended=True)
+    assert "battery" not in got and got["cloud_connected"] is None
+    assert [c[0] for c in calls] == ["Shelly.GetConfig", "Shelly.GetStatus", "Webhook.List", "Schedule.List"]
+    answers["Shelly.GetStatus"] = shelly.UnsupportedError("no handler")
+    got = await shelly.read_settings(None, 2, "http://1.2.3.4", "Plus1", None, extended=True)
+    assert "battery" not in got and got["cloud_connected"] is None
+    answers["Shelly.GetStatus"] = {"sys": {"wakeup_period": 0}}
+    got = await shelly.read_settings(None, 2, "http://1.2.3.4", "Plus1", None, extended=True)
+    assert (got["battery"], got["cloud_connected"]) == (False, None)
+    answers["Shelly.GetStatus"] = {"sys": None, "cloud": {"connected": False}}
+    got = await shelly.read_settings(None, 2, "http://1.2.3.4", "Plus1", None, extended=True)
+    assert "battery" not in got and got["cloud_connected"] is False
+    answers["Cloud.GetStatus"] = {"connected": True}
+    calls.clear()
+    got = await shelly.read_settings(None, 2, "http://1.2.3.4", "Plus1", None)
+    assert got["cloud_connected"] is True and [c[0] for c in calls] == ["Shelly.GetConfig", "Cloud.GetStatus"]
+    answers["Shelly.GetConfig"] = {"cloud": {"enable": True}, "sys": {"wakeup_period": 7200}}
+    calls.clear()
+    got = await shelly.read_settings(None, 2, "http://1.2.3.4", "HTG3", None, extended=True)
+    assert (got["battery"], got["cloud_connected"]) == (True, True)
+    assert [c[0] for c in calls] == ["Shelly.GetConfig", "Cloud.GetStatus", "Webhook.List", "Schedule.List"]
 
 
 async def test_gen1_device_id_from_the_settings(device_api):
@@ -297,25 +343,59 @@ async def test_gen1_password_errors_never_contain_the_url(monkeypatch):
     assert "topsecret" not in str(err.value)
 
 
+def challenge_realm(box):
+    """Realm a fake protected device challenges with: "challenge" if set, else its auth
+    domain, else its ID."""
+    return box.get("challenge") or box["auth_domain"] or box["device_id"]
+
+
+def fake_read_refused(box, auth):
+    """Error of an authenticated read on a fake device, None if it is accepted. A stored
+    HA1 of another realm is refused like DeviceAuth does before anything is sent; every
+    other attempt is signed and counted in box["signed"]."""
+    if not box["protected"]:
+        return None
+    if auth is not None and auth.ha1 and auth.realm != challenge_realm(box):
+        return shelly.ShellyError("Stored device password belongs to another device ID – enter it again")
+    box["signed"] = box.get("signed", 0) + 1
+    if auth is None or auth.ha1 != box["ha1"]:
+        return shelly.AuthError("The Shelly rejected the password")
+    return None
+
+
+def fake_set_auth(box, realm, new_auth):
+    """Shelly.SetAuth on a fake device: the realm becomes its auth domain."""
+    if new_auth:
+        assert new_auth.gen == 1 or new_auth.realm == realm  # the HA1 is derived from the realm sent
+        box.update(protected=True, ha1=new_auth.ha1, auth_domain=realm)
+    else:
+        box.update(protected=False, ha1=None, auth_domain=None)
+
+
 @pytest.fixture
 async def device(mgr, net, monkeypatch):
-    """Checked Gen2 device A with a fake protection state on the device."""
+    """Checked Gen2 device A with a fake protection state on the device: device_id is the
+    ID its /shelly answer reports, auth_domain the realm its password is bound to (None
+    while unprotected), realms the realms Shelly.SetAuth received."""
     await mgr.scan()
-    box = {"protected": False, "ha1": None, "fail_write": None, "apply": True, "writes": 0}
+    box = {"protected": False, "ha1": None, "fail_write": None, "apply": True, "writes": 0,
+           "device_id": mgr.devices[A]["shelly_id"], "auth_domain": None, "realms": []}
 
     async def status(_session, _origin):
-        return box["protected"]
+        domain = box["auth_domain"] if box["protected"] else None
+        return shelly.Protection(box["protected"], box["device_id"], domain)
 
     async def protect(_session, gen, _origin, realm, new_auth, auth=None):
         box["writes"] += 1
+        box["realms"].append(realm)
         if box["apply"]:
-            box["protected"], box["ha1"] = (True, new_auth.ha1) if new_auth else (False, None)
+            fake_set_auth(box, realm, new_auth)
         if box["fail_write"]:
             raise box["fail_write"]
 
     async def read(_session, gen, _origin, _type, auth=None, extended=False):
-        if box["protected"] and (auth is None or auth.ha1 != box["ha1"]):
-            raise shelly.AuthError("The Shelly rejected the password")
+        if error := fake_read_refused(box, auth):
+            raise error
         return {}
 
     monkeypatch.setattr(shelly, "protection_status", status)
@@ -331,6 +411,7 @@ async def test_enable_protection_verified_and_confirmed(mgr, device):
     assert device["writes"] == 0
     result = await mgr.set_device_password(A, "enable", "pw-1", confirm=True, acknowledged=True, user="u")
     assert result == {"protected": True} and mgr.credentials.has_device_password(A)
+    assert device["realms"] == [mgr.devices[A]["shelly_id"]] == [mgr.credentials.entries[A]["realm"]]
     assert mgr.events.entries[-1]["action"] == "enabled"
 
 
@@ -350,6 +431,66 @@ async def test_change_failure_keeps_previous_credential(mgr, device):
         await mgr.set_device_password(A, "change", "pw-2", confirm=True, acknowledged=True)
     assert mgr.credentials.entries[A] == old
     assert mgr.events.entries[-1]["severity"] == "error"
+
+
+BLOCKED = "The Shelly temporarily blocks sign-ins (too many attempts) – wait a few minutes and try again"
+
+
+def counted_reads(monkeypatch, blocked=False):
+    """Count the verification reads of the device fixture; blocked: every read raises the
+    sign-in block instead."""
+    calls = []
+    fake = shelly.read_settings
+
+    async def read(*args, **kwargs):
+        calls.append(1)
+        if blocked:
+            raise shelly.AuthBlockedError(BLOCKED)
+        return await fake(*args, **kwargs)
+
+    monkeypatch.setattr(shelly, "read_settings", read)
+    return calls
+
+
+@pytest.mark.parametrize("mode", ["change", "remove"])
+async def test_refused_set_auth_is_not_verified(mgr, device, monkeypatch, mode):
+    """Gen2+: Shelly.SetAuth refused with the stored current password was not executed –
+    no verification reads (each would be one more failed sign-in), a text of its own, the
+    stored password stays."""
+    await mgr.set_device_password(A, "enable", "pw-1", confirm=True, acknowledged=True)
+    old = dict(mgr.credentials.entries[A])
+    device.update(apply=False, fail_write=shelly.AuthError("The Shelly rejected the password"))
+    reads = counted_reads(monkeypatch)
+    with pytest.raises(shelly.AuthError, match="^The Shelly rejected the stored current password – nothing was changed$"):
+        await mgr.set_device_password(A, mode, "pw-2", confirm=True, acknowledged=True)
+    assert reads == [] and device["writes"] == 2 and mgr.credentials.entries[A] == old
+
+
+async def test_blocked_set_auth_is_not_verified(mgr, device, monkeypatch):
+    """Gen2+: Shelly.SetAuth answered with the sign-in block: the block text, no reads."""
+    await mgr.set_device_password(A, "enable", "pw-1", confirm=True, acknowledged=True)
+    old = dict(mgr.credentials.entries[A])
+    device.update(apply=False, fail_write=shelly.AuthBlockedError(BLOCKED))
+    reads = counted_reads(monkeypatch)
+    with pytest.raises(shelly.AuthBlockedError, match="temporarily blocks sign-ins"):
+        await mgr.set_device_password(A, "change", "pw-2", confirm=True, acknowledged=True)
+    assert reads == [] and mgr.credentials.entries[A] == old
+
+
+async def test_blocked_verification_is_not_a_rejected_password(mgr, device, monkeypatch):
+    """A sign-in block during the verification says nothing about the password: "store"
+    shows the block text; "enable" keeps the stored password and names the block, with no
+    second verification read."""
+    device["protected"] = True
+    reads = counted_reads(monkeypatch, blocked=True)
+    with pytest.raises(shelly.AuthBlockedError, match="temporarily blocks sign-ins"):
+        await mgr.set_device_password(A, "store", "pw-1", confirm=True)
+    assert not mgr.credentials.has_device_password(A) and reads == [1]
+    device["protected"] = False
+    with pytest.raises(shelly.ShellyError) as err:
+        await mgr.set_device_password(A, "enable", "pw-1", confirm=True, acknowledged=True)
+    assert str(err.value) == f"The new password could not be confirmed – the previously stored password was kept ({BLOCKED})"
+    assert not isinstance(err.value, shelly.AuthError) and not mgr.credentials.has_device_password(A) and reads == [1, 1]
 
 
 async def test_remove_protection_deletes_only_after_success(mgr, device):
@@ -397,6 +538,113 @@ async def test_store_requires_protected_device(mgr, device):
     assert mgr.credentials.has_device_password(A)
 
 
+def former_id(device_id, name="shellymini1pmg3"):
+    """The 2.2.0 form of a device ID: another name before the same MAC suffix."""
+    return f"{name}-{device_id.rpartition('-')[2]}"
+
+
+async def test_store_uses_auth_domain_after_id_change(mgr, device, caplog):
+    """A password set under the renamed 2.2.0 ID stays bound to it (auth_domain differs
+    from id): "store" tests and stores it against that realm, says so once in the log
+    (no ID) and leaves the device untouched."""
+    sid = mgr.devices[A]["shelly_id"]
+    former = former_id(sid)
+    device.update(protected=True, auth_domain=former, ha1=shelly.gen2_ha1(former, "right"))
+    with caplog.at_level("INFO", logger="sfm.manager"):
+        result = await mgr.set_device_password(A, "store", "right", confirm=True, user="u")
+    assert result == {"protected": True, "realm_outdated": True}
+    assert mgr.credentials.entries[A]["realm"] == former and device["writes"] == 0
+    assert mgr.events.entries[-1]["action"] == "stored" and mgr.devices[A]["shelly_id"] == sid
+    lines = [r.getMessage() for r in caplog.records if "former device ID" in r.getMessage()]
+    assert lines == [
+        "Kitchen: stored password is bound to the former device ID of the Shelly – change it once to fix this"
+    ]
+    blobs = [json.dumps(mgr.events.entries), json.dumps(mgr.public_state()), caplog.text]
+    assert not any(former in b or device["ha1"] in b for b in blobs)
+
+
+async def test_change_binds_password_to_device_id(mgr, device):
+    """Change password (the same one is fine) after a store with the former realm:
+    Shelly.SetAuth gets the device ID, the HA1 is derived from it and the stored entry
+    moves to it; the stored former HA1 still signs the change."""
+    sid = mgr.devices[A]["shelly_id"]
+    former = former_id(sid)
+    device.update(protected=True, auth_domain=former, ha1=shelly.gen2_ha1(former, "right"))
+    await mgr.set_device_password(A, "store", "right", confirm=True)
+    result = await mgr.set_device_password(A, "change", "right", confirm=True, acknowledged=True)
+    assert result == {"protected": True} and device["realms"] == [sid] and device["auth_domain"] == sid
+    assert mgr.credentials.entries[A]["realm"] == sid and device["ha1"] == shelly.gen2_ha1(sid, "right")
+    assert await mgr.set_device_password(A, "store", "right", confirm=True) == {"protected": True}
+
+
+async def test_live_device_id_replaces_an_outdated_one(mgr, device):
+    """The device ID of the live /shelly answer is the SetAuth realm: a known ID from
+    before the update (here the 2.2.0 one) is replaced, so a change really moves the
+    password to the restored ID. An answer without ID keeps the known one."""
+    sid = mgr.devices[A]["shelly_id"]
+    former = former_id(sid)
+    device.update(protected=True, auth_domain=former, ha1=shelly.gen2_ha1(former, "right"))
+    await mgr.set_device_password(A, "store", "right", confirm=True)
+    mgr.devices[A]["shelly_id"] = former   # known ID from a check under 2.2.0
+    await mgr.set_device_password(A, "change", "new-pw", confirm=True, acknowledged=True)
+    assert device["realms"] == [sid] and mgr.devices[A]["shelly_id"] == sid
+    device["device_id"] = None
+    await mgr.set_device_password(A, "store", "new-pw", confirm=True)
+    assert mgr.devices[A]["shelly_id"] == sid and mgr.credentials.entries[A]["realm"] == sid
+
+
+async def test_store_falls_back_to_device_id(mgr, device):
+    """An auth domain with the former ID while the device still challenges with its ID:
+    "store" tests the password once more under the device ID and stores it there. Only
+    the candidate of the challenge realm signs, so a wrong password costs one attempt."""
+    sid = mgr.devices[A]["shelly_id"]
+    former = former_id(sid)
+    device.update(protected=True, auth_domain=former, challenge=sid, ha1=shelly.gen2_ha1(sid, "right"))
+    with pytest.raises(shelly.AuthError, match="^The Shelly rejected the password$"):
+        await mgr.set_device_password(A, "store", "wrong", confirm=True)
+    assert device["signed"] == 1 and not mgr.credentials.has_device_password(A)
+    assert await mgr.set_device_password(A, "store", "right", confirm=True) == {"protected": True}
+    assert device["signed"] == 2 and mgr.credentials.entries[A]["realm"] == sid
+    device.update(challenge=None, ha1=shelly.gen2_ha1(former, "right"))
+    with pytest.raises(shelly.AuthError, match="^The Shelly rejected the password$"):
+        await mgr.set_device_password(A, "store", "wrong", confirm=True)
+    assert device["signed"] == 3 and mgr.credentials.entries[A]["realm"] == sid
+
+
+async def test_live_id_of_another_device_is_kept_out(mgr, device):
+    """A live ID with another MAC suffix (another Shelly at the address) never replaces
+    the known ID: Shelly.SetAuth gets the known one and "store" tests against it."""
+    sid = mgr.devices[A]["shelly_id"]
+    other = "shellyplus1-ffffffffffff"
+    device["device_id"] = other
+    await mgr.set_device_password(A, "enable", "pw-1", confirm=True, acknowledged=True)
+    assert device["realms"] == [sid] and mgr.devices[A]["shelly_id"] == sid
+    assert mgr.credentials.entries[A]["realm"] == sid
+    device.update(auth_domain=other, ha1=shelly.gen2_ha1(other, "pw-1"), signed=0)
+    with pytest.raises(shelly.AuthError, match="^The Shelly rejected the password$"):
+        await mgr.set_device_password(A, "store", "pw-1", confirm=True)
+    assert mgr.devices[A]["shelly_id"] == sid and device["signed"] == 0
+
+
+@pytest.mark.parametrize("domain", [
+    "shellymini1pmg3-ffffffffffff",     # another MAC suffix: another device
+    "shelly mini-{suffix}",            # a character a realm never has
+    "a" * 32 + "-{suffix}",            # 65 characters: one over 64 (never shortened to fit)
+    "-{suffix}",                       # no name before the suffix
+    "{suffix}",                        # no hyphen at all
+])
+async def test_foreign_auth_domain_is_ignored(mgr, device, domain):
+    """Only an auth domain of 1-64 letters, digits or hyphens with the device's MAC
+    suffix is tried; any other one leaves the device ID as realm, so the password of a
+    device bound to it is rejected and nothing is stored."""
+    sid = mgr.devices[A]["shelly_id"]
+    domain = domain.format(suffix=sid.rpartition("-")[2])
+    device.update(protected=True, auth_domain=domain, ha1=shelly.gen2_ha1(domain, "right"))
+    with pytest.raises(shelly.AuthError, match="^The Shelly rejected the password$"):
+        await mgr.set_device_password(A, "store", "right", confirm=True)
+    assert not mgr.credentials.has_device_password(A)
+
+
 async def test_secrets_never_in_state_or_logs(mgr, device):
     """Neither password nor HA1 appear in the log, state file or public state."""
     await mgr.set_device_password(A, "enable", "Very-Secret-1", confirm=True, acknowledged=True)
@@ -419,11 +667,16 @@ async def test_public_state_fields(mgr, net):
 async def several(mgr, net, monkeypatch):
     """Checked devices A, B, C, each with its own fake protection state."""
     await mgr.scan()
-    boxes = {f"http://{d[1]}": {"protected": False, "ha1": None, "fail": None} for d in net.devices.values()}
+    boxes = {
+        f"http://{d[1]}": {"protected": False, "ha1": None, "fail": None, "auth_domain": None,
+                           "device_id": mgr.devices[i]["shelly_id"]}
+        for i, d in net.devices.items()
+    }
     running = {"now": 0, "max": 0}
 
     async def status(_session, origin):
-        return boxes[origin]["protected"]
+        box = boxes[origin]
+        return shelly.Protection(box["protected"], box["device_id"], box["auth_domain"] if box["protected"] else None)
 
     async def protect(_session, gen, origin, realm, new_auth, auth=None):
         running["now"] += 1
@@ -433,12 +686,11 @@ async def several(mgr, net, monkeypatch):
         box = boxes[origin]
         if box["fail"]:
             raise box["fail"]
-        box["protected"], box["ha1"] = (True, new_auth.ha1) if new_auth else (False, None)
+        fake_set_auth(box, realm, new_auth)
 
     async def read(_session, gen, origin, _type, auth=None, extended=False):
-        box = boxes[origin]
-        if box["protected"] and (auth is None or auth.ha1 != box["ha1"]):
-            raise shelly.AuthError("The Shelly rejected the password")
+        if error := fake_read_refused(boxes[origin], auth):
+            raise error
         return {}
 
     monkeypatch.setattr(shelly, "protection_status", status)
@@ -495,6 +747,17 @@ async def test_bulk_store_existing_password(mgr, several):
     assert mgr.credentials.has_device_password(A) and not mgr.credentials.has_device_password(B)
 
 
+async def test_bulk_store_after_id_change(mgr, several):
+    """Store on several devices also tests a password bound to the former 2.2.0 ID
+    against that realm."""
+    mgr.devices[A]["auth_enabled"] = True
+    former = former_id(mgr.devices[A]["shelly_id"])
+    several["boxes"][several["origin"][A]].update(
+        protected=True, auth_domain=former, ha1=shelly.gen2_ha1(former, "shared"))
+    results = await mgr.set_passwords("store", [A], "shared", confirm=True)
+    assert [r["result"] for r in results] == ["ok"] and mgr.credentials.entries[A]["realm"] == former
+
+
 async def test_bulk_validation(mgr, several):
     """Mode, confirmations, password, selection and storage choice are checked."""
     good = {"confirm": True, "acknowledged": True}
@@ -515,8 +778,10 @@ async def test_bulk_validation(mgr, several):
 
 async def test_gen2_cloud_and_bluetooth_proxy(device_api):
     """Cloud switch (Shelly.GetConfig) and its connection (Cloud.GetStatus, only while
-    on); Home Assistant's Bluetooth proxy script (Script.List, only while Bluetooth is
-    on: running script with exactly that name)."""
+    on; extended reads may take it from Shelly.GetStatus, see
+    test_gen2_sys_and_cloud_status_in_one_request); Home Assistant's Bluetooth proxy
+    script (Script.List, only while Bluetooth is on: running script with exactly that
+    name)."""
     calls, answers = device_api
     answers["Shelly.GetConfig"] = {"cloud": {"enable": True}, "ble": {"enable": True}}
     answers["Cloud.GetStatus"] = {"connected": False}
@@ -722,3 +987,103 @@ async def test_access_point_form_logs_no_password(mgr, net, monkeypatch, caplog)
     mgr.devices[A]["gen"] = 1
     with pytest.raises(ValueError):
         await mgr.change_settings(A, {"ap_config": {"enable": False}}, "u")
+
+
+# Readable texts of a refused access point form (shelly.ap_refusal), the device's answer in brackets
+AP_OPEN_REFUSED = ("An open access point is no longer possible on this Shelly once a password was set – use a password"
+                   " instead (device answer: {})")
+AP_INVALID = "The Shelly refused these access point settings as invalid (device answer: {})"
+
+
+@pytest.mark.parametrize(("text", "open_requested", "had_password", "expected"), [
+    ("Device reports: Invalid argument (code -103)", True, True,
+     AP_OPEN_REFUSED.format("Invalid argument (code -103)")),
+    ("Device reports: Failed precondition (code -109)", True, True,
+     AP_OPEN_REFUSED.format("Failed precondition (code -109)")),
+    ("Device reports: code -103", True, True, AP_OPEN_REFUSED.format("code -103")),
+    ("The Shelly rejected the password", True, True, "The Shelly rejected the password"),
+    ("Device reports: Invalid argument (code -103)", False, True, AP_INVALID.format("Invalid argument (code -103)")),
+    ("Device reports: Invalid argument (code -103)", True, False, AP_INVALID.format("Invalid argument (code -103)")),
+    ("Device reports: code -103", False, False, AP_INVALID.format("code -103")),
+    ("Device reports: x (code -113)", False, True, "Device reports: x (code -113)"),
+    ("Device reports: out of memory", True, True, "Device reports: out of memory"),
+    ("Device reports: code -103 later", False, False, "Device reports: code -103 later"),
+    ("Invalid argument (code -103)", True, True, "Invalid argument (code -103)"),
+])
+def test_access_point_refusal_text(text, open_requested, had_password, expected):
+    """A coded refusal of an open access point that had a password names the kept password
+    (any code: the Shelly docs name none); another -103 names the settings as invalid; any
+    other text (no device answer, no code, another code) stays as it is."""
+    assert shelly.ap_refusal(text, open_requested, had_password) == expected
+
+
+async def test_access_point_refusal_comes_from_the_device_answer(monkeypatch):
+    """The text ap_refusal reads is the one a refused Wifi.SetConfig raises (_rpc, device_error)."""
+    async def call(*_args, **_kwargs):
+        return 200, {"id": 1, "error": {"code": -103, "message": "Invalid argument"}}
+
+    monkeypatch.setattr(shelly, "_call", call)
+    form = shelly.validate_settings({"ap_config": {"enable": True, "security": "open", "accept_open": True}}, [])
+    with pytest.raises(ShellyError) as err:
+        await shelly.write_settings(None, 2, "http://1.2.3.4", form)
+    assert shelly.ap_refusal(str(err.value), True, True) == AP_OPEN_REFUSED.format("Invalid argument (code -103)")
+
+
+async def test_access_point_open_refused_after_a_password(client, mgr, net, monkeypatch):
+    """The Shelly refuses an open access point while it reported one with a password: the
+    readable text is raised, logged in full and answered with 409; a refused password form
+    gets the -103 text; sign-in errors, other refusals and a form sent together with other
+    settings keep their kind and text; nothing is read back after a refusal."""
+    await mgr.scan()
+    refusal: list[Exception] = [ShellyError("Device reports: Invalid argument (code -103)")]
+    reads = []
+
+    async def write(*_args, **_kwargs):
+        raise refusal[0]
+
+    async def read(*_args, **_kwargs):
+        reads.append(1)
+        return {}
+
+    monkeypatch.setattr(shelly, "write_settings", write)
+    monkeypatch.setattr(shelly, "read_settings", read)
+    mgr.devices[A].update(ap=True, ap_config={"ssid": "Garden", "open": False, "range_extender": None})
+    open_form = {"ap_config": {"enable": True, "security": "open", "accept_open": True}}
+    with pytest.raises(ShellyError, match="^An open access point is no longer possible") as err:
+        await mgr.change_settings(A, open_form, "u")
+    assert type(err.value) is ShellyError and isinstance(err.value.__cause__, ShellyError)
+    entry = mgr.events.entries[-1]
+    assert entry["kind"] == "setting" and entry["ok"] is False
+    assert entry["error"] == AP_OPEN_REFUSED.format("Invalid argument (code -103)")
+    # A long device message stays in the log entry in full
+    long_answer = "x" * 160 + " (code -109)"
+    refusal[0] = ShellyError(f"Device reports: {long_answer}")
+    with pytest.raises(ShellyError):
+        await mgr.change_settings(A, open_form, "u")
+    assert mgr.events.entries[-1]["error"] == AP_OPEN_REFUSED.format(long_answer)
+    # Without a message the device answer is the bare code
+    refusal[0] = ShellyError("Device reports: code -103")
+    with pytest.raises(ShellyError, match=re.escape(AP_OPEN_REFUSED.format("code -103"))):
+        await mgr.change_settings(A, open_form, "u")
+    # A refused password form: the -103 text
+    refusal[0] = ShellyError("Device reports: Invalid argument (code -103)")
+    password_form = {"ap_config": {"enable": True, "security": "password", "password": "secret 12"}}
+    with pytest.raises(ShellyError, match=re.escape(AP_INVALID.format("Invalid argument (code -103)"))):
+        await mgr.change_settings(A, password_form, "u")
+    # A sign-in error and another code of a password form pass unchanged
+    for form, error in ((open_form, shelly.AuthError("The Shelly rejected the password")),
+                        (password_form, ShellyError("Device reports: x (code -113)"))):
+        refusal[0] = error
+        with pytest.raises(ShellyError) as err:
+            await mgr.change_settings(A, form, "u")
+        assert err.value is error and mgr.events.entries[-1]["error"] == str(error)
+    # With another setting in the same request the refusal may belong to that call: its text stays
+    refusal[0] = ShellyError("Device reports: Invalid argument (code -103)")
+    with pytest.raises(ShellyError) as err:
+        await mgr.change_settings(A, {"name": "Garden", **open_form}, "u")
+    assert err.value is refusal[0] and mgr.events.entries[-1]["error"] == str(refusal[0])
+    assert reads == []
+    # The UI answer: 409 with the readable text
+    refusal[0] = ShellyError("Device reports: Invalid argument (code -103)")
+    r = await client.post(f"/api/devices/{A}/settings", json=open_form, headers={"X-CSRF-Token": client.csrf})
+    assert r.status == 409 and AP_OPEN_REFUSED.format("Invalid argument (code -103)") in await r.text()

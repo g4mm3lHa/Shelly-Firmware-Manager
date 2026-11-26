@@ -9,7 +9,7 @@ from typing import Any
 from aiohttp import web
 from events import user_from
 from timetable import ID_RE as SCHEDULE_ID_RE
-from web_base import Handlers, json_body, translated
+from web_base import Handlers, confirmed_body, json_body, translated
 
 
 class ScheduleRoutes(Handlers):
@@ -43,8 +43,7 @@ class ScheduleRoutes(Handlers):
     async def schedule_delete(self, request: web.Request) -> web.StreamResponse:
         """Delete a schedule (after a confirmation)."""
         sid = self.schedule_id_from(request)
-        if (await json_body(request)).get("confirm") is not True:
-            raise web.HTTPBadRequest(text="Confirmation incomplete")
+        await confirmed_body(request)
         self.mgr.delete_schedule(sid, user_from(request.headers))
         return web.json_response({"deleted": True})
 
@@ -52,8 +51,7 @@ class ScheduleRoutes(Handlers):
         """"Run now" (after a confirmation): refused while a check, an installation or
         another run is going on."""
         sid = self.schedule_id_from(request)
-        if (await json_body(request)).get("confirm") is not True:
-            raise web.HTTPBadRequest(text="Confirmation incomplete")
+        await confirmed_body(request)
         translated(lambda: self.mgr.reserve_schedule_run(sid), bad=())  # synchronous: a second request gets 409
         self.background(self.mgr.run_schedule_now(sid, user_from(request.headers)))
         return web.json_response({"started": True})

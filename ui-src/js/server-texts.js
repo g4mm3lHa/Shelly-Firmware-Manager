@@ -1,5 +1,6 @@
 // Translation of texts the server sends in English: status messages of the devices (the
-// pill tooltip and the device details), install errors, the reasons of the download base
+// pill tooltip and the device details), install errors, the reason of a comparison after an
+// update that was not made, the reasons of the download base
 // URL, the results of the connection test and the error texts of API answers. Each text of SERVER_TEXTS is the English
 // original as the server builds it, a value of its own as a {placeholder}; a dictionary
 // entry keyed by it translates every text of this form. A placeholder of NESTED holds a
@@ -55,6 +56,7 @@ const SERVER_TEXTS = [
   "Target version not confirmed. {diagnosis}",
   "The Shelly reports {version} instead of the target version {target}",
   "The Shelly downloaded the firmware but still reports {version} – check the device log or the Shelly's web interface and try again with enabled websocket debugging",
+  "The Shelly still reports {version}. The update to {target} can run in two steps, but the second step did not finish – check the device, then install again",
   "Download rejected: request came from {ips}, not from the device IP {ip}. Disable the option restrict_downloads_to_devices",
   "The Shelly never requested the firmware – is {url} reachable from the Shelly (IP of Home Assistant, port from the Network section)?",
   "Device or firmware changed since the check – please check again",
@@ -66,14 +68,21 @@ const SERVER_TEXTS = [
   "The update stopped: no progress from the Shelly for {seconds} s",
   "The Shelly applied the update but did not restart within {seconds} s",
   "After the restart the Shelly still reports {version} – the update was not applied",
+  "After the restart the Shelly still reports {version}. The update to {target} can run in two steps, but the second step did not start within {seconds} s – start the update again",
+  "After the restart the Shelly still reports {version}. The update to {target} can run in two steps, but the second step did not finish within {seconds} s – start the update again",
   "After the restart the Shelly reports {version} instead of {target}",
   "No answer from the Shelly within {seconds} s after the restart",
   "Connection to the Shelly lost before the update command – no answer in {attempts} attempts within {seconds} s. Nothing was installed.",
   "Connection to the Shelly lost before the update command – no answer in {attempts} attempts within {seconds} s. Nothing was installed. Wi-Fi signal: {rssi} dBm (weak).",
   "The Shelly restarted unexpectedly before the update command (running for {seconds} s). Nothing was installed.",
+  "Connection to the Shelly lost before the update command – nothing was installed",
+  "The Shelly refused or blocked the sign-in during the installation – settings not read again",
   // Access point form (answer of the server; the form checks the same before)
   "The password contains a character the Shelly cannot use: {char}",
   "Invalid access point password (8 to 63 characters)",
+  // Access point form refused by the Shelly (the device's answer stays in brackets)
+  "An open access point is no longer possible on this Shelly once a password was set – use a password instead (device answer: {error})",
+  "The Shelly refused these access point settings as invalid (device answer: {error})",
   "A connection test is already running",
   "This device cannot run the test now (Gen 2 or newer, checked, not busy)",
   "No Shelly of Gen 2 or newer is known yet – run a check first",
@@ -87,13 +96,20 @@ const SERVER_TEXTS = [
   "Device not reachable: {error}",
   // Download base URL
   "Installations are disabled: set the download base URL (LAN IP address of Home Assistant and port 8098) in the Settings tab.",
-  "Installations are disabled: the download base URL is still the former example value {url}. Change it in the Settings tab or confirm that it really is the address of Home Assistant.",
   "Installations are disabled: the IP address of the download base URL is not in a private network (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7). Correct it in the Settings tab.",
   "Installations are disabled: the download base URL is not a valid address (http(s)://host:port, letters, digits, dots and hyphens in the host). Correct it in the Settings tab.",
   // Answers of a Shelly and its address
   "Device not reachable ({error})",
   "The Shelly rejected the password",
   "The Shelly requires a password – store it in the device's password dialog",
+  "The Shelly temporarily blocks sign-ins (too many attempts) – wait a few minutes and try again",
+  "The Shelly rejected the stored current password – nothing was changed",
+  "Password protection was not confirmed as removed",
+  "Password protection was not confirmed as removed ({error})",
+  "The password was not changed – the previous password still works",
+  "The password was not changed – the previous password still works ({error})",
+  "The new password could not be confirmed – the previously stored password was kept",
+  "The new password could not be confirmed – the previously stored password was kept ({error})",
   "Stored device password belongs to another device ID – enter it again",
   "Authentication with the Shelly failed",
   "Unexpected authentication request from the Shelly",
@@ -103,6 +119,8 @@ const SERVER_TEXTS = [
   "Response from the device too large",
   "Invalid authentication request from the Shelly",
   "The Shelly answered the WebSocket request with a redirect",
+  "The Shelly answered with a redirect (HTTP {status}) – redirects are not followed",
+  "The Shelly requires HTTPS (Enhanced Security) – not supported by this app yet",
   "The device reported no usable Wi-Fi signal",
   "Unknown version format: {value}",
   "Invalid value for {key} in the answer",

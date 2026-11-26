@@ -12,7 +12,7 @@ Usage (repository root, pinned dependencies):
 Options:
   --root DIR          repository copy to serve (default: this repository) – for
                       mockups: copy the repository, change ui-src, build, pass the copy
-  --scenario NAME     demo scenario: idle (default), busy, legacy, missing, features, first
+  --scenario NAME     demo scenario: idle (default), busy, missing, features, first
   --scheme light|dark colour scheme (default light)
   --widths LIST       comma-separated widths (default 1440,412; widths < 700 use @2x
                       and touch)

@@ -4,7 +4,7 @@ theme (light/dark), standalone and embedded like the HA panel.
 Runs against demo.py servers ("idle" on 8801, "busy" on 8802; qa/run_ui.py starts
 them); writes screenshots and results.json to <shots-dir>.
 Usage: python qa/ui_test.py <shots-dir> [--full]
-Default (per change, 3.0.1): quick matrix of 5 cases – 360 px light embedded, 430 px
+Default (per change): quick matrix of 5 cases – 360 px light embedded, 430 px
 dark, 1440 px dark, busy 360 px light and busy 1440 px dark. --full: all 13 cases
 (360/430/1440 × light/dark, embedded at 360/430, busy 360/1440) – final gate only."""
 

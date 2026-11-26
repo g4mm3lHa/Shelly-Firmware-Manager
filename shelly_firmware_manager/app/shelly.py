@@ -7,17 +7,27 @@ through shelly_cloud; both build on the errors and text helpers defined here.
 Security:
 - Devices are only contacted at the origin pinned by shelly_net.resolve_device_origin
   (private IP, no DNS rebinding); redirects are never followed and
-  every answer is size-limited (MAX_DEVICE_BODY, MAX_WS_FRAME).
+  every answer is size-limited (MAX_DEVICE_BODY, MAX_WS_FRAME). A redirect to HTTPS
+  (the device's Enhanced Security) raises HttpsRequiredError, any other redirect names
+  its HTTP status; the redirect target is never shown or logged.
 - Device authentication: Gen1 Basic Auth, Gen2+ Digest Auth (SHA-256, user
   "admin"). Credentials are only sent in the scheme matching the device's
   generation (no downgrade from Digest to Basic, no MD5, no Digest without qop
   "auth") and only after a challenge; a rejected password is not tried twice.
+  Each request answers a fresh challenge (no nonce is reused).
+- Sign-in block of firmware 2.0+ (HTTP 429, on the WebSocket an RPC error with code
+  429) while credentials are stored: AuthBlockedError. Only a request sent without
+  credentials is sent again, once, after AUTH_BLOCK_WAIT_S (the short block while the
+  device's table of open sign-ins is full); a signed request answered with 429 is
+  never repeated, so a retry never counts as a failed attempt. Without stored
+  credentials a 429 is an ordinary refused request and is not repeated.
 - Values written to a device (name, NTP server, power-on action, AP/Bluetooth
   switch, password protection) are validated against strict patterns or the
   options the device itself reported. Gen1 passwords are sent as query
   parameters (documented API); errors raised here never contain the URL.
 - Gen2+ installations use the device's RPC WebSocket at the same pinned origin
-  (OtaChannel): no redirects, frame size limit, SHA-256 Digest auth only.
+  (OtaChannel): no redirects (one to HTTPS/WSS raises HttpsRequiredError), frame size
+  limit, SHA-256 Digest auth only.
 """
 
 import asyncio
@@ -48,6 +58,19 @@ DEVICE_TIMEOUT = aiohttp.ClientTimeout(total=15)
 MAX_DEVICE_BODY = 1024 * 1024  # upper limit for a device response
 AUTH_USER = "admin"  # fixed user name of Gen2+ devices, also the Gen1 default
 DIGEST_PARAM_RE = re.compile(r'(\w+)=(?:"([^"]*)"|([^,\s]*))')
+# auth_domain of a Gen2+ /shelly answer accepted as a Digest realm: 1-64 letters, digits, hyphens
+AUTH_DOMAIN_RE = re.compile(r"^[A-Za-z0-9-]{1,64}$")
+# Wait before a request without credentials is sent once more after an HTTP 429: firmware
+# 2.0+ answers 429 to new sign-ins for about 2 s while its table of open sign-ins is full;
+# 2.5 s lies just past that window
+AUTH_BLOCK_WAIT_S = 2.5
+# HTTP statuses of a redirect (the set aiohttp itself follows); a device answer with one
+# of them is never followed and never read as an answer
+REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+# Schemes of a redirect target that mean the device only speaks HTTPS (Enhanced Security)
+SECURE_SCHEMES = ("https://", "wss://")
+# Message of a device that redirects plain HTTP to HTTPS (HttpsRequiredError)
+HTTPS_REQUIRED = "The Shelly requires HTTPS (Enhanced Security) – not supported by this app yet"
 
 # Gen2+ RPC over WebSocket (used during an installation to receive the OTA events)
 OTA_WS_CONNECT_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=10)
@@ -90,6 +113,30 @@ class ShellyError(RuntimeError):
 
 class AuthError(ShellyError):
     """The device requires a password or rejected the stored one (severity: error)."""
+
+
+class AuthBlockedError(AuthError):
+    """The device temporarily blocks sign-ins (HTTP 429: too many failed attempts or too
+    many open sign-ins, firmware 2.0+); nothing was executed.
+
+    A subclass of AuthError: every caller that stops at a refused password stops here
+    as well instead of sending more requests, and the severity is an error."""
+
+
+def _blocked() -> AuthBlockedError:
+    """The error of a device that blocks sign-ins (the one place of its text)."""
+    return AuthBlockedError(
+        "The Shelly temporarily blocks sign-ins (too many attempts) – wait a few minutes and try again"
+    )
+
+
+class HttpsRequiredError(ShellyError):
+    """The device redirects plain HTTP to HTTPS (severity: error).
+
+    Gen2+ Enhanced Security: always on for Shellys shipped with firmware 2.0 or later;
+    an older one does it once Enhanced Security is switched on and an HTTPS certificate
+    is installed. The redirect is never followed and this app does not speak HTTPS to
+    devices, so the device cannot be checked, updated or backed up."""
 
 
 class UnsupportedError(ShellyError):
@@ -195,7 +242,8 @@ def _sha256(text: str) -> str:
 
 
 def gen2_ha1(realm: str, password: str) -> str:
-    """HA1 of the Gen2+ Digest Auth: SHA-256('admin:<device id>:<password>')."""
+    """HA1 of the Gen2+ Digest Auth: SHA-256('admin:<realm>:<password>'). The realm is
+    the device's auth domain, which is normally its device ID (see Protection)."""
     return _sha256(f"{AUTH_USER}:{realm}:{password}")
 
 
@@ -205,13 +253,24 @@ class DeviceAuth:
     can never end up in a log line or an error message by accident.
 
     gen1 uses password (Basic Auth). Gen2+ uses either a stored ha1 bound to
-    realm (= Shelly device ID) or a plain password from which HA1 is derived.
+    realm (the device's auth domain, normally its device ID) or a plain password
+    from which HA1 is derived. A stored ha1 only answers a challenge of exactly
+    that realm.
     """
 
     gen: int
     password: str | None = field(default=None, repr=False)
     ha1: str | None = field(default=None, repr=False)
     realm: str | None = None
+
+    def _ha1_for(self, realm: str) -> str:
+        """HA1 for the realm of a challenge: a stored HA1 only for the device ID it belongs
+        to (another realm is refused), else derived from the password."""
+        if self.ha1:
+            if realm != self.realm:
+                raise ShellyError("Stored device password belongs to another device ID – enter it again")
+            return self.ha1
+        return gen2_ha1(realm, self.password or "")
 
     def authorization(self, challenge: str, method: str, uri: str) -> str:
         """Authorization header answering the device's WWW-Authenticate challenge."""
@@ -228,12 +287,7 @@ class DeviceAuth:
             raise ShellyError("Unexpected authentication request from the Shelly")
         if not realm or not nonce or "auth" not in [q.strip() for q in values.get("qop", "auth").split(",")]:
             raise ShellyError("Incomplete authentication request from the Shelly")
-        if self.ha1:
-            if realm != self.realm:
-                raise ShellyError("Stored device password belongs to another device ID – enter it again")
-            ha1 = self.ha1
-        else:
-            ha1 = gen2_ha1(realm, self.password or "")
+        ha1 = self._ha1_for(realm)
         cnonce, nc = secrets.token_hex(8), "00000001"
         response = _sha256(f"{ha1}:{nonce}:{nc}:{cnonce}:auth:{_sha256(f'{method}:{uri}')}")
         return (
@@ -256,12 +310,7 @@ class DeviceAuth:
         realm, nonce = str(challenge.get("realm") or ""), challenge.get("nonce")
         if not realm or nonce in (None, "") or not isinstance(nonce, (str, int)) or isinstance(nonce, bool):
             raise ShellyError("Incomplete authentication request from the Shelly")
-        if self.ha1:
-            if realm != self.realm:
-                raise ShellyError("Stored device password belongs to another device ID – enter it again")
-            ha1 = self.ha1
-        else:
-            ha1 = gen2_ha1(realm, self.password or "")
+        ha1 = self._ha1_for(realm)
         cnonce, nc = secrets.randbelow(2**31), "00000001"
         response = _sha256(f"{ha1}:{nonce}:{nc}:{cnonce}:auth:{_sha256(WS_HA2_INPUT)}")
         return {
@@ -279,6 +328,21 @@ class DeviceAuth:
 Query = Mapping[str, str] | Sequence[tuple[str, str]]
 
 
+def _redirect_error(status: int, location: str | None) -> ShellyError:
+    """Error for a redirect answer of a device: HttpsRequiredError if the target is
+    HTTPS/WSS (the scheme only, compared without case), else a ShellyError naming the
+    status. The target itself is never part of the text (it is device-controlled and
+    may name an address outside the LAN)."""
+    if _secure_target(location):
+        return HttpsRequiredError(HTTPS_REQUIRED)
+    return ShellyError(f"The Shelly answered with a redirect (HTTP {status}) – redirects are not followed")
+
+
+def _secure_target(location: str | None) -> bool:
+    """True if a redirect target (Location header) starts with https:// or wss://."""
+    return (location or "").strip().lower().startswith(SECURE_SCHEMES)
+
+
 async def _call(
     session: aiohttp.ClientSession,
     origin: str,
@@ -290,14 +354,26 @@ async def _call(
     """One request to a device; answers an authentication challenge once.
 
     Returns (HTTP status, parsed JSON or None). Redirects are forbidden (they
-    could lead out of the LAN) and the response size is limited.
+    could lead out of the LAN): a redirect status raises before the body is read
+    (HttpsRequiredError for a redirect to HTTPS, see _redirect_error). The response
+    size is limited. Order of the status checks: redirect first, then the sign-in
+    block (429), then the password challenge (401).
+
+    With credentials (auth not None) an HTTP 429 means the device blocks sign-ins:
+    to a request sent without credentials (the device's short block of new sign-ins)
+    the request is sent once more without credentials after AUTH_BLOCK_WAIT_S; a 429
+    after that wait or to the signed request raises AuthBlockedError at once – a
+    signed request is never repeated. Without credentials a 429 is returned like any
+    other status (it can also be a busy endpoint, and the request may be a command).
+    At most three requests: unsigned, unsigned after the wait, signed.
     """
     url = URL(origin + path)
     if params:
         url = url.with_query(params)
     method = "GET" if body is None else "POST"
-    headers: dict[str, str] | None = None
-    for attempt in range(2):
+    headers: dict[str, str] | None = None  # the Authorization header once credentials are sent
+    waited = False  # the one wait after a 429 to a request without credentials is used
+    for _attempt in range(3):
         async with session.request(
             method,
             url,
@@ -306,11 +382,17 @@ async def _call(
             allow_redirects=False,
             timeout=DEVICE_TIMEOUT,
         ) as resp:
-            if resp.status == 401:
-                if attempt or auth is None:
+            if resp.status in REDIRECT_STATUSES:
+                raise _redirect_error(resp.status, resp.headers.get("Location"))
+            if resp.status == 429 and auth is not None:
+                if headers is not None or waited:
+                    raise _blocked()
+                waited = True  # the response is closed before the wait
+            elif resp.status == 401:
+                if headers is not None or auth is None:
                     raise AuthError(
                         "The Shelly rejected the password"
-                        if attempt
+                        if headers is not None
                         else "The Shelly requires a password – store it in the device's password dialog"
                     )
                 headers = {
@@ -319,11 +401,13 @@ async def _call(
                     )
                 }
                 continue
-            raw = await read_limited(resp, MAX_DEVICE_BODY, "Response from the device too large")
-            try:
-                return resp.status, parse_json(raw.decode("utf-8", "replace"))
-            except ValueError:
-                return resp.status, None
+            else:
+                raw = await read_limited(resp, MAX_DEVICE_BODY, "Response from the device too large")
+                try:
+                    return resp.status, parse_json(raw.decode("utf-8", "replace"))
+                except ValueError:
+                    return resp.status, None
+        await asyncio.sleep(AUTH_BLOCK_WAIT_S)
     raise ShellyError("Authentication with the Shelly failed")  # not reached
 
 
@@ -383,7 +467,8 @@ async def device_info(
 
     auth_for(gen) returns the credentials once the generation is known (/shelly
     itself never needs authentication). shelly_id is the Gen2+ device ID, which is
-    also the Digest Auth realm. on_identity(gen, shelly_id) is called right after
+    the realm Shelly.SetAuth takes and normally also the Digest Auth realm (see
+    Protection for the exception). on_identity(gen, shelly_id) is called right after
     /shelly – so a device whose password is missing or wrong is still identified
     and a device password can be set for it.
 
@@ -454,8 +539,14 @@ async def trigger_update(
         await _rpc(session, origin, "Shelly.Update", {"url": firmware_url}, auth)
 
 
-async def _refuse_redirect(_session: object, _context: object, _params: object) -> None:
-    """aiohttp trace hook: a redirect would lead away from the device – refuse it."""
+async def _refuse_redirect(_session: object, _context: object, params: aiohttp.TraceRequestRedirectParams) -> None:
+    """aiohttp trace hook: a redirect would lead away from the device – refuse it.
+
+    aiohttp calls it before it follows anything. A redirect to HTTPS/WSS raises
+    HttpsRequiredError (defensive: such a device already fails the check over HTTP);
+    the target is never part of the text."""
+    if _secure_target(params.response.headers.get("Location")):
+        raise HttpsRequiredError(HTTPS_REQUIRED)
     raise ShellyError("The Shelly answered the WebSocket request with a redirect")
 
 
@@ -469,9 +560,11 @@ class OtaChannel:
     request with "src" – here the Shelly.Update command itself.
 
     Security: the URL is built from the pinned private-IP origin (no DNS),
-    redirects are refused, frames are limited to MAX_WS_FRAME, no proxy from the
-    environment, Digest auth only as SHA-256 (DeviceAuth.ws_auth). Only the event
-    name, a clipped message and the percentage leave this class.
+    redirects are refused (one to HTTPS/WSS as HttpsRequiredError), frames are
+    limited to MAX_WS_FRAME, no proxy from the environment, Digest auth only as
+    SHA-256 (DeviceAuth.ws_auth); a sign-in block (code 429) is handled as over
+    HTTP (see update). Only the event name, a clipped message and the percentage
+    leave this class.
 
     Usage: async with OtaChannel(origin, auth) as ota:
                accepted = await ota.update(url)
@@ -521,36 +614,60 @@ class OtaChannel:
     async def update(self, firmware_url: str) -> Literal[True] | None:
         """Send Shelly.Update. True if the device accepted it, None if no answer
         arrived in time (the update may still run – never send it twice).
-        Raises AuthError/ShellyError if the device refused it."""
+        Raises AuthError/ShellyError if the device refused it.
+
+        The same sign-in rules as for HTTP (_call), with RPC error codes: code 401 to
+        the unsigned frame is answered once with a signed frame, code 401 to the signed
+        one raises "rejected the password". With credentials, code 429 to the unsigned
+        frame is answered once with a new unsigned frame after AUTH_BLOCK_WAIT_S; code
+        429 after that or to the signed frame raises AuthBlockedError. A frame refused
+        with 401 or 429 was not executed, so a retry frame never runs the update twice.
+        A retry frame that cannot be sent raises a ShellyError (nothing was installed);
+        it never leads to the update command over HTTP (ChannelUnavailable is raised for
+        the first frame only)."""
         params = {"url": firmware_url}
         ws = self._socket()
         try:
             await ws.send_json({"id": 1, "src": self.src, "method": "Shelly.Update", "params": params})
         except (aiohttp.ClientError, OSError, RuntimeError) as err:  # closed before sending
             raise ChannelUnavailable(type(err).__name__) from None
-        answer = await self._answer(1)
-        if answer is None:
-            return None
-        error = answer.get("error")
-        if isinstance(error, dict) and error.get("code") == 401:
-            if self.auth is None:
-                raise AuthError("The Shelly requires a password – store it in the device's password dialog")
-            try:
-                challenge = parse_json(str(error.get("message") or ""))
-            except ValueError:
-                raise ShellyError("Invalid authentication request from the Shelly") from None
-            frame: dict[str, Any] = {"id": 2, "src": self.src, "method": "Shelly.Update", "params": params}
-            frame["auth"] = self.auth.ws_auth(challenge)
-            await ws.send_json(frame)
-            answer = await self._answer(2)
+        signed = False  # a frame with credentials was sent
+        waited = False  # the one wait after code 429 to an unsigned frame is used
+        for frame_id in (1, 2, 3):  # unsigned, unsigned after the wait, signed
+            answer = await self._answer(frame_id)
             if answer is None:
                 return None
             error = answer.get("error")
-            if isinstance(error, dict) and error.get("code") == 401:
-                raise AuthError("The Shelly rejected the password")
-        if error:
-            raise ShellyError(f"Device reports: {device_error(error)}")
-        return True
+            details = error if isinstance(error, dict) else {}
+            code = details.get("code")
+            retry: dict[str, Any] = {"id": frame_id + 1, "src": self.src, "method": "Shelly.Update", "params": params}
+            if code == 429 and self.auth is not None:
+                if signed or waited:
+                    raise _blocked()
+                waited = True
+                await asyncio.sleep(AUTH_BLOCK_WAIT_S)
+            elif code == 401:
+                if self.auth is None:
+                    raise AuthError("The Shelly requires a password – store it in the device's password dialog")
+                if signed:
+                    raise AuthError("The Shelly rejected the password")
+                try:
+                    challenge = parse_json(str(details.get("message") or ""))
+                except ValueError:
+                    raise ShellyError("Invalid authentication request from the Shelly") from None
+                retry["auth"] = self.auth.ws_auth(challenge)
+                signed = True
+            elif error:
+                raise ShellyError(f"Device reports: {device_error(error)}")
+            else:
+                return True
+            try:
+                await ws.send_json(retry)
+            except (aiohttp.ClientError, OSError, RuntimeError):  # the connection ended: not over HTTP now
+                raise ShellyError(
+                    "Connection to the Shelly lost before the update command – nothing was installed"
+                ) from None
+        raise ShellyError("Authentication with the Shelly failed")  # not reached
 
     def _socket(self) -> aiohttp.ClientWebSocketResponse:
         """The open WebSocket; only valid inside 'async with'."""
@@ -729,11 +846,13 @@ BLE_PROXY_SCRIPT = "aioshelly_ble_integration"
 async def _ble_proxy(session: aiohttp.ClientSession, origin: str, auth: DeviceAuth | None) -> bool | None:
     """True if Home Assistant's Bluetooth proxy script runs on the device (Script.List:
     name BLE_PROXY_SCRIPT, running), False if not or the device has no scripts, None
-    if it could not be read."""
+    if it could not be read; a sign-in block (AuthBlockedError) is raised."""
     try:
         data = await _rpc(session, origin, "Script.List", auth=auth)
     except UnsupportedError:
         return False
+    except AuthBlockedError:  # a blocked device gets no further request in this read
+        raise
     except (TimeoutError, ShellyError, aiohttp.ClientError):
         return None
     scripts = data.get("scripts")
@@ -746,9 +865,11 @@ async def _ble_proxy(session: aiohttp.ClientSession, origin: str, auth: DeviceAu
 
 async def _cloud_connected(session: aiohttp.ClientSession, origin: str, auth: DeviceAuth | None) -> bool | None:
     """Gen2+: whether the device is connected to the Shelly cloud now (Cloud.GetStatus),
-    None if it could not be read."""
+    None if it could not be read; a sign-in block (AuthBlockedError) is raised."""
     try:
         status = await _rpc(session, origin, "Cloud.GetStatus", auth=auth)
+    except AuthBlockedError:  # a blocked device gets no further request in this read
+        raise
     except (TimeoutError, ShellyError, aiohttp.ClientError):
         return None
     connected = status.get("connected")
@@ -811,6 +932,53 @@ async def link_status(
     return {"uptime": int(uptime) if uptime is not None else None, "rssi": _rssi(wifi)}
 
 
+NSTEPS_TIMEOUT_S = 5  # reading the update steps of a device: optional, so a short limit
+NSTEPS_MAX = 9  # highest plausible number of update steps (a larger value is ignored)
+
+
+async def update_nsteps(
+    session: aiohttp.ClientSession, origin: str, version: str, auth: DeviceAuth | None = None
+) -> int | None:
+    """Gen2+: the number of update steps the device itself reports for version, or None.
+
+    Reads Sys.GetStatus available_updates: the entry of the channel ("stable" or "beta")
+    whose version equals version (compared as parsed version numbers) and that carries
+    nsteps. Firmware that reorganises the memory of the device installs in two passes and
+    reports nsteps 1 before the first pass and 0 when the last one starts; a regular
+    update has no nsteps. The value only tells an installation to wait for a second
+    pass – it is never used to choose an offer.
+
+    None when the device reports no such entry, nsteps is no plain integer from 0 to
+    NSTEPS_MAX (a bool or a text is refused), or the request fails in any other way
+    within NSTEPS_TIMEOUT_S. A refused or blocked sign-in (AuthError) is raised, so the
+    caller sends no further signed request (no retry is made here)."""
+    try:
+        wanted = parse_version(version)
+        async with asyncio.timeout(NSTEPS_TIMEOUT_S):
+            status = await _rpc(session, origin, "Sys.GetStatus", auth=auth)
+    except AuthError:
+        raise
+    except (TimeoutError, ShellyError, aiohttp.ClientError, OSError):
+        return None
+    updates = status.get("available_updates")
+    if not isinstance(updates, dict):
+        return None
+    for channel in ("stable", "beta"):
+        entry = updates.get(channel)
+        if not isinstance(entry, dict):
+            continue
+        nsteps = entry.get("nsteps")  # read as it is: 0 is a valid value ("last step started")
+        if isinstance(nsteps, bool) or not isinstance(nsteps, int) or not 0 <= nsteps <= NSTEPS_MAX:
+            continue
+        try:
+            same = parse_version(entry.get("version")) == wanted
+        except ShellyError:
+            continue
+        if same:
+            return nsteps
+    return None
+
+
 def _positive(value: object) -> bool:
     """True if a reported period is a number above 0 (a sleeping battery device)."""
     return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
@@ -818,14 +986,44 @@ def _positive(value: object) -> bool:
 
 async def _battery_status(session: aiohttp.ClientSession, origin: str, auth: DeviceAuth | None) -> dict[str, bool]:
     """{"battery": bool} from the Gen2+ sys status (wakeup_period, reported by battery
-    devices only); {} if it could not be read – the stored value then stays."""
+    devices only); {} if it could not be read – the stored value then stays; a sign-in
+    block (AuthBlockedError) is raised."""
     try:
         status = await _rpc(session, origin, "Sys.GetStatus", auth=auth)
     except UnsupportedError:
         return {"battery": False}
+    except AuthBlockedError:  # a blocked device gets no further request in this read
+        raise
     except (TimeoutError, ShellyError, aiohttp.ClientError):
         return {}
     return {"battery": _positive(status.get("wakeup_period"))}
+
+
+async def _sys_and_cloud(
+    session: aiohttp.ClientSession, origin: str, auth: DeviceAuth | None
+) -> tuple[dict[str, bool], bool | None]:
+    """Gen2+ battery flag and cloud connection from one Shelly.GetStatus, whose result
+    holds the status of every component under its key ("sys", "cloud"); used by an
+    extended read while the cloud is on and the sys config reports no wakeup_period.
+
+    Returns ({"battery": bool}, connected): battery from sys.wakeup_period as in
+    _battery_status, connected from cloud.connected as in _cloud_connected. battery is
+    left out (stored value kept) when the request fails in any way, unsupported
+    included, or the answer has no "sys" object; connected is None when it fails or
+    reports no boolean; a sign-in block (AuthBlockedError) is raised. Only these two
+    values are taken: the rest of the answer (for example sys.available_updates, Wi-Fi
+    addresses, other component states) is neither kept nor logged."""
+    try:
+        status = await _rpc(session, origin, "Shelly.GetStatus", auth=auth)
+    except AuthBlockedError:  # a blocked device gets no further request in this read
+        raise
+    except (TimeoutError, ShellyError, aiohttp.ClientError):
+        return {}, None
+    sys_status = status.get("sys")
+    battery = {"battery": _positive(sys_status.get("wakeup_period"))} if isinstance(sys_status, dict) else {}
+    cloud = status.get("cloud")
+    connected = cloud.get("connected") if isinstance(cloud, dict) else None
+    return battery, connected if isinstance(connected, bool) else None
 
 
 async def _list_active(
@@ -833,11 +1031,14 @@ async def _list_active(
 ) -> bool | str | None:
     """True/False whether a device list has an active entry; UNSUPPORTED if the
     device lacks the endpoint; None (unknown) on any other failure – a timeout or
-    an authentication error is never taken for "unsupported"."""
+    an authentication error is never taken for "unsupported". A sign-in block
+    (AuthBlockedError) is raised: the device gets no further request."""
     try:
         data = await read()
     except UnsupportedError:
         return UNSUPPORTED
+    except AuthBlockedError:  # a blocked device gets no further request in this read
+        raise
     except (TimeoutError, ShellyError, aiohttp.ClientError):
         return None
     entries = data.get(key)
@@ -861,21 +1062,25 @@ async def read_settings(
     Shelly.GetConfig, Gen1 /settings).
 
     cloud_connected: whether the device is connected to the Shelly cloud while the
-    cloud is on (Gen2+ one more request, Cloud.GetStatus; None if unknown or off).
+    cloud is on (Gen2+ one more request, Cloud.GetStatus – when extended and the sys
+    status is read too, both come from one Shelly.GetStatus; None if unknown or off).
     ble_proxy: Gen2+ with Bluetooth on – whether Home Assistant's Bluetooth proxy
     script runs (one more request, Script.List; None if unknown).
 
     battery is True for a battery device that sleeps between wake-ups (Gen2+
-    wakeup_period > 0 in the sys status – read with Sys.GetStatus only when extended –
-    or in the sys config; Gen1 sleep_mode.period > 0) – such a device answers only
-    while it is awake, so it is only ever detected from the device itself. Gen2+
-    leaves battery out (stored value kept) when it could not be read.
+    wakeup_period > 0 in the sys status – read only when extended, with Sys.GetStatus
+    or, while the cloud is on, Shelly.GetStatus – or in the sys config; Gen1
+    sleep_mode.period > 0) – such a device answers only while it is awake, so it is
+    only ever detected from the device itself. Gen2+ leaves battery out (stored value
+    kept) when it could not be read.
 
-    Switch values are True/False or UNSUPPORTED. extended=True (checks and Reload
-    Device Info only) also reads whether actions/webhooks and schedules are active:
-    Gen2+ needs Webhook.List and Schedule.List (no batch RPC exists), Gen1 needs
-    /settings/actions; schedules of Gen1 are part of /settings. Only the boolean
-    "has an active entry" is kept – never URLs, calls or scripts."""
+    Switch values are True/False or UNSUPPORTED. extended=True (checks, Reload Device
+    Info and the read after a restore) also reads whether actions/webhooks and
+    schedules are active: Gen2+ needs Webhook.List and Schedule.List (no batch RPC
+    exists), Gen1 needs /settings/actions; schedules of Gen1 are part of /settings.
+    Only the boolean "has an active entry" is kept – never URLs, calls or scripts.
+    A failed optional request leaves its value unknown, but a sign-in block
+    (AuthBlockedError) ends the read at once: the device gets no further request."""
     outputs: list[dict[str, Any]] = []
     extra: dict[str, Any] = {}
     if gen >= 2:
@@ -892,15 +1097,25 @@ async def read_settings(
         extra["ble"] = _flag((config.get("ble") or {}).get("enable"))
         extra["debug_ws"] = _flag(((system.get("debug") or {}).get("websocket") or {}).get("enable"))
         extra["cloud"] = _flag((config.get("cloud") or {}).get("enable"))
-        extra["cloud_connected"] = (
-            await _cloud_connected(session, origin, auth) if extra["cloud"] is True else None
-        )
+        # The sys status is read only when extended and the sys config gives no wakeup_period.
+        sys_wanted = extended and not _positive(system.get("wakeup_period"))
+        if extra["cloud"] is True and sys_wanted:
+            # Both values wanted: one Shelly.GetStatus instead of Cloud.GetStatus and Sys.GetStatus;
+            # after a failure no second request (battery then stays as stored).
+            battery, extra["cloud_connected"] = await _sys_and_cloud(session, origin, auth)
+            sys_wanted = False
+        else:
+            battery = {}
+            extra["cloud_connected"] = (
+                await _cloud_connected(session, origin, auth) if extra["cloud"] is True else None
+            )
         extra["ble_proxy"] = await _ble_proxy(session, origin, auth) if extra["ble"] is True else False
         if _positive(system.get("wakeup_period")):
             extra["battery"] = True
         if extended:
-            if "battery" not in extra:
-                extra.update(await _battery_status(session, origin, auth))
+            if sys_wanted:
+                battery = await _battery_status(session, origin, auth)
+            extra.update(battery)
             extra["actions"] = await _list_active(
                 lambda: _rpc(session, origin, "Webhook.List", auth=auth), "hooks", lambda e: e.get("enable") is True
             )
@@ -1084,12 +1299,74 @@ GEN1_AP_NOTE = (
 GEN1_DEBUG_WS_NOTE = "Gen1 devices have no websocket debug log"
 
 
-async def protection_status(session: aiohttp.ClientSession, origin: str) -> bool | None:
-    """Password protection as reported by /shelly (no authentication needed):
-    True/False, None if the device does not report it."""
+@dataclass(frozen=True, slots=True)
+class Protection:
+    """Password protection of a device as its /shelly answer reports it.
+
+    enabled: True/False, None if the device does not report it. device_id: the Gen2+
+    device ID (None for Gen1 or when the answer has none); it is the realm a new
+    password is set with (Shelly.SetAuth accepts only the device ID). auth_domain:
+    the Gen2+ realm the device's current password is bound to (Shelly.GetDeviceInfo,
+    null without a password) exactly as the device sent it – never shortened, checked
+    by realm before it is used. It normally equals device_id; firmware 2.2.0 renamed
+    the ID of the 1PM Mini Gen3/Gen4, and a password set during that time stays bound
+    to the 2.2.0 ID after 2.2.1 restored the former one."""
+
+    enabled: bool | None
+    device_id: str | None = None
+    auth_domain: str | None = None
+
+    @property
+    def realm(self) -> str | None:
+        """Realm the device's current password is bound to: auth_domain while the
+        protection is on, if it is 1-64 letters, digits or hyphens and differs from
+        device_id only before the last hyphen (the same MAC suffix, as the 2.2.0
+        rename keeps it); otherwise device_id. A realm the device does not challenge
+        with is still refused by DeviceAuth."""
+        domain, device_id = self.auth_domain, self.device_id
+        if self.enabled is not True or not domain or not device_id or not AUTH_DOMAIN_RE.fullmatch(domain):
+            return device_id
+        prefix, _, suffix = domain.rpartition("-")
+        id_prefix, _, id_suffix = device_id.rpartition("-")
+        # rpartition gives an empty prefix without a hyphen: both need a name and a suffix
+        return domain if prefix and id_prefix and suffix and suffix == id_suffix else device_id
+
+    def same_device(self, known_id: str | None, mac: object = None) -> bool:
+        """True if device_id belongs to the device known by known_id or mac: its
+        suffix after the last hyphen (the MAC address in lower case, which the 2.2.0
+        rename keeps) equals that of known_id or the hex digits of mac, ignoring
+        case. Also True when neither is known (nothing to compare with); False
+        without a device_id."""
+        if not self.device_id:
+            return False
+        suffix = self.device_id.rpartition("-")[2].lower()
+        known = {
+            value
+            for value in (
+                (known_id or "").rpartition("-")[2].lower(),
+                re.sub(r"[^0-9a-f]", "", str(mac or "").lower()),
+            )
+            if value
+        }
+        return not known or (bool(suffix) and suffix in known)
+
+
+async def protection_status(session: aiohttp.ClientSession, origin: str) -> Protection:
+    """Password protection as reported by /shelly (no authentication needed), with
+    the Gen2+ device ID and auth domain of the same answer (see Protection). An empty
+    device ID becomes None, so it never replaces a known one."""
     info = await _device_json(session, origin, "/shelly")
-    value = info.get("auth_en" if int_field(info, "gen", 1) >= 2 else "auth")
-    return value if isinstance(value, bool) else None
+    gen = int_field(info, "gen", 1)
+    value = info.get("auth_en" if gen >= 2 else "auth")
+    enabled = value if isinstance(value, bool) else None
+    if gen < 2:
+        return Protection(enabled)
+    domain = info.get("auth_domain")
+    return Protection(
+        enabled,
+        clip(info.get("id"), 64) or None,
+        domain if isinstance(domain, str) else None,
+    )
 
 
 async def set_protection(
@@ -1103,10 +1380,12 @@ async def set_protection(
     """Enable/change (new_auth = DeviceAuth of the new password) or disable
     (new_auth None) the device's password protection.
 
-    Gen2+: Shelly.SetAuth with user admin, realm = device ID and the HA1 (null
-    disables; realm = Shelly device ID). Gen1: /settings/login with user admin. The caller must verify the
-    result – a lost or ambiguous answer proves nothing. Network errors are
-    re-raised without any URL (Gen1 carries the password in the query)."""
+    Gen2+: Shelly.SetAuth with user admin, the realm and the HA1 (null disables).
+    The realm must be the device ID, never its auth domain: Shelly.SetAuth accepts
+    only the device ID, and new_auth.ha1 must be derived from the same realm. Gen1:
+    /settings/login with user admin. The caller must verify the result – a lost or
+    ambiguous answer proves nothing. Network errors are re-raised without any URL
+    (Gen1 carries the password in the query)."""
     try:
         if gen >= 2:
             if not realm:
@@ -1174,6 +1453,38 @@ def fetch_error(text: str, url: str) -> str:
     if code == "-114":
         return f"No connection to {url}: connection error (Shelly code {codes})"
     return f"The device could not fetch {url} (Shelly code {codes})"
+
+
+# Prefix of a refusal the device sent as an RPC error (_rpc)
+_DEVICE_REPORTS = "Device reports: "
+# Error code of a device answer (device_error) at its end: "Invalid argument (code -103)"
+# with a message, the bare "code -103" without one
+_AP_CODE_RE = re.compile(r"(?:\(code (-?\d+)\)|^code (-?\d+))$")
+
+
+def ap_refusal(text: str, open_requested: bool, had_password: bool) -> str:
+    """Readable text of an access point form (Wifi.SetConfig) the Shelly refused.
+
+    text is the text of the refusal ("Device reports: <device answer>"); open_requested
+    is True for an open access point, had_password True if the device reported its
+    access point with a password before the change. Secure provisioning (Shelly API docs,
+    firmware 1.7.5 and newer) keeps an access point password once one was set, and the
+    docs name no error code for it: so every coded refusal of an open access point that
+    had a password gets that reason. Another refusal with code -103 (INVALID ARGUMENT)
+    names the settings as invalid. Both keep the device's answer in brackets; any other
+    text (no device answer, no code, another code) stays as it is."""
+    answer = text.removeprefix(_DEVICE_REPORTS)
+    match = _AP_CODE_RE.search(answer) if answer != text else None
+    if not match:
+        return text
+    if open_requested and had_password:
+        return (
+            "An open access point is no longer possible on this Shelly once a password was set – use a password"
+            f" instead (device answer: {answer})"
+        )
+    if (match.group(1) or match.group(2)) == "-103":
+        return f"The Shelly refused these access point settings as invalid (device answer: {answer})"
+    return text
 
 
 async def port_open(ip: str, port: int) -> float:

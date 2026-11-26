@@ -1,4 +1,4 @@
-"""Security rules of both web servers (formerly the workspace smoke test, 3.0.1).
+"""Security rules of both web servers.
 
 UI app: strict CSP, no Server banner, 32 KB limit for JSON bodies, no secrets in the
 settings view. Download server: only provided files, sandbox CSP, no other paths, no
@@ -6,8 +6,8 @@ Server banner, no request bodies. No network: test servers on 127.0.0.1 only."""
 
 import download_server
 import pytest
-from helpers import chunks
 from aiohttp.test_utils import TestClient, TestServer
+from helpers import chunks, stage_import, stage_upload
 
 
 async def test_ui_page_headers(client):
@@ -89,8 +89,8 @@ async def test_odd_requests_are_refused_with_the_security_headers(client, header
 async def test_non_ascii_tokens_of_transfers_are_unknown_tokens(client, mgr):
     """A token with other characters while an upload and an import are staged: an
     unknown token (409), never an error of the comparison."""
-    await mgr.stage_upload(chunks(b"u" * 5000), "fw.bin", 5000)
-    await mgr.stage_import(chunks(b"PK\x05\x06" + b"\0" * 18), 22)
+    await stage_upload(mgr, chunks(b"u" * 5000), "fw.bin", 5000)
+    await stage_import(mgr, chunks(b"PK\x05\x06" + b"\0" * 18), 22)
     for path in ("/api/firmware/upload/confirm", "/api/firmware/import/check", "/api/firmware/import/confirm"):
         answer = await client.post(path, json={"token": "ü" * 32, "type": "Plus1", "version": "1.0.0", "password": "x"},
                                    headers={"X-CSRF-Token": client.csrf})

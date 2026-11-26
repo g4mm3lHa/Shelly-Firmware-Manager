@@ -234,7 +234,6 @@ def build_ui_app(mgr: Manager, ingress_ip: str = INGRESS_PROXY_IP, app_version: 
     app.router.add_get("/api/settings", settings.options_get)
     app.router.add_get("/api/settings/app-page", settings.app_page)
     app.router.add_post("/api/settings", settings.options_save)
-    app.router.add_post("/api/settings/download-base/confirm", settings.confirm_download_base)
     app.router.add_post("/api/settings/connection-test", settings.connection_test)
     app.router.add_static("/static/", STATIC_DIR, show_index=False, follow_symlinks=False, name="static")
     return app

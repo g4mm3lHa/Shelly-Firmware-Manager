@@ -173,7 +173,8 @@ available version, status and last check.
 **Areas:** as soon as a device is in an area of Home Assistant, the **Area** column
 (after **Device**; on a phone the first row of the details) and the area icon next to
 **Filter** appear. The area filter takes several areas at once, also **Without area**;
-search finds the area too. The app reads the areas at every check.
+search finds the area too. The app reads the areas at every check. A single check is
+meant to use the areas read up to 60 seconds before (see [How a check works](#how-a-check-works)).
 
 **Security:** a strip above the list counts the devices without password protection
 and with the cloud, the access point or the websocket debug log switched on (unknown
@@ -210,7 +211,7 @@ is above 0), each with its count. A dot on the icon shows that a filter other th
 | Ready | Firmware provided (from the firmware store or downloaded), waiting for your approval – "Install" next to the status opens the installation dialog |
 | Scheduled | Installation approved for a later time; the time is shown under the version (see [Scheduled installation](#scheduled-installation)) |
 | Updated | The installation was confirmed; shown until the next check of the device. If the backup before the update shows changed settings or a script that no longer runs, a line below the firmware says so (see [Comparison after an update](#backups)) |
-| Queued / step of the installation | Installation waiting for a free slot / running: the label names the step – **Backup …**, **Restarting …**, **Waiting for device …**, **Installing** (with the percentage for Gen2+), **Verifying …** – blue while it runs, yellow while a step takes longer than usual. The tooltip (phones: the device details) names the step, how long it has been running, when the app gives up and the Wi-Fi signal |
+| Queued / step of the installation | Installation waiting for a free slot / running: the label names the step – **Backup …**, **Restarting …**, **Waiting for device …**, **Installing** (with the percentage for Gen2+), **Installing again …** (second step of a two-step update), **Verifying …** – blue while it runs, yellow while a step takes longer than usual. The tooltip (phones: the device details) names the step, how long it has been running, when the app gives up and the Wi-Fi signal |
 | Unconfirmed | The installation ran, but the target version was not confirmed (see the details); stays in **Updates Available** until the next check of the device |
 | Error | Check, download or installation failed; after a failed installation – or with a stored version while the Shelly server could not be asked – the device stays in **Updates Available** and can be installed (again) |
 | Asleep | Battery device that did not answer the last check – it sleeps; the IP is dimmed. Wake it up and check it again |
@@ -270,9 +271,12 @@ list. A Shelly that Home Assistant does not know cannot be listed.
 **Host name:** the column exists only while **Resolve host names** is on (Settings tab,
 Advanced). It shows the host name set in the Shelly integration, else the name the
 device announces in your network (e.g. `shellyplus1pm-a0dd6c29c3e0.local`), and "–"
-while the name does not resolve. It is for display only: the app always reaches the
-device at its address in Home Assistant. The Columns chooser can hide it; on a phone it
-is a row in the details.
+while the name does not resolve.
+
+A name you give the Shelly does not change the announced name. It stays the device ID
+followed by `.local` and shows only while it resolves. The column is for display only:
+the app always reaches the device at its address in Home Assistant. The Columns chooser
+can hide it; on a phone it is a row in the details.
 
 **NTP server:** a click on the entry in the column (desktop) opens the dialog to change it.
 
@@ -299,9 +303,12 @@ password is not stored here.
   WPA2 demands), because some phones and computers cannot connect otherwise.
   The password goes to the Shelly only; the app does not store or log it. The Shelly
   decides whether it accepts a password or an open access point; its refusal is shown in
-  the form. **Range extender** is offered if the device has it. Only the access point is
-  changed; the Wi-Fi connection to your network stays as it is. Gen1 devices cannot
-  change it here: turning on their access point turns off their Wi-Fi client mode.
+  the form. According to the Shelly API documentation, firmware 1.7.5 and newer keeps an
+  access point password once one was set. If the Shelly refuses an open access point
+  that had a password, the form names this reason. **Range extender** is offered if the
+  device has it. Only the access point is changed; the Wi-Fi connection to your network
+  stays as it is. Gen1 devices cannot change it here: turning on their access point
+  turns off their Wi-Fi client mode.
 - **Cloud** (cloud icon): yellow while the Shelly cloud is on, with the connection in
   the tooltip. With the cloud off, the Shelly app and other Shelly cloud services no
   longer reach the device from outside your network; Home Assistant and this app keep
@@ -361,6 +368,15 @@ A check (all devices, a single device or the schedule) works in this order:
    devices without one – one request for all Gen1 types. Imported files are not
    provided this way: only while the Shelly list cannot be asked, for a manual
    installation at your own risk like on Gen2+.
+
+Each check reads the device registry, the areas and the battery sensors from Home
+Assistant. A full check also reads the Shelly config entries and discoveries. This is
+meant to go over one connection per check.
+
+A single check (**Check for updates**, **Offer update now**, after an intermediate
+version) is meant to reuse Home Assistant answers up to 60 seconds old. A rename or
+area move in that minute then shows with the next check. **Check now**, the schedule
+and **Try again** are meant to always ask Home Assistant anew.
 
 Every check that asks the Shelly update server also makes one reference request with
 fixed values (Plus1 1.0.7, which must be offered 1.3.3 – no data of your devices). If
@@ -431,8 +447,34 @@ the percentage). An error reported by the Shelly ends the installation at once. 
 a download request after 2 minutes, or without new progress for 60 seconds (120 seconds
 when the Wi-Fi signal was weak at the start), the installation fails. After 100 % the
 Shelly must restart within 30 seconds (the label shows "Restarting …") and report exactly
-the target version within 90 seconds after the restart ("Verifying …"); the old version,
-another version or no answer is an error.
+the target version within 90 seconds after the restart ("Verifying …"). Another version or
+no answer is an error; so is the old version, unless a two-step update is expected.
+
+Firmware 2.2.0 and later can install in two steps: it reorganises the memory of a Shelly
+on an older version. The Shelly then restarts on its old version and is meant to install
+the update a second time by itself. The app expects this when the update crosses 2.2.0,
+or when the Shelly update server or the device names several steps.
+
+The app then sends no second command. It keeps the file ready for the Shelly, shows
+**Installing again …** and waits up to 3 minutes for the second step to start. Once the
+Shelly downloads the file again, the second step has 5 minutes to finish. Do not switch
+the Shelly off meanwhile.
+
+If the second step does not start or finish in time, the installation fails: start it
+again. A missed answer only counts as a restart when the running time of the Shelly shows
+one. Without the device connection the same times apply, but the result is "Unconfirmed":
+check the device, then install.
+
+The app recognises the new download by the address of the Shelly. Behind network address
+translation (NAT, e.g. Docker or a router between the networks) every download comes from
+another address. Such a download is meant to count for the Shelly if no other device was
+installing the same file when it arrived; else the app cannot tell them apart. The second
+step then shows itself only by the restart of the Shelly within 3 minutes.
+
+After the update command the app reads the running time only as a hint. If the Shelly
+refuses or blocks the sign-in for it or for a version query, the installation goes on
+without it. The app then sends no further signed request to the Shelly during this
+installation. After an intermediate version the next step then shows at the next check.
 
 Devices without this connection (Gen1, or when it is not available) are checked every
 10 seconds until they report exactly the target version (at most 5 minutes). If that
@@ -670,7 +712,15 @@ version keeps it). Counters that change with every update (`sys.cfg_rev`) are no
 compared. Nothing is changed on the device; the result is logged with the names of the
 first changed settings (without their values, which may hold e.g. a server address) and the
 stopped scripts. Downgrades and
-installations without a backup **Before update** get no comparison.
+installations without a backup **Before update** get no comparison. If the Shelly refused
+or blocked the sign-in during the installation, the app does not read it again: the
+comparison shows that reason instead.
+
+Settings the new firmware no longer has are meant to be listed apart under **Removed with the
+firmware**, for example `ble.enable` (removed in Gen2+ firmware 2.0.0). They do not count as
+changed, add no line below the firmware and are only counted in the log. A component the device
+no longer reports at all still counts as changed. On Gen1 this is a channel; an object missing
+from the settings counts as removed.
 
 ### Logs
 
@@ -735,6 +785,26 @@ password**, or the lock icon):
 
 After enabling, changing or removing the protection, change the password in the Home
 Assistant Shelly integration as well.
+
+**1PM Mini Gen3/Gen4 and firmware 2.2.0:** 2.2.0 changed the device ID of these models,
+2.2.1 restores it. A password set or changed under 2.2.0 stays bound to the 2.2.0 ID.
+According to Shelly, its web UI then refuses the password. You can see this in
+`http://<IP>/shelly`: `auth_domain` differs from `id`.
+
+In that case **Store existing password** is meant to accept the correct password anyway.
+Then use **Change password** once; the same password is fine. The app sets it with the
+restored ID. The Shelly is then meant to bind the password to that ID again.
+
+**Failed sign-ins:** the app sends a stored password once per request. Once the Shelly
+refused it, a check, a backup or an installation sends nothing more with it. A Gen2+
+Shelly that refuses the change or removal of its protection is expected to have changed
+nothing, so the app stops there too. Each of these actions counts one failed attempt at
+most.
+
+Firmware 2.0 and newer delays sign-ins after repeated failed attempts. In that case the
+app is meant to show "The Shelly temporarily blocks sign-ins" as an error. It is meant to
+wait only for the short block of about 2 seconds that many sign-ins at once can cause,
+without sending a password.
 
 **Several devices at once:** Settings tab → **Device Passwords** → **Device passwords**. Choose the action –
 **Store the existing device password in this app** or **Set password** (enables the
@@ -829,13 +899,19 @@ Gen2+ firmware is downloaded over HTTPS only.
 | Device not reachable (connection test) | The chosen test device did not answer Home Assistant. Choose another device or **Automatic** |
 | Not reachable (device details) | The device did not answer its last check. **Try again** shows whether Home Assistant still knows its address, whether the port is open and whether the device answers; check the device, its network and its address in the Shelly integration |
 | The comparison could not be made (Comparison after update) | The device could not be read again after the update or its backup **Before update** is gone. The update itself is not affected; check the device's settings in its web interface if in doubt |
+| The comparison could not be made: The Shelly refused or blocked the sign-in during the installation – settings not read again | The app sends no further signed request after a refused sign-in. Check the device password (row menu ⋮ → **Device password**), then compare the settings in the web interface of the Shelly |
 | The Shelly downloaded the firmware but still reports … | The device did not install it – check the log in the Shelly web UI |
+| After the restart the Shelly still reports … – the update was not applied | The Shelly restarted but kept its old version. Check the log in the Shelly web UI, then try the installation again from **Updates Available** |
+| After the restart the Shelly still reports … The update to … can run in two steps, but the second step did not start within 180 s | The Shelly came back on its old version and did not start the second step of a [two-step update](#installing-updates). Start the installation again from **Updates Available**; do not switch the Shelly off while it installs |
+| After the restart the Shelly still reports … The update to … can run in two steps, but the second step did not finish within 300 s | The Shelly downloaded the file again but did not reach the target version within 5 minutes. Start the installation again from **Updates Available**; do not switch the Shelly off while it installs |
+| Target version not confirmed. The Shelly still reports … The update to … can run in two steps, but the second step did not finish | The second step of a two-step update did not come. Check the device (row menu ⋮ → **Check for updates**), then install it again |
 | The Shelly reports an update error … It downloaded the firmware but rejected it | The installed firmware may be too old for a direct update to this version: check the device again – the Shelly update server names the required intermediate version (or install one via the web interface of the Shelly or an upload) |
 | Check warning: the Shelly update server no longer answers with the next step | Shelly changed its update server: required intermediate versions cannot be detected. Prefer the web interface of the Shelly for devices on very old firmware |
 | Error … Stored version X is ready and can be installed manually | The Shelly server could not be asked. Check again later, or install the stored version at your own risk |
 | Download does not match the SHA-256 named by the manufacturer's URL | The download was damaged or altered and was not stored – check again |
 | Many "Download rejected" lines in the app log | Only the first rejected request per address and 10 minutes is logged; the others are counted in one line |
 | Connection to the Shelly lost before the update command – no answer in n attempts within n s. Nothing was installed. | The Shelly did not answer the check right before the update command, usually because of weak Wi-Fi. Improve the reception (access point, antenna position) and try the installation again |
+| Connection to the Shelly lost before the update command – nothing was installed | The Shelly asked for its password, or briefly blocked sign-ins, over the WebSocket. The connection then ended before the app could send the update command again. Nothing reached the device as a command. Try the installation again |
 | The Shelly restarted unexpectedly before the update command (running for n s). Nothing was installed. | The Shelly restarted on its own while the app was waiting for it (power supply, firmware fault, Wi-Fi loss). Check the device and try the installation again |
 | The password contains a character the Shelly cannot use: … (access point form) | Use only letters without umlauts or accents, digits and common symbols (printable ASCII) |
 | The device did not answer within 2 minutes after its restart – nothing was installed | **Restart the device first** restarted the Shelly, but it did not come back in time. Check that it is online, then try the installation again |
@@ -844,6 +920,14 @@ Gen2+ firmware is downloaded over HTTPS only.
 | The Shelly reports X instead of the target version Y | Check the device; run "Check for updates" again |
 | Certificate of … is not publicly trusted | See [Certificate pinning](#certificate-pinning) |
 | The Shelly requires a password | Store the device password (see [Device passwords](#device-passwords)) |
+| The Shelly rejected the password | The password entered or stored in this app is not the current one of the device, e.g. it was changed elsewhere. Store the current password with **Store existing password**. For a 1PM Mini Gen3/Gen4 whose password was set under firmware 2.2.0, see [Device passwords](#device-passwords) |
+| Stored device password belongs to another device ID – enter it again | The Shelly asks for its password under another device ID than the one the stored password was tested with. Either another Shelly answers at the address, or the password was set again under another ID. That can happen on a 1PM Mini Gen3/Gen4 with firmware 2.2.0 and 2.2.1. Check the address, then use **Store existing password** again; for a 1PM Mini Gen3/Gen4, then follow [Device passwords](#device-passwords) |
+| The Shelly temporarily blocks sign-ins (too many attempts) – wait a few minutes and try again | Firmware 2.0 and newer counts failed password attempts over 10 minutes. After more than 10 it answers sign-ins only with a delay between attempts (10 s, rising to 5 minutes). Every client counts: this app, the Shelly integration of Home Assistant, a browser or a script. Make sure each one uses the current device password, wait a few minutes and check again. A restart of the Shelly or the next accepted sign-in resets the count |
+| The Shelly rejected the stored current password – nothing was changed | The password stored in this app no longer works, e.g. because it was changed elsewhere. The device is meant to keep its password. Store the current password with **Store existing password**, then change it again (see [Device passwords](#device-passwords)) |
+| The Shelly requires HTTPS (Enhanced Security) – not supported by this app yet | The Shelly answers plain HTTP only with a redirect to HTTPS. According to Shelly, devices shipped with firmware 2.0 or later always do this. Older ones do it after Enhanced Security was switched on and an HTTPS certificate was installed. The app never follows the redirect and cannot check, update or back up this Shelly yet. Until then, update it in its own web interface (`https://<IP>`) |
+| The Shelly answered with a redirect (HTTP …) – redirects are not followed | Something at the device address sends the request elsewhere, e.g. another web server or a proxy. The app never follows a redirect: check the address of the device in the Shelly integration |
+| An open access point is no longer possible on this Shelly once a password was set – use a password instead (device answer: …) | According to the Shelly API documentation, firmware 1.7.5 and newer cannot set an access point password back to empty (Secure provisioning). Keep the current password or set a new one. The app shows this text for every refused open access point that had a password. If the device answer in brackets names another reason, correct that entry |
+| The Shelly refused these access point settings as invalid (device answer: … (code -103)) | The Shelly did not accept the values the form sent (code -103: invalid argument). Check the network name and the password; the device answer in brackets may name the value |
 | Device reports: … (code n) | The Shelly refused the request; the text and the code come from the device itself (English). Correct the entry the text names, e.g. an access point password of 8 to 63 characters; the code helps when you report the problem |
 | A Shelly is missing from the list | Open the line "N of M Shellys listed · Why are K missing?" above the list: it names the reason (disabled, not set up or ignored in Home Assistant). Shellys behind a gateway and unsupported kinds are not listed as devices (see the [FAQ](#faq)) |
 | No usable address (tile in the Devices tab) | The host name does not resolve, the IP address is outside the private networks or the device has no address. Set an address in the Shelly integration (IP address or a host name that Home Assistant resolves) |
@@ -985,7 +1069,8 @@ in the firmware store and **Allow downgrades** is switched on (see
   [Gen1 firmware](#gen1-firmware)); no downgrade; no installation progress.
 - A downgrade needs the older version in the firmware store – Shelly only offers the
   current version for download. A device may refuse a downgrade.
-- Communication with the Shellys is unencrypted in your network.
+- Communication with the Shellys is unencrypted in your network. Shellys that accept only
+  HTTPS (Enhanced Security, see [Troubleshooting](#troubleshooting)) are not supported yet.
 - Shelly's server interfaces are not officially guaranteed; a change on their side can
   break checks until the app is updated.
 
@@ -1019,8 +1104,9 @@ The app connects only to:
   official changelog pages. Only the firmware ID (e.g. `Plus1`) and, for Gen2+ devices,
   the installed firmware version are part of the request; no other information about
   your devices or Home Assistant is sent.
-- **Home Assistant** via the Supervisor – device registry, area registry (for the
-  **Area** column), the Shelly config entries and discovery flows (for **Shellys not
+- **Home Assistant** via the Supervisor – device registry, entity registry (battery
+  sensors of the Shelly integration), area registry (for the **Area** column), the
+  Shelly config entries and discovery flows (for **Shellys not
   listed**), notifications, the app's own settings, its slug (for the link to the app
   page) and its host port (read for the **Settings** tab, set when you change **Host
   port**), and the Home Assistant version (only for **Details for a bug ticket**).
@@ -1114,9 +1200,10 @@ What changes when you update from an older version:
   downgrades** in the Settings tab if you use them. The sort order and columns of the
   Devices table start fresh and are then kept per browser. Check that the **Watchdog**
   switch on the app page is on.
-- **From 3.0.0 release candidates:** if the old example address
-  `http://192.168.178.50:8098` is still set, installations are blocked until you change
-  it or confirm it with "This address is correct".
+- **From 3.0.0 release candidates:** the old example address `http://192.168.178.50:8098`
+  no longer needs a confirmation – it is checked like any other address. If it is not the
+  address of your Home Assistant, correct it in the Settings tab (**Test connection** shows
+  whether the Shellys reach it).
 - **From 2.x or 1.x:** update to 3.0.0 first and start it once (it removes the former
   shared Shelly password from the stored options and converts the table settings), then
   update to the current version – or remove and reinstall the app. Backups made before

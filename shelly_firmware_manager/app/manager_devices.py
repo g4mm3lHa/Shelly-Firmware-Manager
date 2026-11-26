@@ -13,13 +13,32 @@ from typing import Any
 
 import aiohttp
 import shelly
-from shelly import UNSUPPORTED, AuthError, DeviceAuth, ShellyError, clip, error_text
-
 from manager_core import (
-    ACTIVITY_CHECKING, ACTIVITY_DOWNLOADING, ACTIVITY_RELOADING, ACTIVITY_SERVER, BATTERY_FROM_DEVICE, Device,
-    STATUS_AVAILABLE, STATUS_CURRENT, STATUS_INSTALLING, STATUS_READY, STATUS_UNCLEAR, severity_of, unexpected_text,
+    ACTIVITY_CHECKING,
+    ACTIVITY_DOWNLOADING,
+    ACTIVITY_RELOADING,
+    ACTIVITY_SERVER,
+    BATTERY_FROM_DEVICE,
+    STATUS_AVAILABLE,
+    STATUS_CURRENT,
+    STATUS_INSTALLING,
+    STATUS_READY,
+    STATUS_UNCLEAR,
+    Device,
+    severity_of,
+    unexpected_text,
 )
 from manager_transfer import Transfers
+from shelly import (
+    UNSUPPORTED,
+    AuthBlockedError,
+    AuthError,
+    DeviceAuth,
+    HttpsRequiredError,
+    ShellyError,
+    clip,
+    error_text,
+)
 
 log = logging.getLogger("sfm.manager")
 
@@ -55,8 +74,9 @@ class DeviceSettings(Transfers):
         A failure must not stop the firmware check: the old values stay, but
         settings_error marks them as unknown (shown as such, logged as warning or
         error) – a failed read-back is never reported as confirmed. Exception
-        raise_auth: a missing or refused password (AuthError) is raised after
-        settings_error is set, so the check fails as an error of the device. A
+        raise_auth: a missing or refused password (AuthError) and a device that
+        requires HTTPS (HttpsRequiredError) are raised after settings_error is set, so
+        the check fails as an error of the device. A
         battery state reported by the device replaces one derived from Home
         Assistant (battery_source)."""
         try:
@@ -70,7 +90,7 @@ class DeviceSettings(Transfers):
             log.warning("%s: reading settings failed: %s", dev.get("name"), err)
             message = error_text(err, 300) or type(err).__name__
             dev["settings_error"] = {"message": message, "severity": severity_of(err)}
-            if raise_auth and isinstance(err, AuthError):
+            if raise_auth and isinstance(err, (AuthError, HttpsRequiredError)):
                 raise
             return False
         except Exception as err:
@@ -203,8 +223,10 @@ class DeviceSettings(Transfers):
         if the read-back failed (the change is then unconfirmed); not_applied names the
         settings the device accepted but reports with another value afterwards. Every
         attempt that reaches the device is written to the activity log – as failed if
-        a value was not applied. log_entry False: no entry of its own (the run of a
-        schedule writes one entry for all its devices)."""
+        a value was not applied. An access point form the Shelly refused raises a
+        ShellyError with a readable text that keeps the device's answer (_ap_refusal).
+        log_entry False: no entry of its own (the run of a schedule writes one entry for
+        all its devices)."""
         dev = self._settings_device(device_id)
         clean = shelly.validate_settings(changes, dev.get("outputs") or [])
         if ("ap" in clean or "ap_config" in clean) and dev.get("gen") == 1:
@@ -235,9 +257,13 @@ class DeviceSettings(Transfers):
                 self.session, dev["gen"], dev["origin"], clean, self._auth(device_id, dev)
             )
         except (TimeoutError, ShellyError, aiohttp.ClientError, ValueError) as err:
-            error = error_text(err, 300) or type(err).__name__
+            readable = self._ap_refusal(err, dev, clean)
+            # A readable refusal keeps the device's answer (up to 160 characters): 400 hold it in full
+            error = (error_text(readable, 400) if readable else error_text(err, 300)) or type(err).__name__
             if log_entry:
                 self.events.add("setting", ok=False, device=dev.get("name"), changes=diff, user=user, error=error)
+            if readable:
+                raise ShellyError(readable) from err
             raise
         if "eco" in clean:  # the device may restart and miss the read-back
             dev["eco"] = clean["eco"]
@@ -255,6 +281,24 @@ class DeviceSettings(Transfers):
         self.save()
         settings = {k: dev.get(k) for k in SETTINGS_ANSWER}
         return settings, restart, verified, not_applied
+
+    @staticmethod
+    def _ap_refusal(err: BaseException, dev: Device, clean: dict[str, Any]) -> str:
+        """Readable text of an access point form the Shelly refused (shelly.ap_refusal), or ""
+        if err is no such refusal or keeps its text. Only a change of the access point form
+        alone is read this way: with other settings in the same request (possible through the
+        API only) the refusal may belong to another call, so it keeps its text. Only the
+        device's own refusal (a plain ShellyError of the RPC answer) is rewritten; a password,
+        sign-in or HTTPS error keeps its kind and text. dev is not read again after a failed
+        write, so its ap_config is the state read just before the dialog opened: open False
+        means the access point had a password."""
+        if set(clean) != {"ap_config"} or type(err) is not ShellyError:
+            return ""
+        text = str(err)
+        readable = shelly.ap_refusal(
+            text, clean["ap_config"].get("security") == "open", (dev.get("ap_config") or {}).get("open") is False
+        )
+        return readable if readable != text else ""
 
     @staticmethod
     def _not_applied(dev: Device, clean: dict[str, Any]) -> list[str]:
@@ -397,7 +441,10 @@ class DeviceSettings(Transfers):
         the device (/shelly) – stored credentials never count as protection.
         Device writes are verified afterwards; local credentials change only after
         a verified success, so an ambiguous answer never loses the recovery
-        credential. Results are logged – never the password or hash."""
+        credential. Exception: a Gen2+ Shelly.SetAuth refused at sign-in (wrong stored
+        password, or the device blocks sign-ins) was not executed and is not verified –
+        each further signed request would count as one more failed attempt on the
+        device. Results are logged – never the password or hash."""
         if mode not in PASSWORD_MODES:
             raise ValueError("Unknown password action")
         if confirm is not True:
@@ -528,19 +575,52 @@ class DeviceSettings(Transfers):
         realm: str | None,
         keep: bool = True,
     ) -> dict[str, Any]:
-        """Device part of set_device_password (see there); raises on any failure."""
-        protected = await shelly.protection_status(self.session, origin)
+        """Device part of set_device_password (see there); raises on any failure.
+
+        Gen2+: the device ID of the live /shelly answer replaces the known one (as a
+        check does) and is the realm sent to Shelly.SetAuth – a known ID from before a
+        firmware update could be outdated. It is taken only from the same device
+        (shelly.Protection.same_device: the same MAC suffix as the known ID or MAC);
+        another Shelly at the address leaves the known ID, which that Shelly is
+        expected to refuse. "store" tests the password against the realm the device's
+        current password is bound to (shelly.Protection.realm); after the 2.2.0 ID
+        change of the 1PM Mini Gen3/Gen4 that is the former ID, the result then
+        carries realm_outdated=True and a log line says to change the password once,
+        which binds it to the device ID again. If the device does not accept the
+        password under that realm, "store" tests it once more under the device ID. A
+        stored HA1 answers only a challenge of its own realm (DeviceAuth), so at most
+        one of both tests signs a request. Nothing is changed on the device by
+        "store"."""
+        state = await shelly.protection_status(self.session, origin)
+        protected = state.enabled
         dev["auth_enabled"] = protected
+        live = gen >= 2 and state.device_id is not None and state.same_device(realm, dev.get("mac"))
+        if live:
+            dev["shelly_id"] = realm = state.device_id  # an empty ID never replaces a known one
         current = self._auth(device_id, dev)
         candidate = None
         if mode in ("store", "enable", "change"):
-            candidate = self.credentials.candidate(gen, realm, password)
+            tested = (state.realm or realm) if mode == "store" and live else realm
+            candidate = self.credentials.candidate(gen, tested, password)
         if mode == "store" and candidate is not None:
             if protected is False:
                 raise ShellyError("The device is not password protected – use 'Enable password protection' instead")
-            if not await self._auth_works(dev, candidate):
+            works = await self._auth_works(dev, candidate)
+            if not works and gen >= 2 and realm and candidate.realm != realm:
+                # The device may challenge with its device ID after all. Only the
+                # candidate of the challenge realm signs; the other one is refused
+                # locally (DeviceAuth), so this sends no second signed attempt
+                candidate = self.credentials.candidate(gen, realm, password)
+                works = await self._auth_works(dev, candidate)
+            if not works:
                 raise AuthError("The Shelly rejected the password")
             self.credentials.store(device_id, candidate)
+            if gen >= 2 and candidate.realm != realm:
+                log.info(
+                    "%s: stored password is bound to the former device ID of the Shelly – change it once to fix this",
+                    dev.get("name"),
+                )
+                return {"protected": protected, "realm_outdated": True}
             return {"protected": protected}
         if mode == "enable" and protected is not False:
             raise ShellyError(
@@ -557,11 +637,23 @@ class DeviceSettings(Transfers):
         try:
             await shelly.set_protection(self.session, gen, origin, realm, new, current)
             answer: BaseException | None = None
+        except AuthError as err:
+            # Gen2+: Shelly.SetAuth refused at sign-in (401) or blocked (429) was not
+            # executed. Nothing is verified then: each further signed read would count
+            # as one more failed attempt towards the device's sign-in block. Gen1 keeps
+            # the verification of an ambiguous /settings/login answer.
+            if gen < 2:
+                answer = err
+            elif isinstance(err, AuthBlockedError) or current is None:
+                raise
+            else:
+                raise AuthError("The Shelly rejected the stored current password – nothing was changed") from None
         except (TimeoutError, ShellyError, aiohttp.ClientError) as err:
             answer = err  # the change may still have been applied: verify below
-        # Verification against the device itself
+        # Verification against the device itself: a new password counts only once it
+        # answers the device's challenge, whose realm DeviceAuth compares with its own
         try:
-            protected = await shelly.protection_status(self.session, origin)
+            protected = (await shelly.protection_status(self.session, origin)).enabled
         except (TimeoutError, ShellyError, aiohttp.ClientError):
             protected = None
         dev["auth_enabled"] = protected
@@ -570,7 +662,20 @@ class DeviceSettings(Transfers):
                 self.credentials.remove(device_id)
                 return {"protected": False}
             raise ShellyError(self._unverified("Password protection was not confirmed as removed", answer))
-        if protected is True and new is not None and await self._auth_works(dev, new):
+        try:
+            confirmed = protected is True and new is not None and await self._auth_works(dev, new)
+            if not confirmed and mode == "change" and await self._auth_works(dev, current):
+                raise ShellyError(
+                    self._unverified("The password was not changed – the previous password still works", answer)
+                )
+        except AuthBlockedError as err:
+            # A blocked device answers no further sign-in: the stored password stays
+            raise ShellyError(
+                self._unverified(
+                    "The new password could not be confirmed – the previously stored password was kept", err
+                )
+            ) from None
+        if confirmed and new is not None:
             # Replaces (or, if not kept, deletes) the old credential only now
             try:
                 if keep:
@@ -585,10 +690,6 @@ class DeviceSettings(Transfers):
                     "stored password of this device"
                 ) from None
             return {"protected": True}
-        if mode == "change" and await self._auth_works(dev, current):
-            raise ShellyError(
-                self._unverified("The password was not changed – the previous password still works", answer)
-            )
         raise ShellyError(
             self._unverified(
                 "The new password could not be confirmed – the previously stored password was kept", answer
@@ -597,9 +698,12 @@ class DeviceSettings(Transfers):
 
     async def _auth_works(self, dev: Device, auth: DeviceAuth | None) -> bool:
         """True if an authenticated read succeeds with auth. Only meaningful while
-        the device is protected – an unprotected device accepts anything."""
+        the device is protected – an unprotected device accepts anything. A sign-in
+        block (AuthBlockedError) is raised: it says nothing about the password."""
         try:
             await shelly.read_settings(self.session, dev["gen"], dev["origin"], dev.get("type"), auth)
+        except AuthBlockedError:
+            raise
         except (TimeoutError, ShellyError, aiohttp.ClientError):  # AuthError included
             return False
         return True

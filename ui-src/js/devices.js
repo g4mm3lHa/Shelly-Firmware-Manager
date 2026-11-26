@@ -39,7 +39,7 @@ const shownStatus = d => d.planned && d.status === "ready" && !d.installing ? "s
 const downgrading = d => !!d.downgrade && d.status === "installing";
 const hasUpdate = d => !downgrading(d) && ["available", "ready", "installing"].includes(d.status);
 // Ignored devices are not installable until they are resumed; nothing is installable
-// while the download base URL is missing or the unconfirmed former example; a scheduled
+// while the download base URL is missing or not usable; a scheduled
 // installation is started from the row menu ("Install now") only
 export const installable = (d, s) => !d.planned && (d.status === "ready" || failedInstall(d)) && !d.installing && !d.ignored && !s.scanning && !d.activity &&
   !(s.download_base && s.download_base.issue);
@@ -125,19 +125,25 @@ const SERVER_SLOW_MS = 5000;
 const serverSince = new Map();   // device ID -> time the page first saw the wait
 // Running installation (install_step of the server): the pill names the step – blue with a
 // spinner, yellow while the step takes longer than usual ("late"); the tooltip and the
-// device details explain it (step n of N, how long, when the app gives up, Wi-Fi signal)
+// device details explain it (step n of N, how long, when the app gives up, Wi-Fi signal).
+// Two-step update (second_pass): the Shelly installs the update a second time by itself –
+// the pill says "Installing again …" without a percentage (the progress of the first pass
+// is over) and the details add a line on the two-step update.
 const STEP_LABELS = {backup: t("Backup …"), restart: t("Restarting …"), precheck: t("Waiting for device …"),
   reboot: t("Restarting …"), verify: t("Verifying …")};
 const STEP_TEXTS = {backup: () => t("backing up the settings"), restart: () => t("restarting the Shelly before the installation"),
-  precheck: () => t("checking the Shelly before the update command"), install: () => t("the Shelly downloads and writes the firmware"),
+  precheck: () => t("checking the Shelly before the update command"),
+  install: d => d.install_step.second_pass ? t("the Shelly installs the update a second time (two-step update)") : t("the Shelly downloads and writes the firmware"),
   reboot: () => t("the Shelly restarts with the new firmware"),
   verify: d => t("waiting for the Shelly to report {version}", {version: installTarget(d) || "–"})};
 // Target of the running installation: a downgrade names it, an update installs the offer
 const installTarget = d => d.target || d.offer_version;
-/** Pill text of the running step; downloading: "Installing n %" (a downgrade "Downgrading n %"). */
+/** Pill text of the running step; downloading: "Installing n %" (a downgrade "Downgrading n %");
+ *  the second pass of a two-step update: "Installing again …". */
 function stepLabel(d) {
   const s = d.install_step;
   if (s.step !== "install") return STEP_LABELS[s.step] || s.step;
+  if (s.second_pass) return t("Installing again …");
   return (downgrading(d) ? t("Downgrading") : t("Installing")) + (typeof d.ota_progress === "number" ? ` ${d.ota_progress} %` : "");
 }
 /** Lines of the tooltip and the device details for the running step. */
@@ -150,6 +156,7 @@ function stepLines(d) {
   else lines.push(t("Takes {seconds} s – longer than expected (usually under {usual} s)", vars));
   if (s.late && s.attempt > 1 && s.give_up) lines.push(t("Attempt {n} of {max} · the app gives up after {limit} s", {n: s.attempt, max: s.attempts, limit: s.give_up}));
   else if (s.late && s.give_up) lines.push(t("The app gives up after {limit} s", {limit: s.give_up}));
+  if (s.second_pass) lines.push(t("Two-step update: the Shelly restarted on {version} and installs the update again. Do not switch it off.", {version: d.version || "–"}));
   if (typeof s.rssi === "number") lines.push(t("Wi-Fi signal at the start: {signal}", {signal: signalLabel(s.rssi)}));
   lines.push(t("Installed: {version}", {version: d.version || "–"}), t("Target: {version}", {version: installTarget(d) || "–"}));
   return lines;

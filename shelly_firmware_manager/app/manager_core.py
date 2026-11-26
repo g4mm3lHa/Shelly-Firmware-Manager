@@ -25,16 +25,17 @@ device): the UI shows it while polling, nothing of it is persisted.
 
 import asyncio
 import contextlib
+import contextvars
 import json
 import logging
 import os
 import re
 import secrets
 import time
-from collections.abc import Callable
-from urllib.parse import urlsplit
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+from urllib.parse import urlsplit
 
 import aiohttp
 import app_options
@@ -45,10 +46,19 @@ from backup_store import BackupStore
 from changelog import Changelogs
 from credentials import Credentials
 from events import EventLog
-from shelly import AuthError, DeviceAuth, ShellyError, clip, error_text, plain, port_open, same_secret
+from shelly import (
+    AuthError,
+    DeviceAuth,
+    HttpsRequiredError,
+    ShellyError,
+    clip,
+    error_text,
+    plain,
+    port_open,
+    same_secret,
+)
 from shelly_net import resolve_lan_address
 from tls import CertificatePins
-
 
 log = logging.getLogger("sfm.manager")
 
@@ -144,6 +154,22 @@ SUPERVISOR = "http://supervisor"  # Supervisor API (Core API proxy below /core)
 
 SUPERVISOR_TIMEOUT = aiohttp.ClientTimeout(total=15)
 
+
+def supervisor_headers(token: str) -> dict[str, str]:
+    """Headers of a request to the Supervisor API (and the Core API proxy below /core)
+    with the Supervisor token of this app; never logged."""
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def supervisor_get(session: aiohttp.ClientSession, token: str, path: str) -> Any:
+    """JSON answer of a GET to the Supervisor API at path (for example /addons/self/info),
+    whatever its content type. An HTTP error status raises aiohttp.ClientResponseError, a
+    body that is no JSON a ValueError; the caller logs and handles both."""
+    headers = supervisor_headers(token)
+    async with session.get(f"{SUPERVISOR}{path}", headers=headers, timeout=SUPERVISOR_TIMEOUT) as resp:
+        resp.raise_for_status()
+        return await resp.json(content_type=None)
+
 # Largest WebSocket message accepted from Home Assistant: the device registry lists the
 # devices of all integrations in one message (aiohttp's default of 4 MiB is too small
 # for very large installations)
@@ -156,6 +182,9 @@ HA_REQUEST_NAMES = {
     "config_entries/get": "config entries",
     "config_entries/flow/progress": "discovery flows",
 }
+# Seconds a Home Assistant answer (device registry, battery sensors, areas) is reused by
+# single checks; a full check and "Try again" always ask anew (see ManagerCore._ha_cached)
+HA_CACHE_S = 60
 
 # Pages of the Home Assistant frontend: the page of this app (its info card has the
 # "Changelog" link next to the version) and, if the slug is unknown, the list of apps
@@ -203,9 +232,6 @@ SOURCE_IMPORT = "import"
 DOWNLOAD_BASE_MESSAGES = {
     "missing": "Installations are disabled: set the download base URL (LAN IP address of Home "
     "Assistant and port 8098) in the Settings tab.",
-    "unconfirmed": "Installations are disabled: the download base URL is still the former example "
-    f"value {app_options.LEGACY_DOWNLOAD_BASE}. Change it in the Settings tab or confirm that it "
-    "really is the address of Home Assistant.",
     "not_private": "Installations are disabled: the IP address of the download base URL is not in a "
     "private network (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7). Correct it in the "
     "Settings tab.",
@@ -218,9 +244,12 @@ FIRST_START_BLOCK = "Not before the first-start question is answered: import a f
 
 
 def severity_of(err: BaseException) -> str:
-    """Log severity of a device error: authentication and internal errors are
-    errors; unreachable devices, timeouts and temporary/missing data warnings."""
-    if isinstance(err, AuthError) or not isinstance(err, (TimeoutError, ShellyError, aiohttp.ClientError, OSError)):
+    """Log severity of a device error: authentication errors, a device that requires
+    HTTPS (both stay until the user acts) and internal errors are errors; unreachable
+    devices, timeouts and temporary/missing data warnings."""
+    if isinstance(err, (AuthError, HttpsRequiredError)):
+        return "error"
+    if not isinstance(err, (TimeoutError, ShellyError, aiohttp.ClientError, OSError)):
         return "error"
     return "warning"
 
@@ -308,6 +337,125 @@ class Pending:
         self.payload, self._token, self._on_drop, self._timer = None, "", None, None
 
 
+class HaConnection:
+    """One Core WebSocket connection to Home Assistant (through the Supervisor proxy) for
+    the list requests of one check (see ManagerCore._ha_reads).
+
+    The socket opens and authenticates on the first request (greeting auth_required, then
+    the token, then auth_ok); the requests follow one after another on it with IDs counted
+    from 1, as Home Assistant requires per connection, and messages with other IDs are
+    skipped. A refused request (success false) is a ShellyError and keeps the socket; any
+    other failure (timeout, a socket closed by the other side, a frame that is not a JSON
+    object, a failed sign-in) closes it, and the next request opens a new one. A request
+    that was sent is never repeated. close ends the connection for good: a request made
+    afterwards (a task that inherited the scope) uses a socket of its own that is closed
+    right after its answer, so no socket outlives its scope."""
+
+    def __init__(self, session: aiohttp.ClientSession, token: str, since: float | None) -> None:
+        """Nothing is opened yet. since: start (time.monotonic) of a scope that asks
+        anew – answers asked for before it are not reused; None: answers of up to
+        HA_CACHE_S are reused (see ManagerCore._ha_cached)."""
+        self.since = since
+        self.finished = False  # set by close: this connection opens no socket any more
+        self._session = session
+        self._token = token
+        self._ws: aiohttp.ClientWebSocketResponse | None = None
+        self._last_id = 0  # ID of the last request sent on the open socket
+        self._lock = asyncio.Lock()  # one request at a time on the socket
+
+    async def request(self, request: str, **params: str) -> list[Any]:
+        """Answer of one list request (params are added to it); anything but a
+        successful list answer is a ShellyError (or the timeout / connection error)."""
+        async with self._lock:
+            if self.finished:  # the scope has ended: one request on a socket of its own
+                single = HaConnection(self._session, self._token, None)
+                try:
+                    return await single.request(request, **params)
+                finally:
+                    await single.close()
+            try:
+                answer = await self._exchange(request, params)
+            except BaseException:  # the state of the socket is unknown: never used again
+                await self._drop()
+                raise
+        if not answer.get("success"):
+            raise ShellyError(clip(answer.get("error")))
+        result = answer.get("result")
+        return result if isinstance(result, list) else []
+
+    async def close(self) -> None:
+        """End of the scope: the socket is closed (after the request that is running)
+        and never opened again."""
+        async with self._lock:
+            self.finished = True
+            await self._drop()
+
+    async def _exchange(self, request: str, params: dict[str, str]) -> dict[str, Any]:
+        """Send one request (opening the socket if none is open) and return Home
+        Assistant's answer to its ID."""
+        ws = self._ws
+        if ws is None or ws.closed:
+            ws = await self._open(request)
+        self._last_id += 1
+        await ws.send_json({"id": self._last_id, "type": request, **params})
+        while True:
+            msg = await self._receive(ws, request)
+            if msg.get("id") == self._last_id:
+                return msg
+
+    async def _open(self, request: str) -> aiohttp.ClientWebSocketResponse:
+        """A new authenticated socket; the token is sent only after the greeting
+        auth_required. request: the list request that needs it (for error texts)."""
+        await self._drop()  # e.g. closed by the other side since the last request
+        ws_url = SUPERVISOR.replace("http", "ws", 1) + "/core/websocket"
+        ws = await self._session.ws_connect(
+            ws_url, timeout=aiohttp.ClientWSTimeout(ws_close=30), max_msg_size=REGISTRY_MAX
+        )
+        self._ws, self._last_id = ws, 0
+        if (await self._receive(ws, request)).get("type") != "auth_required":
+            raise ShellyError("Unexpected WebSocket greeting")
+        await ws.send_json({"type": "auth", "access_token": self._token})
+        if (await self._receive(ws, request)).get("type") != "auth_ok":
+            raise ShellyError("Authentication with Home Assistant failed")
+        return ws
+
+    @staticmethod
+    async def _receive(ws: aiohttp.ClientWebSocketResponse, request: str) -> dict[str, Any]:
+        """Next JSON object from Home Assistant (at most 30 s); anything else is a
+        ShellyError. request: the list request it belongs to (for error texts)."""
+        msg = await ws.receive(timeout=30)
+        if msg.type is not aiohttp.WSMsgType.TEXT:
+            # e.g. closed by aiohttp because the message exceeds REGISTRY_MAX
+            name = HA_REQUEST_NAMES.get(request, request)
+            raise ShellyError(f"Home Assistant did not answer the {name} request ({msg.type.name})")
+        try:
+            data = json.loads(msg.data)
+        except ValueError:
+            raise ShellyError("Unreadable answer of Home Assistant") from None
+        if not isinstance(data, dict):
+            raise ShellyError("Unexpected answer of Home Assistant")
+        return data
+
+    async def _drop(self) -> None:
+        """Close the open socket, if any (the next request opens a new one)."""
+        ws, self._ws = self._ws, None
+        if ws is not None:
+            await ws.close()
+
+
+# HaConnection of the running check's scope (ManagerCore._ha_reads). A context variable,
+# not an attribute: parallel single checks and "Try again" run as separate tasks, each
+# with a scope of its own.
+_HA_READS: contextvars.ContextVar[HaConnection | None] = contextvars.ContextVar("ha_reads", default=None)
+
+
+def _ha_usable(started: float, since: float | None) -> bool:
+    """True if a Home Assistant answer whose request started at started (time.monotonic)
+    may be reused: younger than HA_CACHE_S and, in a scope that asks anew (since), asked
+    for at or after that scope started."""
+    return time.monotonic() - started < HA_CACHE_S and (since is None or started >= since)
+
+
 class ManagerCore:
     """State of all Shellys, its persistence and the services every layer needs."""
 
@@ -328,7 +476,6 @@ class ManagerCore:
         self.tz, self.tz_name = schedule.local_zone()
         # Optional, no default: installations are refused while it is unset
         self.download_base = (options.get("download_base_url") or "").rstrip("/") or None
-        self.download_base_confirmed: str | None = None  # confirmed legacy example value (persisted)
         self.restrict_downloads = bool(options["restrict_downloads_to_devices"])
         self.gen1_enabled = bool(options["gen1_updates_enabled"])
         self.allow_downgrade = options.get("allow_downgrade") is True  # optional, missing = off
@@ -360,7 +507,9 @@ class ManagerCore:
         self.install_steps: dict[str, dict[str, Any]] = {}
         self.last_scan: int | None = None
         self.devices: dict[str, Device] = {}  # HA device ID -> state
-        self.downloads: dict[str, dict[str, Any]] = {}  # file name -> {"served": {ip: n}, "rejected": {ip, ...}}
+        # file name -> {"served": {ip: n}, "rejected": {ip, ...}, "attributed": {device id: n}}
+        # ("attributed": GETs from an address of no known device while only that device installed the file)
+        self.downloads: dict[str, dict[str, Any]] = {}
         self.firmware: dict[str, FirmwareMeta] = {}  # file name -> metadata of the stored firmware
         self.activity: dict[str, str] = {}  # HA device ID -> ACTIVITY_* while a check or restart runs
         self.progress: dict[str, Any] | None = None  # running full check: {"kind", "total", "done", "errors", "phase"}
@@ -411,6 +560,13 @@ class ManagerCore:
         # single-device checks alike); all of them show "downloading" while it downloads
         self._provision_waiters: dict[tuple[str, str], set[str]] = {}
         self._fetching: set[tuple[str, str]] = set()  # provide tasks that are downloading right now
+        # Answers of Home Assistant reused by single checks (see _ha_cached; memory only):
+        # key ("devices", "batteries", "areas") -> (time.monotonic when its request
+        # started, answer); the timer that drops it after HA_CACHE_S; the read running
+        # for a key (start time, result shared by every caller waiting for it)
+        self._ha_cache: dict[str, tuple[float, object]] = {}
+        self._ha_drop: dict[str, asyncio.TimerHandle] = {}
+        self._ha_reading: dict[str, tuple[float, asyncio.Future[object]]] = {}
         self._downloads_running = 0  # for the progress phase of a parallel check
         # Running checks only (cleared when no check runs anymore, see _release_check_state):
         # file name -> shared checksum verification of a stored file (single flight)
@@ -431,10 +587,10 @@ class ManagerCore:
         # Backup made right before the running installation of a device (ID), for the
         # comparison after the update (see Backups.compare_after_update)
         self._before_backups: dict[str, str] = {}
-        self._upload = Pending()  # staged manual upload (see stage_upload)
+        self._upload = Pending()  # staged manual upload (see stage_upload_part)
         self._upload_lock = asyncio.Lock()  # one upload transfer at a time
         self._export = Pending()  # prepared store export (see prepare_export)
-        self._import = Pending()  # staged store import (see stage_import)
+        self._import = Pending()  # staged store import (see stage_import_part)
         self._import_lock = asyncio.Lock()  # one import transfer / check / confirmation at a time
         self._import_storing = False  # confirm_import is writing its files to the store
         # File transfers in parts (upload, import) that are not complete yet, by kind;
@@ -550,8 +706,6 @@ class ManagerCore:
         self.firmware = data.get("firmware") or {}
         self.schedule = data["schedule"] if isinstance(data.get("schedule"), dict) else {}
         self.schedules = self._stored_schedules(data.get("schedules"))
-        confirmed = data.get("download_base_confirmed")
-        self.download_base_confirmed = confirmed if isinstance(confirmed, str) else None
         self.first_start_open = data.get("first_start_open") is True
         self.first_start_notified = data.get("first_start_notified") is True
         self.gen1_marking_due = data.get("gen1_imports_marked") is not True
@@ -610,7 +764,6 @@ class ManagerCore:
             "firmware": self.firmware,
             "schedule": self.schedule,
             "schedules": self.schedules,
-            "download_base_confirmed": self.download_base_confirmed,
             "first_start_open": self.first_start_open,
             "first_start_notified": self.first_start_notified,
             "gen1_imports_marked": not self.gen1_marking_due,
@@ -655,26 +808,35 @@ class ManagerCore:
 
     async def _registry(self) -> list[dict[str, Any]]:
         """Device registry via the Core WebSocket API (through the Supervisor proxy).
-        The registry of all integrations arrives as one message (REGISTRY_MAX)."""
-        return await self._ha_list("config/device_registry/list")
+        The registry of all integrations arrives as one message (REGISTRY_MAX). The
+        answer is reused for up to HA_CACHE_S (see _ha_cached): the list is a copy, but
+        its entries are shared – never change them."""
+        return list(await self._ha_cached("devices", lambda: self._ha_list("config/device_registry/list")))
 
     async def _area_registry(self) -> list[Any]:
-        """Area registry via the Core WebSocket API: [{"area_id", "name", …}]."""
-        return await self._ha_list("config/area_registry/list")
+        """Area registry via the Core WebSocket API: [{"area_id", "name", …}]; reused
+        like the device registry (see _registry)."""
+        return list(await self._ha_cached("areas", lambda: self._ha_list("config/area_registry/list")))
 
     async def _battery_devices(self) -> set[str]:
+        """HA device IDs with a battery sensor of the Shelly integration (see
+        _read_battery_devices), reused for up to HA_CACHE_S (see _ha_cached). Empty if
+        the request fails (no conclusion, logged; a failure is never reused)."""
+        try:
+            return set(await self._ha_cached("batteries", self._read_battery_devices))
+        except (TimeoutError, ShellyError, aiohttp.ClientError, OSError) as err:
+            log.warning("Entity registry of Home Assistant not available: %s", err or type(err).__name__)
+            return set()
+
+    async def _read_battery_devices(self) -> frozenset[str]:
         """HA device IDs with a battery sensor of the Shelly integration (entity
         registry: platform shelly, unique ID "<mac>-<component>-battery" – Gen1
         device_0, Gen2+ devicepower:0; Home Assistant removes it for externally
         powered devices). Home Assistant does not hand out the sleep period of its
         config entry over the API, so this sensor is the only hint of a battery
-        device that never answered the app. Empty if the request fails (no
-        conclusion, logged)."""
-        try:
-            entities = await self._ha_list("config/entity_registry/list")
-        except (TimeoutError, ShellyError, aiohttp.ClientError, OSError) as err:
-            log.warning("Entity registry of Home Assistant not available: %s", err or type(err).__name__)
-            return set()
+        device that never answered the app. Only this set is kept, not the entity
+        registry. Raises like _ha_list."""
+        entities = await self._ha_list("config/entity_registry/list")
         found = set()
         for entity in entities:
             if not isinstance(entity, dict) or entity.get("platform") != "shelly":
@@ -687,54 +849,107 @@ class ManagerCore:
                 and isinstance(device_id, str)
             ):
                 found.add(device_id)
-        return found
+        return frozenset(found)
 
     async def _ha_setup_state(self) -> tuple[list[Any], list[Any]]:
         """Config entries of the Shelly integration (config_entries/get; ignored
         discoveries have source "ignore") and the flows in progress (discoveries
         not set up yet, config_entries/flow/progress) – for the Shellys Home
-        Assistant knows but the app does not list. Raises like _ha_list."""
+        Assistant knows but the app does not list. Only the full check asks for them,
+        so they are never reused; inside its scope they use its connection. Raises
+        like _ha_list."""
         entries = await self._ha_list("config_entries/get", domain="shelly")
         flows = await self._ha_list("config_entries/flow/progress")
         return entries, flows
 
+    @contextlib.asynccontextmanager
+    async def _ha_reads(self, fresh: bool = False) -> AsyncIterator[None]:
+        """Scope of the Home Assistant part of one check: every list request inside it
+        (_ha_list) uses one HaConnection, opened on the first request that is not
+        answered from the cache – a scope whose answers are all reused opens none. At
+        the end the socket is closed and the connection is finished. fresh: answers
+        asked for before the scope started are not reused (full check, "Try again");
+        what it reads refreshes the cache for the next single check. Ends before any
+        device is contacted, so no socket is held during device access."""
+        scope = HaConnection(self.session, self.token, time.monotonic() if fresh else None)
+        reset = _HA_READS.set(scope)
+        try:
+            yield
+        finally:
+            _HA_READS.reset(reset)
+            await scope.close()
+
+    async def _ha_cached[T](self, key: str, read: Callable[[], Awaitable[T]]) -> T:
+        """Answer of Home Assistant under key ("devices", "batteries", "areas"): the
+        stored one while _ha_usable allows it, else read() (single flight: callers
+        that ask while a read of the key runs wait for it and share its answer or its
+        failure; a fresh scope does not take a read that started before it, and waits
+        for it to end and then reads itself). A success is stored with the time its
+        request started and dropped by a timer after HA_CACHE_S; a failure is never
+        stored – it reaches only the callers waiting at that moment, and the answer
+        stored before is dropped. A cancelled reader hands over to a waiting caller,
+        which then reads itself; a cancelled waiter leaves the read running."""
+        scope = _HA_READS.get()
+        since = scope.since if scope is not None else None
+        while True:
+            cached = self._ha_cache.get(key)
+            if cached is not None and _ha_usable(cached[0], since):
+                return cast(T, cached[1])
+            running = self._ha_reading.get(key)
+            if running is None:
+                break
+            started, shared = running
+            await asyncio.wait({shared})  # not cancelled with this caller
+            if shared.cancelled() or (since is not None and started < since):
+                continue  # its reader was cancelled, or it was asked for before this fresh scope
+            return cast(T, shared.result())  # the answer, or the failure raised again
+        started = time.monotonic()
+        shared = asyncio.get_running_loop().create_future()
+        self._ha_reading[key] = (started, shared)
+        try:
+            value = await read()
+            self._ha_store(key, started, value)
+            shared.set_result(value)
+            return value
+        except Exception as err:
+            self._ha_forget(key)
+            shared.set_exception(err)
+            shared.exception()  # marked as retrieved: without waiters nothing is logged for it
+            raise
+        except BaseException:  # cancelled: a waiting caller reads itself
+            shared.cancel()
+            raise
+        finally:
+            # Dropped with the read: the failure (and its traceback) is held only while
+            # callers wait for it
+            del self._ha_reading[key]
+
+    def _ha_store(self, key: str, started: float, value: object) -> None:
+        """Keep an answer of Home Assistant (see _ha_cached) until HA_CACHE_S after its
+        request started; the timer then frees it (the device registry may be large)."""
+        self._ha_forget(key)
+        self._ha_cache[key] = (started, value)
+        delay = max(started + HA_CACHE_S - time.monotonic(), 0)
+        self._ha_drop[key] = asyncio.get_running_loop().call_later(delay, self._ha_forget, key)
+
+    def _ha_forget(self, key: str) -> None:
+        """Drop the stored answer of key and stop its timer."""
+        timer = self._ha_drop.pop(key, None)
+        if timer is not None:
+            timer.cancel()
+        self._ha_cache.pop(key, None)
+
     async def _ha_list(self, request: str, **params: str) -> list[Any]:
-        """Answer of one list request of the Core WebSocket API (device or entity
+        """Answer of one list request of the Core WebSocket API (device, entity or area
         registry, config entries, flows); params are added to the request; anything
-        but a successful list answer is a ShellyError."""
-        ws_url = SUPERVISOR.replace("http", "ws", 1) + "/core/websocket"
-
-        async def receive(ws: aiohttp.ClientWebSocketResponse) -> dict[str, Any]:
-            """Next JSON object from Home Assistant; anything else is a ShellyError."""
-            msg = await ws.receive(timeout=30)
-            if msg.type is not aiohttp.WSMsgType.TEXT:
-                # e.g. closed by aiohttp because the message exceeds REGISTRY_MAX
-                name = HA_REQUEST_NAMES.get(request, request)
-                raise ShellyError(f"Home Assistant did not answer the {name} request ({msg.type.name})")
-            try:
-                data = json.loads(msg.data)
-            except ValueError:
-                raise ShellyError("Unreadable answer of Home Assistant") from None
-            if not isinstance(data, dict):
-                raise ShellyError("Unexpected answer of Home Assistant")
-            return data
-
-        async with self.session.ws_connect(
-            ws_url, timeout=aiohttp.ClientWSTimeout(ws_close=30), max_msg_size=REGISTRY_MAX
-        ) as ws:
-            if (await receive(ws)).get("type") != "auth_required":
-                raise ShellyError("Unexpected WebSocket greeting")
-            await ws.send_json({"type": "auth", "access_token": self.token})
-            if (await receive(ws)).get("type") != "auth_ok":
-                raise ShellyError("Authentication with Home Assistant failed")
-            await ws.send_json({"id": 1, "type": request, **params})
-            while True:
-                msg = await receive(ws)
-                if msg.get("id") == 1:
-                    if not msg.get("success"):
-                        raise ShellyError(clip(msg.get("error")))
-                    result = msg.get("result")
-                    return result if isinstance(result, list) else []
+        but a successful list answer is a ShellyError (see HaConnection). Inside a
+        check's scope (_ha_reads) all requests share its connection; outside one the
+        request gets a connection of its own."""
+        scope = _HA_READS.get()
+        if scope is not None:
+            return await scope.request(request, **params)
+        async with self._ha_reads():
+            return await self._ha_list(request, **params)
 
     async def notify(self, title: str, message: str, notification_id: str) -> bool:
         """Persistent notification in Home Assistant. True if Home Assistant accepted
@@ -742,7 +957,7 @@ class ManagerCore:
         try:
             async with self.session.post(
                 f"{SUPERVISOR}/core/api/services/persistent_notification/create",
-                headers={"Authorization": f"Bearer {self.token}"},
+                headers=supervisor_headers(self.token),
                 json={"title": title, "message": message, "notification_id": notification_id},
                 timeout=SUPERVISOR_TIMEOUT,
             ) as resp:
@@ -756,13 +971,7 @@ class ManagerCore:
         """Version of Home Assistant (Core API /config), None if it cannot be read
         (only for "Details for a bug ticket")."""
         try:
-            async with self.session.get(
-                f"{SUPERVISOR}/core/api/config",
-                headers={"Authorization": f"Bearer {self.token}"},
-                timeout=SUPERVISOR_TIMEOUT,
-            ) as resp:
-                resp.raise_for_status()
-                version = (await resp.json(content_type=None)).get("version")
+            version = (await supervisor_get(self.session, self.token, "/core/api/config")).get("version")
         except (TimeoutError, aiohttp.ClientError, ValueError, AttributeError) as err:
             log.warning("Version of Home Assistant not available: %s", err or type(err).__name__)
             return None
@@ -773,7 +982,7 @@ class ManagerCore:
         try:
             async with self.session.post(
                 f"{SUPERVISOR}{path}",
-                headers={"Authorization": f"Bearer {self.token}"},
+                headers=supervisor_headers(self.token),
                 json=body,
                 timeout=SUPERVISOR_TIMEOUT,
             ) as resp:
@@ -792,13 +1001,8 @@ class ManagerCore:
         open to every app); while it is not available the list of apps is returned."""
         if self.app_slug is None:
             try:
-                async with self.session.get(
-                    f"{SUPERVISOR}/addons/self/info",
-                    headers={"Authorization": f"Bearer {self.token}"},
-                    timeout=SUPERVISOR_TIMEOUT,
-                ) as resp:
-                    resp.raise_for_status()
-                    slug = ((await resp.json(content_type=None)).get("data") or {}).get("slug")
+                info = await supervisor_get(self.session, self.token, "/addons/self/info")
+                slug = (info.get("data") or {}).get("slug")
             except (TimeoutError, aiohttp.ClientError, ValueError, AttributeError) as err:
                 log.warning("App info not available from the Supervisor: %s", err or type(err).__name__)
                 return APP_LIST_PAGE
@@ -813,13 +1017,8 @@ class ManagerCore:
         "network": {"8098/tcp": port or null}, open to every app). Sets host_port and
         host_port_known; a failure is logged and leaves the port unknown."""
         try:
-            async with self.session.get(
-                f"{SUPERVISOR}/addons/self/info",
-                headers={"Authorization": f"Bearer {self.token}"},
-                timeout=SUPERVISOR_TIMEOUT,
-            ) as resp:
-                resp.raise_for_status()
-                network = ((await resp.json(content_type=None)).get("data") or {}).get("network")
+            info = await supervisor_get(self.session, self.token, "/addons/self/info")
+            network = (info.get("data") or {}).get("network")
         except (TimeoutError, aiohttp.ClientError, ValueError, AttributeError) as err:
             log.warning("Host port not readable from the Supervisor: %s", err or type(err).__name__)
             self.host_port_known = False
@@ -918,9 +1117,6 @@ class ManagerCore:
         log.info("App options changed by %s (%s)%s", user, ", ".join(changed), " – restarting" if restart else "")
         self.events.add("options", changes=diff, user=user)
         self.options = new
-        if "download_base_url" in changed and self.download_base_confirmed is not None:
-            self.download_base_confirmed = None  # a confirmation never outlives a change
-            self.save()
         if {"download_base_url", "host_port"} & set(changed) and self.connection_test is not None:
             self.connection_test = None  # a test result never outlives a changed address or host port
             self.save()
@@ -930,38 +1126,15 @@ class ManagerCore:
     def download_base_issue(self) -> str | None:
         """Why installations are blocked by download_base_url, else None.
 
-        "missing": not set (optional option without default). "unconfirmed": still the
-        former example value, which is only accepted after an explicit confirmation –
-        it may really be the address of Home Assistant (FritzBox default network).
-        "not_private": an IP address outside the private networks, saved before the
-        option refused it. "invalid": not a usable address (odd characters, bad host name).
-        Neither can be confirmed, only corrected."""
+        "missing": not set (optional option without default). "not_private": an IP address
+        outside the private networks, saved before the option refused it. "invalid": not a
+        usable address (odd characters, bad host name). Both can only be corrected."""
         if not self.download_base:
             return "missing"
         problem = app_options.download_base_problem(self.download_base)
         if problem:
             return "not_private" if problem == app_options.DOWNLOAD_BASE_NOT_PRIVATE else "invalid"
-        legacy = app_options.LEGACY_DOWNLOAD_BASE.rstrip("/")
-        if self.download_base == legacy and self.download_base_confirmed != legacy:
-            return "unconfirmed"
         return None
-
-    def confirm_download_base(self, url: object, user: str | None = None) -> None:
-        """Confirm that the former example value really is the address of Home
-        Assistant. url must be the current value (no confirmation of a stale view).
-        Stored in state.json; no option change, no restart. Logged."""
-        current = isinstance(url, str) and url.rstrip("/") == self.download_base
-        if self.download_base_issue != "unconfirmed" or not current:
-            raise ShellyError("Nothing to confirm – the download base URL has changed, reload the page")
-        self.download_base_confirmed = self.download_base
-        self.save()
-        log.info("Download base URL %s confirmed by %s", self.download_base, user)
-        self.events.add(
-            "options",
-            confirmed=True,
-            changes=[{"option": "download_base_url", "old": "not confirmed", "new": "confirmed"}],
-            user=user,
-        )
 
     async def restart_app(self) -> None:
         """Ask the Supervisor to restart this app so new options take effect."""

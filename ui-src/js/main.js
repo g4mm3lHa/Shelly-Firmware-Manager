@@ -1,6 +1,6 @@
 // Entry module: rendering, tabs and polling. Importing it loads all other modules.
 import {
-  $, api, attachTip, box, closeModal, confirmDialog, el, fmt, getState, guarded, hideTip, keepFocus, loadLocal, message, modal, saveLocal, setTip, t, ui,
+  $, api, attachTip, box, closeModal, el, fmt, getState, guarded, hideTip, keepFocus, loadLocal, message, modal, saveLocal, setTip, t, ui,
 } from "./core.js";
 import {lang} from "./i18n.js";
 import {buildChooser, closeRowMenu, loadPrefs, renderDevices, syncChooser} from "./devices.js";
@@ -80,9 +80,9 @@ function renderMeta(s) {
   $("meta").replaceChildren(el("span", t("Last checked: {time}", {time: fmt(s.last_scan)}), "pill meta-pill"), cycle);
 }
 /** Notice while installations are disabled by the download base URL: not set, an IP
- *  address outside the private networks, or still the former example value that the
- *  admin has not confirmed yet (only that one has a confirm button). Rebuilt only
- *  when the problem changes, so polling does not steal the focus from its buttons. */
+ *  address outside the private networks or not a valid address (only "Open settings").
+ *  Rebuilt only when the problem changes, so polling does not steal the focus from its
+ *  buttons. */
 function renderNotice(info) {
   const n = $("notice"), key = info.issue ? `${info.issue}|${info.url}` : "";
   if (n.dataset.key === key) return;
@@ -95,10 +95,6 @@ function renderNotice(info) {
     buttons.append(imp, skip);
     n.replaceChildren(el("span", t("First start: {text}", {text: FIRST_START})), buttons);
     return;
-  }
-  if (info.issue === "unconfirmed") {
-    const yes = el("button", t("This address is correct"), "primary"); yes.onclick = () => confirmDownloadBase(info.url);
-    buttons.append(yes);
   }
   const open = el("button", t("Open settings")); open.onclick = () => showView("settings");
   buttons.append(open);
@@ -125,13 +121,6 @@ const WELCOME_TITLE = t("Welcome – import a firmware store?");
  *  keeps the title of the welcome dialog when it was skipped there (title). */
 async function skipFirstStart(title) {
   await guarded(title || t("First start"), title ? "importIcon" : undefined, async () => { await api("api/first-start/skip", {}); closeModal(); });
-}
-/** Confirm that the former example URL really is the address of Home Assistant. */
-function confirmDownloadBase(url) {
-  confirmDialog({title: t("Confirm download base URL"), button: t("Yes, this is correct"), kind: "primary",
-    content: [el("p", t("Is {url} really the LAN address of Home Assistant with the host port {port}?", {url, port: (ui.state && ui.state.host_port) || 8098})),
-      el("p", t("The Shellys download the firmware from this address. If it is wrong, every update fails. The confirmation ends when the address is changed."), "hint")],
-    action: async () => { await api("api/settings/download-base/confirm", {url}); closeModal(); }});
 }
 const PHASES = {queued: t("starting"), registry: t("reading the device list"), devices: t("checking devices"),
   download: t("downloading firmware"), changelog: t("checking firmware information")};

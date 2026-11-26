@@ -23,6 +23,7 @@ with the limits and the error handling of the shelly module.
 """
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import time
@@ -358,6 +359,17 @@ def _show(value: object) -> str:
     return clip(json.dumps(value, separators=(", ", ": "), ensure_ascii=False), SHOW_LIMIT)
 
 
+def _holder(path: tuple[str, ...], gen: int) -> tuple[str, ...]:
+    """Path of the object that holds a setting: the component for Gen2+ ("ble" for
+    ble.observer.enable, so a removed sub-object counts as well; () for a value outside a
+    component); for Gen1 the channel entry ("relays", "0") of a channel list, else () –
+    /settings itself, so an object the firmware dropped from /settings counts as removed
+    as well."""
+    if gen < 2:
+        return path[:2] if len(path) >= 3 and path[0] in GEN1_CHANNELS and path[1].isdigit() else ()
+    return path[:1] if len(path) >= 2 else ()
+
+
 def _label(path: tuple[str, ...], gen: int) -> str:
     """Name of a setting with Shelly's own keys: "switch:0 · initial_state" (Gen2+:
     component, then the path inside it), "relays.0 · default_state" (Gen1)."""
@@ -579,12 +591,17 @@ AFTER_ROWS = 100  # rows of each list of a comparison after an update kept at mo
 def after_update(gen: int, before: dict[str, Any], now: dict[str, Any]) -> dict[str, Any]:
     """What an update changed, from the backup made right before it and the device read
     again afterwards: {"changed": [{"key", "before", "now"}], "new": [{"key", "value"}],
+    "gone": [{"key", "before"}], "changed_count", "new_count", "gone_count",
     "scripts": {"before", "again", "stopped"}}.
 
-    changed: settings with another value now ("now" "–": no longer reported); new:
-    settings the backup did not have – the new firmware brought them, with Shelly's
-    default value. Counters that change by themselves (GEN2_IGNORED, e.g. sys.cfg_rev)
-    are never compared. scripts (Gen2+, Gen1 has none): how many scripts ran before the
+    changed: settings with another value now ("now" "–": the whole component or Gen1
+    channel that held the setting is no longer reported); new: settings the backup did
+    not have – the new firmware brought them, with Shelly's default value; gone: settings
+    the backup had that the device no longer reports although it still reports their
+    holder (_holder) – only the firmware changes the shape of the config, so the new
+    firmware removed them (e.g. ble.enable since Gen2+ firmware 2.0.0). Gone settings are
+    no changes. Counters that change by themselves (GEN2_IGNORED, e.g. sys.cfg_rev) are
+    never compared. scripts (Gen2+, Gen1 has none): how many scripts ran before the
     update, how many of them run again, and the names of the others."""
     if gen >= 2:
         old, new, walk_lists = before.get("config") or {}, now.get("config") or {}, False
@@ -597,11 +614,15 @@ def after_update(gen: int, before: dict[str, Any], now: dict[str, Any]) -> dict[
         return gen < 2 or not (len(path) < 2 or path in GEN2_IGNORED or path[0].startswith("script:"))
 
     changed: list[Row] = []
+    gone: list[Row] = []
     for path, value in _leaves(old, walk_lists):
         if not compared(path):
             continue
         known, current = _dig(new, path)
-        if not known or current != value:
+        if not known and new and _dig(new, _holder(path, gen))[0]:
+            # The device reports settings and still the holder, only not this field: the new firmware removed it
+            gone.append({"key": _label(path, gen), "before": _show(value)})
+        elif not known or current != value:
             changed.append({"key": _label(path, gen), "before": _show(value), "now": _show(current) if known else "–"})
     added: list[Row] = []
     for path, value in _leaves(new, walk_lists):
@@ -613,8 +634,10 @@ def after_update(gen: int, before: dict[str, Any], now: dict[str, Any]) -> dict[
     return {
         "changed": sorted(changed, key=lambda r: r["key"])[:AFTER_ROWS],
         "new": sorted(added, key=lambda r: r["key"])[:AFTER_ROWS],
+        "gone": sorted(gone, key=lambda r: r["key"])[:AFTER_ROWS],
         "changed_count": len(changed),
         "new_count": len(added),
+        "gone_count": len(gone),
         "scripts": {"before": len(ran), "again": len(ran) - len(stopped), "stopped": stopped[:AFTER_ROWS]},
     }
 
@@ -668,12 +691,8 @@ async def _write_config(target: Target, rows: list[Row], errors: dict[str, str])
                 errors[group[0]["key"]] = error_text(err)
                 continue
         for row in group:
-            try:
+            with _noted(errors, row["key"]):
                 restart |= await _set_config(target, component, [row])
-            except AuthError:
-                raise
-            except ShellyError as err:
-                errors[row["key"]] = error_text(err)
     return restart
 
 
@@ -690,6 +709,19 @@ def _chunks(code: str) -> Iterator[str]:
         yield code[start:]
 
 
+@contextlib.contextmanager
+def _noted(errors: dict[str, str], key: str) -> Iterator[None]:
+    """Write of one row: a refusal of the device (ShellyError) is noted under the row's
+    key and the restore goes on; an authentication error ends the restore, and any other
+    exception (lost connection, timeout) propagates as well."""
+    try:
+        yield
+    except AuthError:
+        raise
+    except ShellyError as err:
+        errors[key] = error_text(err)
+
+
 async def _stop_script(target: Target, script_id: int) -> None:
     """Stop a script before it is written or removed (one that does not run answers with an error)."""
     try:
@@ -704,7 +736,7 @@ async def _write_scripts(target: Target, rows: list[Row], errors: dict[str, str]
     """Make the scripts equal to the backup: remove, create, write code and the start
     at boot. Written scripts stay stopped – _start_scripts starts what ran in the backup."""
     for row in sorted(rows, key=lambda r: r["state"] != "extra"):  # removing first frees the places
-        try:
+        with _noted(errors, row["key"]):
             script_id = row["id"]
             if row["state"] == "extra":
                 await _stop_script(target, script_id)
@@ -722,10 +754,6 @@ async def _write_scripts(target: Target, rows: list[Row], errors: dict[str, str]
                     await target.rpc("Script.PutCode", {"id": script_id, "code": chunk, "append": number > 0})
             config = {"name": item["name"], "enable": item.get("enable") is True}
             await target.rpc("Script.SetConfig", {"id": script_id, "config": config})
-        except AuthError:
-            raise
-        except ShellyError as err:
-            errors[row["key"]] = error_text(err)
     return False
 
 
@@ -754,7 +782,7 @@ async def _write_list(target: Target, rows: list[Row], errors: dict[str, str], n
     """Make the schedules or webhooks equal to the backup (namespace "Schedule" or
     "Webhook"): remove, change, create."""
     for row in sorted(rows, key=lambda r: r["state"] != "extra"):  # removing first frees the places
-        try:
+        with _noted(errors, row["key"]):
             if row["state"] == "extra":
                 await target.rpc(f"{namespace}.Delete", {"id": row["id"]})
                 continue
@@ -763,10 +791,6 @@ async def _write_list(target: Target, rows: list[Row], errors: dict[str, str], n
                 await target.rpc(f"{namespace}.Update", {**body, "id": row["id"]})
             else:
                 await target.rpc(f"{namespace}.Create", body)
-        except AuthError:
-            raise
-        except ShellyError as err:
-            errors[row["key"]] = error_text(err)
     return False
 
 
@@ -817,12 +841,8 @@ async def _write_gen1(target: Target, rows: list[Row], errors: dict[str, str]) -
                 errors[group[0][0]["key"]] = error_text(err)
                 continue
         for row, pair in group:
-            try:
+            with _noted(errors, row["key"]):
                 await target.get(endpoint, [pair])
-            except AuthError:
-                raise
-            except ShellyError as err:
-                errors[row["key"]] = error_text(err)
     return False
 
 
@@ -833,12 +853,8 @@ async def _write_actions(target: Target, rows: list[Row], errors: dict[str, str]
         enabled = "true" if item["enabled"] else "false"
         params = [("index", str(row["index"])), ("name", row["name"]), ("enabled", enabled)]
         params += [("urls[]", url) for url in item["urls"]] or [("urls[]", "")]
-        try:
+        with _noted(errors, row["key"]):
             await target.get("/settings/actions", params)
-        except AuthError:
-            raise
-        except ShellyError as err:
-            errors[row["key"]] = error_text(err)
     return False
 
 

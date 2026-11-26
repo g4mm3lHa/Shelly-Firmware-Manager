@@ -277,12 +277,21 @@ def _foreign_pending():
     return [t for t in asyncio.all_tasks() if t is not current and not t.done()]
 
 
+async def _download_running(mgr):
+    """Wait (at most 2 s) until a shared download task runs; a busy test run may need longer
+    than a fixed short pause to get there."""
+    for _ in range(200):
+        if mgr._provisions:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("no shared download task started")
+
+
 async def test_cancelled_check_leaves_no_running_download(mgr, net):
     """App stop during a download: the shared download task is cancelled too."""
     net.download_gate = asyncio.Event()  # the download never finishes on its own
     task = asyncio.create_task(mgr.scan())
-    await asyncio.sleep(0.05)
-    assert mgr._provisions  # a shared download task is running
+    await _download_running(mgr)  # a shared download task is running
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
@@ -299,8 +308,7 @@ async def test_cancelled_single_check_leaves_no_running_download(mgr, net):
     net.download_gate = asyncio.Event()
     mgr.reserve_check("device", A)
     task = asyncio.create_task(mgr.check_device(A))
-    await asyncio.sleep(0.05)
-    assert mgr._provisions
+    await _download_running(mgr)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
@@ -522,6 +530,45 @@ async def test_missing_password_fails_the_check_of_the_device(mgr, net):
     assert dev["status"] == manager_core.STATUS_READY and "settings_error" not in dev
 
 
+async def test_device_that_requires_https_is_an_error(mgr, net, monkeypatch):
+    """A Shelly that redirects to HTTPS (Enhanced Security): an error of this device
+    with the text, not "Not reachable"; the other devices are not affected. The same
+    from the settings read fails the check like a missing password."""
+    real = shelly.device_info
+
+    async def device_info(session, origin, *args, **kwargs):
+        if origin == "http://192.168.1.11":  # Hall
+            raise shelly.HttpsRequiredError(shelly.HTTPS_REQUIRED)
+        return await real(session, origin, *args, **kwargs)
+
+    monkeypatch.setattr(shelly, "device_info", device_info)
+    assert await mgr.scan()
+    hall = mgr.devices[B]
+    assert hall["status"] == manager_core.STATUS_ERROR and hall["error_level"] == "error"
+    assert hall["message"] == shelly.HTTPS_REQUIRED and hall["unreachable"] is False
+    assert mgr.devices[A]["status"] == manager_core.STATUS_READY
+    assert mgr.devices[C]["status"] == manager_core.STATUS_READY
+    entry = [e for e in mgr.events.entries if e["kind"] == "check"][-1]
+    assert entry["severity"] == "error" and entry["errors"] == 1
+    monkeypatch.setattr(shelly, "device_info", real)
+    net.settings_error = shelly.HttpsRequiredError(shelly.HTTPS_REQUIRED)
+    assert await mgr.scan()
+    dev = mgr.devices[A]
+    assert dev["status"] == manager_core.STATUS_ERROR and dev["message"] == shelly.HTTPS_REQUIRED
+    assert dev["settings_error"]["severity"] == "error" and not dev["unreachable"]
+
+
+async def test_sign_in_block_fails_the_check_as_an_error(mgr, net):
+    """A Shelly that still blocks sign-ins after the one short wait: an error of the device
+    (red, like a refused password) with the block text, not a "settings unknown" warning."""
+    text = "The Shelly temporarily blocks sign-ins (too many attempts) – wait a few minutes and try again"
+    net.settings_error = shelly.AuthBlockedError(text)
+    assert await mgr.scan()
+    dev = mgr.devices[A]
+    assert dev["status"] == manager_core.STATUS_ERROR and dev["error_level"] == "error" and dev["message"] == text
+    assert dev["settings_error"] == {"message": text, "severity": "error"} and not dev["unreachable"]
+
+
 # ---------------------------------------------------------------- Unexpected errors stay with their device
 
 
@@ -713,6 +760,34 @@ async def test_host_name_from_the_device_id_only_when_it_resolves(mgr, net):
     net.resolvable.clear()
     await mgr.check_device(A, user="u")
     assert mgr.devices[A]["host_name"] is None
+
+
+@pytest.mark.parametrize("shelly_name", ["plus1", "Living Room Light"])
+async def test_host_name_ignores_the_shelly_name(mgr, net, monkeypatch, shelly_name):
+    """Host name column (option resolve_host_names on): a name set on the Shelly is never
+    looked up, neither one that is a valid host label nor one with spaces; only
+    <device id>.local is, and requests keep the address of the registry entry."""
+    looked_up = []
+    read_settings = shelly.read_settings  # the fake of conftest.FakeNet
+
+    async def named_settings(*args, **kwargs):
+        # The settings of the fake with the Shelly name of this case
+        return {**await read_settings(*args, **kwargs), "shelly_name": shelly_name}
+
+    async def lookup(host):
+        # Records every looked-up name; every name resolves
+        looked_up.append(host)
+        return True
+
+    monkeypatch.setattr(shelly, "read_settings", named_settings)
+    monkeypatch.setattr(shelly_net, "host_resolves", lookup)
+    await mgr.scan()  # option still off: lists the devices without a lookup
+    mgr.resolve_host_names = True
+    await mgr.check_device(A, user="u")
+    own = f"shelly-{A}.local"
+    assert mgr.devices[A]["shelly_name"] == shelly_name
+    assert looked_up == [own]
+    assert mgr.devices[A]["host_name"] == own and mgr.devices[A]["origin"] == "http://192.168.1.10"
 
 
 async def test_host_names_off_by_default(mgr, net, monkeypatch):

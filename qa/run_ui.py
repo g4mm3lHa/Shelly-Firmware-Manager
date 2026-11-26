@@ -15,7 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "shelly_firmware_manager" / "app"
-DEMOS = {8801: "idle", 8802: "busy", 8803: "legacy", 8804: "missing", 8805: "features", 8806: "first", 8807: "public",
+DEMOS = {8801: "idle", 8802: "busy", 8804: "missing", 8805: "features", 8806: "first", 8807: "public",
          8808: "features"}  # 8808: used by the backups suite only (it stores, deletes and restores backups)
 
 
