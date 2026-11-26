@@ -106,6 +106,7 @@ change it there or with **Host port** in the **Settings** tab.
 | Max. parallel installations | 5 | 1–20 | How many installations (and password changes) run at the same time; further approvals wait |
 | Resolve host names | off | on / off | Looks up each device's host name at every check and shows the **Host name** column (see [Devices](#devices)). Off: no lookup, no column |
 | Pinned certificates | two Shelly hosts | host + SHA-256 | Certificate fingerprints for Shelly servers (see [Certificate pinning](#certificate-pinning)) |
+| Base colour | Default | Default, Blue, Teal, Green, Violet, Orange | Colour of the surfaces, buttons and links of this app, for all browsers. **Default**: neutral grey surfaces, buttons and links in the colour of the Home Assistant theme. A colour replaces the theme colour in this app; card **Display** |
 
 ### Download base URL
 
@@ -151,8 +152,8 @@ the installation dialog shows a yellow **Download server** line with **Test now*
 ## Using the app
 
 The app has six tabs: **Devices**, **Firmware**, **Schedules**, **Backups**, **Logs**
-and **Settings**. It follows the Home Assistant theme (colours, light/dark) and works on
-phones; there only the active tab shows its name. The user interface is in English,
+and **Settings**. It follows the Home Assistant theme (colours, light/dark; **Base colour** in
+the Settings tab changes its colour) and works on phones; there only the active tab shows its name. The user interface is in English,
 German, Dutch, French, Italian, Spanish, Polish or Portuguese (see [Settings](#settings)).
 
 On a fresh installation the card **Getting started** above the device list leads
@@ -691,7 +692,8 @@ passwords on several devices at once (see [Device passwords](#device-passwords))
 card **Display** chooses the language of this page: **Same as Home Assistant** (default;
 English where no translation exists), English, Deutsch, Nederlands, Français, Italiano,
 Español, Polski or Português. The translations other than English are machine translated. It applies at once, only in this
-browser, and needs no save. The status messages of the devices and the errors the app
+browser, and needs no save. **Base colour** below it shows the chosen colour at once and is
+kept with **Save settings** for all browsers (see [Configuration](#configuration)). The status messages of the devices and the errors the app
 reports are translated as well; the activity log, texts the Shelly itself sends and this
 documentation stay English.
 The last line links to the app page in Home Assistant, where **Changelog** next to the
