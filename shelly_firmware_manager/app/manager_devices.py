@@ -268,12 +268,14 @@ class DeviceSettings(Transfers):
     @staticmethod
     def _ap_refusal(err: BaseException, dev: Device, clean: dict[str, Any]) -> str:
         """Readable text of an access point form the Shelly refused (shelly.ap_refusal), or ""
-        if err is no such refusal or keeps its text. Only the device's own refusal (a plain
-        ShellyError of the RPC answer) is rewritten; a password, sign-in or HTTPS error keeps
-        its kind and text. dev is not read again after a failed write, so its ap_config is
-        the state read just before the dialog opened: open False means the access point had
-        a password."""
-        if "ap_config" not in clean or type(err) is not ShellyError:
+        if err is no such refusal or keeps its text. Only a change of the access point form
+        alone is read this way: with other settings in the same request (possible through the
+        API only) the refusal may belong to another call, so it keeps its text. Only the
+        device's own refusal (a plain ShellyError of the RPC answer) is rewritten; a password,
+        sign-in or HTTPS error keeps its kind and text. dev is not read again after a failed
+        write, so its ap_config is the state read just before the dialog opened: open False
+        means the access point had a password."""
+        if set(clean) != {"ap_config"} or type(err) is not ShellyError:
             return ""
         text = str(err)
         readable = shelly.ap_refusal(

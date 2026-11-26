@@ -1032,8 +1032,8 @@ async def test_access_point_refusal_comes_from_the_device_answer(monkeypatch):
 async def test_access_point_open_refused_after_a_password(client, mgr, net, monkeypatch):
     """The Shelly refuses an open access point while it reported one with a password: the
     readable text is raised, logged in full and answered with 409; a refused password form
-    gets the -103 text; sign-in errors and other refusals keep their kind and text; nothing
-    is read back after a refusal."""
+    gets the -103 text; sign-in errors, other refusals and a form sent together with other
+    settings keep their kind and text; nothing is read back after a refusal."""
     await mgr.scan()
     refusal: list[Exception] = [ShellyError("Device reports: Invalid argument (code -103)")]
     reads = []
@@ -1077,6 +1077,11 @@ async def test_access_point_open_refused_after_a_password(client, mgr, net, monk
         with pytest.raises(ShellyError) as err:
             await mgr.change_settings(A, form, "u")
         assert err.value is error and mgr.events.entries[-1]["error"] == str(error)
+    # With another setting in the same request the refusal may belong to that call: its text stays
+    refusal[0] = ShellyError("Device reports: Invalid argument (code -103)")
+    with pytest.raises(ShellyError) as err:
+        await mgr.change_settings(A, {"name": "Garden", **open_form}, "u")
+    assert err.value is refusal[0] and mgr.events.entries[-1]["error"] == str(refusal[0])
     assert reads == []
     # The UI answer: 409 with the readable text
     refusal[0] = ShellyError("Device reports: Invalid argument (code -103)")
