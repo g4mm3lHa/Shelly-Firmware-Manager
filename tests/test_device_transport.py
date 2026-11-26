@@ -309,6 +309,8 @@ async def test_get_errors(session, answer, error, text):
     (200, {"id": 1, "error": "out of memory"}, shelly.ShellyError, "^Device reports: out of memory$"),
     (200, {"id": 1, "error": {"code": -103, "message": "bad\nforged line\x1b[31m"}}, shelly.ShellyError,
      r"^Device reports: badforged line\[31m \(code -103\)$"),
+    (200, {"id": 1, "error": {"code": -104, "message": "-104: Timed out"}}, shelly.ShellyError,
+     r"^Device reports: Timed out \(code -104\)$"),
     (500, None, shelly.ShellyError, r"rejected the request \(HTTP 500\)"),
     (200, None, shelly.ShellyError, "Invalid response"),
 ])
@@ -319,6 +321,21 @@ async def test_rpc_errors(session, status, answer, error, text):
     async with FakeDevice(routes={"/rpc": response}) as dev:
         with pytest.raises(error, match=text):
             await shelly.device_rpc(session, dev.origin, "Foo.Bar")
+
+
+@pytest.mark.parametrize(("error", "text"), [
+    ({"code": -104, "message": "-104: Timed out"}, "Timed out (code -104)"),
+    ({"code": -104, "message": "-104:Timed out"}, "Timed out (code -104)"),
+    ({"code": -104, "message": "-104:"}, "code -104"),
+    ({"code": -114, "message": "-1: Connection error: -14"}, "-1: Connection error: -14 (code -114)"),
+    ({"code": -104, "message": "-1040: Timed out"}, "-1040: Timed out (code -104)"),
+    ({"code": -104, "message": "Timed out -104: x"}, "Timed out -104: x (code -104)"),
+    ({"code": 104, "message": "-104: Timed out"}, "-104: Timed out (code 104)"),
+])
+def test_device_error_shows_the_code_once(error, text):
+    """A message that starts with its own code loses that prefix; another number or a code
+    elsewhere in the text stays."""
+    assert shelly.device_error(error) == text
 
 
 async def test_rpc_result_shapes(session):
