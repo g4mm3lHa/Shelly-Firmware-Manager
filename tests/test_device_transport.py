@@ -330,6 +330,22 @@ async def test_protection_status_reports_id_and_auth_domain(session, answer, exp
     assert state.realm == realm and dev.requests == [("GET", "/shelly", None, None)]
 
 
+@pytest.mark.parametrize(("device_id", "known_id", "mac", "same"), [
+    (REALM, REALM, None, True),
+    (REALM, FORMER, None, True),                              # 2.2.0 rename: the MAC suffix stays
+    (REALM, "shellyplus1-ffffffffffff", None, False),         # another Shelly at the address
+    (REALM, None, "A8:03:2A:B1:23:45", True),                 # no known ID: the MAC decides
+    (REALM, None, "FF:FF:FF:FF:FF:FF", False),
+    (REALM, "shellyplus1-ffffffffffff", "A8032AB12345", True),  # the known MAC matches
+    (REALM, None, None, True),                                # nothing known to compare with
+    (None, REALM, None, False),
+])
+def test_protection_same_device(device_id, known_id, mac, same):
+    """A live device ID belongs to the known device if its MAC suffix equals that of the
+    known ID or the known MAC (case ignored)."""
+    assert shelly.Protection(True, device_id).same_device(known_id, mac) is same
+
+
 async def test_password_bound_to_the_former_id_answers_its_challenge(session):
     """A Shelly whose password stays bound to the 2.2.0 ID challenges with that realm: an
     HA1 built from Protection.realm signs the request, one bound to the device ID is

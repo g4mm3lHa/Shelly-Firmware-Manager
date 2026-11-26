@@ -1285,6 +1285,25 @@ class Protection:
         # rpartition gives an empty prefix without a hyphen: both need a name and a suffix
         return domain if prefix and id_prefix and suffix and suffix == id_suffix else device_id
 
+    def same_device(self, known_id: str | None, mac: object = None) -> bool:
+        """True if device_id belongs to the device known by known_id or mac: its
+        suffix after the last hyphen (the MAC address in lower case, which the 2.2.0
+        rename keeps) equals that of known_id or the hex digits of mac, ignoring
+        case. Also True when neither is known (nothing to compare with); False
+        without a device_id."""
+        if not self.device_id:
+            return False
+        suffix = self.device_id.rpartition("-")[2].lower()
+        known = {
+            value
+            for value in (
+                (known_id or "").rpartition("-")[2].lower(),
+                re.sub(r"[^0-9a-f]", "", str(mac or "").lower()),
+            )
+            if value
+        }
+        return not known or (bool(suffix) and suffix in known)
+
 
 async def protection_status(session: aiohttp.ClientSession, origin: str) -> Protection:
     """Password protection as reported by /shelly (no authentication needed), with

@@ -15,7 +15,7 @@ Part of `docs/CODEMAP.md`; read when you change stored fields or files below `/d
 | `changelog.json` | last fetched page per generation: `{"1"\|"2": {"fetched", "versions": {version: {"date", "entries"}}}}` |
 
 Device entry (`state.devices[<HA device id>]`): identity `name`, `shelly_name`,
-`gen`, `type` (firmware ID / app), `model`, `mac`, `shelly_id` (Gen2+ device ID, the `Shelly.SetAuth` realm; also taken from the live `/shelly` answer of a password action, where an empty one never replaces it),
+`gen`, `type` (firmware ID / app), `model`, `mac`, `shelly_id` (Gen2+ device ID, the `Shelly.SetAuth` realm; also taken from the live `/shelly` answer of a password action if it has the same MAC suffix as the known ID or MAC; an empty one never replaces it),
 `origin` (`http://<private ip>:<port>`), `version`, `build`; check `status`
 (`up-to-date|available|ready|installing|unconfirmed|error|asleep|unregistered|skipped`; `unregistered` only from older versions, shown as not checked),
 `message`, `error_level`, `last_check`, `last_success`, `last_update`,

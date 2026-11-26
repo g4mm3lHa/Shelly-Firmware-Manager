@@ -538,26 +538,40 @@ class DeviceSettings(Transfers):
 
         Gen2+: the device ID of the live /shelly answer replaces the known one (as a
         check does) and is the realm sent to Shelly.SetAuth – a known ID from before a
-        firmware update could be outdated. "store" tests the password against the
-        realm the device's current password is bound to (shelly.Protection.realm);
-        after the 2.2.0 ID change of the 1PM Mini Gen3/Gen4 that is the former ID, the
-        result then carries realm_outdated=True and a log line says to change the
-        password once, which binds it to the device ID again. Nothing is changed on
-        the device by "store"."""
+        firmware update could be outdated. It is taken only from the same device
+        (shelly.Protection.same_device: the same MAC suffix as the known ID or MAC);
+        another Shelly at the address leaves the known ID, which that Shelly is
+        expected to refuse. "store" tests the password against the realm the device's
+        current password is bound to (shelly.Protection.realm); after the 2.2.0 ID
+        change of the 1PM Mini Gen3/Gen4 that is the former ID, the result then
+        carries realm_outdated=True and a log line says to change the password once,
+        which binds it to the device ID again. If the device does not accept the
+        password under that realm, "store" tests it once more under the device ID. A
+        stored HA1 answers only a challenge of its own realm (DeviceAuth), so at most
+        one of both tests signs a request. Nothing is changed on the device by
+        "store"."""
         state = await shelly.protection_status(self.session, origin)
         protected = state.enabled
         dev["auth_enabled"] = protected
-        if gen >= 2 and state.device_id:
+        live = gen >= 2 and state.device_id is not None and state.same_device(realm, dev.get("mac"))
+        if live:
             dev["shelly_id"] = realm = state.device_id  # an empty ID never replaces a known one
         current = self._auth(device_id, dev)
         candidate = None
         if mode in ("store", "enable", "change"):
-            tested = (state.realm or realm) if mode == "store" else realm
+            tested = (state.realm or realm) if mode == "store" and live else realm
             candidate = self.credentials.candidate(gen, tested, password)
         if mode == "store" and candidate is not None:
             if protected is False:
                 raise ShellyError("The device is not password protected – use 'Enable password protection' instead")
-            if not await self._auth_works(dev, candidate):
+            works = await self._auth_works(dev, candidate)
+            if not works and gen >= 2 and realm and candidate.realm != realm:
+                # The device may challenge with its device ID after all. Only the
+                # candidate of the challenge realm signs; the other one is refused
+                # locally (DeviceAuth), so this sends no second signed attempt
+                candidate = self.credentials.candidate(gen, realm, password)
+                works = await self._auth_works(dev, candidate)
+            if not works:
                 raise AuthError("The Shelly rejected the password")
             self.credentials.store(device_id, candidate)
             if gen >= 2 and candidate.realm != realm:
