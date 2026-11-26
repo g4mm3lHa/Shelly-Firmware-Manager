@@ -96,6 +96,8 @@ class Manager(Schedules):
                     # Gen2+: is the installed version stored (way back after the next update)?
                     "way_back": self.way_back(dev, kept),
                     "installing": key in self.installing,
+                    # Running step of the installation (status pill and its tooltip) or None
+                    "install_step": self.install_step_view(key),
                     "activity": self.activity.get(key),
                     "ignored": bool(dev.get("ignored")),
                     # Removed from Home Assistant: since when (seconds) or None

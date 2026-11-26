@@ -356,6 +356,8 @@ class ManagerCore:
         self.lock = asyncio.Lock()  # check (exclusive)
         self.install_slots = asyncio.Semaphore(int(options.get("max_parallel_installs", 5)))
         self.installing: set[str] = set()  # device IDs: running or waiting
+        # Device ID -> running step of its installation (see Installs.install_step_view; memory only)
+        self.install_steps: dict[str, dict[str, Any]] = {}
         self.last_scan: int | None = None
         self.devices: dict[str, Device] = {}  # HA device ID -> state
         self.downloads: dict[str, dict[str, Any]] = {}  # file name -> {"served": {ip: n}, "rejected": {ip, ...}}

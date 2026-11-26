@@ -235,8 +235,9 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   beta needs its tick also when scheduling. The section stands above the changelog
   (live test rc1, approved 2026-11-22).
 - **Logs tab, unread entries (live test rc1, approved 2026-11-22; 3.11.0, red: F10 b,
-  approved 2026-11-23):** a small red round "!" (white sign) after the tab name (phones:
-  after the icon) while the log holds an error entry
+  approved 2026-11-23; 3.13.1, variant B, approved 2026-11-26):** a small red dot (8 px,
+  ring in the colour of the tab strip) on the top right of the tab icon, desktop and phones; it
+  lies over the icon, so the tab width never changes (no jump), while the log holds an error entry
   newer than the newest entry this browser has shown in the Logs tab – warnings and
   successes never set it; opening the tab clears it. The entries that were unread at that
   moment carry a bar in the primary colour on the left until the tab is left; entries of

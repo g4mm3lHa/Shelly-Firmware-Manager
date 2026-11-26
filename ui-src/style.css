@@ -228,10 +228,10 @@ button.pill{cursor:pointer}
 .pill,.act,.fstrip,.prechk>li.wait{--tone:var(--secondary-text-color);--tone-text:color-mix(in srgb,var(--tone) 50%,var(--primary-text-color))}
 .tone-success,.p-uptodate,.p-updated,.act.s-on,.act.c-good,.fstrip.t-good,.msg-success,.prechk>li.ok{--tone:var(--success-color)}
 .act.restart,.fstrip.t-neutral{--tone:var(--primary-text-color)}
-.tone-warning,.p-ready,.p-available,.p-queued,.p-installing,.p-ignored,.p-removed,.fstrip.t-warn,.msg-warning,.prechk>li.warn{
+.tone-warning,.p-ready,.p-available,.p-installing,.p-step.p-late,.p-ignored,.p-removed,.act.c-warn,.fstrip.t-warn,.msg-warning,.prechk>li.warn{
   --tone:var(--warning-color);--tone-text:var(--warn-text)}
 .tone-error,.p-error,.p-unconfirmed,.act.c-alert,.fstrip.t-alert,.msg-error,.prechk>li.err{--tone:var(--error-color)}
-.tone-primary,.p-activity,.p-scheduled,.prechk>li.run{--tone:var(--primary-color)}   /* run: the step that is running (spinner) */
+.tone-primary,.p-activity,.p-scheduled,.p-queued,.p-step,.prechk>li.run{--tone:var(--primary-color)}   /* run: the step that is running (spinner) */
 /* Waiting for the Shelly update server: turns yellow when its delay (set by the script:
    5 s after the wait began) has passed */
 .p-activity.p-server{animation:server-slow 0s linear forwards}
@@ -279,7 +279,7 @@ button.pill{cursor:pointer}
   border:1px solid color-mix(in srgb,var(--beta) 50%,transparent);padding:0 7px;margin-right:0}
 .tooltip{position:fixed;z-index:var(--z-tip);max-width:360px;padding:8px 10px;border-radius:var(--radius-s);font-size:var(--fs-small);
   background:var(--primary-text-color);color:var(--card-background-color);pointer-events:none;
-  overflow-wrap:anywhere;box-shadow:var(--shadow-tip)}
+  overflow-wrap:anywhere;white-space:pre-line;box-shadow:var(--shadow-tip)}   /* "\n" in a text starts a new line */
 
 /* One disclosure sign everywhere: no browser marker, a chevron after the text (down when
    closed, up when open) – "For n devices", log entries, changelogs and groups in dialogs,
@@ -342,6 +342,7 @@ dl.kv>dd.src{font-size:var(--fs-small)}
 /* Status dialog: message left, status pill right */
 .dstatus{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:12px}
 .dmsg{margin:0;line-height:1.45}
+.dmsg.lines{white-space:pre-line}   /* the lines of a running installation (device details) */
 /* Warning box of a dialog: radius and tint of the notice bar */
 .warnbox{border-left:3px solid var(--warning-color);border-radius:var(--radius-s);padding:8px 12px;margin:10px 0;
   background:color-mix(in srgb,var(--warning-color) 12%,var(--card-background-color))}
@@ -464,9 +465,12 @@ h1 .beta{margin-left:4px;color:var(--error-text);font-size:var(--fs-tag);font-we
 .tab svg{width:var(--icon);height:var(--icon);fill:currentColor}
 .tab.active{background:var(--card-background-color);color:var(--link-text);font-weight:500;
   box-shadow:0 1px 3px color-mix(in srgb,var(--tint) 30%,transparent)}
-/* Logs tab: unread error entries (red round "!" after the name, on phones after the icon) */
-.tab-unread{display:inline-flex;align-items:center;justify-content:center;flex:none;width:16px;height:16px;
-  border-radius:50%;background:var(--error-color);color:#fff;font-size:11px;font-weight:700;line-height:1}
+/* Logs tab: unread error entries – red dot on the top right of the tab icon (like the
+   dot of the search icon, ring in the colour of the tab strip); it lies over the icon,
+   the tab width never changes */
+.tab-ic{position:relative;display:inline-flex;flex:none}
+.tab-unread{position:absolute;top:-3px;right:-4px;width:8px;height:8px;border-radius:50%;
+  background:var(--error-color);border:2px solid var(--surf-hi);pointer-events:none}
 
 /* Wide screens: the app icon left of the title and the header pills; the tab strip as wide as its tabs */
 @media (min-width:701px){
@@ -495,7 +499,6 @@ h1 .beta{margin-left:4px;color:var(--error-text);font-size:var(--fs-tag);font-we
   .tabs-icons .tab:not(.active){font-size:0;flex:0 0 44px;gap:0;padding:10px 0}
   .tabs-icons .tab.active{flex:1;padding:8px 2px;white-space:nowrap}
   .tabs-icons .tab svg{width:var(--icon-xl);height:var(--icon-xl)}
-  .tabs-icons .tab:not(.active) .tab-unread{margin-left:2px}
 }
 
 /* ================================================================ Tab Devices */

@@ -337,7 +337,13 @@ def _logs(c):
     page.unroute("**/api/state")
     page.route("**/api/state", state(True))
     refresh_state(page, f)
-    check(f"{case}: Logs – mark for an unread error entry", mark.is_visible() and mark.inner_text().startswith("!"), mark.inner_text())
+    check(f"{case}: Logs – mark for an unread error entry", mark.is_visible())
+    # Red dot over the icon: the tab keeps its width with and without the mark
+    widths = f.evaluate("""() => { const tab = document.getElementById('tab-logs'), m = tab.querySelector('.tab-unread');
+      const w = () => tab.getBoundingClientRect().width, on = w(); m.hidden = true; const off = w(); m.hidden = false;
+      return [on, off, getComputedStyle(m).position]; }""")
+    check(f"{case}: Logs – the dot lies over the icon, tab width unchanged",
+          abs(widths[0] - widths[1]) < 0.5 and widths[2] == "absolute", str(widths))
     red = f.evaluate("""() => { const probe = document.createElement('div'); probe.style.background = 'var(--error-color)';
       document.body.append(probe); const want = getComputedStyle(probe).backgroundColor; probe.remove();
       return getComputedStyle(document.querySelector('#tab-logs .tab-unread')).backgroundColor === want; }""")

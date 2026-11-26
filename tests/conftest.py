@@ -231,6 +231,21 @@ def net(monkeypatch, tmp_path):
     return fake
 
 
+# Running time and Wi-Fi signal during an installation: not reported by default (tests of
+# the weak-Wi-Fi tolerance set their own answer; the real function is kept for its own tests)
+REAL_LINK_STATUS = shelly.link_status
+
+
+@pytest.fixture(autouse=True)
+def no_link_status(monkeypatch):
+    """shelly.link_status answers {"uptime": None, "rssi": None} unless a test replaces it."""
+
+    async def unknown(*_args, **_kwargs):
+        return {"uptime": None, "rssi": None}
+
+    monkeypatch.setattr(shelly, "link_status", unknown)
+
+
 @pytest.fixture
 def quick_install(monkeypatch):
     """Short installation timings for installs that run to the end in a test

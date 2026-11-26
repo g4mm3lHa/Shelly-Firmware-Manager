@@ -52,10 +52,11 @@ def _device_list(c):
     f.locator("#dlg-btns button", has_text="Cancel").click()
     if width > 700:   # the icon strip is part of the table on wide screens
         counts = f.evaluate("""() => ({good: document.querySelectorAll('.act.c-good').length,
-          alert: document.querySelectorAll('.act.c-alert').length, warn: document.querySelectorAll('.act.c-warn').length,
+          aop_warn: document.querySelectorAll('.act.c-warn[aria-label^="Power-on"]').length,
+          red: document.querySelectorAll('.act.c-alert').length, warn: document.querySelectorAll('.act.c-warn').length,
           ap: document.querySelectorAll('.act.alert.s-on[aria-label^="Access point"]').length})""")
-        check(f"{case}: power-on action green and red, lock yellow, access point red",
-              all(counts[k] > 0 for k in ("good", "alert", "warn", "ap")), str(counts))
+        check(f"{case}: power-on action green and yellow (never red), lock yellow, access point red",
+              all(counts[k] > 0 for k in ("good", "aop_warn", "warn", "ap")) and not counts["red"], str(counts))
 
 
 LIVE = {"shelly_name": "shelly-2", "ntp": "time.local", "eco": True, "ap": False, "ble": True, "debug_ws": False,
@@ -205,14 +206,20 @@ def _access_point_form(c, body):
     check(f"{case}: access point form with its sections", all(x in body for x in ("Network name (SSID)", "Protect with a password",
           "Open – no password", "Range extender")) and ssid.input_value() == "ShellyPlus1-A8032AB636EC", body[:300])
     check(f"{case}: access point: Save needs a password", save.is_disabled())
-    check(f"{case}: access point: hint names the length", "8 to 63 characters." in body, body[:600])
+    check(f"{case}: access point: hint names the length and ASCII only",
+          "8 to 63 characters, letters without umlauts or accents" in body, body[:600])
     f.locator("#dlg-body input[type=password]").fill("secret1")
     check(f"{case}: access point: Save needs 8 characters", save.is_disabled())
     f.locator("#dlg-body input[type=password]").fill("x" * 64)
     check(f"{case}: access point: 64 characters stay whole, Save disabled",
           save.is_disabled() and len(f.locator("#dlg-body input[type=password]").input_value()) == 64)
+    # A character outside printable ASCII: named below the field at once, Save disabled
+    f.locator("#dlg-body input[type=password]").fill("pässwört-1")
+    bad = f.locator("#dlg-body .sub-block p.bad")
+    check(f"{case}: access point: umlaut named, Save disabled", save.is_disabled() and bad.is_visible()
+          and bad.inner_text() == "The password contains a character the Shelly cannot use: ä", bad.inner_text())
     f.locator("#dlg-body input[type=password]").fill("secret-1")
-    check(f"{case}: access point: Save with a password", not save.is_disabled())
+    check(f"{case}: access point: Save with a password", not save.is_disabled() and bad.is_hidden())
     f.locator("#dlg-body input[value=open]").check()
     warn = f.locator("#dlg-body .warnbox.danger")
     check(f"{case}: access point: open = red warning, Save after the risk is accepted", warn.is_visible() and save.is_disabled())
@@ -593,3 +600,73 @@ def _layout(c):
               str(geo))
         row.screenshot(path=out / f"{case}-tile.png")
         row.locator("td.c-details summary").click()
+
+
+# Running installations played by a route: one device per step of the status pill
+STEPS = [
+    {"step": "backup", "n": 1, "of": 6, "seconds": 4, "usual": 60, "late": False, "give_up": None, "attempt": None,
+     "attempts": None, "rssi": None},
+    {"step": "precheck", "n": 3, "of": 6, "seconds": 24, "usual": 5, "late": True, "give_up": 60, "attempt": 3,
+     "attempts": 5, "rssi": -84},
+    {"step": "install", "n": 4, "of": 6, "seconds": 3, "usual": 30, "late": False, "give_up": 60, "attempt": None,
+     "attempts": None, "rssi": -62},
+    {"step": "verify", "n": 6, "of": 6, "seconds": 34, "usual": 30, "late": True, "give_up": 90, "attempt": None,
+     "attempts": None, "rssi": None},
+]
+
+
+def _install_steps(c):
+    """Status pill of a running installation: the step as text, blue with a spinner,
+    yellow while it takes longer than usual; the tooltip (phones: the device details)
+    explains the step, the time, the limit, the Wi-Fi signal and the versions."""
+    case, f, page, out, width = c.case, c.f, c.page, c.out, c.width
+    names = []
+
+    def state(route):
+        headers = {k: v for k, v in route.request.headers.items() if k.lower() != "if-none-match"}
+        s = route.fetch(headers=headers).json()
+        ready = [d for d in s["devices"] if d["status"] == "ready" and not d.get("planned") and not d.get("beta")]
+        for d, step in zip(ready, STEPS, strict=False):
+            d.update(status="installing", installing=True, install_step=step, ota_progress=42 if step["step"] == "install" else None)
+            names.append(d["name"])
+        route.fulfill(json=s)
+
+    page.route("**/api/state", state)
+    refresh_state(page, f)
+    pills = {}
+    for name in names[:len(STEPS)]:
+        pill = f.locator("#dev-cards tr", has_text=name).first.locator(".status-cell .pill")
+        pills[name] = (pill.inner_text().strip(), pill.get_attribute("class"), pill.locator(".spinner").count())
+    # The demo has three ready devices: the first three steps are shown
+    texts = [p[0] for p in pills.values()]
+    check(f"{case}: install steps – pill texts", len(texts) >= 3
+          and texts == ["Backup …", "Waiting for device …", "Installing 42 %", "Verifying …"][:len(texts)], str(pills))
+    late = [("p-late" in p[1]) for p in pills.values()]
+    check(f"{case}: install steps – yellow only when late, spinner", late == [False, True, False, True][:len(late)]
+          and all("p-step" in p[1] and p[2] == 1 for p in pills.values()), str(pills))
+    tones = f.evaluate("""() => { const root = getComputedStyle(document.documentElement), v = n => root.getPropertyValue(n).trim();
+      return {primary: v('--primary-color'), warning: v('--warning-color'),
+        pills: [...document.querySelectorAll('#dev-cards .status-cell .pill.p-step')].map(p => getComputedStyle(p).getPropertyValue('--tone').trim())}; }""")
+    want = [tones["warning"] if x else tones["primary"] for x in late]
+    check(f"{case}: install steps – primary colour, warning colour when late", tones["pills"] == want, str(tones))
+    page.screenshot(path=out / f"{case}-install-steps.png")
+    waiting = f.locator("#dev-cards tr", has_text=names[1]).first.locator(".status-cell .pill")
+    if width > 700:
+        waiting.hover()
+        wait_until(lambda: tip_text(f))
+        tip = tip_text(f) or ""
+        check(f"{case}: install steps – tooltip lines", all(x in tip for x in (
+            "Step 3 of 6: checking the Shelly before the update command",
+            "No answer for 24 s – longer than expected (usually under 5 s)",
+            "Attempt 3 of 5 · the app gives up after 60 s", "Wi-Fi signal at the start: −84 dBm (weak)", "Target: ")), tip)
+        page.screenshot(path=out / f"{case}-install-steps-tip.png")
+        page.mouse.move(0, 0)
+    else:
+        waiting.click()
+        f.locator("#dlg").wait_for()
+        body = dialog(f)["body"]
+        check(f"{case}: install steps – phone details show the step lines", "Step 3 of 6" in body and "Attempt 3 of 5" in body, body[:300])
+        page.screenshot(path=out / f"{case}-install-steps-details.png")
+        page.keyboard.press("Escape")
+    page.unroute("**/api/state")
+    refresh_state(page, f)
