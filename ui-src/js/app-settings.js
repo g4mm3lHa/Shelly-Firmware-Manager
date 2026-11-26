@@ -3,7 +3,7 @@
 // card "Device Passwords" (several devices).
 import {
   $, ackGate, api, attachTip, box, checkbox, closeModal, el, field, filePassword, fmt, fmtSize, formError, guarded, icon, iconButton, input,
-  mb, message, messageBody, modal, passwordCopy, section, startDownload, t, tn, ui, uploadFile, valueList,
+  mb, message, messageBody, modal, passwordCopy, section, setTip, startDownload, t, tn, ui, uploadFile, valueList,
 } from "./core.js";
 import {autoLanguage, setLanguage} from "./i18n.js";
 import {languageChoice, LANGUAGES} from "./lang.js";
@@ -14,7 +14,8 @@ import {connectionRow} from "./diagnosis.js";
 // ---------------------------------------------------------------- App settings
 // All app options, grouped into cards in this order (Title Case card heads). Saving
 // stores them in the app (settings.json) and restarts it. [key, label, type, description, group]
-// in English (same texts as translations/en.yaml), translated when shown.
+// in English (same texts as translations/en.yaml), translated when shown. The base colour
+// (group "Display") stands in the card Display with the language (languageCard).
 const OPTION_GROUPS = ["Checks", "Download Server", "Firmware & Storage", "Backups", "Logs", "Advanced"];
 const STORAGE = "Firmware & Storage";
 export const OPTION_FIELDS = [
@@ -36,6 +37,7 @@ export const OPTION_FIELDS = [
   ["max_parallel_installs", "Max. parallel installations", "number", "1–20; further approvals wait", "Advanced"],
   ["resolve_host_names", "Resolve host names", "bool", "Looks up each device's host name (<device id>.local) at every check and shows the column “Host name”; off by default", "Advanced"],
   ["pinned_certificates", "Pinned certificates", "pins", "Host below shelly.cloud + SHA-256 fingerprint; several entries per host allowed", "Advanced"],
+  ["base_color", "Base colour", "color", "Colour of the surfaces, buttons and links of this app. Default: neutral grey surfaces; buttons and links in the colour of the Home Assistant theme.", "Display"],
 ];
 // The firmware store block (export / import) stands in the card "Firmware & Storage"
 // directly before this option
@@ -145,10 +147,20 @@ function backupsNote(totals) {
       : t("{n} backups of {devices} devices are stored ({size}), encrypted.", {n: totals.count, devices: totals.devices, size});
   return stored + " " + where;
 }
+/** Help of an option: the i-icon after its name and the visually hidden description (id
+ *  "<id>-help"); the text is the tooltip of the name and the icon. Returns [icon, description]. */
+function optionHelp(lab, id, label, desc) {
+  const help = el("div", desc, "sr-only"); help.id = id + "-help";
+  const info = el("button", null, "icon help"); info.type = "button"; info.append(icon("info"));
+  info.setAttribute("aria-label", t("Help: {name}", {name: label})); info.setAttribute("aria-describedby", help.id);
+  attachTip(lab, () => desc, true); attachTip(info, () => desc, true);
+  return [info, help];
+}
 /** Build the grouped settings cards with one common Save button. */
 export function renderSettings() {
   const o = ui.options; settingsInputs = {};
   if (!o) { $("settings-form").replaceChildren(box("div", "card", box("div", "card-body", el("p", t("Loading …"), "hint")))); return; }
+  savedBase = BASE_COLORS.some(c => c[0] === o.base_color) ? o.base_color : "default"; showBase(savedBase);
   const cards = OPTION_GROUPS.map(group => {
     const form = el("div", null, "form");
     for (const [key, english, type, descEn] of OPTION_FIELDS.filter(f => f[4] === group)) {
@@ -165,11 +177,8 @@ export function renderSettings() {
       // the download base URL). On wide screens the block is "display: contents", so the
       // name/control grid is unchanged. The help text is a tooltip of the name and the
       // icon; it stays in the page (visually hidden) as description of the control.
-      const help = el("div", desc, "sr-only"); help.id = id + "-help";
+      const [info, help] = optionHelp(lab, id, label, desc);
       control.setAttribute("aria-describedby", help.id);
-      const info = el("button", null, "icon help"); info.type = "button"; info.append(icon("info"));
-      info.setAttribute("aria-label", t("Help: {name}", {name: label})); info.setAttribute("aria-describedby", help.id);
-      attachTip(lab, () => desc, true); attachTip(info, () => desc, true);
       let warn = null, suggest = null;
       if (key === "download_base_url") {   // live hints while typing (address, port), no blocking
         warn = el("div", null, "desc warnc"); warn.id = id + "-warn"; warn.setAttribute("role", "status");
@@ -271,6 +280,7 @@ function optionChanges() {
     else if (type === "number") value = Number(input.value);
     else if (type === "port") value = input.value.trim() === "" ? null : Number(input.value);
     else if (type === "pins") value = input.values();
+    else if (type === "color") value = input.querySelector("input:checked").value;
     else value = input.value.trim();
     // A missing optional switch (allow_downgrade, beta_firmware) counts as off
     const old = type === "pins" ? o[key] || [] : type === "text" || type === "port" ? o[key] ?? (type === "port" ? null : "") :
@@ -329,7 +339,39 @@ function storeBlock() {
     el("p", t("Move the complete firmware store to another Home Assistant instance: export it as one ZIP file (sealed with a password) and import it there. The backups of the device settings are part of the export. Device passwords are not exported."), "hint"),
     box("div", "store-btns", ex, im));
 }
-/** Card "Display": language of this page, stored in this browser only. */
+// Base colour of the app (option base_color): the server writes the saved value into the
+// root element (data-base-color, see style.css); a dot of the card Display previews its colour
+// there at once. Saving keeps it; leaving the tab (its unsaved changes are dropped) or
+// rendering the form again from the saved options shows the saved colour again.
+const BASE_COLORS = [["default", t("Default")], ["blue", t("Blue")], ["teal", t("Teal")], ["green", t("Green")],
+  ["violet", t("Violet")], ["orange", t("Orange")]];
+let savedBase = document.documentElement.dataset.baseColor;
+const showBase = value => { document.documentElement.dataset.baseColor = value; };
+/** Show the saved base colour again (the Settings tab is left). */
+export function resetBaseColor() { if (savedBase) showBase(savedBase); }
+/** Row "Base colour": one radio group of round swatches (name as accessible name and tooltip),
+ *  the name of the chosen one after the dots. */
+function baseColorRow() {
+  const [, english, , descEn] = OPTION_FIELDS.find(f => f[0] === "base_color");
+  const label = t(english), desc = t(descEn), id = "opt-base_color";
+  const lab = el("label", label); lab.id = id + "-label";
+  const [info, help] = optionHelp(lab, id, label, desc);
+  const group = box("div", "swatches"); group.id = id;
+  group.setAttribute("role", "radiogroup"); group.setAttribute("aria-labelledby", lab.id); group.setAttribute("aria-describedby", help.id);
+  const current = savedBase || "default", name = el("span", "", "swatch-name"); name.setAttribute("aria-hidden", "true");
+  for (const [code, text] of BASE_COLORS) {
+    const dot = input("radio", {name: "base-color", value: code, checked: code === current});
+    dot.setAttribute("aria-label", text); setTip(dot, text);
+    dot.addEventListener("change", () => { showBase(code); name.textContent = text; });
+    if (dot.checked) name.textContent = text;
+    group.append(box("label", "swatch", dot));
+  }
+  group.append(name);
+  settingsInputs.base_color = group;
+  return box("div", "set-field t-color", box("div", "set-name", lab, info), box("div", "set-control", group), help);
+}
+/** Card "Display": language of this page (stored in this browser only) and the base colour
+ *  of the app (an app option, saved with "Save settings"). */
 function languageCard() {
   const select = el("select"); select.id = "set-language";
   for (const [code, name] of LANGUAGES) {
@@ -341,8 +383,8 @@ function languageCard() {
   select.onchange = () => setLanguage(select.value);
   const lab = el("label", t("Language")); lab.htmlFor = select.id;
   return box("div", "card", box("div", "card-head", el("h2", t("Display"))), box("div", "card-body",
-    box("div", "form", box("div", "set-field t-select", box("div", "set-name", lab), box("div", "set-control", select))),
-    el("p", t("Applies at once and only in this browser – no “Save settings” needed. Logs, error messages and the documentation stay English."), "hint lang-note")));
+    box("div", "form", box("div", "set-field t-select", box("div", "set-name", lab), box("div", "set-control", select)), baseColorRow()),
+    el("p", t("The language applies at once and only in this browser – no “Save settings” needed. The base colour is saved with “Save settings” for all browsers. Logs, error messages and the documentation stay English."), "hint lang-note")));
 }
 /** Settings card that opens the dialog for passwords of several devices. */
 function passwordsCard() {

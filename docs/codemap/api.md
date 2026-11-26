@@ -8,7 +8,7 @@ Part of `docs/CODEMAP.md`; read when you change routes: the table and the middle
 
 | Route | Handler → Manager |
 |---|---|
-| `GET /` | page (CSRF token, asset version) |
+| `GET /` | page (CSRF token, asset version, saved base colour as `data-base-color` of the root element) |
 | `GET /api/state` | `public_state` (ETag / 304; `start_id` is new with every app start) |
 | `POST /api/scan` | `reserve_check` + `scan` (background) |
 | `POST /api/devices/{id}/check` | `reserve_check("device")` + `check_device` |

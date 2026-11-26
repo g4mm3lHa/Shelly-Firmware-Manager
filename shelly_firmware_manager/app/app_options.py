@@ -39,6 +39,12 @@ BOOLS = (
     "keep_installed",
     "backup_before_install",
 )
+# Options with a fixed list of values; the first value is the default
+CHOICES = {
+    # Base colour of the UI (Settings tab, card Display): "default" keeps the primary colour
+    # of the Home Assistant theme with neutral surfaces, a colour replaces the primary colour
+    "base_color": ("default", "blue", "teal", "green", "violet", "orange"),
+}
 DEFAULTS = {
     "check_interval_days": 7,
     "check_time": "02:45",
@@ -53,6 +59,7 @@ DEFAULTS = {
     "backup_keep": 10,
     "restrict_downloads_to_devices": True,
     "max_parallel_installs": 5,
+    **{key: values[0] for key, values in CHOICES.items()},
     # Pins for the Shelly servers with the in-house Allterco CA (see DOCS.md, Certificate pinning)
     "pinned_certificates": [
         {
@@ -69,7 +76,7 @@ DEFAULTS = {
 # is ignored everywhere, so an unknown (e.g. removed) key can never reach the UI, the log
 # or the settings file – e.g. the removed list of allowed Gen1 types (gen1_allowed_types)
 # of older versions or the hint field "settings" of the Configuration tab.
-KEYS = frozenset({*INT_RANGES, *BOOLS, *DEFAULTS, "download_base_url", "pinned_certificates"})
+KEYS = frozenset({*INT_RANGES, *BOOLS, *CHOICES, *DEFAULTS, "download_base_url", "pinned_certificates"})
 # Former default/example of download_base_url (release candidates of 3.0.0). The option
 # is optional without default; this value only counts after an explicit confirmation.
 LEGACY_DOWNLOAD_BASE = "http://192.168.178.50:8098"
@@ -162,6 +169,10 @@ def _validate(key: str, value: Any) -> Any:
     if key in BOOLS:
         if not isinstance(value, bool):
             raise ValueError(f"{key}: true or false expected")
+        return value
+    if key in CHOICES:
+        if not isinstance(value, str) or value not in CHOICES[key]:
+            raise ValueError(f"{key}: one of {', '.join(CHOICES[key])} expected")
         return value
     if key == "download_base_url":
         # Printable ASCII only, no spaces: nothing the Shelly or a log line could misread
