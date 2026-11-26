@@ -23,6 +23,7 @@ with the limits and the error handling of the shelly module.
 """
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import time
@@ -689,12 +690,8 @@ async def _write_config(target: Target, rows: list[Row], errors: dict[str, str])
                 errors[group[0]["key"]] = error_text(err)
                 continue
         for row in group:
-            try:
+            with _noted(errors, row["key"]):
                 restart |= await _set_config(target, component, [row])
-            except AuthError:
-                raise
-            except ShellyError as err:
-                errors[row["key"]] = error_text(err)
     return restart
 
 
@@ -711,6 +708,19 @@ def _chunks(code: str) -> Iterator[str]:
         yield code[start:]
 
 
+@contextlib.contextmanager
+def _noted(errors: dict[str, str], key: str) -> Iterator[None]:
+    """Write of one row: a refusal of the device (ShellyError) is noted under the row's
+    key and the restore goes on; an authentication error ends the restore, and any other
+    exception (lost connection, timeout) propagates as well."""
+    try:
+        yield
+    except AuthError:
+        raise
+    except ShellyError as err:
+        errors[key] = error_text(err)
+
+
 async def _stop_script(target: Target, script_id: int) -> None:
     """Stop a script before it is written or removed (one that does not run answers with an error)."""
     try:
@@ -725,7 +735,7 @@ async def _write_scripts(target: Target, rows: list[Row], errors: dict[str, str]
     """Make the scripts equal to the backup: remove, create, write code and the start
     at boot. Written scripts stay stopped – _start_scripts starts what ran in the backup."""
     for row in sorted(rows, key=lambda r: r["state"] != "extra"):  # removing first frees the places
-        try:
+        with _noted(errors, row["key"]):
             script_id = row["id"]
             if row["state"] == "extra":
                 await _stop_script(target, script_id)
@@ -743,10 +753,6 @@ async def _write_scripts(target: Target, rows: list[Row], errors: dict[str, str]
                     await target.rpc("Script.PutCode", {"id": script_id, "code": chunk, "append": number > 0})
             config = {"name": item["name"], "enable": item.get("enable") is True}
             await target.rpc("Script.SetConfig", {"id": script_id, "config": config})
-        except AuthError:
-            raise
-        except ShellyError as err:
-            errors[row["key"]] = error_text(err)
     return False
 
 
@@ -775,7 +781,7 @@ async def _write_list(target: Target, rows: list[Row], errors: dict[str, str], n
     """Make the schedules or webhooks equal to the backup (namespace "Schedule" or
     "Webhook"): remove, change, create."""
     for row in sorted(rows, key=lambda r: r["state"] != "extra"):  # removing first frees the places
-        try:
+        with _noted(errors, row["key"]):
             if row["state"] == "extra":
                 await target.rpc(f"{namespace}.Delete", {"id": row["id"]})
                 continue
@@ -784,10 +790,6 @@ async def _write_list(target: Target, rows: list[Row], errors: dict[str, str], n
                 await target.rpc(f"{namespace}.Update", {**body, "id": row["id"]})
             else:
                 await target.rpc(f"{namespace}.Create", body)
-        except AuthError:
-            raise
-        except ShellyError as err:
-            errors[row["key"]] = error_text(err)
     return False
 
 
@@ -838,12 +840,8 @@ async def _write_gen1(target: Target, rows: list[Row], errors: dict[str, str]) -
                 errors[group[0][0]["key"]] = error_text(err)
                 continue
         for row, pair in group:
-            try:
+            with _noted(errors, row["key"]):
                 await target.get(endpoint, [pair])
-            except AuthError:
-                raise
-            except ShellyError as err:
-                errors[row["key"]] = error_text(err)
     return False
 
 
@@ -854,12 +852,8 @@ async def _write_actions(target: Target, rows: list[Row], errors: dict[str, str]
         enabled = "true" if item["enabled"] else "false"
         params = [("index", str(row["index"])), ("name", row["name"]), ("enabled", enabled)]
         params += [("urls[]", url) for url in item["urls"]] or [("urls[]", "")]
-        try:
+        with _noted(errors, row["key"]):
             await target.get("/settings/actions", params)
-        except AuthError:
-            raise
-        except ShellyError as err:
-            errors[row["key"]] = error_text(err)
     return False
 
 

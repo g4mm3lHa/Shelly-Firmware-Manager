@@ -21,14 +21,25 @@ import data_paths
 import shelly
 import shelly_cloud
 import shelly_net
-from shelly import AuthError, DeviceAuth, ShellyError, error_text
-
 from manager_checks import Checks
 from manager_core import (
-    ACTIVITY_RESTARTING, DOWNLOAD_BASE_MESSAGES, PENDING, Device, STATUS_ASLEEP, STATUS_AVAILABLE, STATUS_CURRENT,
-    STATUS_ERROR, STATUS_INSTALLING, STATUS_READY, STATUS_UNCLEAR, holds_file, markdown_text, section_of,
+    ACTIVITY_RESTARTING,
+    DOWNLOAD_BASE_MESSAGES,
+    PENDING,
+    STATUS_ASLEEP,
+    STATUS_AVAILABLE,
+    STATUS_CURRENT,
+    STATUS_ERROR,
+    STATUS_INSTALLING,
+    STATUS_READY,
+    STATUS_UNCLEAR,
+    Device,
+    holds_file,
+    markdown_text,
+    section_of,
     unexpected_text,
 )
+from shelly import AuthError, DeviceAuth, ShellyError, error_text
 
 log = logging.getLogger("sfm.manager")
 

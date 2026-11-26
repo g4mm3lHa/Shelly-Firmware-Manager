@@ -2,9 +2,10 @@
 
 Handlers is the base class of every area: it holds the manager and the function that
 runs work detached from the request (both given by web_ui.build_ui_app), and checks
-the device ID of a URL. json_body, guarded and translated turn bad input and refused
-actions into HTTP answers, so a handler never answers with the text of an unexpected
-error (that one goes to the middleware: 500 without details, see web_ui.security).
+the device ID of a URL. json_body, confirmed_body, unconfirmed, guarded and translated
+turn bad input, missing confirmations and refused actions into HTTP answers, so a
+handler never answers with the text of an unexpected error (that one goes to the
+middleware: 500 without details, see web_ui.security).
 """
 
 import re
@@ -43,6 +44,21 @@ async def json_body(request: web.Request) -> dict[str, Any]:
         raise web.HTTPBadRequest(text="Invalid JSON") from None
     if not isinstance(body, dict):
         raise web.HTTPBadRequest(text="JSON object expected")
+    return body
+
+
+def unconfirmed() -> web.HTTPBadRequest:
+    """400 answer of a write without one of its confirmation flags (or with a flag that
+    does not match, such as the SHA-256 of an approved update)."""
+    return web.HTTPBadRequest(text="Confirmation incomplete")
+
+
+async def confirmed_body(request: web.Request) -> dict[str, Any]:
+    """JSON body of a write that needs {"confirm": true} (see json_body); without it -> 400
+    (see unconfirmed). A handler checks the IDs of its URL before it reads the body."""
+    body = await json_body(request)
+    if body.get("confirm") is not True:
+        raise unconfirmed()
     return body
 
 

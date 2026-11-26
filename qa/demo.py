@@ -23,12 +23,14 @@ diagnosis = scenario == "diagnosis"
 if diagnosis:
     scenario = "features"
 sys.path.insert(0, app_dir)
+import logging
+
 import data_paths
 import manager
-from shelly import ShellyError
 import web_ui
 from aiohttp import web
-import logging
+from shelly import ShellyError
+
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 data = Path(tempfile.mkdtemp())

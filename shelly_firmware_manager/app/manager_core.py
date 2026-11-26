@@ -33,9 +33,9 @@ import re
 import secrets
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from urllib.parse import urlsplit
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import urlsplit
 
 import aiohttp
 import app_options
@@ -59,7 +59,6 @@ from shelly import (
 )
 from shelly_net import resolve_lan_address
 from tls import CertificatePins
-
 
 log = logging.getLogger("sfm.manager")
 
@@ -154,6 +153,22 @@ def holds_file(dev: Device) -> bool:
 SUPERVISOR = "http://supervisor"  # Supervisor API (Core API proxy below /core)
 
 SUPERVISOR_TIMEOUT = aiohttp.ClientTimeout(total=15)
+
+
+def supervisor_headers(token: str) -> dict[str, str]:
+    """Headers of a request to the Supervisor API (and the Core API proxy below /core)
+    with the Supervisor token of this app; never logged."""
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def supervisor_get(session: aiohttp.ClientSession, token: str, path: str) -> Any:
+    """JSON answer of a GET to the Supervisor API at path (for example /addons/self/info),
+    whatever its content type. An HTTP error status raises aiohttp.ClientResponseError, a
+    body that is no JSON a ValueError; the caller logs and handles both."""
+    headers = supervisor_headers(token)
+    async with session.get(f"{SUPERVISOR}{path}", headers=headers, timeout=SUPERVISOR_TIMEOUT) as resp:
+        resp.raise_for_status()
+        return await resp.json(content_type=None)
 
 # Largest WebSocket message accepted from Home Assistant: the device registry lists the
 # devices of all integrations in one message (aiohttp's default of 4 MiB is too small
@@ -570,10 +585,10 @@ class ManagerCore:
         # Backup made right before the running installation of a device (ID), for the
         # comparison after the update (see Backups.compare_after_update)
         self._before_backups: dict[str, str] = {}
-        self._upload = Pending()  # staged manual upload (see stage_upload)
+        self._upload = Pending()  # staged manual upload (see stage_upload_part)
         self._upload_lock = asyncio.Lock()  # one upload transfer at a time
         self._export = Pending()  # prepared store export (see prepare_export)
-        self._import = Pending()  # staged store import (see stage_import)
+        self._import = Pending()  # staged store import (see stage_import_part)
         self._import_lock = asyncio.Lock()  # one import transfer / check / confirmation at a time
         self._import_storing = False  # confirm_import is writing its files to the store
         # File transfers in parts (upload, import) that are not complete yet, by kind;
@@ -940,7 +955,7 @@ class ManagerCore:
         try:
             async with self.session.post(
                 f"{SUPERVISOR}/core/api/services/persistent_notification/create",
-                headers={"Authorization": f"Bearer {self.token}"},
+                headers=supervisor_headers(self.token),
                 json={"title": title, "message": message, "notification_id": notification_id},
                 timeout=SUPERVISOR_TIMEOUT,
             ) as resp:
@@ -954,13 +969,7 @@ class ManagerCore:
         """Version of Home Assistant (Core API /config), None if it cannot be read
         (only for "Details for a bug ticket")."""
         try:
-            async with self.session.get(
-                f"{SUPERVISOR}/core/api/config",
-                headers={"Authorization": f"Bearer {self.token}"},
-                timeout=SUPERVISOR_TIMEOUT,
-            ) as resp:
-                resp.raise_for_status()
-                version = (await resp.json(content_type=None)).get("version")
+            version = (await supervisor_get(self.session, self.token, "/core/api/config")).get("version")
         except (TimeoutError, aiohttp.ClientError, ValueError, AttributeError) as err:
             log.warning("Version of Home Assistant not available: %s", err or type(err).__name__)
             return None
@@ -971,7 +980,7 @@ class ManagerCore:
         try:
             async with self.session.post(
                 f"{SUPERVISOR}{path}",
-                headers={"Authorization": f"Bearer {self.token}"},
+                headers=supervisor_headers(self.token),
                 json=body,
                 timeout=SUPERVISOR_TIMEOUT,
             ) as resp:
@@ -990,13 +999,8 @@ class ManagerCore:
         open to every app); while it is not available the list of apps is returned."""
         if self.app_slug is None:
             try:
-                async with self.session.get(
-                    f"{SUPERVISOR}/addons/self/info",
-                    headers={"Authorization": f"Bearer {self.token}"},
-                    timeout=SUPERVISOR_TIMEOUT,
-                ) as resp:
-                    resp.raise_for_status()
-                    slug = ((await resp.json(content_type=None)).get("data") or {}).get("slug")
+                info = await supervisor_get(self.session, self.token, "/addons/self/info")
+                slug = (info.get("data") or {}).get("slug")
             except (TimeoutError, aiohttp.ClientError, ValueError, AttributeError) as err:
                 log.warning("App info not available from the Supervisor: %s", err or type(err).__name__)
                 return APP_LIST_PAGE
@@ -1011,13 +1015,8 @@ class ManagerCore:
         "network": {"8098/tcp": port or null}, open to every app). Sets host_port and
         host_port_known; a failure is logged and leaves the port unknown."""
         try:
-            async with self.session.get(
-                f"{SUPERVISOR}/addons/self/info",
-                headers={"Authorization": f"Bearer {self.token}"},
-                timeout=SUPERVISOR_TIMEOUT,
-            ) as resp:
-                resp.raise_for_status()
-                network = ((await resp.json(content_type=None)).get("data") or {}).get("network")
+            info = await supervisor_get(self.session, self.token, "/addons/self/info")
+            network = (info.get("data") or {}).get("network")
         except (TimeoutError, aiohttp.ClientError, ValueError, AttributeError) as err:
             log.warning("Host port not readable from the Supervisor: %s", err or type(err).__name__)
             self.host_port_known = False

@@ -8,7 +8,7 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
   with explanation. Ignored: own group, yellow "Ignored" label, no install until
   resumed; name, IP, firmware and icons dimmed (70 %), status and "Ignored" at full
   strength (2026-11-22, L3).
-- **Columns (2026-11-22, mockup `reports/3.8.0-design/M7`):** round icon at the right end
+- **Columns (2026-11-22):** round icon at the right end
   of the toolbar (desktop only); popover like sort and filter: title "Columns", one entry
   per data column with ✓ while shown (a click keeps the popover open), "Reset columns"
   last; blue dot on the icon while the shown columns or their order differ from the
@@ -136,13 +136,16 @@ as the UI change). Read when you change the Devices tab, its action icons, devic
   without a password of 8 to 63 characters (the Shelly refuses others; the server checks
   it too, live test 3.13.0-rc1) or the accepted risk; the app checks nothing else, a
   refusal of the Shelly stays in the form with the inputs, as "Device reports: <message>
-  (code n)". The password is never stored or logged; the log names "new password" and
+  (code n)". Two refusals of the form sent alone read differently (approved 2026-11-26):
+  an open access point refused by a Shelly that had a password reads "An open access point
+  is no longer possible on this Shelly once a password was set – use a password instead
+  (device answer: …)"; another refusal with code -103 reads "The Shelly refused these
+  access point settings as invalid (device answer: …)". The password is never stored or logged; the log names "new password" and
   only settings that change (no "on → on"). Gen1 stays locked (A7).
 - Websocket debug popup: explanation, link `<web_url>#/diagnostics` (new tab,
   noopener), warning below firmware 1.0.0.
 
 ## Cloud, Bluetooth proxy, offer delay, missing Shellys, installation (3.9.0, mockups `3.9.0`, approved 2026-11-22)
-Wordings: `mockups/3.9.0/TEXTE.md`.
 - **Cloud (F13, F14):** tenth icon of the action column after Bluetooth (MDI cloud),
   yellow while on, grey off, "?" unknown; tooltip "Cloud: on – connected to the Shelly
   cloud" / "… – not connected at the moment" / "Cloud: off"; phones: button "Cloud" in the
@@ -258,7 +261,7 @@ Wordings: `mockups/3.9.0/TEXTE.md`.
   (short names; the filter entries keep "Cloud on", "Access point on", "Debug log on"), each
   only while above 0 (an active filter keeps its tile); unknown states do not count; all 0:
   one green check tile "No findings". Phones (≤ 700 px): symbol and number only, the name in
-  the tooltip (variant A, `mockups/3.12.0-rc2`). A click sets the filter, a second click
+  the tooltip (variant A). A click sets the filter, a second click
   clears it (tile marked while active). Filter entries "Access point on" and "Debug log on"
   after "Cloud on".
 - **Area (C1, 7 a, 8 c):** column "Area" after "Device" while at least one device has an

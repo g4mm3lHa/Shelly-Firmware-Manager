@@ -263,6 +263,15 @@ class DeviceAuth:
     ha1: str | None = field(default=None, repr=False)
     realm: str | None = None
 
+    def _ha1_for(self, realm: str) -> str:
+        """HA1 for the realm of a challenge: a stored HA1 only for the device ID it belongs
+        to (another realm is refused), else derived from the password."""
+        if self.ha1:
+            if realm != self.realm:
+                raise ShellyError("Stored device password belongs to another device ID – enter it again")
+            return self.ha1
+        return gen2_ha1(realm, self.password or "")
+
     def authorization(self, challenge: str, method: str, uri: str) -> str:
         """Authorization header answering the device's WWW-Authenticate challenge."""
         scheme, _, params = challenge.partition(" ")
@@ -278,12 +287,7 @@ class DeviceAuth:
             raise ShellyError("Unexpected authentication request from the Shelly")
         if not realm or not nonce or "auth" not in [q.strip() for q in values.get("qop", "auth").split(",")]:
             raise ShellyError("Incomplete authentication request from the Shelly")
-        if self.ha1:
-            if realm != self.realm:
-                raise ShellyError("Stored device password belongs to another device ID – enter it again")
-            ha1 = self.ha1
-        else:
-            ha1 = gen2_ha1(realm, self.password or "")
+        ha1 = self._ha1_for(realm)
         cnonce, nc = secrets.token_hex(8), "00000001"
         response = _sha256(f"{ha1}:{nonce}:{nc}:{cnonce}:auth:{_sha256(f'{method}:{uri}')}")
         return (
@@ -306,12 +310,7 @@ class DeviceAuth:
         realm, nonce = str(challenge.get("realm") or ""), challenge.get("nonce")
         if not realm or nonce in (None, "") or not isinstance(nonce, (str, int)) or isinstance(nonce, bool):
             raise ShellyError("Incomplete authentication request from the Shelly")
-        if self.ha1:
-            if realm != self.realm:
-                raise ShellyError("Stored device password belongs to another device ID – enter it again")
-            ha1 = self.ha1
-        else:
-            ha1 = gen2_ha1(realm, self.password or "")
+        ha1 = self._ha1_for(realm)
         cnonce, nc = secrets.randbelow(2**31), "00000001"
         response = _sha256(f"{ha1}:{nonce}:{nc}:{cnonce}:auth:{_sha256(WS_HA2_INPUT)}")
         return {

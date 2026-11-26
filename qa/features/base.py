@@ -6,9 +6,6 @@ import sys
 import time
 import zipfile
 
-
-
-
 IDLE, MISSING, FEATURES, FIRST, PUBLIC, BACKUPS = (
     f"http://127.0.0.1:{p}" for p in (8801, 8804, 8805, 8806, 8807, 8808))
 OVERFLOW_JS = "document.documentElement.scrollWidth - document.documentElement.clientWidth"

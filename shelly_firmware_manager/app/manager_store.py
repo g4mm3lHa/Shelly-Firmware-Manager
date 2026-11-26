@@ -27,12 +27,20 @@ import shelly
 import shelly_cloud
 import store_transfer
 from changelog import marked
-from shelly import ShellyError, clip
-
 from manager_core import (
-    DOWNLOAD_BASE_MESSAGES, Device, FirmwareMeta, ManagerCore, SOURCE_DOWNLOAD,
-    SOURCE_IMPORT, SOURCE_UPLOAD, STATUS_AVAILABLE, STATUS_CURRENT, STATUS_INSTALLING, holds_file,
+    DOWNLOAD_BASE_MESSAGES,
+    SOURCE_DOWNLOAD,
+    SOURCE_IMPORT,
+    SOURCE_UPLOAD,
+    STATUS_AVAILABLE,
+    STATUS_CURRENT,
+    STATUS_INSTALLING,
+    Device,
+    FirmwareMeta,
+    ManagerCore,
+    holds_file,
 )
+from shelly import ShellyError, clip
 
 log = logging.getLogger("sfm.manager")
 
@@ -611,20 +619,18 @@ class FirmwareStore(ManagerCore):
             for name, meta in ordered
         ]
 
-    def _downgrade_candidates(self) -> dict[str, set[tuple[int, ...]]]:
-        """Stored final Gen2+ versions per firmware ID whose file exists – computed
-        once per state request, so the row menu knows whether a downgrade is possible
-        without one request per device (same rules as downgrade_versions)."""
+    @staticmethod
+    def _downgrade_candidates(
+        kept: dict[tuple[str, tuple[int, ...]], FirmwareMeta],
+    ) -> dict[str, set[tuple[int, ...]]]:
+        """Stored final Gen2+ versions per firmware ID whose file exists, taken from kept
+        (the result of _stored_versions, computed once per state request), so the row
+        menu knows whether a downgrade is possible without one request per device (same
+        rules as downgrade_versions)."""
         stored: dict[str, set[tuple[int, ...]]] = {}
-        for name, meta in self.firmware.items():
-            if (meta.get("gen") or 1) < 2 or self._adopted_unconfirmed(meta):
-                continue
-            try:
-                parsed = shelly.parse_version(meta.get("version"))
-            except ShellyError:
-                continue
-            if parsed[3] == 3 and (data_paths.FW_DIR / name).is_file():
-                stored.setdefault(str(meta.get("type")), set()).add(parsed)
+        for fw_type, parsed in kept:
+            if parsed[3] == 3:
+                stored.setdefault(fw_type, set()).add(parsed)
         return stored
 
     @staticmethod

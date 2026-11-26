@@ -3,7 +3,7 @@
 Part of `docs/UI_DECISIONS.md` (approved, binding; change only with approval, in the same commit
 as the UI change). Read when you change a dialog, the toolbar, card heads or tooltips (all tabs).
 
-## Building blocks (3.11.0, `reports/optimierung-analyse` F1 a, approved 2026-11-23)
+## Building blocks (3.11.0, approved 2026-11-23)
 - New UI builds from the building blocks of `ui-src/js/core.js`, not from its own copies:
   `confirmDialog` (confirmation; red button unless `kind` says otherwise; an error keeps
   title and icon), `gateButton` / `ackGate` (a condition or a tick enables the action
@@ -18,7 +18,7 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   hidden, "Version a → b", model with "Gen n", small SHA-256; buttons unchanged.
 - **Dialog title icon** (20 px, `modal(…, titleIcon)`): changelog, delete (red), upload
   (all steps incl. errors), installation dialog (red chip), downgrade (history icon).
-- **Dialog rules (2026-11-22, `reports/3.8.0-design` U8, U9, T4):** (a) every delete dialog
+- **Dialog rules (2026-11-22):** (a) every delete dialog
   has the red trash icon before the title ("Delete firmware?", "Delete unknown file?",
   "Delete log entry?", "Delete all logs?", "Remove from list?"), every downgrade dialog the
   downgrade (history) icon, in all steps incl. errors. (b) Multi-step dialogs: step 1 is
@@ -26,7 +26,7 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   error dialog keeps the title (and icon) of the dialog it comes from (e.g. "Install
   update?", "Delete firmware?", "Save settings?"); errors without a dialog keep their
   short title ("Check", "Ignore", "Settings").
-- **Input errors (3.11.0, `reports/optimierung-analyse` F3 a, approved 2026-11-23):** an
+- **Input errors (3.11.0, approved 2026-11-23):** an
   error about the entries of a form step stays in that step, below its content (red text,
   announced), and every entry stays as typed or chosen: a check before sending (no file,
   no password, passwords differ, no device) and a refusal of the sent entries (upload,
@@ -41,11 +41,11 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   status pill right, sections Firmware, Device (Model with "Gen n", Firmware ID, NTP;
   empty rows hidden) and History. The phone list ("Details" in the tile) shows the same
   values.
-- **Keyboard (3.11.0, `reports/optimierung-analyse` F5 a, approved 2026-11-23):** a redraw
+- **Keyboard (3.11.0, approved 2026-11-23):** a redraw
   of a tab keeps the keyboard focus on the same control (rows and tiles are matched by
   their `data-key`, the control by its label). A dialog is named by its title and starts
   with the focus on its first control (the close icon) unless it focuses a field itself
-  (`reports/3.11.0/FRAGEN_rc2.md` 1 b, approved 2026-11-23); a step that removes the
+  (approved 2026-11-23); a step that removes the
   focused control moves the focus there too; closing returns it to the control that
   opened the dialog. The X and Escape do what "Cancel" / "Close" of the step does
   (discard a staged upload or import, return to the list of the device's backups).
@@ -126,7 +126,7 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   device data), its place is kept so the header does not move when the tab changes; all
   other tabs show it.
 
-## Texts, controls and design basics (2026-11-22, `reports/3.8.0-design`)
+## Texts, controls and design basics (2026-11-22)
 - **Spelling (T1–T3, T6):** card titles and status labels in Title Case; menus, buttons,
   filters and tags in sentence case with a capital start ("Device details", "Latest",
   "Intermediate"). "Gen 2" for one device; "Gen1"/"Gen2+" only as a group in running text.
@@ -193,12 +193,12 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   dark fallback colours; the theme colour is used pure only for lines, fills and icons.
   Icons that are links or mark a chosen entry (link icons, tick of the chosen filter,
   "Kept" pin, opened toolbar icon) use the link text colour.
-- **CSS building blocks (3.11.0, `reports/optimierung-analyse` F1 a, approved 2026-11-23):**
+- **CSS building blocks (3.11.0, approved 2026-11-23):**
   `ui-src/style.css` is one file in the order tokens, base, building blocks, page head
   and tabs, then one section per tab with its own phone block. A coloured state reads
-  `--tone` (pills, action icons, status strips, message and check-list icons), set by
-  `.tone-success|warning|error|primary` or a state class mapped there; neutral is the
-  default. Rows of a list in a dialog share one line rule (fine line, none under the last
+  `--tone` (pills, action icons, status strips, message and check-list icons), set by a
+  state class mapped to a tone (`p-`, `s-`/`c-`, `t-`, `msg-`, `prechk`); there is no
+  separate tone class. Neutral is the default (2026-11-26). Rows of a list in a dialog share one line rule (fine line, none under the last
   row), rows of a tab list one band rule; phone tiles have the card background, no line
   and the tile radius (one rule
   for Devices and Schedules; Logs and Backups set it in their tab, after their own rules

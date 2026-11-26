@@ -620,7 +620,8 @@ async def test_http_schedules_crud_and_run_now(client, mgr, net, actions):
     changed = mgr.events.entries[-1]
     assert changed["event"] == "changed" and "Switched off" in changed["changes"]
     assert (await client.post("/api/schedules/ffffffffffff", json=schedule_data(), headers=hdr)).status == 404
-    assert (await client.post(f"/api/schedules/{sid}/run", json={}, headers=hdr)).status == 400
+    r = await client.post(f"/api/schedules/{sid}/run", json={}, headers=hdr)
+    assert r.status == 400 and await r.text() == "Confirmation incomplete"
     mgr.reserve_check("all")
     assert (await client.post(f"/api/schedules/{sid}/run", json={"confirm": True}, headers=hdr)).status == 409
     mgr.progress = None
@@ -629,7 +630,8 @@ async def test_http_schedules_crud_and_run_now(client, mgr, net, actions):
     for _ in range(20):
         await asyncio.sleep(0)
     assert mgr.events.entries[-1]["event"] == "run" and len(actions["restart"]) == 3
-    assert (await client.post(f"/api/schedules/{sid}/delete", json={}, headers=hdr)).status == 400
+    r = await client.post(f"/api/schedules/{sid}/delete", json={}, headers=hdr)
+    assert r.status == 400 and await r.text() == "Confirmation incomplete"
     assert (await client.post(f"/api/schedules/{sid}/delete", json={"confirm": True}, headers=hdr)).status == 200
     assert mgr.schedules == [] and mgr.events.entries[-1]["event"] == "deleted"
 

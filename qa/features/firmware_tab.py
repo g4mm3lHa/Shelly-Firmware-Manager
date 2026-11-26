@@ -1,7 +1,16 @@
 """Firmware store suite, Firmware tab area: downgrade, rows, sorting, delete and upload (demo "features" on 8805)."""
 
 from features.base import (
-    OVERFLOW_JS, check, dialog, filter_entries, firmware_zip, menu_items, pick_filter, refresh_state, tip_text, wait_until,
+    OVERFLOW_JS,
+    check,
+    dialog,
+    filter_entries,
+    firmware_zip,
+    menu_items,
+    pick_filter,
+    refresh_state,
+    tip_text,
+    wait_until,
 )
 
 

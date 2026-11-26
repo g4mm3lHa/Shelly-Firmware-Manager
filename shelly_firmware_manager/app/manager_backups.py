@@ -33,10 +33,9 @@ import store_transfer
 import timetable
 from backup_store import BackupError, normalize_mac
 from events import worst
-from shelly import AuthBlockedError, AuthError, ShellyError, clip, error_text
-
-from manager_core import Device, STATUS_ERROR, STATUS_INSTALLING, severity_of, unexpected_text, unreachable
+from manager_core import STATUS_ERROR, STATUS_INSTALLING, Device, severity_of, unexpected_text, unreachable
 from manager_devices import DeviceSettings
+from shelly import AuthBlockedError, AuthError, ShellyError, clip, error_text
 
 log = logging.getLogger("sfm.manager")
 

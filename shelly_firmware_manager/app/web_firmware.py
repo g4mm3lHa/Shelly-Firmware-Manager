@@ -12,10 +12,10 @@ import re
 import data_paths
 from aiohttp import web
 from events import user_from
+from manager import Manager
 from manager_transfer import PART_MAX, TRANSFER_ID_RE
 from shelly import ShellyError
 from shelly_cloud import FW_NAME_RE, MAX_FW_SIZE
-from manager import Manager
 from web_base import (
     EXPORT_TOKEN_RE,
     SECURITY_HEADERS,

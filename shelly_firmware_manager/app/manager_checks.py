@@ -43,9 +43,7 @@ import shelly
 import shelly_cloud
 import shelly_net
 from events import worst
-from shelly import AuthError, HttpsRequiredError, ShellyError, clip, error_text, plain
-from shelly_net import AddressError
-
+from manager_backups import Backups
 from manager_core import (
     ACTIVITY_CHECKING,
     ACTIVITY_DOWNLOADING,
@@ -53,7 +51,6 @@ from manager_core import (
     ACTIVITY_WAITING,
     BATTERY_FROM_DEVICE,
     BATTERY_FROM_HA,
-    Device,
     SOURCE_DOWNLOAD,
     SOURCE_IMPORT,
     SOURCE_UPLOAD,
@@ -63,13 +60,15 @@ from manager_core import (
     STATUS_ERROR,
     STATUS_READY,
     STATUS_SKIPPED,
+    Device,
     holds_file,
     markdown_text,
     severity_of,
     unexpected_text,
     unreachable,
 )
-from manager_backups import Backups
+from shelly import AuthError, HttpsRequiredError, ShellyError, clip, error_text, plain
+from shelly_net import AddressError
 
 log = logging.getLogger("sfm.manager")
 

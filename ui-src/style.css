@@ -1,11 +1,11 @@
 /* Everything is built on Home Assistant theme variables; app.js copies all CSS
    variables of the active HA theme into this page. The values here are only
    fallbacks in case the theme is not readable (page opened outside Ingress). */
-:root{--primary-background-color:#fafafa;--secondary-background-color:#e5e5e5;--card-background-color:#fff;
+:root{--primary-background-color:#fafafa;--card-background-color:#fff;
   --primary-text-color:#212121;--secondary-text-color:#727272;--divider-color:rgba(0,0,0,.12);
   --primary-color:#03a9f4;--text-primary-color:#fff;--error-color:#db4437;--success-color:#43a047;
   --warning-color:#ffa600;--info-color:#039be5;color-scheme:light dark}
-@media (prefers-color-scheme:dark){:root{--primary-background-color:#111;--secondary-background-color:#202020;
+@media (prefers-color-scheme:dark){:root{--primary-background-color:#111;
   --card-background-color:#1c1c1c;--primary-text-color:#e1e1e1;--secondary-text-color:#9b9b9b;
   --divider-color:rgba(225,225,225,.12)}}
 /* Design tokens: every font size, radius, line and warning text of the app uses these.
@@ -23,10 +23,9 @@
    that are links), error text and the text of grey tags; the pure theme colour is for
    lines and fills. Control height: text buttons, fields and selects (desktop 33 px,
    phones 44 px). Tones: every coloured state (pills, action icons, status strips, message
-   and check-list icons) reads one variable, --tone, set by a tone class (.tone-success,
-   .tone-warning, .tone-error, .tone-primary) or a state class mapped to a tone; success
-   text is mixed like the link text. Monospace font, shadows, layers (z-index), icon sizes
-   and the beta colour are tokens too.
+   and check-list icons) reads one variable, --tone, set by a state class mapped to a
+   tone (p-, s-/c-, t-, msg-, prechk); success text is mixed like the link text.
+   Monospace font, shadows, layers (z-index), icon sizes and the beta colour are tokens too.
    Surfaces: cards, tool icons, tonal buttons and the tab strip are tinted instead of drawing
    lines: --surf (cards, phone tiles, status strips) and --surf-hi (buttons, tab strip, tool
    icons); rows of a list stand on the card as bands in the card background. The tint is weaker
@@ -226,12 +225,12 @@ button.filter-item[aria-checked=true]::after{margin-left:0;padding-left:8px}
 button.pill{cursor:pointer}
 /* Tones: neutral by default, then one rule per tone for every state class */
 .pill,.act,.fstrip,.prechk>li.wait{--tone:var(--secondary-text-color);--tone-text:color-mix(in srgb,var(--tone) 50%,var(--primary-text-color))}
-.tone-success,.p-uptodate,.p-updated,.act.s-on,.act.c-good,.fstrip.t-good,.msg-success,.prechk>li.ok{--tone:var(--success-color)}
+.p-uptodate,.p-updated,.act.s-on,.act.c-good,.fstrip.t-good,.msg-success,.prechk>li.ok{--tone:var(--success-color)}
 .act.restart,.fstrip.t-neutral{--tone:var(--primary-text-color)}
-.tone-warning,.p-ready,.p-available,.p-installing,.p-step.p-late,.p-ignored,.p-removed,.act.c-warn,.fstrip.t-warn,.msg-warning,.prechk>li.warn{
+.p-ready,.p-available,.p-installing,.p-step.p-late,.p-ignored,.p-removed,.act.c-warn,.fstrip.t-warn,.msg-warning,.prechk>li.warn{
   --tone:var(--warning-color);--tone-text:var(--warn-text)}
-.tone-error,.p-error,.p-unconfirmed,.act.c-alert,.fstrip.t-alert,.msg-error,.prechk>li.err{--tone:var(--error-color)}
-.tone-primary,.p-activity,.p-scheduled,.p-queued,.p-step,.prechk>li.run{--tone:var(--primary-color)}   /* run: the step that is running (spinner) */
+.p-error,.p-unconfirmed,.act.c-alert,.fstrip.t-alert,.msg-error,.prechk>li.err{--tone:var(--error-color)}
+.p-activity,.p-scheduled,.p-queued,.p-step,.prechk>li.run{--tone:var(--primary-color)}   /* run: the step that is running (spinner) */
 /* Waiting for the Shelly update server: turns yellow when its delay (set by the script:
    5 s after the wait began) has passed */
 .p-activity.p-server{animation:server-slow 0s linear forwards}

@@ -27,11 +27,10 @@ from pathlib import Path
 from typing import Any
 
 import aiohttp
-from tls import CertificatePins
-
 import data_paths
 from shelly import ShellyError, clip, parse_version
 from shelly_cloud import fetch_cloud_text
+from tls import CertificatePins
 
 log = logging.getLogger("sfm.changelog")
 

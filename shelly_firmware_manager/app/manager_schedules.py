@@ -47,14 +47,18 @@ from typing import Any
 
 import aiohttp
 import timetable
-from shelly import UNSUPPORTED, ShellyError, error_text, plain
-
-from manager_backups import BACKUP_PARALLEL, RESULT_STORED
 from events import worst
+from manager_backups import BACKUP_PARALLEL, RESULT_STORED
 from manager_core import (
-    PENDING, Device, STATUS_INSTALLING, STATUS_SKIPPED, markdown_text, unexpected_text,
+    PENDING,
+    STATUS_INSTALLING,
+    STATUS_SKIPPED,
+    Device,
+    markdown_text,
+    unexpected_text,
 )
 from manager_installs import Installs
+from shelly import UNSUPPORTED, ShellyError, error_text, plain
 
 log = logging.getLogger("sfm.manager")
 

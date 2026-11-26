@@ -337,6 +337,26 @@ async def test_http_install_of_a_store_fallback_needs_acknowledgment(client, mgr
     assert started == [A]
 
 
+async def test_install_needs_its_confirmation(client, mgr, monkeypatch):
+    """An installation starts only with "confirm": true and the SHA-256 of the offered
+    update; without either the answer is 400 and nothing starts."""
+    await mgr.scan()
+    started = []
+
+    async def install(device_id, sha, approved_by, downgrade=False, restart_first=False):
+        started.append(device_id)
+        return True
+
+    monkeypatch.setattr(mgr, "install", install)
+    sha = mgr.devices[A]["sha256"]
+    assert sha  # an update is offered: only the missing confirmation refuses it
+    for body in ({"sha256": sha}, {"confirm": True}, {"confirm": True, "sha256": "x"}, {"confirm": 1, "sha256": sha}):
+        r = await client.post(f"/api/devices/{A}/install", json=body, headers=hdr(client))
+        assert r.status == 400 and await r.text() == "Confirmation incomplete"
+    await asyncio.sleep(0.01)
+    assert started == [] and not mgr.installing and "planned" not in mgr.devices[A]
+
+
 async def test_log_entries_can_be_deleted_over_http(client, mgr, net):
     """Delete one entry / all entries – confirmation and CSRF token required."""
     await mgr.scan()
@@ -345,13 +365,15 @@ async def test_log_entries_can_be_deleted_over_http(client, mgr, net):
     target = entries[0]["id"]
     url = f"/api/logs/{target}/delete"
     assert (await client.post(url, json={"confirm": True})).status == 403  # no CSRF token
-    assert (await client.post(url, json={}, headers=hdr(client))).status == 400
+    r = await client.post(url, json={}, headers=hdr(client))
+    assert r.status == 400 and await r.text() == "Confirmation incomplete"
     assert (await client.post("/api/logs/zzz/delete", json={"confirm": True}, headers=hdr(client))).status == 404
     assert (await client.post(f"/api/logs/{'0' * 12}/delete", json={"confirm": True}, headers=hdr(client))).status == 404
     assert (await client.post(url, json={"confirm": True}, headers=hdr(client))).status == 200
     left = (await (await client.get("/api/logs")).json())["entries"]
     assert target not in [e["id"] for e in left] and len(left) == len(entries) - 1
-    assert (await client.post("/api/logs/clear", json={}, headers=hdr(client))).status == 400
+    r = await client.post("/api/logs/clear", json={}, headers=hdr(client))
+    assert r.status == 400 and await r.text() == "Confirmation incomplete"
     r = await client.post("/api/logs/clear", json={"confirm": True}, headers={**hdr(client), "X-Remote-User-Name": "alice"})
     assert r.status == 200 and (await r.json())["deleted"] == len(left)
     [entry] = (await (await client.get("/api/logs")).json())["entries"]

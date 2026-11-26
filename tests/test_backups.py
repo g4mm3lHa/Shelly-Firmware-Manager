@@ -18,7 +18,7 @@ import store_transfer
 from backup_store import BackupError, BackupStore
 from conftest import A, B, C
 from fake_shelly import SCRIPT, FakeGen1, FakeShelly
-from helpers import chunks, make_manager, web_client
+from helpers import chunks, make_manager, stage_import, web_client
 from shelly import AuthError, ShellyError
 
 
@@ -606,6 +606,60 @@ async def test_restore_reports_a_device_that_stops_answering(one):
         await shelly_backup.restore(target_of(one), backup, ["settings"], lambda _s: None)
 
 
+def failing(device, method, error):
+    """Let one RPC method of the fake raise error; every other method still answers."""
+    real = device.rpc
+
+    async def rpc(name, params=None):
+        if name == method:
+            raise error
+        return await real(name, params)
+
+    device.rpc = rpc
+
+
+async def test_refused_script_is_named_and_the_rest_is_restored(one):
+    """A script the device refuses to write is named under its key; the other scripts are
+    still made equal to the backup and the restore goes on."""
+    backup = await shelly_backup.read(target_of(one))
+    one.scripts[1].update(code="broken")
+    one.scripts[5] = {"name": "test.js", "enable": True, "running": True, "code": "x"}
+    failing(one, "Script.PutCode", ShellyError("Device reports: out of memory"))
+    result = await shelly_backup.restore(target_of(one), backup, ["scripts"], lambda _s: None)
+    scripts = result["parts"][0]
+    assert [o["key"] for o in scripts["open"]] == ["auto-light.js"]
+    assert "out of memory" in scripts["open"][0]["error"]
+    assert 5 not in one.scripts and result["lost"] is None
+
+
+@pytest.mark.parametrize(
+    ("part", "method"),
+    [("settings", "Switch.SetConfig"), ("scripts", "Script.PutCode"), ("webhooks", "Webhook.Create")],
+)
+async def test_a_password_refused_while_writing_ends_the_restore(one, part, method):
+    """A sign-in refusal of a write (after the read succeeded) is no refused value of one
+    row: it ends the restore with the AuthError."""
+    backup = await shelly_backup.read(target_of(one))
+    one.config["switch:0"]["initial_state"] = "on"
+    one.scripts[1].update(code="broken")
+    one.hooks.clear()
+    failing(one, method, AuthError("The Shelly rejected the password"))
+    with pytest.raises(AuthError):
+        await shelly_backup.restore(target_of(one), backup, [part], lambda _s: None)
+
+
+async def test_a_write_without_an_answer_is_a_lost_device(one):
+    """A timeout while writing one row is no refusal of that row: the writing stops, the
+    device is named as lost and the row stays open without a device answer."""
+    backup = await shelly_backup.read(target_of(one))
+    one.config["switch:0"]["initial_state"] = "on"
+    one.hooks.clear()
+    failing(one, "Switch.SetConfig", TimeoutError())
+    result = await shelly_backup.restore(target_of(one), backup, ["settings", "webhooks"], lambda _s: None)
+    assert result["lost"] == "TimeoutError" and "Webhook.Create" not in one.calls
+    assert result["parts"][0]["open"] == [{"key": "switch:0 · initial_state", "error": None}]
+
+
 async def test_new_scripts_are_created_in_small_parts(one):
     backup = await shelly_backup.read(target_of(one))
     long_code = "// ☀\n" + "let x = 'ä';\n" * 400
@@ -1108,7 +1162,7 @@ async def test_store_export_carries_the_backups(backed, net, shellys, tmp_path):
     assert b"Backups/AABBCC00000A/" in raw and b"auto-light" not in raw
     assert mgr.events.entries[-1]["kind"] == "export" and mgr.events.entries[-1]["backups"] == 2
     mgr.delete_backup(first["id"], True, "alice")
-    staged = await mgr.stage_import(chunks(raw), len(raw))
+    staged = await stage_import(mgr, chunks(raw), len(raw))
     path.unlink()
     summary = await mgr.check_import(staged["token"], prepared["password"])
     assert summary["backups"] == 2 and summary["backups_new"] == 1
@@ -1176,7 +1230,8 @@ async def test_http_backups(backed, net, shellys):
         r = await c.post(f"/api/backups/{bid}/preview", json={}, headers=hdr)
         assert [len(p["rows"]) for p in (await r.json())["parts"]] == [1, 0, 0, 0, 0]
         body = {"parts": ["settings"]}
-        assert (await c.post(f"/api/backups/{bid}/restore", json=body, headers=hdr)).status == 400
+        r = await c.post(f"/api/backups/{bid}/restore", json=body, headers=hdr)
+        assert r.status == 400 and await r.text() == "Confirmation incomplete"
         r = await c.post(f"/api/backups/{bid}/restore", json={"parts": ["network"], "confirm": True}, headers=hdr)
         assert r.status == 400 and "not confirmed" in await r.text()
         r = await c.post(f"/api/backups/{bid}/restore", json={**body, "confirm": True}, headers=hdr)

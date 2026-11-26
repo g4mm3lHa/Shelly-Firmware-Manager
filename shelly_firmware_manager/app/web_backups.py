@@ -11,7 +11,7 @@ backup; a secret written into a script or a webhook or action URL is, see shelly
 from aiohttp import web
 from backup_store import ID_RE as BACKUP_ID_RE
 from events import user_from
-from web_base import EXPORT_TOKEN_RE, UPLOAD_CHUNK, Handlers, guarded, json_body, translated
+from web_base import EXPORT_TOKEN_RE, UPLOAD_CHUNK, Handlers, confirmed_body, guarded, json_body, translated
 
 
 class BackupRoutes(Handlers):
@@ -82,9 +82,7 @@ class BackupRoutes(Handlers):
         "confirm": true, and "network_acknowledged": true for the network settings});
         progress and result are part of the state."""
         backup_id = self.backup_id_from(request)
-        body = await json_body(request)
-        if body.get("confirm") is not True:
-            raise web.HTTPBadRequest(text="Confirmation incomplete")
+        body = await confirmed_body(request)
         translated(
             lambda: self.mgr.reserve_restore(
                 backup_id, body.get("parts"), body.get("network_acknowledged"), user_from(request.headers)

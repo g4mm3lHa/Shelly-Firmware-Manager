@@ -10,7 +10,7 @@ import app_options
 from aiohttp import web
 from events import ENTRY_ID_RE, user_from
 from shelly import ShellyError
-from web_base import DEVICE_ID_RE, Handlers, guarded, json_body
+from web_base import DEVICE_ID_RE, Handlers, confirmed_body, guarded, json_body
 
 log = logging.getLogger("sfm.ui")
 
@@ -35,8 +35,7 @@ class SettingsRoutes(Handlers):
     async def log_delete(self, request: web.Request) -> web.StreamResponse:
         """Delete one log entry. The deletion is written to the app log only."""
         entry_id = request.match_info["id"]
-        if (await json_body(request)).get("confirm") is not True:
-            raise web.HTTPBadRequest(text="Confirmation incomplete")
+        await confirmed_body(request)
         if not ENTRY_ID_RE.fullmatch(entry_id) or not self.mgr.events.remove(entry_id):
             raise web.HTTPNotFound(text="Unknown log entry")
         log.info("Log entry %s deleted by %s", entry_id, user_from(request.headers))
@@ -44,8 +43,7 @@ class SettingsRoutes(Handlers):
 
     async def logs_clear(self, request: web.Request) -> web.StreamResponse:
         """Delete all log entries; one entry naming the user stays."""
-        if (await json_body(request)).get("confirm") is not True:
-            raise web.HTTPBadRequest(text="Confirmation incomplete")
+        await confirmed_body(request)
         user = user_from(request.headers)
         count = self.mgr.events.clear(user)
         log.info("Activity log cleared by %s (%d entries)", user, count)

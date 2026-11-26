@@ -70,13 +70,8 @@ async def supervisor_options(session: aiohttp.ClientSession, token: str) -> dict
     """Options the Supervisor keeps for this app (/addons/self/info), also those no longer
     in config.yaml; None if they cannot be read (logged)."""
     try:
-        async with session.get(
-            f"{manager_core.SUPERVISOR}/addons/self/info",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=manager_core.SUPERVISOR_TIMEOUT,
-        ) as resp:
-            resp.raise_for_status()
-            options = ((await resp.json(content_type=None)).get("data") or {}).get("options")
+        info = await manager_core.supervisor_get(session, token, "/addons/self/info")
+        options = (info.get("data") or {}).get("options")
     except (TimeoutError, aiohttp.ClientError, ValueError, AttributeError) as err:
         log.warning("App options not readable from the Supervisor: %s", err or type(err).__name__)
         return None
@@ -111,7 +106,7 @@ async def load_settings(session: aiohttp.ClientSession, token: str) -> tuple[dic
     try:
         async with session.post(
             f"{manager_core.SUPERVISOR}/addons/self/options",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=manager_core.supervisor_headers(token),
             json={"options": {}},
             timeout=manager_core.SUPERVISOR_TIMEOUT,
         ) as resp:

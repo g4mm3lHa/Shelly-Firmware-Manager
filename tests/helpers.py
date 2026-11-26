@@ -69,3 +69,23 @@ def store(mgr, fw_type, version, gen=2, source=manager_core.SOURCE_DOWNLOAD, con
     (data_paths.FW_DIR / name).write_bytes(data)
     mgr._register_firmware(name, fw_type, gen, version, sha, len(data), True, source=source)
     return name, sha
+
+
+async def stage_upload(mgr, body, filename, length, user="unknown"):
+    """Step 1 of a manual upload in one request (the whole file as one part); the UI always sends parts."""
+    if not isinstance(length, int) or length < 1:
+        raise ValueError("Firmware file implausibly small")
+    result = await mgr.stage_upload_part(body, filename, length, length, 0, None, user)
+    if "token" not in result:
+        raise ValueError("Upload incomplete")
+    return result
+
+
+async def stage_import(mgr, body, length):
+    """Step 1 of a store import in one request (the whole file as one part); the UI always sends parts."""
+    if not isinstance(length, int) or length < 1:
+        raise ValueError("Empty file")
+    result = await mgr.stage_import_part(body, length, length, 0, None)
+    if "token" not in result:
+        raise ValueError("Transfer incomplete")
+    return result

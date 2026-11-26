@@ -29,9 +29,8 @@ from typing import Any
 from urllib.parse import quote, urljoin, urlsplit
 
 import aiohttp
-from tls import CertificatePins, explain_tls_error
-
 from shelly import ShellyError, clip, int_field, parse_json, plain, read_limited
+from tls import CertificatePins, explain_tls_error
 
 MAX_FW_SIZE = 64 * 1024 * 1024  # upper limit for a firmware file
 MIN_FW_SIZE = 1024  # anything smaller is certainly no firmware

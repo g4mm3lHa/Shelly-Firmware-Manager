@@ -16,7 +16,7 @@ import manager_transfer
 import pytest
 import store_transfer
 from conftest import A
-from helpers import chunks, store
+from helpers import chunks, stage_import, store
 from shelly import ShellyError
 from store_transfer import TransferError
 
@@ -32,8 +32,8 @@ async def export_bytes(mgr):
 
 
 async def stage(mgr, data):
-    """Stage an export file like the upload route."""
-    return (await mgr.stage_import(chunks(data), len(data)))["token"]
+    """Stage an export file in one part (the route receives it in parts)."""
+    return (await stage_import(mgr, chunks(data), len(data)))["token"]
 
 
 def forget_store(mgr):
@@ -312,16 +312,16 @@ async def test_import_limits(mgr, net, monkeypatch):
     """Size limit of the option, announced size, no ZIP, free disk space, token."""
     mgr.import_max = 1000
     with pytest.raises(ValueError, match="maximum import size"):
-        await mgr.stage_import(chunks(b"x" * 1001), 1001)
+        await stage_import(mgr, chunks(b"x" * 1001), 1001)
     with pytest.raises(ValueError, match="larger than announced"):
-        await mgr.stage_import(chunks(b"x" * 600), 500)
+        await stage_import(mgr, chunks(b"x" * 600), 500)
     with pytest.raises(ValueError, match="no ZIP"):
-        await mgr.stage_import(chunks(b"x" * 500), 500)
+        await stage_import(mgr, chunks(b"x" * 500), 500)
     with pytest.raises(ValueError, match="Empty"):
-        await mgr.stage_import(chunks(b""), 0)
+        await stage_import(mgr, chunks(b""), 0)
     monkeypatch.setattr(type(mgr), "_free_space", lambda _self: 0)
     with pytest.raises(ShellyError, match="free disk space"):
-        await mgr.stage_import(chunks(b"x" * 500), 500)
+        await stage_import(mgr, chunks(b"x" * 500), 500)
     with pytest.raises(ShellyError, match="No pending import"):
         await mgr.check_import("0" * 32, "x")
     assert not any(n.startswith(manager_transfer.IMPORT_PREFIX) for n in os_listdir())
@@ -471,7 +471,7 @@ async def test_import_releases_the_check_block(mgr, net):
     store(mgr, "Plus1", "1.3.0")
     data, password = await export_bytes(mgr)
     forget_store(mgr)
-    token = (await mgr.stage_import(chunks(data), len(data)))["token"]
+    token = (await stage_import(mgr, chunks(data), len(data)))["token"]
     with pytest.raises(ShellyError, match="not been checked"):
         await mgr.confirm_import(token)
     assert mgr._import_storing is False

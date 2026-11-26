@@ -17,7 +17,6 @@ from conftest import A, B, C, vendor_content
 from helpers import make_manager, store
 from shelly import ShellyError
 
-
 # ---------------------------------------------------------------- Gen2+: the server decides, the store serves
 
 

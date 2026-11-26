@@ -6,7 +6,6 @@ from pathlib import Path
 
 from features.base import IDLE, MISSING, OVERFLOW_JS, PUBLIC, check, open_page, ui_frame, wait_until
 
-
 # Cases shared with tests/test_guards.py: the hint the Settings tab shows for each address
 URL_CASES = json.loads((Path(__file__).resolve().parents[2] / "tests" / "download_url_cases.json").read_text())
 HINT_WORDS = {"none": None, "private": "private network", "credentials": "user name", "query": "query",

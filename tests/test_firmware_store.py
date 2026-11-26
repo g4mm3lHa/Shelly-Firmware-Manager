@@ -17,7 +17,7 @@ import pytest
 import shelly
 import shelly_cloud
 from conftest import OPTIONS, A, B, C
-from helpers import chunks, firmware_zip, store
+from helpers import chunks, firmware_zip, stage_upload, store
 from shelly import ShellyError
 
 
@@ -286,7 +286,7 @@ async def test_upload_prefills_from_manifest_and_registers(mgr, net):
     matching SHA-256 is recorded as checked."""
     await mgr.scan()
     data = firmware_zip({"name": "Plus1", "platform": "esp32", "build_id": "20240101-000000/1.3.0-gabc"})
-    staged = await mgr.stage_upload(chunks(data), "plus1-1.3.0.zip", len(data), "alice")
+    staged = await stage_upload(mgr, chunks(data), "plus1-1.3.0.zip", len(data), "alice")
     assert staged["detected"] == {"type": "Plus1", "version": "1.3.0"} and staged["types"] == ["Plus1"]
     sha = hashlib.sha256(data).hexdigest()
     assert staged["sha256"] == sha and staged["size"] == len(data)
@@ -302,7 +302,7 @@ async def test_upload_prefills_from_manifest_and_registers(mgr, net):
 async def test_upload_without_manifest_or_sha(mgr, net):
     await mgr.scan()
     data = firmware_zip()
-    staged = await mgr.stage_upload(chunks(data), "fw.zip", len(data))
+    staged = await stage_upload(mgr, chunks(data), "fw.zip", len(data))
     assert staged["detected"] == {"type": None, "version": None}
     entry = mgr.confirm_upload(staged["token"], "Plus1", "1.2.0", "")
     assert entry["sha_checked"] is False
@@ -311,7 +311,7 @@ async def test_upload_without_manifest_or_sha(mgr, net):
 async def test_upload_sha_mismatch_keeps_the_upload_for_a_correction(mgr, net):
     await mgr.scan()
     data = firmware_zip()
-    staged = await mgr.stage_upload(chunks(data), "fw.zip", len(data))
+    staged = await stage_upload(mgr, chunks(data), "fw.zip", len(data))
     with pytest.raises(shelly.ShellyError, match="does not match"):
         mgr.confirm_upload(staged["token"], "Plus1", "1.2.0", "a" * 64)
     with pytest.raises(ValueError):
@@ -326,7 +326,7 @@ async def test_upload_sha_mismatch_keeps_the_upload_for_a_correction(mgr, net):
 async def test_upload_refuses_unknown_type_or_unstable_version(mgr, net, fw_type, version):
     await mgr.scan()
     data = firmware_zip()
-    staged = await mgr.stage_upload(chunks(data), "fw.zip", len(data))
+    staged = await stage_upload(mgr, chunks(data), "fw.zip", len(data))
     with pytest.raises(ValueError):
         mgr.confirm_upload(staged["token"], fw_type, version)
     assert mgr.firmware_list()[0]["source"] == "download"  # nothing registered
@@ -336,41 +336,41 @@ async def test_upload_refuses_duplicates(mgr, net):
     await mgr.scan()
     stored = next(iter(mgr.firmware))
     data = (data_paths.FW_DIR / stored).read_bytes()
-    staged = await mgr.stage_upload(chunks(data), "same.bin", len(data))  # any extension
+    staged = await stage_upload(mgr, chunks(data), "same.bin", len(data))  # any extension
     assert staged["duplicate"] == "Plus1 1.5.0"
     with pytest.raises(shelly.ShellyError, match="already stored"):
         mgr.confirm_upload(staged["token"], "Plus1", "1.4.0")
     data2 = firmware_zip()
-    staged = await mgr.stage_upload(chunks(data2), "other.zip", len(data2))
+    staged = await stage_upload(mgr, chunks(data2), "other.zip", len(data2))
     with pytest.raises(shelly.ShellyError, match="already stored"):
         mgr.confirm_upload(staged["token"], "Plus1", "1.5.0")
 
 
 async def test_upload_checks_extension_size_and_zip_format(mgr, net):
     with pytest.raises(ValueError, match="zip"):
-        await mgr.stage_upload(chunks(b"x" * 5000), "fw.exe", 5000)
+        await stage_upload(mgr, chunks(b"x" * 5000), "fw.exe", 5000)
     with pytest.raises(ValueError, match="small"):
-        await mgr.stage_upload(chunks(b"x" * 10), "fw.bin", 10)
+        await stage_upload(mgr, chunks(b"x" * 10), "fw.bin", 10)
     with pytest.raises(ValueError, match="64 MB"):
-        await mgr.stage_upload(chunks(b""), "fw.bin", shelly_cloud.MAX_FW_SIZE + 1)
+        await stage_upload(mgr, chunks(b""), "fw.bin", shelly_cloud.MAX_FW_SIZE + 1)
     with pytest.raises(ValueError, match="ZIP"):
-        await mgr.stage_upload(chunks(b"x" * 5000), "fw.zip", 5000)
+        await stage_upload(mgr, chunks(b"x" * 5000), "fw.zip", 5000)
     with pytest.raises(ValueError, match="larger than announced"):
-        await mgr.stage_upload(chunks(b"x" * 6000), "fw.bin", 5000)
+        await stage_upload(mgr, chunks(b"x" * 6000), "fw.bin", 5000)
     with pytest.raises(ValueError, match="incomplete"):
-        await mgr.stage_upload(chunks(b"x" * 4000), "fw.bin", 5000)
+        await stage_upload(mgr, chunks(b"x" * 4000), "fw.bin", 5000)
     assert not list(data_paths.FW_DIR.glob(manager_core.PART_PREFIX + "*"))
 
 
 async def test_upload_token_expiry_and_cancel(mgr, net, monkeypatch):
     await mgr.scan()
     data = firmware_zip()
-    staged = await mgr.stage_upload(chunks(data), "fw.zip", len(data))
+    staged = await stage_upload(mgr, chunks(data), "fw.zip", len(data))
     with pytest.raises(shelly.ShellyError):
         mgr.confirm_upload("0" * 32, "Plus1", "1.2.0")
     mgr.cancel_upload(staged["token"])
     assert mgr._upload.payload is None and not list(data_paths.FW_DIR.glob(manager_core.PART_PREFIX + "*"))
-    staged = await mgr.stage_upload(chunks(data), "fw.zip", len(data))
+    staged = await stage_upload(mgr, chunks(data), "fw.zip", len(data))
     mgr._upload._deadline -= manager_transfer.UPLOAD_TTL_S + 1
     with pytest.raises(shelly.ShellyError, match="upload the file again"):
         mgr.confirm_upload(staged["token"], "Plus1", "1.2.0")
@@ -478,7 +478,7 @@ async def test_file_read_back_is_used_only_for_a_matching_offer(net):
     name, sha = put_file(firmware_zip({"name": "Plus1", "version": "1.3.0"}))
     await m.adopt_files()
     m.devices[A] = {"name": "Kitchen", "gen": 2, "type": "Plus1", "version": "1.4.0"}
-    assert m.downgrade_versions(A) == [] and m._downgrade_candidates() == {}
+    assert m.downgrade_versions(A) == [] and m._downgrade_candidates(m._stored_versions()) == {}
     assert await m._store_offer({"type": "Plus1", "gen": 2, "version": "1.2.0"}) is None
     assert await m._stored_firmware("Plus1", "1.3.0", 2) is None
     assert await m._stored_firmware("Plus1", "1.3.0", 2, offered_sha="b" * 64) is None

@@ -14,7 +14,7 @@ import pytest
 from conftest import OPTIONS, A
 from credentials import Credentials
 from events import EventLog
-from helpers import chunks, firmware_zip
+from helpers import chunks, firmware_zip, stage_upload
 
 
 async def test_partial_downloads_removed_at_start(net):
@@ -94,10 +94,10 @@ def test_log_limit_trims_once_and_keeps_limit(tmp_path):
 
 
 async def test_upload_log_entries_survive_a_restart(mgr, net):
-    """3.0.0 final review: the log kind "upload" is kept when the log is loaded again."""
+    """The log kind "upload" is kept when the log is loaded again."""
     await mgr.scan()
     data = firmware_zip()
-    staged = await mgr.stage_upload(chunks(data), "fw.zip", len(data), "alice")
+    staged = await stage_upload(mgr, chunks(data), "fw.zip", len(data), "alice")
     mgr.confirm_upload(staged["token"], "Plus1", "1.2.0", None, "alice")
     m = manager.Manager(dict(OPTIONS), session=None, token="t")
     assert any(e["kind"] == "upload" and e["version"] == "1.2.0" for e in m.events.entries)

@@ -16,7 +16,7 @@ from events import user_from
 from manager import Manager
 from manager_core import DOWNLOAD_BASE_MESSAGES
 from shelly import ShellyError
-from web_base import Background, Handlers, guarded, json_body, translated
+from web_base import Background, Handlers, confirmed_body, guarded, json_body, translated, unconfirmed
 
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -101,17 +101,17 @@ class DeviceRoutes(Handlers):
         "beta_acknowledged": true, also when scheduled. Installing a device now drops
         its scheduled installation."""
         device_id = self.device_id_from(request)
-        body = await json_body(request)
+        body = await confirmed_body(request)
         sha = body.get("sha256")
-        if body.get("confirm") is not True or not isinstance(sha, str) or not SHA_RE.fullmatch(sha):
-            raise web.HTTPBadRequest(text="Confirmation incomplete")
+        if not isinstance(sha, str) or not SHA_RE.fullmatch(sha):
+            raise unconfirmed()
         if self.mgr.schedule_running is not None:
             raise web.HTTPConflict(
                 text=f"Schedule “{self.mgr.schedule_running}” is running – please try again afterwards"
             )
         if body.get("downgrade") is True:
             if body.get("acknowledged") is not True:
-                raise web.HTTPBadRequest(text="Confirmation incomplete")
+                raise unconfirmed()
             blocker = self.mgr.downgrade_blocker(device_id)
             if blocker:
                 raise web.HTTPConflict(text=blocker)
@@ -135,14 +135,14 @@ class DeviceRoutes(Handlers):
             raise web.HTTPConflict(text="Approval does not match the provided update (anymore)")
         # A stored version offered without the server's answer needs the risk acknowledgment
         if self.mgr.devices[device_id].get("store_fallback") and body.get("acknowledged") is not True:
-            raise web.HTTPBadRequest(text="Confirmation incomplete")
+            raise unconfirmed()
         restart_first = body.get("restart", False)  # "Restart the device first"
         if not isinstance(restart_first, bool):
             raise web.HTTPBadRequest(text="restart: true or false expected")
         if restart_first and not self.mgr.devices[device_id].get("install_failed"):
             raise web.HTTPBadRequest(text="A restart first is only offered after a failed installation")
         if self.mgr.devices[device_id].get("beta") and body.get("beta_acknowledged") is not True:
-            raise web.HTTPBadRequest(text="Confirmation incomplete")
+            raise unconfirmed()
         user = user_from(request.headers)
         if "at" in body:
             at = translated(lambda: self.mgr.plan_install(device_id, sha, body["at"], user, restart_first))
@@ -154,8 +154,7 @@ class DeviceRoutes(Handlers):
     async def planned_cancel(self, request: web.Request) -> web.StreamResponse:
         """Cancel the scheduled installation of a device."""
         device_id = self.device_id_from(request)
-        if (await json_body(request)).get("confirm") is not True:
-            raise web.HTTPBadRequest(text="Confirmation incomplete")
+        await confirmed_body(request)
         if not self.mgr.cancel_plan(device_id, user_from(request.headers)):
             raise web.HTTPConflict(text="No installation is scheduled for this device (anymore)")
         return web.json_response({"cancelled": True})

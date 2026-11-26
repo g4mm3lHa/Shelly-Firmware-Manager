@@ -7,19 +7,19 @@ line-length = 120
 target-version = "py312"  # Python of the image (frozen: 3.12.16)
 
 [tool.ruff.lint]
-# App code (shelly_firmware_manager/app): style, pyflakes, bugbear, security (bandit),
-# async pitfalls, pyupgrade, simplifications, blind except; plus comprehensions,
+# App code (shelly_firmware_manager/app): style, pyflakes, import order, bugbear, security
+# (bandit), async pitfalls, pyupgrade, simplifications, blind except; plus comprehensions,
 # performance, returns, pathlib, refurb, raise style, commented-out code, unused
 # arguments, logging, string concatenation, print statements and ruff's own rules
 select = [
-    "E", "F", "W", "B", "S", "ASYNC", "UP", "SIM", "BLE",
+    "E", "F", "W", "I", "B", "S", "ASYNC", "UP", "SIM", "BLE",
     "C4", "PERF", "RET", "PIE", "PTH", "FURB", "RSE", "ERA", "ARG", "LOG", "G", "ISC", "T20", "FLY", "RUF",
 ]
 # RUF001-003: typographic characters (–, →, …) are used on purpose in texts and comments
 ignore = ["RUF001", "RUF002", "RUF003"]
 
 [tool.ruff.lint.per-file-ignores]
-# Tests, tools and QA scripts: pyflakes, bugbear and unused noqa only
+# Tests, tools and QA scripts: pyflakes, bugbear, import order and unused noqa only
 "{tests,tools,qa}/**" = [
     "E", "W", "S", "ASYNC", "UP", "SIM", "BLE",
     "C4", "PERF", "RET", "PIE", "PTH", "FURB", "RSE", "ERA", "ARG", "LOG", "G", "ISC", "T20", "FLY",
@@ -33,7 +33,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.mypy]
-# Static type check of the app modules (3.1.0): strict, against the bundled packages
+# Static type check of the app modules: strict, against the bundled packages
 # (tools/dev/run.sh puts them on the path). The modules import each other by name.
 python_version = "3.12"
 strict = true

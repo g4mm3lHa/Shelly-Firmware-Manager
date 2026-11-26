@@ -13,15 +13,32 @@ from typing import Any
 
 import aiohttp
 import shelly
-from shelly import (
-    UNSUPPORTED, AuthBlockedError, AuthError, DeviceAuth, HttpsRequiredError, ShellyError, clip, error_text,
-)
-
 from manager_core import (
-    ACTIVITY_CHECKING, ACTIVITY_DOWNLOADING, ACTIVITY_RELOADING, ACTIVITY_SERVER, BATTERY_FROM_DEVICE, Device,
-    STATUS_AVAILABLE, STATUS_CURRENT, STATUS_INSTALLING, STATUS_READY, STATUS_UNCLEAR, severity_of, unexpected_text,
+    ACTIVITY_CHECKING,
+    ACTIVITY_DOWNLOADING,
+    ACTIVITY_RELOADING,
+    ACTIVITY_SERVER,
+    BATTERY_FROM_DEVICE,
+    STATUS_AVAILABLE,
+    STATUS_CURRENT,
+    STATUS_INSTALLING,
+    STATUS_READY,
+    STATUS_UNCLEAR,
+    Device,
+    severity_of,
+    unexpected_text,
 )
 from manager_transfer import Transfers
+from shelly import (
+    UNSUPPORTED,
+    AuthBlockedError,
+    AuthError,
+    DeviceAuth,
+    HttpsRequiredError,
+    ShellyError,
+    clip,
+    error_text,
+)
 
 log = logging.getLogger("sfm.manager")
 

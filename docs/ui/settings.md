@@ -24,7 +24,7 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
   and a 44 px touch target on phones. Choosing a dot previews the colour in the whole page at
   once and shows "Unsaved changes"; it is saved with "Save settings" (app option `base_color`,
   all browsers) and shown from the first paint after that. A save that changes only the base
-  colour does not restart the app (`reports/3.13.0/FRAGEN-rc3.md` 1 b, approved 2026-11-26): the
+  colour does not restart the app (approved 2026-11-26): the
   dialog "Save settings?" has no restart hint and the button "Save", then it closes, the form
   shows the saved settings and a toast "Settings saved" appears; with other changes it stays
   "Save & restart". White text on filled buttons stays for every colour (2 a). Leaving the tab without saving
@@ -145,7 +145,7 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
   before saving." (approved 2026-11-21); it disappears when the user edits the field.
 
 ## Connection test of the download server (3.12.0, mockups `3.12.0-ui` A1, approved 2026-11-24)
-- **Host port (2026-11-24, `reports/3.12.0/FRAGEN-rc3.md` 1a 2a 3 4 5):** first field of the
+- **Host port (2026-11-24):** first field of the
   card "Download Server" (number, default 8098), read from Home Assistant each time the tab
   loads. Line below: the port check on saving; "switched off in Home Assistant" (empty field)
   or "could not be read" (field disabled, pointer to the Configuration tab). Typing a new

@@ -37,7 +37,7 @@ both servers in parallel (cancels checks/installations, saves the state), exit 0
 - `manager_schedules.py` (8): scheduled installations, schedules and their runs → `test_timetable.py`
 - `manager.py` (9): `Manager`, `public_state` → `test_web.py`
 - `web_ui.py`: Ingress UI + JSON API: CSRF/size middleware, page, state, route table → `test_web.py`, `test_security.py`
-- `web_base.py`: shared parts of the handlers: `Handlers`, `json_body`, `guarded`, `translated`, `SECURITY_HEADERS` → `test_web.py`, `test_security.py`
+- `web_base.py`: shared parts of the handlers: `Handlers`, `json_body`, `confirmed_body` / `unconfirmed` ("Confirmation incomplete"), `guarded`, `translated`, `SECURITY_HEADERS` → `test_web.py`, `test_security.py`
 - `web_devices.py`, `web_firmware.py`, `web_backups.py`, `web_schedules.py`, `web_settings.py` (logs and settings): handlers per area → `test_web.py`, `test_security.py`, `test_backups.py`, `test_timetable.py`
 - `download_server.py`: LAN download server for the Shellys, address of the connection test → `test_security.py`, `test_diagnosis.py`
 - `shelly.py`: device access: errors and text helpers, authentication, requests, settings, OTA WebSocket → `test_device_settings.py`, `test_device_transport.py`, `test_guards.py`
