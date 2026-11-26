@@ -27,8 +27,9 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
   colour does not restart the app (`reports/3.13.0/FRAGEN-rc3.md` 1 b, approved 2026-11-26): the
   dialog "Save settings?" has no restart hint and the button "Save", then it closes, the form
   shows the saved settings and a toast "Settings saved" appears; with other changes it stays
-  "Save & restart". White text on filled buttons stays for every colour (2 a). Leaving the tab or a new form from the
-  saved settings shows the saved colour again. Default after the update: "Default" (no choice
+  "Save & restart". White text on filled buttons stays for every colour (2 a). Leaving the tab without saving
+  ("Discard" in the dialog "Unsaved changes") or a new form from the saved settings shows the
+  saved colour again. Default after the update: "Default" (no choice
   "Same as Home Assistant"). Default = surfaces neutral from the text colour, accents in the
   theme's primary colour; a colour replaces the primary colour for surfaces and accents.
   Hint under the card: "The language applies at once and only in this browser – no “Save
@@ -41,6 +42,20 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
 - **Columns (live test 3.10.0-rc1, approved 2026-11-22):** the cards fill independent column stacks
   (no shared row heights): three columns from 1600 px, two from 1168 px, else one; card n
   goes to column n mod columns, so the order reads left to right as before.
+- **Save area and unsaved changes (live test 3.13.0-rc3, findings F and G, approved 2026-11-26
+  without mockup):** the save area ("Unsaved changes" hint, button "Save settings") stands twice
+  in the same state: above the cards on the right (phones: full width over the first card, as a
+  bar like the one below, not sticky) and below the cards (phones: the sticky bar); the hint
+  shows only while the form holds a change, the button always. Leaving the tab (also clicking
+  the Settings tab again or "Open settings") or choosing a new language while the form holds
+  a change opens the dialog "Unsaved changes" with "The settings are not saved yet.": "Discard"
+  takes the step and drops the changes; the blue "Save" runs the normal save flow ("Save
+  settings?", Cancel stays on the tab) and takes the step after it – without a restart at
+  once, with a restart the page opens the chosen tab (a new language: the Settings tab in that
+  language) after the reload; the X and Escape stay on the tab with the changes. A suggested
+  download base URL counts as a change. No browser warning when the page is closed.
+- **Language change (live test 3.13.0-rc3, finding E, approved 2026-11-26):** the page reloads in
+  the new language on the Settings tab (marker `#settings`, as after saving).
 - **Changelog hint (3.5.0, 2026-11-19):** last line of the Settings tab, below
   the Save area: hint "What changed in each version: open the app page in Home
   Assistant and choose “Changelog” next to the version." – the link opens the info
@@ -141,8 +156,8 @@ as the UI change). Read when you change the Settings tab, the firmware store dia
   the host port field; live while typing in either field, saving stays possible; none while
   the host port is unknown or empty.
 - **After saving (live test 3.12.0-rc3, 1a):** the page reloads after the app restart on the
-  Settings tab (marker `#settings` in the address, removed at the start); a normal reload
-  opens Devices.
+  Settings tab (marker `#settings` in the address, removed at the start; after "Save" in the
+  dialog "Unsaved changes" the marker of the chosen tab); a normal reload opens Devices.
 - **Texts with the port:** help of the download base URL ("+ the host port above"), Getting
   started and the confirmation of the former example address name the real host port; the
   connection test names the port cause only while the address port differs from it.

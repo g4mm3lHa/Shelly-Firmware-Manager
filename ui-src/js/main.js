@@ -6,7 +6,7 @@ import {lang} from "./i18n.js";
 import {buildChooser, closeRowMenu, loadPrefs, renderDevices, syncChooser} from "./devices.js";
 import {renderFirmware} from "./firmware.js";
 import {mobileQuery, renderLogs} from "./logs.js";
-import {IMPORT_OWN, importDialog, renderSettings, resetBaseColor} from "./app-settings.js";
+import {confirmLeave, IMPORT_OWN, importDialog, renderSettings, resetBaseColor, settingsDirty} from "./app-settings.js";
 import "./install.js";
 import {renderSchedules} from "./schedules.js";
 import {renderBackups} from "./backups.js";
@@ -146,8 +146,14 @@ function renderProgress(p) {
   if (p.total) { bar.max = p.total; bar.value = p.done; } else bar.removeAttribute("value");   // indeterminate
 }
 const VIEWS = ["devices", "firmware", "schedules", "backups", "logs", "settings"];
-/** Switch tab and load its data. */
+/** Switch tab and load its data. Leaving the Settings tab (or opening it again) while its
+ *  form holds unsaved changes asks first (dialog "Unsaved changes", see confirmLeave). */
 export function showView(v) {
+  if (ui.view === "settings" && settingsDirty()) { confirmLeave({view: v, go: () => switchView(v)}); return; }
+  switchView(v);
+}
+/** Switch tab without asking. */
+function switchView(v) {
   ui.view = v; closeRowMenu();
   for (const k of VIEWS) { $("view-" + k).hidden = k !== v; $("tab-" + k).classList.toggle("active", k === v); $("tab-" + k).setAttribute("aria-selected", k === v); }
   // "Check now" belongs to the device data, not to the settings: hidden there, its place
@@ -227,8 +233,11 @@ export async function load(force) {
   }
 }
 loadPrefs(); buildChooser(); syncChooser();
-// Reloaded after saving the settings (app restart): open the Settings tab again
-if (location.hash === "#settings") {
+// Reloaded after saving the settings (app restart) or a new language: open the tab of the
+// marker "#<tab>" in the address (the Settings tab, or the tab chosen in the dialog
+// "Unsaved changes"); a normal page load opens Devices
+const marked = location.hash.slice(1);
+if (VIEWS.includes(marked)) {
   try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { /* marker stays */ }
-  showView("settings");
+  showView(marked);
 } else load();

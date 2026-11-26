@@ -8,9 +8,16 @@
 // times keep the form "2026-11-23 03:00" in every language.
 import {resolve, STORE_KEY} from "./lang.js";
 
-/** Store the choice and reload the page in the new language. */
-export function setLanguage(value) {
+/** Store the language choice for the next page load (this browser only). */
+export function storeLanguage(value) {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(value)); } catch (e) { /* page only */ }
+}
+/** Store the choice and reload the page in the new language. The language is chosen in the
+ *  Settings tab, so the page opens it again (marker "#settings" in the address, removed at
+ *  the start, see main.js). */
+export function setLanguage(value) {
+  storeLanguage(value);
+  try { history.replaceState(null, "", "#settings"); } catch (e) { /* page opens on Devices */ }
   location.reload();
 }
 // The dictionary the loader brought (i18n-<code>.js as a classic script: SFM_TEXTS.default)

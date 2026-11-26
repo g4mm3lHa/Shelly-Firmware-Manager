@@ -144,8 +144,9 @@ def download_url_suggestion(browser, out):
         page.wait_for_selector("#opt-download_base_url")
         check(f"{host}: suggested URL", wait_until(lambda p=page, e=expected: p.input_value("#opt-download_base_url") == e),
               page.input_value("#opt-download_base_url"))
-        check(f"{host}: unsaved marker follows the suggestion",
-              page.locator(".unsaved").is_visible() == bool(expected))
+        check(f"{host}: unsaved marker follows the suggestion (both save areas)",
+              page.locator(".form-actions .unsaved").is_visible() == bool(expected)
+              and page.locator(".form-actions-top .unsaved").is_visible() == bool(expected))
         note = page.locator("#opt-download_base_url-suggest")
         check(f"{host}: suggestion note shown only with a suggestion", note.is_visible() == bool(expected))
         if expected:
