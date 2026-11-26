@@ -5,6 +5,17 @@
 Release candidate. New look with tinted cards, an access point form, translated status
 messages and a faster start.
 
+Changes in rc4
+
+Added
+- Settings tab: leaving the tab or choosing another language with unsaved changes asks
+  first – discard them or save them before going on.
+- Settings tab: "Save settings" with the "Unsaved changes" hint also above the cards
+  (phone: full width over the first card).
+
+Fixed
+- Settings tab: a new language reloads the page on the Settings tab instead of Devices.
+
 Changes in rc3
 
 Added
