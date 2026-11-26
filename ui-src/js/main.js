@@ -43,7 +43,7 @@ export function render(force) {
     else if (ui.view === "backups") renderBackups();
   });
 }
-/** Logs tab: a red "!" while the log holds an error entry newer than the newest entry
+/** Logs tab: a red dot on the tab icon while the log holds an error entry newer than the newest entry
  *  this browser has shown in the Logs tab (per browser; on the first visit nothing counts
  *  as unread; warnings and successes never set it). Opening the Logs tab marks
  *  everything as read; the entries that were unread at that moment stay lightly
@@ -60,8 +60,11 @@ function markUnreadLogs(s) {
   const tab = $("tab-logs");
   let mark = tab.querySelector(".tab-unread");
   if (!mark) {
-    mark = box("span", "tab-unread", el("span", "!"), el("span", t("Unread error entries in the log"), "sr-only"));
-    mark.firstChild.setAttribute("aria-hidden", "true"); tab.append(mark);
+    // The dot lies over the icon (wrapped together with it): the tab keeps its width with
+    // and without the mark, nothing beside it moves
+    mark = box("span", "tab-unread", el("span", t("Unread error entries in the log"), "sr-only"));
+    const svg = tab.querySelector("svg"), holder = box("span", "tab-ic");
+    tab.insertBefore(holder, svg); holder.append(svg, mark);
   }
   mark.hidden = !((s.log_latest_error || 0) > seen);
 }

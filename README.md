@@ -27,6 +27,10 @@ How this differs from the update entities of the Shelly integration is answered 
   <img src="docs/images/backups-phone.png" alt="Backups tab on a phone" width="250">
 </p>
 
+Six base colours (Settings → Display), each in the light and the dark theme of Home Assistant:
+
+![Base colours Default, Blue, Teal, Green, Violet and Orange, each light and dark](docs/images/base-colours.png)
+
 ## Features
 
 - All Shellys of the Shelly integration in one list, sorted by what needs your attention,

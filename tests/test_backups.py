@@ -1177,7 +1177,7 @@ async def test_http_backups(backed, net, shellys):
 
 
 async def test_error_mark_of_the_log_and_unreachable_devices(mgr, net):
-    """The mark of the newest error entry (the "!" of the Logs tab) moves only with an
+    """The mark of the newest error entry (the red dot of the Logs tab) moves only with an
     error; a device that should answer and does not is an error of the check, a
     sleeping battery device a warning."""
     assert mgr.events.latest("error") == 0

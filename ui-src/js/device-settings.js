@@ -16,9 +16,10 @@ const FIELDS = {name: {label: t("Shelly name"), prop: "shelly_name"}, ntp: {labe
 const AOP_LABELS = {off: "Off", on: "On", restore_last: "Restore last state", last: "Restore last mode",
   match_input: "Match input", switch: "Switch", toggle: "Toggle"};
 export const aopLabel = v => AOP_LABELS[v] || v || "–";
-const AOP_RESTORE = ["restore_last", "last"];
-/** Colour of the power-on action: green if every output restores its last state. */
-export const aopTone = outputs => outputs.every(o => AOP_RESTORE.includes(o.aop)) ? "good" : "alert";
+// Green values: the output restores its last state or follows its input (Gen1 "switch")
+const AOP_GOOD = ["restore_last", "last", "match_input", "switch"];
+/** Colour of the power-on action: green if every output has a green value, else yellow. */
+export const aopTone = outputs => outputs.every(o => AOP_GOOD.includes(o.aop)) ? "good" : "warn";
 /** Current power-on action of all outputs as one short text ("Mixed" if they differ). */
 export function aopSummary(outputs) {
   const values = [...new Set(outputs.map(o => aopLabel(o.aop)))];
@@ -140,8 +141,13 @@ export function editCloud(d) {
 const AP_OPEN_WARNING = t("Anyone within Wi-Fi range can connect to this Shelly and – without a device password – change its settings.");
 // Length of an access point password the Shelly accepts (it refuses others with -113)
 const AP_PASSWORD_MIN = 8, AP_PASSWORD_MAX = 63;
-/** A password of that length, counted in characters as the server counts them. */
-const apPasswordFits = text => [...text].length >= AP_PASSWORD_MIN && [...text].length <= AP_PASSWORD_MAX;
+// WPA2: printable ASCII only (no umlauts or accents), as the server checks it
+const AP_PASSWORD_BAD = /[^\x20-\x7e]/u;
+/** First character of the password the Shelly cannot use (an invisible one – control,
+ *  format, separator – as "?", as the server names it), or null. */
+const apPasswordBad = text => { const m = AP_PASSWORD_BAD.exec(text); return m ? (/[\p{C}\p{Z}]/u.test(m[0]) ? "?" : m[0]) : null; };
+/** A password of that length in printable ASCII characters. */
+const apPasswordFits = text => !apPasswordBad(text) && text.length >= AP_PASSWORD_MIN && text.length <= AP_PASSWORD_MAX;
 /** State pill of the access point strip: off, on and open, on with a password. */
 const apPill = (on, open) => !on ? t("Off") : open === true ? t("On · open") : open === false ? t("On · password") : t("On");
 export function editAccessPoint(d) {
@@ -160,8 +166,14 @@ export function editAccessPoint(d) {
     // Longer than the limit on purpose: a pasted password that is too long stays whole and
     // keeps Save disabled instead of being cut silently
     const password = input("password", {autocomplete: "new-password", maxLength: 128});
-    const passwordBlock = box("div", "sub-block", field(t("Password"), password),
-      el("p", t("{min} to {max} characters. Sent to the Shelly only – this app does not store it.", {min: AP_PASSWORD_MIN, max: AP_PASSWORD_MAX}), "hint"));
+    // A character the Shelly cannot use is named below the field at once (Save stays disabled)
+    const badChar = el("p", null, "bad"); badChar.hidden = true; badChar.setAttribute("role", "alert");
+    password.addEventListener("input", () => {
+      const bad = apPasswordBad(password.value);
+      badChar.hidden = !bad; badChar.textContent = bad ? t("The password contains a character the Shelly cannot use: {char}", {char: bad}) : "";
+    });
+    const passwordBlock = box("div", "sub-block", field(t("Password"), password), badChar,
+      el("p", t("{min} to {max} characters, letters without umlauts or accents, digits and common symbols only. Sent to the Shelly only – this app does not store it.", {min: AP_PASSWORD_MIN, max: AP_PASSWORD_MAX}), "hint"));
     const [accept, acceptLabel] = checkbox(t("I accept the risk of an open access point"));
     const openBlock = box("div", "sub-block", box("div", "warnbox danger", el("strong", t("Open access point.")), " " + AP_OPEN_WARNING), acceptLabel);
     const [extender, extenderLabel] = checkbox([t("Range extender"), el("span", t("other devices reach your network through this Shelly"), "sub")],
@@ -192,7 +204,7 @@ export function editAccessPoint(d) {
       if (same) { message(title, t("Nothing changed.")); return; }
       saveSettings(d, title, {ap_config: form}, true, error);
     }}]);
-    // Save: a password of 8 to 63 characters, an open access point needs the accepted risk
+    // Save: a password of 8 to 63 printable ASCII characters, an open access point needs the accepted risk
     gateButton(() => !enable.checked || (choice() === "password" ? apPasswordFits(password.value) : choice() !== "open" || accept.checked),
       enable, password, accept, ...radios.map(([r]) => r));
   });

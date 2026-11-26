@@ -210,7 +210,7 @@ is above 0), each with its count. A dot on the icon shows that a filter other th
 | Ready | Firmware provided (from the firmware store or downloaded), waiting for your approval – "Install" next to the status opens the installation dialog |
 | Scheduled | Installation approved for a later time; the time is shown under the version (see [Scheduled installation](#scheduled-installation)) |
 | Updated | The installation was confirmed; shown until the next check of the device. If the backup before the update shows changed settings or a script that no longer runs, a line below the firmware says so (see [Comparison after an update](#backups)) |
-| Queued / Installing | Installation waiting for a free slot / running (with progress for Gen2+) |
+| Queued / step of the installation | Installation waiting for a free slot / running: the label names the step – **Backup …**, **Restarting …**, **Waiting for device …**, **Installing** (with the percentage for Gen2+), **Verifying …** – blue while it runs, yellow while a step takes longer than usual. The tooltip (phones: the device details) names the step, how long it has been running, when the app gives up and the Wi-Fi signal |
 | Unconfirmed | The installation ran, but the target version was not confirmed (see the details); stays in **Updates Available** until the next check of the device |
 | Error | Check, download or installation failed; after a failed installation – or with a stored version while the Shelly server could not be asked – the device stays in **Updates Available** and can be installed (again) |
 | Asleep | Battery device that did not answer the last check – it sleeps; the IP is dimmed. Wake it up and check it again |
@@ -282,7 +282,10 @@ restart the device. The popup of an icon starts with the current state; "?" mean
 value is unknown (also the power-on action while the outputs of a device have never been
 read). Every change is read back from the device; a value the device
 accepted but did not apply is reported as a warning and logged as failed. If the Shelly
-reports that a change needs a restart, the success message offers **Restart now**. The lock is
+reports that a change needs a restart, the success message offers **Restart now**. The
+power-on action (lightning) is green while every output restores its last state or
+follows its input (**Restore last state**, **Match input**; Gen1 **Restore last mode**,
+**Switch**), yellow with any other value. The lock is
 green if the device is protected and its password is stored in the app, yellow if the
 password is not stored here.
 
@@ -291,7 +294,9 @@ password is not stored here.
   the protection: a password, or open after you accept the risk (anyone in Wi-Fi range
   could then change the device without a device password). A running protected access
   point keeps its password unless you set a new one, because the Shelly never reveals it.
-  The password needs 8 to 63 characters, because the Shelly refuses any other length.
+  The password needs 8 to 63 characters, because the Shelly refuses any other length:
+  letters without umlauts or accents, digits and common symbols (printable ASCII, as
+  WPA2 demands), because some phones and computers cannot connect otherwise.
   The password goes to the Shelly only; the app does not store or log it. The Shelly
   decides whether it accepts a password or an open access point; its refusal is shown in
   the form. **Range extender** is offered if the device has it. Only the access point is
@@ -412,12 +417,22 @@ downloads, and the free disk space.
    shows their number and opens to list them.
 3. **Approve installation.** The Shelly downloads the firmware from the app and restarts.
 
+Right before the update command the app checks again that the same device runs the
+checked firmware. A Shelly on weak Wi-Fi may not answer for a moment: the app then tries
+again, up to 5 times within 60 seconds, and sends the update command only once (again
+only if it surely never reached the device). If the Shelly answers again, its running
+time tells a lost connection (the installation goes on; the log entry of the result
+names how often the connection was lost) from a restart of its own (the installation
+stops, nothing was installed). A refusal of the device (password, another device,
+another firmware) is never tried again.
+
 Gen2+ devices report their progress over the device connection (the status label shows
 the percentage). An error reported by the Shelly ends the installation at once. Without
-a download request after 2 minutes, or without new progress for 60 seconds, the
-installation fails. After 100 % the Shelly must restart within 30 seconds (the label
-shows "Restarting") and report exactly the target version within 30 seconds after the
-restart; the old version, another version or no answer is an error.
+a download request after 2 minutes, or without new progress for 60 seconds (120 seconds
+when the Wi-Fi signal was weak at the start), the installation fails. After 100 % the
+Shelly must restart within 30 seconds (the label shows "Restarting …") and report exactly
+the target version within 90 seconds after the restart ("Verifying …"); the old version,
+another version or no answer is an error.
 
 Devices without this connection (Gen1, or when it is not available) are checked every
 10 seconds until they report exactly the target version (at most 5 minutes). If that
@@ -673,7 +688,7 @@ entry a warning or error. Removed devices are counted too ("1 removed"); each on
 warning if it still answers at its last address and an error if not. A device that does not
 answer is an error; a battery device that is asleep is a warning. Filters and a device search help to find entries; **Hide successful entries** leaves only warnings and errors. Passwords never appear in the log.
 
-The tab updates itself when a new entry is written. A red "!" on the tab marks error
+The tab updates itself when a new entry is written. A red dot on the tab icon marks error
 entries written since you last opened it in this browser; when you open the tab, the
 entries that are new since then are marked by a bar on the left.
 
@@ -820,6 +835,9 @@ Gen2+ firmware is downloaded over HTTPS only.
 | Error … Stored version X is ready and can be installed manually | The Shelly server could not be asked. Check again later, or install the stored version at your own risk |
 | Download does not match the SHA-256 named by the manufacturer's URL | The download was damaged or altered and was not stored – check again |
 | Many "Download rejected" lines in the app log | Only the first rejected request per address and 10 minutes is logged; the others are counted in one line |
+| Connection to the Shelly lost before the update command – no answer in n attempts within n s. Nothing was installed. | The Shelly did not answer the check right before the update command, usually because of weak Wi-Fi. Improve the reception (access point, antenna position) and try the installation again |
+| The Shelly restarted unexpectedly before the update command (running for n s). Nothing was installed. | The Shelly restarted on its own while the app was waiting for it (power supply, firmware fault, Wi-Fi loss). Check the device and try the installation again |
+| The password contains a character the Shelly cannot use: … (access point form) | Use only letters without umlauts or accents, digits and common symbols (printable ASCII) |
 | The device did not answer within 2 minutes after its restart – nothing was installed | **Restart the device first** restarted the Shelly, but it did not come back in time. Check that it is online, then try the installation again |
 | No update is held back for this device | **Offer update now** found no held version any more (e.g. the device was checked meanwhile). Reload the page |
 | Weak Wi-Fi signal (−80 dBm or below) in the installation dialog | The Shelly downloads the firmware over Wi-Fi and the download may fail. Improve the reception (access point, antenna position) or install anyway and retry if it fails |

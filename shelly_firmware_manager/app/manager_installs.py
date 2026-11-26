@@ -46,8 +46,9 @@ INSTALL_NO_DOWNLOAD_S = 120
 INSTALL_WAIT_S = 300  # polling: upper limit (5 min) in case the Shelly gets stuck
 
 OTA_STALL_S = 60  # events: no new progress for 60 s = the update got stuck
+OTA_STALL_WEAK_S = 120  # the same with a weak Wi-Fi signal (WEAK_RSSI or lower at the start)
 OTA_RESTART_WAIT_S = 30  # events: after 100 % the Shelly must restart within 30 s
-OTA_BOOT_WAIT_S = 30  # events: and report the target version within 30 s after the restart
+OTA_BOOT_WAIT_S = 90  # events: and report the target version within 90 s after the restart
 OTA_POLL_S = 5  # events: query interval around the restart
 OTA_TICK_S = 1  # events: check interval while the update runs
 
@@ -60,6 +61,24 @@ RESTART_WAIT_S = 120  # the device must answer again within 2 minutes
 RESTART_POLL_S = 3  # query interval while waiting for its answer
 
 MAX_SERVED_IPS = 16  # download diagnosis: client addresses recorded per file
+
+# Weak Wi-Fi before the update command: the pre-check and the command are tried again
+# while the Shelly does not answer (time-out, connection error) – up to PRECHECK_ATTEMPTS
+# attempts within PRECHECK_WINDOW_S. A refusal of the device (password, other device,
+# other firmware) is never repeated, and the command only if it surely never left.
+PRECHECK_ATTEMPTS = 5
+PRECHECK_WINDOW_S = 60
+PRECHECK_PAUSE_S = 5  # pause between two attempts
+LINK_TIMEOUT_S = 5  # reading running time and Wi-Fi signal (optional, never stops an installation)
+WEAK_RSSI = -80  # dBm and lower: weak signal (as the check list of the installation dialog)
+
+# Steps of an installation as the status pill shows them (install_step_view), in their
+# order. Per step: the time it usually takes at most (longer = "late": the pill turns
+# yellow), counted from the last progress or answer of the Shelly, else from the start of
+# the step; the pre-check is late also from its second attempt on.
+INSTALL_STEPS = ("backup", "restart", "precheck", "install", "reboot", "verify")
+STEP_USUAL_S = {"backup": 60, "restart": 60, "precheck": 5, "install": 30, "reboot": 15, "verify": 30}
+STEP_USUAL_POLLING_S = 120  # "install" without OTA events (Gen1, HTTP fallback): no progress is reported
 
 TEST_PATH = "/connection-test/"  # path of the test address on the download server (download_server)
 
@@ -180,6 +199,8 @@ class Installs(Checks):
         try:
             async with self.install_slots:
                 # Option "Back up before every installation": no backup, no installation
+                if self.backup_before_install:
+                    self._set_step(device_id, "backup")
                 await self.backup_before_installation(device_id, dev, approved_by)
                 dev["message"] = "Downgrade started" if downgrade else "Installation started"
                 entry = {
@@ -197,6 +218,8 @@ class Installs(Checks):
                     entry["restarted"] = True  # the device was restarted before the installation
                 self.events.add("install", event="started", **entry)
                 ok, diagnosis = await self._install(device_id, dev, sha, restart_first)
+                if ok:
+                    diagnosis = self._losses_text(device_id)  # success with connection losses: a hint line
                 if ok and downgrade:
                     self._after_downgrade(dev)
                 elif ok or dev.get("status") == STATUS_UNCLEAR:
@@ -219,6 +242,7 @@ class Installs(Checks):
             return False
         finally:
             self.installing.discard(device_id)
+            self.install_steps.pop(device_id, None)
             dev.pop("downgrade", None)
             dev.pop("downgrade_from", None)
             self.cleanup_firmware()  # housekeeping only, stored firmware stays
@@ -259,6 +283,180 @@ class Installs(Checks):
         if current["mac"] != dev.get("mac") or current["build"] != dev.get("pending_build"):
             raise ShellyError("Device or firmware changed since the check – please check again")
 
+    # ------------------------------------------------------------------------- Steps and weak Wi-Fi
+
+    def _set_step(self, device_id: str, step: str, usual: float | None = None, give_up: float | None = None) -> None:
+        """The installation of device_id enters step (one of INSTALL_STEPS). usual:
+        longer = late (default STEP_USUAL_S); give_up: when the app reports an error
+        (None: no fixed limit). The Wi-Fi signal, the connection losses and a restart
+        the app asked for but did not see stay with the installation."""
+        now = time.monotonic()
+        before = self.install_steps.get(device_id) or {}
+        self.install_steps[device_id] = {
+            "step": step,
+            "since": now,
+            "quiet": now,  # last sign of life within the step (progress, answer)
+            "usual": usual if usual is not None else STEP_USUAL_S[step],
+            "give_up": give_up,
+            "attempt": None,
+            "rssi": before.get("rssi"),
+            "losses": before.get("losses", 0),
+            "restart_unseen": before.get("restart_unseen", False),
+        }
+
+    def _update_step(self, device_id: str, **fields: Any) -> None:
+        """Change fields of the running step (nothing if no step is set)."""
+        step = self.install_steps.get(device_id)
+        if step is not None:
+            step.update(fields)
+
+    def install_step_view(self, device_id: str) -> dict[str, Any] | None:
+        """The running step for the status pill and its tooltip, or None: {"step",
+        "n", "of" (position in INSTALL_STEPS), "seconds" (quiet time: since the last
+        progress or answer, else the start of the step), "usual", "late", "give_up",
+        "attempt", "attempts", "rssi"}. Not stored – only while the installation runs."""
+        step = self.install_steps.get(device_id)
+        if step is None:
+            return None
+        quiet = int(time.monotonic() - step["quiet"])
+        attempt = step["attempt"]
+        return {
+            "step": step["step"],
+            "n": INSTALL_STEPS.index(step["step"]) + 1,
+            "of": len(INSTALL_STEPS),
+            "seconds": quiet,
+            "usual": step["usual"],
+            "late": quiet >= step["usual"] or (attempt or 1) > 1,
+            "give_up": step["give_up"],
+            "attempt": attempt,
+            "attempts": PRECHECK_ATTEMPTS if attempt else None,
+            "rssi": step["rssi"],
+        }
+
+    def _weak(self, device_id: str) -> int | None:
+        """The Wi-Fi signal read at the start of the installation if it is weak, else None."""
+        rssi = (self.install_steps.get(device_id) or {}).get("rssi")
+        return rssi if isinstance(rssi, int) and rssi <= WEAK_RSSI else None
+
+    def _stall_limit(self, device_id: str) -> int:
+        """Seconds without progress after which a running download counts as stuck:
+        longer with a weak Wi-Fi signal."""
+        return OTA_STALL_WEAK_S if self._weak(device_id) is not None else OTA_STALL_S
+
+    def _losses_text(self, device_id: str) -> str | None:
+        """Hint line of a confirmed installation whose connection was lost (counted per gap of
+        unanswered attempts before the update command), else None."""
+        losses = (self.install_steps.get(device_id) or {}).get("losses", 0)
+        if not losses:
+            return None
+        weak = self._weak(device_id)
+        times = "once" if losses == 1 else f"{losses} times"
+        signal = f" (weak Wi-Fi: {weak} dBm)" if weak is not None else ""
+        return f"Connection to the Shelly lost {times} while waiting – tried again{signal}"
+
+    async def _read_link(self, device_id: str, dev: Device) -> dict[str, int | None]:
+        """Running time and Wi-Fi signal of the device ({} if it cannot be read in
+        LINK_TIMEOUT_S – both are optional)."""
+        try:
+            async with asyncio.timeout(LINK_TIMEOUT_S):
+                return await shelly.link_status(self.session, dev["gen"], dev["origin"], self._auth(device_id, dev))
+        except (TimeoutError, ShellyError, aiohttp.ClientError, OSError) as err:
+            log.debug("%s: running time and Wi-Fi signal not read: %s", dev.get("name"), err)
+            return {}
+
+    async def _command_update(
+        self, device_id: str, dev: Device, url: str, auth: DeviceAuth | None, ota: dict[str, Any]
+    ) -> asyncio.Task[None] | None:
+        """Step "precheck": pre-check (_verify_unchanged) and update command, tolerant of
+        a weak Wi-Fi. While the Shelly does not answer (time-out, connection error) both
+        are tried again, up to PRECHECK_ATTEMPTS attempts within PRECHECK_WINDOW_S; a
+        refusal of the device is raised at once. The command is sent again only if it
+        surely never left (no connection); without an answer to a sent command the
+        installation waits for the device as usual (never a second command).
+
+        After the first answer the Wi-Fi signal is read (longer download tolerance when
+        it is weak). After an answer that followed unanswered attempts, the running time
+        tells a restart of the device (it runs shorter than the time since its last
+        answer) from a lost connection: a restart stops the installation, a lost
+        connection is counted for the hint line of the result. Only the pre-check is
+        bounded by the window; a command on its way is never cut off. Returns the OTA
+        event reader (Gen2+ WebSocket) or None (HTTP: the version is polled)."""
+        self._set_step(device_id, "precheck", give_up=PRECHECK_WINDOW_S)
+        started = time.monotonic()
+        last_alive = started  # last answer of the device (before the first one: the start of the step)
+        missed = False  # unanswered attempts since the last answer
+        linked = False  # running time and signal read after the first answer
+        attempt = 0
+        while True:
+            attempt += 1
+            self._update_step(device_id, attempt=attempt)
+            try:
+                left = max(PRECHECK_PAUSE_S, PRECHECK_WINDOW_S - (time.monotonic() - started))
+                async with asyncio.timeout(left):
+                    await self._verify_unchanged(device_id, dev)
+                answered = time.monotonic()
+                self._update_step(device_id, quiet=answered)
+                if missed or not linked:
+                    await self._after_answer(device_id, dev, last_alive if missed else None)
+                last_alive, missed, linked = answered, False, True
+                reader = await self._update_over_websocket(dev, url, auth, ota) if dev["gen"] >= 2 else None
+                if reader is None:
+                    await self._update_over_http(dev, url, auth)
+                return reader
+            except (TimeoutError, aiohttp.ClientError, OSError) as err:
+                # No answer, or the command never left: try again while the window lasts
+                missed = True
+                elapsed = time.monotonic() - started
+                log.info("%s: no answer before the update command (attempt %d): %s",
+                         dev["name"], attempt, error_text(err, 120) or type(err).__name__)
+                if attempt >= PRECHECK_ATTEMPTS or elapsed + PRECHECK_PAUSE_S >= PRECHECK_WINDOW_S:
+                    weak = self._weak(device_id)
+                    raise ShellyError(
+                        f"Connection to the Shelly lost before the update command – no answer in {attempt} "
+                        f"attempts within {round(elapsed)} s. Nothing was installed."
+                        f"{f' Wi-Fi signal: {weak} dBm (weak).' if weak is not None else ''}"
+                    ) from None
+                await asyncio.sleep(PRECHECK_PAUSE_S)
+
+    async def _after_answer(self, device_id: str, dev: Device, last_alive: float | None) -> None:
+        """The device answered the pre-check: read its running time and Wi-Fi signal
+        once, and after unanswered attempts (last_alive: time of its answer before them,
+        or the start of the step) decide between a lost connection (counted) and a
+        restart (ShellyError: nothing is installed) – it restarted if it runs shorter
+        than the time since last_alive. Restart & install: a restart the app asked for
+        but did not see (the device kept answering) is the expected one, once."""
+        link = await self._read_link(device_id, dev)
+        if link.get("rssi") is not None:
+            self._update_step(device_id, rssi=link["rssi"])
+        if last_alive is None:
+            return
+        uptime = link.get("uptime")
+        step = self.install_steps.get(device_id) or {}
+        if uptime is not None and uptime < time.monotonic() - last_alive:
+            if step.get("restart_unseen"):
+                step["restart_unseen"] = False
+                log.info("%s: the restart before the installation happened now", dev["name"])
+                return
+            raise ShellyError(
+                f"The Shelly restarted unexpectedly before the update command (running for {uptime} s). "
+                "Nothing was installed."
+            )
+        if step:
+            step["losses"] += 1
+
+    async def _update_over_http(self, dev: Device, url: str, auth: DeviceAuth | None) -> None:
+        """Update command over HTTP (Gen1, or Gen2+ without a usable WebSocket). A
+        connection that was never made raises (the command did not leave: it may be
+        sent again); without an answer to a sent command the device may update anyway –
+        the installation then waits for it and the command is never sent twice."""
+        try:
+            await shelly.trigger_update(self.session, dev["gen"], dev["origin"], url, auth)
+        except aiohttp.ClientConnectorError:
+            raise
+        except (TimeoutError, aiohttp.ClientError, OSError) as err:
+            log.warning("%s: no answer to the update command (%s) – waiting for the device",
+                        dev["name"], error_text(err, 120) or type(err).__name__)
+
     async def _restart_and_wait(self, device_id: str, dev: Device, auth: DeviceAuth | None) -> None:
         """Restart the device and wait until it answers again. A device that still
         answers after the restart command (slow shutdown) is queried every
@@ -269,6 +467,7 @@ class Installs(Checks):
         answer within RESTART_WAIT_S after the restart command – nothing is
         installed then."""
         dev["message"] = "Restarting the device before the installation"
+        self._set_step(device_id, "restart", give_up=RESTART_WAIT_S)
         await shelly.restart(self.session, dev["gen"], dev["origin"], auth)
         if not await self._back_after_restart(device_id, dev, time.monotonic()):
             raise ShellyError("The device did not answer within 2 minutes after its restart – nothing was installed")
@@ -286,6 +485,7 @@ class Installs(Checks):
                     return True
                 if time.monotonic() - started >= RESTART_DOWN_S:
                     log.info("%s: no pause seen after the restart command", dev["name"])
+                    self._update_step(device_id, restart_unseen=True)  # Restart & install: it may still come
                     return True
             except (TimeoutError, ShellyError, aiohttp.ClientError, OSError):
                 went_down = True
@@ -335,14 +535,15 @@ class Installs(Checks):
             # Only the approved device is restarted: identity and build first
             await self._verify_unchanged(device_id, dev)
             await self._restart_and_wait(device_id, dev, auth)
-        await self._verify_unchanged(device_id, dev)
 
-        # 2. Trigger the update; the Shelly downloads from the app's download server.
-        # Gen2+: over the device WebSocket, so the device's own OTA events
-        # (progress, error) arrive; plain HTTP as fallback if the WebSocket is unusable.
+        # 2. Pre-check again and trigger the update; the Shelly downloads from the app's
+        # download server. Gen2+: over the device WebSocket, so the device's own OTA
+        # events (progress, error) arrive; plain HTTP as fallback if the WebSocket is
+        # unusable. Both tolerate a weak Wi-Fi (see _command_update).
         url = f"{self.download_base}/{dev['file']}"
         self._reset_download(dev)
         ota: dict[str, Any] = {
+            "device_id": device_id,
             "dev": dev,
             "error": None,
             "failed": asyncio.Event(),  # ota_error
@@ -351,10 +552,12 @@ class Installs(Checks):
             "last": None,  # time of the last OTA event
             "events": False,  # True while the OTA events are followed
         }
-        reader = await self._update_over_websocket(dev, url, auth, ota) if dev["gen"] >= 2 else None
+        reader = await self._command_update(device_id, dev, url, auth, ota)
         ota["events"] = reader is not None
-        if reader is None:
-            await shelly.trigger_update(self.session, dev["gen"], dev["origin"], url, auth)
+        self._set_step(
+            device_id, "install", usual=None if reader is not None else STEP_USUAL_POLLING_S,
+            give_up=INSTALL_NO_DOWNLOAD_S if reader is not None else INSTALL_WAIT_S,
+        )  # fmt: skip
         dev.update(status=STATUS_INSTALLING, message="Update accepted, waiting for restart")
         self.save()
         try:
@@ -377,6 +580,7 @@ class Installs(Checks):
             if result is not None:
                 return result
             log.info("%s: device WebSocket ended before the update was applied – polling the version", dev["name"])
+            self._set_step(device_id, "install", usual=STEP_USUAL_POLLING_S, give_up=INSTALL_WAIT_S)
         return await self._await_by_polling(device_id, dev, ota)
 
     async def _await_over_events(
@@ -384,10 +588,11 @@ class Installs(Checks):
     ) -> tuple[bool, str | None] | None:
         """Gen2+ with OTA events:
         - ota_error → error at once;
-        - no download request after 2 min, or no new progress for 60 s → error;
+        - no download request after 2 min, or no new progress for 60 s (120 s with a weak
+          Wi-Fi signal, _stall_limit) → error;
         - after 100 % / ota_success the Shelly must restart within 30 s (WebSocket
           closed or no answer), shown as "Restarting";
-        - within 30 s after the restart it must report the target version; the old
+        - within 90 s after the restart it must report the target version; the old
           version, another version or no answer → error.
         Returns None if the WebSocket ended before the update was applied (the
         caller polls instead)."""
@@ -402,15 +607,19 @@ class Installs(Checks):
             if ota["last"] is None and not self._downloaded(dev):
                 if now - started >= INSTALL_NO_DOWNLOAD_S:
                     raise ShellyError(f"Target version not confirmed. {self._install_diagnosis(dev)}")
-            elif now - (ota["last"] or started) >= OTA_STALL_S:
+                continue
+            stall = self._stall_limit(device_id)
+            self._update_step(device_id, give_up=stall)  # downloading: the stall limit applies
+            if now - (ota["last"] or started) >= stall:
                 at = dev.get("ota_progress")
                 raise ShellyError(
                     f"The update stopped{f' at {at} %' if at is not None else ''}: no progress "
-                    f"from the Shelly for {OTA_STALL_S} s"
+                    f"from the Shelly for {stall} s"
                 )
 
         # Applied: the Shelly restarts (its WebSocket closes or it stops answering)
         target = shelly.parse_version(dev["pending_version"])
+        self._set_step(device_id, "reboot", give_up=OTA_RESTART_WAIT_S)
         applied_at = time.monotonic()
         restarted = ota["closed"].is_set()
         while not restarted and time.monotonic() - applied_at < OTA_RESTART_WAIT_S:
@@ -428,6 +637,7 @@ class Installs(Checks):
             )
 
         dev.update(ota_phase="restarting", message="The Shelly restarts")
+        self._set_step(device_id, "verify", give_up=OTA_BOOT_WAIT_S)
         old = shelly.parse_version(dev["version"]) if dev.get("version") else None
         restart_at = time.monotonic()
         while time.monotonic() - restart_at < OTA_BOOT_WAIT_S:
@@ -562,6 +772,7 @@ class Installs(Checks):
             async for event in channel.events():
                 kind, msg = event["event"], event["msg"]
                 ota["last"] = time.monotonic()
+                self._update_step(ota["device_id"], quiet=ota["last"])  # progress: no longer quiet
                 if kind == "ota_progress" and event["progress"] is not None:
                     dev["ota_progress"] = event["progress"]
                     dev["message"] = f"The Shelly is downloading the firmware: {event['progress']} %"

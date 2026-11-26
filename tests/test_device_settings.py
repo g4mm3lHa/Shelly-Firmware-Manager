@@ -4,6 +4,7 @@ All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test 
 
 import asyncio
 import json
+import re
 
 import data_paths
 import pytest
@@ -654,11 +655,20 @@ def test_access_point_form_is_checked(form):
         shelly.validate_settings({"ap_config": form}, [])
 
 
-@pytest.mark.parametrize("password", ["x" * 8, "x" * 63, "pässwörd", "with space"])
+@pytest.mark.parametrize("password", ["x" * 8, "x" * 63, "with space", "!~#{}<>|\\'\""])
 def test_access_point_password_lengths_the_shelly_takes(password):
-    """8 to 63 printable characters pass (the Shelly refuses other lengths with -113)."""
+    """8 to 63 printable ASCII characters pass (the Shelly refuses other lengths with -113)."""
     form = {"enable": True, "security": "password", "password": password}
     assert shelly.validate_settings({"ap_config": form}, [])["ap_config"]["password"] == password
+
+
+@pytest.mark.parametrize(("password", "shown"), [("pässwörd", "ä"), ("password€", "€"), ("tab\tpassword", "?"),
+                                                 ("x" * 7 + "é", "é")])
+def test_access_point_password_ascii_only(password, shown):
+    """WPA2: printable ASCII only – the error names the first character the Shelly cannot use."""
+    form = {"enable": True, "security": "password", "password": password}
+    with pytest.raises(ValueError, match=f"cannot use: {re.escape(shown)}$"):
+        shelly.validate_settings({"ap_config": form}, [])
 
 
 async def test_access_point_form_logs_no_password(mgr, net, monkeypatch, caplog):

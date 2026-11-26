@@ -4,7 +4,7 @@ import {
   matches, message, modal, modelGen, openDetails, pad, saveLocal, searchText, searchTool, section, selected, setTip, sortControl, t, toast, toolButton,
   ui, valueList, webUrl,
 } from "./core.js";
-import {OFFER_SOURCES, cancelPlan, daysAgo, openDowngrade, openInstall} from "./install.js";
+import {OFFER_SOURCES, cancelPlan, daysAgo, openDowngrade, openInstall, signalLabel} from "./install.js";
 import {
   aopLabel, aopSummary, aopTone, editAccessPoint, editAop, editCloud, editDebug, editEco, editPassword, editSwitch, editValue, featureStrip,
   restartDevice,
@@ -123,6 +123,43 @@ const ACTIVITY_LABELS = {waiting: t("Waiting"), checking: t("Checking …"), dow
 // the wait; the colour changes by a CSS animation at that moment, also between refreshes.
 const SERVER_SLOW_MS = 5000;
 const serverSince = new Map();   // device ID -> time the page first saw the wait
+// Running installation (install_step of the server): the pill names the step – blue with a
+// spinner, yellow while the step takes longer than usual ("late"); the tooltip and the
+// device details explain it (step n of N, how long, when the app gives up, Wi-Fi signal)
+const STEP_LABELS = {backup: t("Backup …"), restart: t("Restarting …"), precheck: t("Waiting for device …"),
+  reboot: t("Restarting …"), verify: t("Verifying …")};
+const STEP_TEXTS = {backup: () => t("backing up the settings"), restart: () => t("restarting the Shelly before the installation"),
+  precheck: () => t("checking the Shelly before the update command"), install: () => t("the Shelly downloads and writes the firmware"),
+  reboot: () => t("the Shelly restarts with the new firmware"),
+  verify: d => t("waiting for the Shelly to report {version}", {version: installTarget(d) || "–"})};
+// Target of the running installation: a downgrade names it, an update installs the offer
+const installTarget = d => d.target || d.offer_version;
+/** Pill text of the running step; downloading: "Installing n %" (a downgrade "Downgrading n %"). */
+function stepLabel(d) {
+  const s = d.install_step;
+  if (s.step !== "install") return STEP_LABELS[s.step] || s.step;
+  return (downgrading(d) ? t("Downgrading") : t("Installing")) + (typeof d.ota_progress === "number" ? ` ${d.ota_progress} %` : "");
+}
+/** Lines of the tooltip and the device details for the running step. */
+function stepLines(d) {
+  const s = d.install_step, vars = {seconds: s.seconds, usual: s.usual};
+  const lines = [t("Step {n} of {of}: {what}", {n: s.n, of: s.of, what: (STEP_TEXTS[s.step] || (() => s.step))(d)})];
+  if (!s.late) lines.push(t("Running for {seconds} s (usually under {usual} s)", vars));
+  else if (s.step === "install") lines.push(t("No progress for {seconds} s – longer than expected (usually under {usual} s)", vars));
+  else if (["precheck", "verify"].includes(s.step)) lines.push(t("No answer for {seconds} s – longer than expected (usually under {usual} s)", vars));
+  else lines.push(t("Takes {seconds} s – longer than expected (usually under {usual} s)", vars));
+  if (s.late && s.attempt > 1 && s.give_up) lines.push(t("Attempt {n} of {max} · the app gives up after {limit} s", {n: s.attempt, max: s.attempts, limit: s.give_up}));
+  else if (s.late && s.give_up) lines.push(t("The app gives up after {limit} s", {limit: s.give_up}));
+  if (typeof s.rssi === "number") lines.push(t("Wi-Fi signal at the start: {signal}", {signal: signalLabel(s.rssi)}));
+  lines.push(t("Installed: {version}", {version: d.version || "–"}), t("Target: {version}", {version: installTarget(d) || "–"}));
+  return lines;
+}
+/** Pill of the running step (the status cell and the device details). */
+function stepPill(d, tag) {
+  const p = el(tag, null, "pill p-step" + (d.install_step.late ? " p-late" : ""));
+  p.append(el("span", null, "spinner"), stepLabel(d));
+  return p;
+}
 // The last successful check differs from the last attempt only after a failed attempt
 const lastSuccess = d => d.last_success && d.last_success !== d.last_check ? fmt(d.last_success) : null;
 
@@ -131,6 +168,7 @@ const ASLEEP_HINT = t("Battery device asleep – wake it up (e.g. press its butt
 /** Text of the status tooltip (details, versions, last attempt and last success). */
 function statusText(d) {
   if (asleep(d)) return `${ASLEEP_HINT}\n` + t("Last contact: {time}", {time: fmt(d.last_success)});
+  if (d.install_step) return stepLines(d).join("\n");
   return [d.message, t("Installed: {version}", {version: d.version || "–"}), d.offer_version ? t("Available: {version}", {version: d.offer_version}) : null,
     d.planned ? t("Install at {time}", {time: d.planned.at_text}) : null,
     t("Last check: {time}", {time: fmt(d.last_check)}), lastSuccess(d) && t("Last successful check: {time}", {time: lastSuccess(d)})].filter(Boolean).join("\n");
@@ -149,8 +187,10 @@ function backupsSection(d) {
  *  ticket" bottom left. */
 function showStatus(d) {
   const key = shownStatus(d), bad = ["error", "unconfirmed"].includes(d.status), unreachable = !!d.unreachable && !asleep(d);
-  const head = box("div", "dstatus", el("p", unreachable ? t("Not reachable") : d.message || "", "dmsg" + (bad ? " bad" : "")),
-    el("span", STATUS_LABELS[key] || d.status, "pill p-" + (key || "").replace(/[^a-z]/g, "")));
+  // A running installation: its step and the lines of the pill's tooltip (phones have no tooltip)
+  const head = d.install_step ? box("div", "dstatus", el("p", stepLines(d).join("\n"), "dmsg lines"), stepPill(d, "span")) :
+    box("div", "dstatus", el("p", unreachable ? t("Not reachable") : d.message || "", "dmsg" + (bad ? " bad" : "")),
+      el("span", STATUS_LABELS[key] || d.status, "pill p-" + (key || "").replace(/[^a-z]/g, "")));
   const provided = hasUpdate(d) || failedInstall(d);
   modal(d.name, [head, unreachable ? unreachableBlock(d) : null,
     section(t("Firmware"), valueList([[t("Installed"), d.version],
@@ -176,7 +216,8 @@ function notePopup(iconName, label, pill, text) {
 }
 const AOP_UNKNOWN = t("Power-on action: unknown – the outputs of this device have not been read yet.");
 /** Power-on action (AOP) in the action column: flash icon with state – green
- *  if every output restores its last state, red if an output has another value, "?"
+ *  if every output restores its last state or follows its input, yellow if an output
+ *  has another value, "?"
  *  if the settings could not be read or the device was never read (outputs unknown);
  *  opens the same dialog as the row menu. Mobile (labeled): the current value is shown
  *  on the button next to the icon. Devices without switchable outputs get a disabled
@@ -190,7 +231,7 @@ function aopButton(d, labeled) {
     b.setAttribute("aria-disabled", "true"); b.onclick = () => notePopup("aop", t("Power-on action"), t("Unknown"), AOP_UNKNOWN);
     return b;
   }
-  const state = !outputs.length ? "restart" : d.settings_error ? "s-unknown" : aopTone(outputs) === "good" ? "c-good" : "c-alert";
+  const state = !outputs.length ? "restart" : d.settings_error ? "s-unknown" : aopTone(outputs) === "good" ? "c-good" : "c-warn";
   const b = el("button", null, `act ${state}`);
   b.append(icon("aop"));
   if (!outputs.length) {
@@ -307,6 +348,11 @@ function statusCell(d) {
       chip.style.animationDelay = `${Math.max(0, SERVER_SLOW_MS - (Date.now() - serverSince.get(d.id)))}ms`;
     }
     return chip;
+  }
+  if (d.install_step) {
+    const p = stepPill(d, "button");
+    p.onclick = () => showStatus(d); attachTip(p, () => statusText(d));
+    return p;
   }
   const key = shownStatus(d);
   // Gen2+ installations report the device's own download progress, then its restart

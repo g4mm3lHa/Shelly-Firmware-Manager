@@ -149,7 +149,7 @@ class EventLog:
         """Mark of the newest entry for the UI (reload of the Logs tab, unread
         entries): its time in seconds × 1000 plus the number of entries written in that
         same second up to it, so it grows with every new entry, also within one second.
-        severity: the mark of the newest entry of this severity instead (unread "!" of
+        severity: the mark of the newest entry of this severity instead (unread dot of
         the Logs tab: errors only) – the value latest() had when that entry was
         written. 0 if there is no such entry."""
         for index in range(len(self.entries) - 1, -1, -1):

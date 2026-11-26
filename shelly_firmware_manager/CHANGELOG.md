@@ -1,5 +1,32 @@
 # Changelog
 
+## 3.13.1
+
+Released 2026-11-26. Installations tolerate a weak Wi-Fi and show their current step;
+the power-on action is no longer red and the Logs tab no longer jumps.
+
+Changed
+- Installation: while a Shelly does not answer right before the update command, the app
+  tries again (up to 5 times within 60 s); the command itself is sent only once.
+- Installation over HTTP: without an answer to the sent update command the app waits for
+  the device (as over the device connection) instead of failing at once.
+- Installation: a Shelly that answers again is told apart by its running time – a lost
+  connection goes on (the result names it), a restart of its own stops the installation.
+- Installation (Gen2+): 120 s instead of 60 s without download progress on weak Wi-Fi
+  (−80 dBm or below); after its restart the Shelly may take 90 s instead of 30 s.
+- Status pill of a running installation names the step (Backup, Restarting, Waiting for
+  device, Installing n %, Verifying); blue, yellow when a step takes longer than usual.
+- Status tooltip (phones: device details) of a running installation: step, time, limit
+  and Wi-Fi signal; line breaks in status tooltips are kept.
+- Power-on action: green also for "Match input" (Gen1 "Switch"), yellow instead of red
+  for every other value.
+- Logs tab: unread errors are marked by a red dot on the tab icon; the tabs no longer
+  shift when it appears or goes.
+- Log: an installation started with Restart & install reads "Restarted by the app before
+  the installation".
+- Access point password: printable ASCII only (WPA2, no umlauts or accents); a character
+  the Shelly cannot use is named in the form.
+
 ## 3.13.0
 
 Released 2026-11-26. New look with tinted cards and a choice of base colour, an access
