@@ -3,7 +3,7 @@
 // card "Device Passwords" (several devices).
 import {
   $, ackGate, api, attachTip, box, checkbox, closeModal, el, field, filePassword, fmt, fmtSize, formError, guarded, icon, iconButton, input,
-  mb, message, messageBody, modal, passwordCopy, section, setTip, startDownload, t, tn, ui, uploadFile, valueList,
+  mb, message, messageBody, modal, passwordCopy, section, setTip, startDownload, t, tn, toast, ui, uploadFile, valueList,
 } from "./core.js";
 import {autoLanguage, setLanguage} from "./i18n.js";
 import {languageChoice, LANGUAGES} from "./lang.js";
@@ -13,7 +13,8 @@ import {connectionRow} from "./diagnosis.js";
 
 // ---------------------------------------------------------------- App settings
 // All app options, grouped into cards in this order (Title Case card heads). Saving
-// stores them in the app (settings.json) and restarts it. [key, label, type, description, group]
+// stores them in the app (settings.json) and restarts it, unless only options of NO_RESTART
+// changed. [key, label, type, description, group]
 // in English (same texts as translations/en.yaml), translated when shown. The base colour
 // (group "Display") stands in the card Display with the language (languageCard).
 const OPTION_GROUPS = ["Checks", "Download Server", "Firmware & Storage", "Backups", "Logs", "Advanced"];
@@ -289,19 +290,30 @@ function optionChanges() {
   }
   return changes;
 }
+// Options that apply without a restart of the app (server: app_options.NO_RESTART): a save
+// that changes only these keeps the app running and the page open
+const NO_RESTART = new Set(["base_color"]);
 // Waiting for the restart after "Save settings": poll interval, time after which any
 // answer reloads the page (restart not noticed), poll interval after that time (ms)
 const RESTART_POLL = 500, RESTART_GIVE_UP = 60000, RESTART_SLOW_POLL = 2000;
-/** Collect changed options, confirm, save and wait for the app restart. */
+/** Collect changed options, confirm, save and wait for the app restart (none if only
+ *  options without a restart changed: the form then shows the saved options again). */
 function saveOptions() {
   const changes = optionChanges();
   if (!Object.keys(changes).length) { message(t("Settings"), t("Nothing changed.")); return; }
   const names = Object.keys(changes).map(k => t(OPTION_FIELDS.find(f => f[0] === k)[1]));
+  const restart = Object.keys(changes).some(k => !NO_RESTART.has(k));
   const port = "host_port" in changes ? el("p", t("The app restarts with port {port}. Before that it checks that no other program on the Home Assistant host uses this port. If the app does not come back, reset the port in the Configuration tab of the app (Network).", {port: changes.host_port}), "warnbox") : null;
-  modal(t("Save settings?"), [el("p", t("Changed: ") + names.join(", ")), port, el("p", t("The app restarts to apply the settings; this page reconnects automatically."), "hint")].filter(Boolean),
-    [{text: t("Cancel")}, {text: t("Save & restart"), kind: "primary", action: () => guarded(t("Save settings?"), undefined, async () => {
+  const note = restart ? el("p", t("The app restarts to apply the settings; this page reconnects automatically."), "hint") : null;
+  modal(t("Save settings?"), [el("p", t("Changed: ") + names.join(", ")), port, note].filter(Boolean),
+    [{text: t("Cancel")}, {text: restart ? t("Save & restart") : t("Save"), kind: "primary", action: () => guarded(t("Save settings?"), undefined, async () => {
       const r = await api("api/settings", changes);
-      if (!r.restarting) { message(t("Settings"), t("Nothing changed.")); return; }
+      if (!r.changed.length) { message(t("Settings"), t("Nothing changed.")); return; }
+      if (!r.restarting) {
+        ui.options = {...ui.options, ...changes};
+        closeModal(); renderSettings(); toast(t("Settings saved"));
+        return;
+      }
       modal(t("Settings saved"), [el("p", t("The app is restarting …"), "hint")], []);
       waitForRestart();
     })}]);

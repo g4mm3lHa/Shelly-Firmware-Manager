@@ -21,7 +21,7 @@ cannot know: responsibility, layering, invariants and pitfalls.
 | `download_server.py` | GET/HEAD `<sha256>.<ext>` for the Shellys, only during an active update, by default only to the target IP; GET/HEAD `connection-test/<32 hex>` only during a connection test the user started, only to its device, once, a short text (`Installs.test_fetched`). |
 | `schedule.py` | the automatic check: every N days at HH:MM, HA time zone, DST, catch-up. |
 | `timetable.py` | schedules and the time of "Install at": validation and next run, pure functions; stored entries re-checked at start (`check_stored`, `check_plan`). |
-| `app_options.py` | option validation (ranges, switches, choices `CHOICES` such as `base_color`), merge with defaults, log diff, download URL rules, settings file (`read_settings`, `write_settings`, `take_over`). |
+| `app_options.py` | option validation (ranges, switches, choices `CHOICES` such as `base_color`; `NO_RESTART` / `needs_restart`: options saved without an app restart), merge with defaults, log diff, download URL rules, settings file (`read_settings`, `write_settings`, `take_over`). |
 | `events.py` | activity log (JSON Lines): severity, entry IDs, delete/clear, `latest` mark. |
 | `diagnostics.py` | text of "Details for a bug ticket" (`report`): masks names, IPs, MACs and Shelly IDs; values come from `Manager.device_report`, passwords never reach it. |
 | `credentials.py` | per-device passwords, file 0600, Gen2+ HA1 only; a write error raises `ShellyError`. |

@@ -874,7 +874,8 @@ class ManagerCore:
         return app_options.public_view(self.options)
 
     async def save_options(self, changes: object, user: str | None = None) -> list[str]:
-        """Validate and store in settings.json; the caller restarts the app.
+        """Validate and store in settings.json; the caller restarts the app unless only
+        options of app_options.NO_RESTART changed (app_options.needs_restart).
 
         "host_port" is no option of settings.json: a new host port of the download server
         is set in Home Assistant (POST /addons/self/options {"network": …}, open to every
@@ -888,8 +889,10 @@ class ManagerCore:
         new, changed = app_options.merge(self.options, changes)
         if not changed and port is None:
             return []
+        restart = port is not None or app_options.needs_restart(changed)
+        # A restart would cancel running work; options without a restart can always be saved
         busy = self.busy or (f"Schedule “{self.schedule_running}” is running" if self.schedule_running else None)
-        if busy:
+        if busy and restart:
             raise ShellyError(f"Not possible – {busy}")
         diff = app_options.change_list(self.options, new, changed)
         if port is not None:
@@ -909,7 +912,7 @@ class ManagerCore:
                 error = f"Settings could not be stored: {err.strerror or type(err).__name__}"
                 self.events.add("options", ok=False, changes=diff, user=user, error=error)
                 raise ShellyError(error) from None
-        log.info("App options changed by %s (%s) – restarting", user, ", ".join(changed))
+        log.info("App options changed by %s (%s)%s", user, ", ".join(changed), " – restarting" if restart else "")
         self.events.add("options", changes=diff, user=user)
         self.options = new
         if "download_base_url" in changed and self.download_base_confirmed is not None:

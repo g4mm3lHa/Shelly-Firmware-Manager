@@ -2,6 +2,7 @@
 
 All HA/Shelly/vendor traffic is mocked (conftest.FakeNet) or goes to local test servers."""
 
+import asyncio
 import json
 import re
 from pathlib import Path
@@ -99,6 +100,43 @@ async def test_base_color_choice(net):
                 assert (await (await client.get("/api/settings")).json())["base_color"] == "violet"
         finally:
             await client.close()
+
+async def test_base_color_alone_saves_without_a_restart(net, monkeypatch):
+    """A save that changes only options of NO_RESTART (the base colour) stores them, logs the
+    change and keeps the app running, also while work runs; any other changed key restarts."""
+    import web_settings
+    assert not app_options.needs_restart([]) and not app_options.needs_restart(["base_color"])
+    assert app_options.needs_restart(["host_port"]) and app_options.needs_restart(["base_color", "log_entry_limit"])
+    monkeypatch.setattr(web_settings, "RESTART_DELAY_S", 0)
+    m = make_manager(net)
+    restarts = []
+
+    async def restart_app():
+        restarts.append(True)
+
+    m.restart_app = restart_app
+    client = await web_client(m)
+    try:
+        hdr = {"X-CSRF-Token": client.csrf}
+        m.schedule_running = "Night"   # running work blocks only a save with a restart
+        r = await client.post("/api/settings", json={"base_color": "teal"}, headers=hdr)
+        assert r.status == 200 and await r.json() == {"changed": ["base_color"], "restarting": False}
+        await asyncio.sleep(0.05)
+        assert restarts == [] and m.options["base_color"] == "teal"
+        assert json.loads(data_paths.SETTINGS_FILE.read_text())["base_color"] == "teal"
+        assert '<html lang="en" data-base-color="teal">' in await (await client.get("/")).text()
+        entry = [e for e in m.events.entries if e["kind"] == "options"][-1]
+        assert entry["changes"] == [{"option": "base_color", "old": "default", "new": "teal"}]
+        r = await client.post("/api/settings", json={"base_color": "green", "log_entry_limit": 500}, headers=hdr)
+        assert r.status != 200 and "Not possible" in await r.text() and m.options["base_color"] == "teal"
+        m.schedule_running = None
+        r = await client.post("/api/settings", json={"base_color": "green", "log_entry_limit": 500}, headers=hdr)
+        assert (await r.json())["restarting"] is True
+        await asyncio.sleep(0.05)
+        assert restarts == [True]
+    finally:
+        await client.close()
+
 
 def test_allow_downgrade_is_an_optional_switch():
     """allow_downgrade: no default (missing = off), only true/false accepted."""

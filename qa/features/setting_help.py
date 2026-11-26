@@ -12,7 +12,7 @@ SAVE_BASE = """value => fetch('api/settings', {method: 'POST', body: JSON.string
 
 def _base_color(case, page, f, save):
     """Card Display: the base colour dots preview at once, mark the form as changed, are
-    dropped by leaving the tab and (save) are stored, kept after a reload."""
+    dropped by leaving the tab and (save) are stored without a restart, kept after a reload."""
     names = f.evaluate("() => [...document.querySelectorAll('#opt-base_color input')].map(i => [i.value, i.getAttribute('aria-label'), i.dataset.tip])")
     check(f"{case}: base colour: six named radios", [n[0] for n in names] == ["default", "blue", "teal", "green", "violet", "orange"]
           and all(n[1] == n[2] for n in names) and names[2][1] == "Teal", str(names))
@@ -45,11 +45,20 @@ def _base_color(case, page, f, save):
     check(f"{case}: base colour: arrow key chooses the next dot", wait_until(lambda: f.evaluate(ROOT_COLOR)[0] == "green"), str(f.evaluate(ROOT_COLOR)))
     try:
         f.click("#settings-form .form-actions button.primary")
-        check(f"{case}: base colour: named in Save settings?", "Changed: Base colour" in dialog(f)["body"], dialog(f)["body"])
-        f.locator("#dlg-btns button", has_text="Save & restart").click()
-        check(f"{case}: base colour: saved", wait_until(lambda: dialog(f)["title"] == "Settings saved"))
-        page.reload()   # as after the restart: the page of the server carries the saved colour, the Settings tab opens again
+        d = dialog(f)
+        check(f"{case}: base colour: named in Save settings?, saved without a restart",
+              "Changed: Base colour" in d["body"] and "restart" not in d["body"] and d["buttons"] == [["Cancel", False], ["Save", False]], str(d))
+        f.locator("#dlg-btns button.primary").click()
+        check(f"{case}: base colour: saved, dialog closed, toast",
+              wait_until(lambda: f.evaluate("() => !document.getElementById('dlg').open && document.getElementById('toast').textContent")) == "Settings saved")
+        check(f"{case}: base colour: form shows the saved colour, no Unsaved changes",
+              f.evaluate(ROOT_COLOR) == ["green", "#558b2f"] and f.evaluate(CHOSEN) == ["green", "Green"]
+              and f.locator(".form-actions .unsaved").is_hidden(), str(f.evaluate(CHOSEN)))
+        f.click("#tab-devices")
+        check(f"{case}: base colour: leaving the tab keeps the saved colour", f.evaluate(ROOT_COLOR) == ["green", "#558b2f"], str(f.evaluate(ROOT_COLOR)))
+        page.reload()   # the page of the server carries the saved colour
         check(f"{case}: base colour: a reload keeps it", f.evaluate(ROOT_COLOR) == ["green", "#558b2f"], str(f.evaluate(ROOT_COLOR)))
+        f.click("#tab-settings")
         f.wait_for_selector("#opt-base_color")
         check(f"{case}: base colour: chosen dot after the reload", f.evaluate(CHOSEN) == ["green", "Green"], str(f.evaluate(CHOSEN)))
     finally:

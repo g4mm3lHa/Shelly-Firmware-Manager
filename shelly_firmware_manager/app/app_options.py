@@ -45,6 +45,9 @@ CHOICES = {
     # of the Home Assistant theme with neutral surfaces, a colour replaces the primary colour
     "base_color": ("default", "blue", "teal", "green", "violet", "orange"),
 }
+# Options that apply without a restart of the app: the page reads them on every load. A save
+# that changes only these stores them and keeps the app running.
+NO_RESTART = frozenset({"base_color"})
 DEFAULTS = {
     "check_interval_days": 7,
     "check_time": "02:45",
@@ -157,6 +160,12 @@ def with_defaults(options: dict[str, Any]) -> dict[str, Any]:
 def public_view(options: dict[str, Any]) -> dict[str, Any]:
     """Options for the UI (there are no secret options)."""
     return with_defaults(options)
+
+
+def needs_restart(changed: list[str]) -> bool:
+    """True if a save of these changed keys must restart the app (any key outside NO_RESTART,
+    including "host_port"); an empty list needs none."""
+    return any(key not in NO_RESTART for key in changed)
 
 
 def _validate(key: str, value: Any) -> Any:

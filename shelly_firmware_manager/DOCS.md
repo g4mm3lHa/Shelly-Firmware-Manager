@@ -81,7 +81,7 @@ Only original Shelly firmware is supported; see [Known limitations](#known-limit
 ## Configuration
 
 All options are in the app's **Settings** tab; the app stores them itself. Saving restarts
-the app. The **Configuration** tab of the app page in Home Assistant only points to the
+the app, except when only **Base colour** changed. The **Configuration** tab of the app page in Home Assistant only points to the
 **Settings** tab: Home Assistant shows no links there, and the one field you see has no
 effect. Its **Network** section shows the host port of the download server; you can
 change it there or with **Host port** in the **Settings** tab.
@@ -693,7 +693,8 @@ card **Display** chooses the language of this page: **Same as Home Assistant** (
 English where no translation exists), English, Deutsch, Nederlands, Français, Italiano,
 Español, Polski or Português. The translations other than English are machine translated. It applies at once, only in this
 browser, and needs no save. **Base colour** below it shows the chosen colour at once and is
-kept with **Save settings** for all browsers (see [Configuration](#configuration)). The status messages of the devices and the errors the app
+kept with **Save settings** for all browsers, without a restart of the app (see
+[Configuration](#configuration)). The status messages of the devices and the errors the app
 reports are translated as well; the activity log, texts the Shelly itself sends and this
 documentation stay English.
 The last line links to the app page in Home Assistant, where **Changelog** next to the

@@ -54,7 +54,7 @@ Part of `docs/CODEMAP.md`; read when you change routes: the table and the middle
 | `POST /api/backups/import/check` · `/confirm` · `/cancel` | `check_backup_import` (`token`, `password`) · `confirm_backup_import` · `cancel_backup_import` |
 | `GET /api/logs` | `events.list` |
 | `POST /api/logs/{id}/delete` · `/api/logs/clear` | `events.remove` · `events.clear` (`confirm`) |
-| `GET` · `POST /api/settings` | `read_host_port`, `options_view` (+ `installed_versions`, `host_port`, `host_port_known`) · `save_options` + restart (`host_port`: checked free, set via `POST /addons/self/options` `network`) |
+| `GET` · `POST /api/settings` | `read_host_port`, `options_view` (+ `installed_versions`, `host_port`, `host_port_known`) · `save_options` + restart, none if only `app_options.NO_RESTART` options changed (answer `restarting`; `host_port`: checked free, set via `POST /addons/self/options` `network`) |
 | `POST /api/settings/connection-test` | `run_connection_test` (`device`: ID or null = automatic; one test at a time, else 409; answer: the result as in `connection_test`) |
 | `POST /api/settings/download-base/confirm` | `confirm_download_base` |
 | `GET /api/settings/app-page` | `app_page` (link to the app page, changelog) |
