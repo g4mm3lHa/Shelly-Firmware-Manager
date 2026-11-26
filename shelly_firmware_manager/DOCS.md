@@ -173,8 +173,8 @@ available version, status and last check.
 **Areas:** as soon as a device is in an area of Home Assistant, the **Area** column
 (after **Device**; on a phone the first row of the details) and the area icon next to
 **Filter** appear. The area filter takes several areas at once, also **Without area**;
-search finds the area too. The app reads the areas at every check; a single check
-may use the areas read up to 60 seconds before (see [How a check works](#how-a-check-works)).
+search finds the area too. The app reads the areas at every check; a single check is
+meant to use the areas read up to 60 seconds before (see [How a check works](#how-a-check-works)).
 
 **Security:** a strip above the list counts the devices without password protection
 and with the cloud, the access point or the websocket debug log switched on (unknown
@@ -371,11 +371,12 @@ A check (all devices, a single device or the schedule) works in this order:
 
 Each check reads the device registry, the areas and the battery sensors from Home
 Assistant; a full check also reads the Shelly config entries and discoveries. This is
-meant to go over one connection per check. A single check (**Check for updates**,
-**Offer update now**, the check after an intermediate version) reuses what Home Assistant
-answered up to 60 seconds before. A device renamed or moved to another area in that
-minute shows the change with the next check after it. A full check (**Check now** or the
-schedule) and **Try again** always ask Home Assistant anew. A failed answer is never reused.
+meant to go over one connection per check.
+
+A single check (**Check for updates**, **Offer update now**, after an intermediate
+version) is meant to reuse Home Assistant answers up to 60 seconds old. A rename or
+area move in that minute then shows with the next check. **Check now**, the schedule
+and **Try again** are meant to always ask Home Assistant anew.
 
 Every check that asks the Shelly update server also makes one reference request with
 fixed values (Plus1 1.0.7, which must be offered 1.3.3 – no data of your devices). If

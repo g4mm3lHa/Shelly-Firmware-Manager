@@ -440,5 +440,6 @@ async def test_battery_sensors_of_the_entity_registry(net, monkeypatch):
     monkeypatch.setattr(manager_core, "HA_CACHE_S", 0)   # the kept answer is out of time
     m._ha_list = failing
     assert await m._battery_devices() == set()
+    monkeypatch.setattr(manager_core, "HA_CACHE_S", 60)   # the failure stored nothing, the old answer is gone
     m._ha_list = answer
     assert await m._battery_devices() == {"d1", "d2"} and len(calls) == 2

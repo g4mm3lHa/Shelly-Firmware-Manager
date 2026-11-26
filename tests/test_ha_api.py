@@ -142,7 +142,7 @@ async def test_check_reads_home_assistant_over_the_websocket(ha, net):
     sup.before = [{"id": 99, "type": "event", "event": {}}, {"type": "pong"}]
     assert await m.scan() is True
     assert set(m.devices) == {A, B, C} and m.devices[A]["name"] == "Kitchen"
-    assert m.devices[A]["status"] == manager_core.STATUS_READY
+    assert last_check(m)["severity"] != "error" and m.devices[A]["status"] == manager_core.STATUS_READY
     assert m.devices[C]["battery_source"] == manager_core.BATTERY_FROM_HA
     assert [r["type"] for r in sup.requests] == list(REQUESTS)
     assert [r["id"] for r in sup.requests] == [1, 2, 3, 4, 5]
