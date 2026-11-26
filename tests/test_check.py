@@ -715,6 +715,34 @@ async def test_host_name_from_the_device_id_only_when_it_resolves(mgr, net):
     assert mgr.devices[A]["host_name"] is None
 
 
+@pytest.mark.parametrize("shelly_name", ["plus1", "Living Room Light"])
+async def test_host_name_ignores_the_shelly_name(mgr, net, monkeypatch, shelly_name):
+    """Host name column (option resolve_host_names on): a name set on the Shelly is never
+    looked up, neither one that is a valid host label nor one with spaces; only
+    <device id>.local is, and requests keep the address of the registry entry."""
+    looked_up = []
+    read_settings = shelly.read_settings  # the fake of conftest.FakeNet
+
+    async def named_settings(*args, **kwargs):
+        # The settings of the fake with the Shelly name of this case
+        return {**await read_settings(*args, **kwargs), "shelly_name": shelly_name}
+
+    async def lookup(host):
+        # Records every looked-up name; every name resolves
+        looked_up.append(host)
+        return True
+
+    monkeypatch.setattr(shelly, "read_settings", named_settings)
+    monkeypatch.setattr(shelly_net, "host_resolves", lookup)
+    await mgr.scan()  # option still off: lists the devices without a lookup
+    mgr.resolve_host_names = True
+    await mgr.check_device(A, user="u")
+    own = f"shelly-{A}.local"
+    assert mgr.devices[A]["shelly_name"] == shelly_name
+    assert looked_up == [own]
+    assert mgr.devices[A]["host_name"] == own and mgr.devices[A]["origin"] == "http://192.168.1.10"
+
+
 async def test_host_names_off_by_default(mgr, net, monkeypatch):
     """Option resolve_host_names off (default): no lookup at all, no host name kept;
     a stored host name is dropped at the start."""

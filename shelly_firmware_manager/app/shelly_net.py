@@ -5,7 +5,8 @@ integration's configuration_url resolved once, every address checked against the
 list LAN_NETWORKS and the first one pinned as 'http://<ip>:<port>' (no DNS rebinding
 between the check and the request). The list is never extended (no carrier-grade NAT,
 no link-local addresses). The host name helpers only look a name up for the Host name
-column; they never send a request.
+column (the host name of the registry entry, else <device id>.local; a name set on the
+Shelly is never used); they never send a request.
 """
 
 import asyncio
@@ -67,7 +68,8 @@ def host_name_of(configuration_url: str | None) -> str | None:
 
 
 # Device ID as a host name label (Gen2+ id, e.g. shellyplus1pm-a0dd6c29c3e0; Gen1
-# /settings device.hostname, e.g. shelly1-b929cc)
+# /settings device.hostname, e.g. shelly1-b929cc). A name set on the Shelly is not a host
+# label: it may contain spaces and is only the DNS-SD service instance name.
 HOST_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 HOST_RESOLVE_TIMEOUT_S = 5  # longest wait for one host name lookup (mDNS may be slow)
@@ -75,14 +77,17 @@ HOST_RESOLVE_TIMEOUT_S = 5  # longest wait for one host name lookup (mDNS may be
 
 def local_host_name(device_id: object) -> str | None:
     """Host name <device id>.local the device announces itself under (mDNS), from
-    the ID the device reports; None if the ID is missing or no valid host label."""
+    the ID the device reports; None if the ID is missing or no valid host label. The
+    .local host stays the device ID also when a name is set on the Shelly (the name
+    is only its DNS-SD service instance name)."""
     label = str(device_id or "").strip().lower()
     return f"{label}.local" if HOST_LABEL_RE.fullmatch(label) else None
 
 
 async def host_resolves(host: str) -> bool:
     """True if the host name resolves to at least one address within
-    HOST_RESOLVE_TIMEOUT_S. Only a lookup: no request is sent to the address."""
+    HOST_RESOLVE_TIMEOUT_S. Any address counts: it is not checked that the address
+    belongs to the device. Only a lookup: no request is sent to the address."""
     loop = asyncio.get_running_loop()
     try:
         infos = await asyncio.wait_for(

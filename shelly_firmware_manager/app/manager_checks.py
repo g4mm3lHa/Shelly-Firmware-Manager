@@ -737,8 +737,12 @@ class Checks(Backups):
     async def _update_host_name(self, dev: Device, configuration_url: str | None) -> None:
         """Host name column: the host name of the registry entry (configuration_url)
         wins, else <device id>.local from the ID the device reported (Gen2+ shelly_id,
-        Gen1 gen1_hostname; the last known one if this attempt failed). Looked up at
-        every check and kept only when it resolves (else None). Display only: requests
+        Gen1 gen1_hostname; the last known one if this attempt failed). A name set on
+        the Shelly (shelly_name) is never used: the device keeps its .local host under
+        the device ID, the name is only its DNS-SD service instance name. A router DNS
+        name is shown when the integration entry was set up with that host name.
+        Looked up at every check and kept only when it resolves (else None); the
+        address it resolves to is not compared with the device. Display only: requests
         always go to the address of the registry entry. Option resolve_host_names off:
         no lookup, no host name."""
         if not self.resolve_host_names:
