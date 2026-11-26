@@ -930,7 +930,7 @@ export default {
   "The first {n} are shown.": "Pokazano pierwsze {n}.",
   "The installed version of every device is stored.": "Zapisywana jest zainstalowana wersja każdego urządzenia.",
   "The IP address is not the LAN address of Home Assistant.": "Adres IP nie jest adresem Home Assistant w sieci LAN.",
-  "The language applies at once and only in this browser – no “Save settings” needed. The base colour is saved with “Save settings” for all browsers. Logs, error messages and the documentation stay English.": "Język obowiązuje od razu i tylko w tej przeglądarce – „Zapisz ustawienia” nie jest potrzebne. Kolor bazowy zapisuje się przez „Zapisz ustawienia” dla wszystkich przeglądarek. Dzienniki, komunikaty o błędach i dokumentacja pozostają po angielsku.",
+  "The language applies at once and only in this browser – no “Save settings” needed. The base colour is saved with “Save settings” for all browsers. The activity log, texts the Shelly itself sends and the documentation stay English.": "Język obowiązuje od razu i tylko w tej przeglądarce – „Zapisz ustawienia” nie jest potrzebne. Kolor bazowy zapisuje się przez „Zapisz ustawienia” dla wszystkich przeglądarek. Dziennik aktywności, teksty wysyłane przez samego Shelly i dokumentacja pozostają po angielsku.",
   "The last attempt failed ({time}): {error}": "Ostatnia próba się nie powiodła ({time}): {error}",
   "The last backup ({time}) stays.": "Ostatnia kopia zapasowa ({time}) zostaje.",
   "The last connection test failed. If the connection fails, the installation stops.": "Ostatni test połączenia nie powiódł się. Jeśli połączenie się nie powiedzie, instalacja zostanie przerwana.",

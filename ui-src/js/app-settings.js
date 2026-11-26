@@ -428,7 +428,7 @@ function languageCard() {
   const lab = el("label", t("Language")); lab.htmlFor = select.id;
   return box("div", "card", box("div", "card-head", el("h2", t("Display"))), box("div", "card-body",
     box("div", "form", box("div", "set-field t-select", box("div", "set-name", lab), box("div", "set-control", select)), baseColorRow()),
-    el("p", t("The language applies at once and only in this browser – no “Save settings” needed. The base colour is saved with “Save settings” for all browsers. Logs, error messages and the documentation stay English."), "hint lang-note")));
+    el("p", t("The language applies at once and only in this browser – no “Save settings” needed. The base colour is saved with “Save settings” for all browsers. The activity log, texts the Shelly itself sends and the documentation stay English."), "hint lang-note")));
 }
 /** Settings card that opens the dialog for passwords of several devices. */
 function passwordsCard() {

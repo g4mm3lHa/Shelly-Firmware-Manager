@@ -4,7 +4,8 @@ Final release 3.13.0 on branch `release-3.13.0` (base: `main` = `v3.12.1`), afte
 to rc4, all tested live through the beta channel, and a code review of rc4. Changes after
 rc4: settings, restart and passwords of a device are refused while its check waits for the
 Shelly update server; "keep" of the access point protection is accepted only for an access
-point the device reports on and protected; version, merged changelog section, docs, code
+point the device reports on and protected; the language hint of the Settings tab names
+what stays English; version, merged changelog section, docs, code
 map, comments, README screenshots.
 
 ## Scope
@@ -22,7 +23,7 @@ map, comments, README screenshots.
 
 | Check | Result |
 |---|---|
-| `tools/dev/check.sh full`: ruff, mypy --strict, build check, version 3.13.0, pytest, UI, layout gate | passed: 722 pytest; ui_test 214/214; ui_features 1483/1483; layout gate 42/42. A first full run ended ui_features with a Playwright error while a context closed ("Route is already handled") under heavy machine load; the suite alone and the repeated full run passed |
+| `tools/dev/check.sh full`: ruff, mypy --strict, build check, version 3.13.0, pytest, UI, layout gate | passed: 722 pytest; ui_test 214/214; ui_features 1483/1483; layout gate 42/42 (after the language hint only that text changed: pytest 722 and the UI quick run 77 + 873 passed again). A first full run ended ui_features with a Playwright error while a context closed ("Route is already handled") under heavy machine load; the suite alone and the repeated full run passed |
 | Branch coverage (`coverage run --branch`, app modules) | 91 % (7890 statements, 2670 branches); lowest: `credentials.py` 80 %, `store_transfer.py` 83 %, `shelly.py` 86 %; changed in this version: `manager_devices.py` 88 %, `app_options.py` 94 %, `backup_store.py` 91 %, `manager_checks.py` 96 %, `manager_installs.py` 91 %, `web_settings.py` 97 % |
 | CVE check | 2026-11-26: PyPI lists no known vulnerability for the ten pinned packages (all at their newest version, hashes match the release files); base image digest unchanged (`c5ba3dee…dd89`), 3.12.16-alpine3.24 is the newest 3.12 alpine tag |
 | Docs check (seven points) | changelog bullets match `DOCS.md` (Logs, installation dialog and passwords of several devices updated in this build); options in `config.yaml` (hint field only), `translations/en.yaml`, Settings tab and Configuration agree (incl. `base_color`); feature list identical in both READMEs; minimum HA 2026.10 and architectures agree; Credits table matches `requirements.txt` (unchanged); relative links and anchors resolve; section order of `DOCS.md` and fixed content of `README.md` unchanged |
