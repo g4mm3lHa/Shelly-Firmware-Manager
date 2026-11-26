@@ -277,12 +277,21 @@ def _foreign_pending():
     return [t for t in asyncio.all_tasks() if t is not current and not t.done()]
 
 
+async def _download_running(mgr):
+    """Wait (at most 2 s) until a shared download task runs; a busy test run may need longer
+    than a fixed short pause to get there."""
+    for _ in range(200):
+        if mgr._provisions:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("no shared download task started")
+
+
 async def test_cancelled_check_leaves_no_running_download(mgr, net):
     """App stop during a download: the shared download task is cancelled too."""
     net.download_gate = asyncio.Event()  # the download never finishes on its own
     task = asyncio.create_task(mgr.scan())
-    await asyncio.sleep(0.05)
-    assert mgr._provisions  # a shared download task is running
+    await _download_running(mgr)  # a shared download task is running
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
@@ -299,8 +308,7 @@ async def test_cancelled_single_check_leaves_no_running_download(mgr, net):
     net.download_gate = asyncio.Event()
     mgr.reserve_check("device", A)
     task = asyncio.create_task(mgr.check_device(A))
-    await asyncio.sleep(0.05)
-    assert mgr._provisions
+    await _download_running(mgr)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
