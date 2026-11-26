@@ -766,7 +766,9 @@ button.listing.listing-phone{display:none}
 .set-name{display:flex;align-items:center;gap:6px;min-width:0}
 .set-name>label{cursor:help}
 button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help svg{width:var(--icon-m);height:var(--icon-m)}
-.form-actions{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:4px}
+/* Common save area of the Settings tab, above the cards (right) and below them */
+.form-actions,.form-actions-top{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:4px}
+.form-actions-top{margin:0 0 12px}
 .unsaved{color:var(--warn-text);font-size:var(--fs-small)}
 .set-changelog{margin:16px 0 0}
 /* Settings cards in independent column stacks (app-settings.js: 1, 2 or 3 columns), so a
@@ -842,6 +844,10 @@ button.icon.help{padding:2px;color:var(--secondary-text-color)}button.icon.help 
     background:var(--card-background-color);border:1px solid var(--line);border-radius:var(--radius-m);
     box-shadow:var(--shadow-bar)}
   .form-actions .unsaved{margin-right:auto}
+  /* Save area above the cards: full width over the first card, scrolls with the page */
+  .form-actions-top{padding:10px 12px;background:var(--card-background-color);border:1px solid var(--line);
+    border-radius:var(--radius-m)}
+  .form-actions-top .unsaved{margin-right:auto}
 }
 
 /* ================================================================ Installation dialog */

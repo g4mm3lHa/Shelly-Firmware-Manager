@@ -1,5 +1,6 @@
-"""Feature suite setting_help: help texts of the Settings tab as tooltips and the base colour
-of the card Display (demo "idle" on 8801)."""
+"""Feature suite setting_help: help texts of the Settings tab as tooltips, the base colour
+of the card Display, the two save areas, the dialog "Unsaved changes" and the language
+change on the Settings tab (demo "idle" on 8801)."""
 
 from features.base import IDLE, OVERFLOW_JS, check, dialog, open_page, tip_text, wait_until
 
@@ -10,9 +11,57 @@ SAVE_BASE = """value => fetch('api/settings', {method: 'POST', body: JSON.string
   headers: {'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name=csrf]').content}}).then(r => r.status)"""
 
 
+SETTINGS_SHOWN = "() => !document.getElementById('view-settings').hidden && document.getElementById('tab-settings').classList.contains('active')"
+DIALOG_OPEN = "() => document.getElementById('dlg').open"
+
+
+def _unsaved_dialog(case, f, title="Unsaved changes", buttons=(("Discard", False), ("Save", False))):
+    """The dialog "Unsaved changes" is open with its text and the buttons Discard / blue Save."""
+    wait_until(lambda: f.evaluate(DIALOG_OPEN))
+    d = dialog(f)
+    check(f"{case}: dialog {title}", d["title"] == title and d["buttons"] == [list(b) for b in buttons]
+          and f.locator("#dlg-btns button").nth(1).evaluate("b => b.classList.contains('primary')"), str(d))
+    return d
+
+
+def _save_areas(case, page, f):
+    """Save area twice in the same state: above the cards (desktop: right; phones: full
+    width over the first card) and below them."""
+    geo = f.evaluate("""() => { const r = e => e.getBoundingClientRect(), top = document.querySelector('#settings-form > .form-actions-top'),
+      grid = document.querySelector('#settings-form .settings-grid'), card = grid.querySelector('.card'), save = top.querySelector('button.primary');
+      return {first: document.getElementById('settings-form').firstElementChild === top, above: r(top).bottom <= r(card).top,
+        right: Math.abs(r(save).right - r(grid).right), width: Math.abs(r(top).width - r(grid).width), text: save.textContent,
+        hints: [...document.querySelectorAll('#settings-form .unsaved')].map(u => u.hidden)}; }""")
+    edge = geo["width"] if page.viewport_size["width"] <= 700 else geo["right"]
+    check(f"{case}: save area above the first card, same state as below", geo["first"] and geo["above"] and edge < 2
+          and geo["text"] == "Save settings" and len(geo["hints"]) == 2 and geo["hints"][0] == geo["hints"][1], str(geo))
+
+
+def _leave_dialog(case, page, f):
+    """Leaving the tab with unsaved changes asks: Escape and the X stay on the tab with the
+    changes, "Discard" switches and drops them."""
+    f.click("#tab-devices")
+    _unsaved_dialog(case, f)
+    check(f"{case}: unsaved: text of the dialog", dialog(f)["body"].strip() == "The settings are not saved yet.", dialog(f)["body"])
+    page.keyboard.press("Escape")
+    check(f"{case}: unsaved: Escape stays on the tab with the changes", wait_until(lambda: not f.evaluate(DIALOG_OPEN))
+          and f.evaluate(SETTINGS_SHOWN) and f.evaluate(ROOT_COLOR)[0] == "teal" and f.locator(".form-actions-top .unsaved").is_visible())
+    f.click("#tab-logs")
+    _unsaved_dialog(case, f)
+    f.click("#dlg-x")
+    check(f"{case}: unsaved: the X stays on the tab", wait_until(lambda: not f.evaluate(DIALOG_OPEN))
+          and f.evaluate(SETTINGS_SHOWN) and f.evaluate(CHOSEN) == ["teal", "Teal"])
+    f.click("#tab-devices")
+    _unsaved_dialog(case, f)
+    f.locator("#dlg-btns button", has_text="Discard").click()
+    check(f"{case}: unsaved: Discard opens the tab", wait_until(lambda: not f.evaluate(DIALOG_OPEN))
+          and wait_until(lambda: not f.locator("#view-devices").is_hidden()) and f.evaluate("() => document.getElementById('view-settings').hidden"))
+
+
 def _base_color(case, page, f, save):
     """Card Display: the base colour dots preview at once, mark the form as changed, are
-    dropped by leaving the tab and (save) are stored without a restart, kept after a reload."""
+    dropped by leaving the tab with "Discard" and (save) are stored without a restart – with
+    "Save settings" and from the dialog "Unsaved changes" –, kept after a reload."""
     names = f.evaluate("() => [...document.querySelectorAll('#opt-base_color input')].map(i => [i.value, i.getAttribute('aria-label'), i.dataset.tip])")
     check(f"{case}: base colour: six named radios", [n[0] for n in names] == ["default", "blue", "teal", "green", "violet", "orange"]
           and all(n[1] == n[2] for n in names) and names[2][1] == "Teal", str(names))
@@ -32,7 +81,7 @@ def _base_color(case, page, f, save):
     check(f"{case}: base colour: a dot previews the colour in the whole page",
           wait_until(lambda: f.evaluate(ROOT_COLOR) == ["teal", "#00897b"]) and f.evaluate(CHOSEN) == ["teal", "Teal"], str(f.evaluate(ROOT_COLOR)))
     check(f"{case}: base colour: Unsaved changes", f.locator(".form-actions .unsaved").is_visible())
-    f.click("#tab-devices")
+    _leave_dialog(case, page, f)
     check(f"{case}: base colour: leaving the tab shows the saved colour", f.evaluate(ROOT_COLOR) == ["default", THEME], str(f.evaluate(ROOT_COLOR)))
     f.click("#tab-settings")
     f.wait_for_selector("#opt-base_color")
@@ -44,7 +93,7 @@ def _base_color(case, page, f, save):
     page.keyboard.press("ArrowRight")
     check(f"{case}: base colour: arrow key chooses the next dot", wait_until(lambda: f.evaluate(ROOT_COLOR)[0] == "green"), str(f.evaluate(ROOT_COLOR)))
     try:
-        f.click("#settings-form .form-actions button.primary")
+        f.click("#settings-form .form-actions-top button.primary")   # the save area above the cards
         d = dialog(f)
         check(f"{case}: base colour: named in Save settings?, saved without a restart",
               "Changed: Base colour" in d["body"] and "restart" not in d["body"] and d["buttons"] == [["Cancel", False], ["Save", False]], str(d))
@@ -61,8 +110,58 @@ def _base_color(case, page, f, save):
         f.click("#tab-settings")
         f.wait_for_selector("#opt-base_color")
         check(f"{case}: base colour: chosen dot after the reload", f.evaluate(CHOSEN) == ["green", "Green"], str(f.evaluate(CHOSEN)))
+        # "Save" in the dialog "Unsaved changes": the normal save flow, then the chosen tab
+        f.locator("#opt-base_color label.swatch", has=f.locator("input[value=teal]")).click()
+        f.click("#tab-logs")
+        _unsaved_dialog(case, f)
+        f.locator("#dlg-btns button.primary").click()
+        d = dialog(f)
+        check(f"{case}: unsaved: Save opens Save settings?", d["title"] == "Save settings?" and d["buttons"] == [["Cancel", False], ["Save", False]], str(d))
+        f.locator("#dlg-btns button", has_text="Cancel").click()
+        check(f"{case}: unsaved: Cancel of Save settings? stays on the tab", wait_until(lambda: not f.evaluate(DIALOG_OPEN))
+              and f.evaluate(SETTINGS_SHOWN) and f.evaluate(CHOSEN) == ["teal", "Teal"])
+        f.click("#tab-logs")
+        _unsaved_dialog(case, f)
+        f.locator("#dlg-btns button.primary").click()
+        wait_until(lambda: dialog(f)["title"] == "Save settings?")
+        f.locator("#dlg-btns button.primary").click()
+        check(f"{case}: unsaved: saved, then the chosen tab", wait_until(lambda: not f.evaluate(DIALOG_OPEN) and not f.locator("#view-logs").is_hidden())
+              and f.evaluate(ROOT_COLOR) == ["teal", "#00897b"] and f.evaluate("() => document.getElementById('toast').textContent") == "Settings saved",
+              str(f.evaluate(ROOT_COLOR)))
     finally:
         check(f"{case}: base colour: demo reset to Default", f.evaluate(SAVE_BASE, "default") == 200)
+
+
+def _language(case, page, f):
+    """A new language reloads the page on the Settings tab (marker removed); with unsaved
+    changes the dialog asks first (in the page language): Escape keeps the language and the
+    changes, "Discard" changes it."""
+    f.click("#tab-devices")
+    if f.evaluate(DIALOG_OPEN):
+        f.locator("#dlg-btns button", has_text="Discard").click()
+    f.click("#tab-settings")
+    f.wait_for_selector("#opt-check_interval_days")
+    with f.expect_navigation():
+        f.select_option("#set-language", "de")
+    f.wait_for_selector("#opt-check_interval_days")
+    check(f"{case}: language: reload opens the Settings tab again", f.evaluate("document.documentElement.lang") == "de"
+          and f.evaluate(SETTINGS_SHOWN) and f.evaluate("location.hash") == "", f.evaluate("location.hash"))
+    saved = f.input_value("#opt-check_interval_days")
+    f.fill("#opt-check_interval_days", "7" if saved != "7" else "8")
+    typed = f.input_value("#opt-check_interval_days")
+    f.select_option("#set-language", "en")
+    _unsaved_dialog(case, f, "Ungespeicherte Änderungen", (("Verwerfen", False), ("Speichern", False)))
+    page.keyboard.press("Escape")
+    check(f"{case}: language: Escape keeps the language and the changes", wait_until(lambda: not f.evaluate(DIALOG_OPEN))
+          and f.input_value("#set-language") == "de" and f.input_value("#opt-check_interval_days") == typed and f.evaluate(SETTINGS_SHOWN))
+    f.select_option("#set-language", "en")
+    _unsaved_dialog(case, f, "Ungespeicherte Änderungen", (("Verwerfen", False), ("Speichern", False)))
+    with f.expect_navigation():
+        f.locator("#dlg-btns button", has_text="Verwerfen").click()
+    f.wait_for_selector("#opt-check_interval_days")
+    check(f"{case}: language: Discard reloads in the new language on the Settings tab, changes dropped",
+          f.evaluate("document.documentElement.lang") == "en" and f.evaluate(SETTINGS_SHOWN)
+          and wait_until(lambda: f.input_value("#opt-check_interval_days") == saved), f.input_value("#opt-check_interval_days"))
 
 
 def setting_help(browser, out):
@@ -125,7 +224,9 @@ def setting_help(browser, out):
         f.fill("#opt-download_base_url", "http://192.168.1.2:8098")
         page.mouse.move(5, 5)
         page.screenshot(path=out / f"setting-help-{case}.png", full_page=True)
+        _save_areas(case, page, f)
         _base_color(case, page, f, save=width > 700)
+        _language(case, page, f)
         check(f"{case}: no horizontal overflow", f.evaluate(OVERFLOW_JS) <= 0)
         check(f"{case}: no console errors", not errors, str(errors[:2]))
         ctx.close()

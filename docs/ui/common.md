@@ -245,7 +245,8 @@ as the UI change). Read when you change a dialog, the toolbar, card heads or too
   (below it "Base colour", an app option saved with "Save settings", see `settings.md`):
   "Same as Home Assistant" (default, fallback English), English, Deutsch, and since 3.12.0
   Nederlands, Français, Italiano, Español, Polski, Português (own names); applies at once,
-  per browser, not part of "Save settings". German uses "du" (without address where
+  per browser, not part of "Save settings"; the page reloads on the Settings tab, with unsaved
+  settings the dialog "Unsaved changes" asks first (`settings.md`). German uses "du" (without address where
   possible). Logs tab: controls, filter and weekday translated, the entries stay English
   including their type and outcome labels. Dates and times keep the form
   "2026-11-23 03:00" in every language. Texts from the server or the Shelly stay English.

@@ -5,7 +5,7 @@ import {
   $, ackGate, api, attachTip, box, checkbox, closeModal, el, field, filePassword, fmt, fmtSize, formError, guarded, icon, iconButton, input,
   mb, message, messageBody, modal, passwordCopy, section, setTip, startDownload, t, tn, toast, ui, uploadFile, valueList,
 } from "./core.js";
-import {autoLanguage, setLanguage} from "./i18n.js";
+import {autoLanguage, setLanguage, storeLanguage} from "./i18n.js";
 import {languageChoice, LANGUAGES} from "./lang.js";
 import {bulkPasswords} from "./device-settings.js";
 import {downgradeWarning} from "./install.js";
@@ -206,14 +206,31 @@ export function renderSettings() {
   followPort(settingsInputs.host_port, settingsInputs.download_base_url);
   cards.unshift(passwordsCard());   // Device Passwords first
   cards.push(languageCard());       // Display last
-  const save = el("button", t("Save settings"), "primary"); save.onclick = saveOptions;
-  const dirty = el("span", t("Unsaved changes"), "unsaved"); dirty.hidden = true;
-  const markDirty = () => { dirty.hidden = !Object.keys(optionChanges()).length; };
+  // The common save area twice in the same state: above the cards (right; phones: full
+  // width over the first card) and below them. The hint shows only while something changed.
+  const areas = ["form-actions-top", "form-actions"].map(cls => {
+    const save = el("button", t("Save settings"), "primary"); save.onclick = () => saveOptions();
+    const dirty = el("span", t("Unsaved changes"), "unsaved"); dirty.hidden = true;
+    return box("div", cls, dirty, save);
+  });
+  const markDirty = () => { const clean = !settingsDirty(); for (const area of areas) area.firstChild.hidden = clean; };
   const wrap = box("div", "settings-grid");
   settingsCards = cards; layoutSettings(wrap);
   wrap.addEventListener("input", markDirty); wrap.addEventListener("change", markDirty); wrap.addEventListener("click", () => setTimeout(markDirty));
-  $("settings-form").replaceChildren(wrap, box("div", "form-actions", dirty, save), changelogNote());   // common save area
+  $("settings-form").replaceChildren(areas[0], wrap, areas[1], changelogNote());
   markDirty();   // a suggested download base URL is an unsaved change
+}
+/** True while the form of the Settings tab holds a change that is not saved (the state of
+ *  "Unsaved changes"); false while the form is still loading. */
+export function settingsDirty() { return !!ui.options && "base_color" in settingsInputs && Object.keys(optionChanges()).length > 0; }
+/** Dialog "Unsaved changes" before a step that would drop the changes of the form: leaving
+ *  the Settings tab (next.go switches to next.view) or a new language (next.language, the
+ *  page reloads). "Discard" takes the step without saving; the blue "Save" runs the normal
+ *  save flow and takes the step after it; the X and Escape stay on the tab with the changes. */
+export function confirmLeave(next) {
+  const go = () => { closeModal(); if (next.language) setLanguage(next.language); else next.go(); };
+  modal(t("Unsaved changes"), [el("p", t("The settings are not saved yet."))],
+    [{text: t("Discard"), action: go}, {text: t("Save"), kind: "primary", action: () => saveOptions(next)}]);
 }
 /** Popup when "Allow downgrades" is ticked: the red downgrade warning; the red "Enable"
  *  needs the tick "I understand the risk". Cancel, the X and Escape take the tick back.
@@ -297,8 +314,12 @@ const NO_RESTART = new Set(["base_color"]);
 // answer reloads the page (restart not noticed), poll interval after that time (ms)
 const RESTART_POLL = 500, RESTART_GIVE_UP = 60000, RESTART_SLOW_POLL = 2000;
 /** Collect changed options, confirm, save and wait for the app restart (none if only
- *  options without a restart changed: the form then shows the saved options again). */
-function saveOptions() {
+ *  options without a restart changed: the form then shows the saved options again).
+ *  next (from "Unsaved changes", see confirmLeave): the step that follows the save – without
+ *  a restart it runs at once; with a restart the new language is stored before and the page
+ *  reloads in it on the Settings tab, or it opens next.view after the reload. Cancel stays
+ *  on the tab with the changes. */
+function saveOptions(next) {
   const changes = optionChanges();
   if (!Object.keys(changes).length) { message(t("Settings"), t("Nothing changed.")); return; }
   const names = Object.keys(changes).map(k => t(OPTION_FIELDS.find(f => f[0] === k)[1]));
@@ -312,18 +333,21 @@ function saveOptions() {
       if (!r.restarting) {
         ui.options = {...ui.options, ...changes};
         closeModal(); renderSettings(); toast(t("Settings saved"));
+        if (next && next.language) setLanguage(next.language);
+        else if (next) next.go();
         return;
       }
+      if (next && next.language) storeLanguage(next.language);
       modal(t("Settings saved"), [el("p", t("The app is restarting …"), "hint")], []);
-      waitForRestart();
+      waitForRestart(next && next.view);
     })}]);
 }
 /** Poll until the restarted app answers with a new start mark ("start_id" of the state),
- *  then reload the page on the Settings tab (marker "#settings" in the address, removed
- *  again at the start, see main.js). After 60 s without a new mark the page reloads as
- *  soon as the app answers at all, and asks less often. */
-function waitForRestart() {
-  try { history.replaceState(null, "", "#settings"); } catch (e) { /* page opens on Devices */ }
+ *  then reload the page on the Settings tab or the given tab (marker "#<tab>" in the
+ *  address, removed again at the start, see main.js). After 60 s without a new mark the
+ *  page reloads as soon as the app answers at all, and asks less often. */
+function waitForRestart(view = "settings") {
+  try { history.replaceState(null, "", "#" + view); } catch (e) { /* page opens on Devices */ }
   const before = ui.state && ui.state.start_id;
   const started = Date.now();
   const probe = async () => {
@@ -353,8 +377,9 @@ function storeBlock() {
 }
 // Base colour of the app (option base_color): the server writes the saved value into the
 // root element (data-base-color, see style.css); a dot of the card Display previews its colour
-// there at once. Saving keeps it; leaving the tab (its unsaved changes are dropped) or
-// rendering the form again from the saved options shows the saved colour again.
+// there at once. Saving keeps it; leaving the tab without saving ("Discard" in the dialog
+// "Unsaved changes") or rendering the form again from the saved options shows the saved
+// colour again.
 const BASE_COLORS = [["default", t("Default")], ["blue", t("Blue")], ["teal", t("Teal")], ["green", t("Green")],
   ["violet", t("Violet")], ["orange", t("Orange")]];
 let savedBase = document.documentElement.dataset.baseColor;
@@ -392,7 +417,13 @@ function languageCard() {
     select.append(option);
   }
   select.value = languageChoice();
-  select.onchange = () => setLanguage(select.value);
+  // A new language reloads the page: with unsaved changes the dialog asks first; the
+  // selection shows the language of the page until the new one applies
+  select.onchange = () => {
+    const language = select.value;
+    if (!settingsDirty()) { setLanguage(language); return; }
+    select.value = languageChoice(); confirmLeave({language});
+  };
   const lab = el("label", t("Language")); lab.htmlFor = select.id;
   return box("div", "card", box("div", "card-head", el("h2", t("Display"))), box("div", "card-body",
     box("div", "form", box("div", "set-field t-select", box("div", "set-name", lab), box("div", "set-control", select)), baseColorRow()),
