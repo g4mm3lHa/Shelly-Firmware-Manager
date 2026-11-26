@@ -316,6 +316,15 @@ Wordings: `mockups/3.9.0/TEXTE.md`.
   "Restarted by the app before the installation (Restart & install)"; a confirmed
   installation with lost connections stays green with the line "Connection to the Shelly
   lost n times while waiting – tried again (weak Wi-Fi: −n dBm)".
+- **Two-step update (2026-11-26, mockup `fw1-zwei-schritt-update`):** a Gen2+ Shelly that
+  comes back on its old version while a second pass is expected installs the update again
+  by itself. The pill reads "Installing again …" (no percentage), blue, yellow after the usual
+  150 s; "Restarting …" while it restarts. The tooltip / details start with "Step 4 of 6: the
+  Shelly installs the update a second time (two-step update)" (the counter goes back from 6
+  to 4), the time line, then "Two-step update: the Shelly restarted on <version> and installs
+  the update again. Do not switch it off.", "Installed: …", "Target: …". No second pass
+  within 180 s: red "Error" with "Install" for the retry. Log line of a confirmed one:
+  "Installed in two steps (the Shelly reorganised its memory)".
 - **Access point password (F4.1):** hint "8 to 63 characters, letters without umlauts or
   accents, digits and common symbols only. Sent to the Shelly only – …"; a character
   outside printable ASCII is named at once below the field ("The password contains a

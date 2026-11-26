@@ -933,6 +933,50 @@ async def link_status(
     return {"uptime": int(uptime) if uptime is not None else None, "rssi": _rssi(wifi)}
 
 
+NSTEPS_TIMEOUT_S = 5  # reading the update steps of a device: optional, so a short limit
+NSTEPS_MAX = 9  # highest plausible number of update steps (a larger value is ignored)
+
+
+async def update_nsteps(
+    session: aiohttp.ClientSession, origin: str, version: str, auth: DeviceAuth | None = None
+) -> int | None:
+    """Gen2+: the number of update steps the device itself reports for version, or None.
+
+    Reads Sys.GetStatus available_updates: the entry of the channel ("stable" or "beta")
+    whose version equals version (compared as parsed version numbers) and that carries
+    nsteps. Firmware that reorganises the memory of the device installs in two passes and
+    reports nsteps 1 before the first pass and 0 when the last one starts; a regular
+    update has no nsteps. The value only tells an installation to wait for a second
+    pass – it is never used to choose an offer.
+
+    None when the device reports no such entry, nsteps is no plain integer from 0 to
+    NSTEPS_MAX (a bool or a text is refused), or the request fails in any way within
+    NSTEPS_TIMEOUT_S (a sign-in block included: no further request is sent)."""
+    try:
+        wanted = parse_version(version)
+        async with asyncio.timeout(NSTEPS_TIMEOUT_S):
+            status = await _rpc(session, origin, "Sys.GetStatus", auth=auth)
+    except (TimeoutError, ShellyError, aiohttp.ClientError, OSError):
+        return None
+    updates = status.get("available_updates")
+    if not isinstance(updates, dict):
+        return None
+    for channel in ("stable", "beta"):
+        entry = updates.get(channel)
+        if not isinstance(entry, dict):
+            continue
+        nsteps = entry.get("nsteps")  # read as it is: 0 is a valid value ("last step started")
+        if isinstance(nsteps, bool) or not isinstance(nsteps, int) or not 0 <= nsteps <= NSTEPS_MAX:
+            continue
+        try:
+            same = parse_version(entry.get("version")) == wanted
+        except ShellyError:
+            continue
+        if same:
+            return nsteps
+    return None
+
+
 def _positive(value: object) -> bool:
     """True if a reported period is a number above 0 (a sleeping battery device)."""
     return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0

@@ -27,17 +27,21 @@ def test_install_timing_constants():
     abort after 2 min without download, at most 5 min. OTA events: 60 s without
     progress (120 s with a weak Wi-Fi signal), 30 s for the restart, 90 s after it, polled
     every 5 s. Before the update command: 5 attempts within 60 s while the Shelly does not
-    answer."""
+    answer. Two-step update: the second pass must start within 3 min, usually within 2.5 min;
+    it is expected from 2.2.0 on."""
     assert (manager_installs.INSTALL_FIRST_CHECK_S, manager_installs.INSTALL_POLL_S) == (30, 10)
     assert (manager_installs.INSTALL_NO_DOWNLOAD_S, manager_installs.INSTALL_WAIT_S) == (120, 300)
     assert (manager_installs.OTA_STALL_S, manager_installs.OTA_STALL_WEAK_S, manager_installs.OTA_RESTART_WAIT_S) == (60, 120, 30)
     assert (manager_installs.OTA_BOOT_WAIT_S, manager_installs.OTA_POLL_S) == (90, 5)
     assert (manager_installs.PRECHECK_ATTEMPTS, manager_installs.PRECHECK_WINDOW_S, manager_installs.WEAK_RSSI) == (5, 60, -80)
+    assert (manager_installs.TWO_STEP_START_S, manager_installs.TWO_STEP_USUAL_S) == (180, 150)
+    assert manager_installs.TWO_STEP_VERSION == (2, 2, 0)
 
 
 @pytest.fixture
 def run_install(mgr, monkeypatch, quick_install):
-    """Run Manager._install against a device answering with the given versions."""
+    """Run Manager._install against a device answering with the given versions (None: no
+    answer, e.g. while it restarts)."""
     monkeypatch.setattr(manager_installs, "INSTALL_NO_DOWNLOAD_S", 0.08)  # clearly before the upper limit
 
     async def run(old, target, answers, gen=2, served=False):
@@ -54,6 +58,8 @@ def run_install(mgr, monkeypatch, quick_install):
             if served:
                 mgr.downloads["x.zip"] = {"served": {"192.168.1.10": 1}, "rejected": set()}
             version = answers[min(len(calls) - 2, len(answers) - 1)]
+            if version is None:
+                raise shelly.ShellyError("not reachable")
             return {"mac": "AA", "build": "b-old", "version": version}
 
         async def trigger(*_args):
@@ -290,10 +296,10 @@ async def test_channel_names_a_redirect_to_https():
     assert str(err.value) == shelly.HTTPS_REQUIRED and "192.168.1.10" not in str(err.value)
 
 
-def install_device(m, gen=2):
-    """A ready device A for Manager._install."""
+def install_device(m, gen=2, old="1.4.0", target="1.5.0"):
+    """A ready device A for Manager._install (installed version old, update to target)."""
     dev = {"name": "Kitchen", "gen": gen, "origin": "http://192.168.1.10", "mac": "AA", "file": "x.zip",
-           "version": "1.4.0", "pending_version": "1.5.0", "pending_build": "b-old", "status": manager_core.STATUS_READY}
+           "version": old, "pending_version": target, "pending_build": "b-old", "status": manager_core.STATUS_READY}
     m.devices[A] = dev
     return dev
 
@@ -311,6 +317,8 @@ def ota_install(monkeypatch):
     monkeypatch.setattr(manager_installs, "OTA_STALL_S", 0.3)
     monkeypatch.setattr(manager_installs, "OTA_RESTART_WAIT_S", 0.3)
     monkeypatch.setattr(manager_installs, "OTA_BOOT_WAIT_S", 0.3)
+    monkeypatch.setattr(manager_installs, "TWO_STEP_START_S", 0.4)
+    monkeypatch.setattr(manager_installs, "TWO_STEP_USUAL_S", 0.3)
     monkeypatch.setattr(shelly_cloud, "file_sha256", lambda *_a: "s")
     calls = {"http": 0}
 
@@ -370,24 +378,36 @@ async def test_progress_is_shown_and_success_confirmed(mgr, ota_install, monkeyp
 DONE = [{"event": "ota_progress", "msg": "", "progress_percent": 100}, {"event": "ota_success", "msg": ""}]
 
 
-async def ota_run(mgr, monkeypatch, events, versions, keep_open=False):
+async def ota_run(mgr, monkeypatch, events, versions, keep_open=False, old="1.4.0", target="1.5.0", **options):
     """Install over FakeShelly; after the pre-check device_info answers from versions
-    (None: no answer, the last entry repeats). Returns (result or exception, device, phases seen)."""
+    (None: no answer, the last entry repeats). Options: hook(version) is called before each
+    answer after the pre-check; full=True runs the whole path (Manager.install: status, log);
+    step_target is stored on the device. Returns (result or exception, device, phases seen)."""
+    hook, full = options.get("hook"), options.get("full", False)
     async with FakeShelly(events=events, keep_open=keep_open) as fake:
         monkeypatch.setattr(shelly, "OtaChannel", lambda _origin, *a: REAL_CHANNEL(fake.origin, *a))
-        dev = install_device(mgr)
-        answers, phases = ["1.4.0", *versions], []  # first: the pre-check of the installation
+        dev = install_device(mgr, old=old, target=target)
+        if "step_target" in options:
+            dev["step_target"] = options["step_target"]
+        answers, phases = [old, *versions], []  # first: the pre-check of the installation
 
         async def device_info(*_args, **_kwargs):
             phases.append(dev.get("ota_phase"))
             version = answers.pop(0) if len(answers) > 1 else answers[0]
+            if hook is not None and len(phases) > 1:
+                hook(version)
             if version is None:
                 raise shelly.ShellyError("not reachable")
             return {"mac": "AA", "build": "b-old", "version": version}
 
         monkeypatch.setattr(shelly, "device_info", device_info)
         try:
-            result = await mgr._install(A, dev, "s")
+            if full:
+                dev["sha256"] = "s"
+                monkeypatch.setattr(mgr, "approval_matches", lambda *_a: True)
+                result = await mgr.install(A, "s", "u")
+            else:
+                result = await mgr._install(A, dev, "s")
         except shelly.ShellyError as err:
             result = err
         fake.release.set()
@@ -403,8 +423,161 @@ async def test_ota_success_restart_and_new_version(mgr, ota_install, monkeypatch
 
 
 async def test_ota_old_version_after_restart_is_an_error(mgr, ota_install, monkeypatch):
+    """No sign of a two-step update (offer, device steps, crossing 2.2.0): an error at once."""
+    monkeypatch.setattr(manager_installs, "TWO_STEP_START_S", 5)
+    started = time.monotonic()
     result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, ["1.4.0"])
-    assert isinstance(result, shelly.ShellyError) and "still reports 1.4.0" in str(result)
+    assert isinstance(result, shelly.ShellyError) and "still reports 1.4.0 – the update was not applied" in str(result)
+    assert time.monotonic() - started < 2  # no wait for a second pass
+
+
+# ---- Two-step update: the device installs the update a second time by itself
+
+
+def second_pass_views(mgr, seen):
+    """hook for ota_run: records the step view and the shown progress at each answer."""
+    return lambda _version: seen.append((mgr.install_step_view(A), mgr.devices[A].get("ota_progress")))
+
+
+async def test_ota_two_step_update_confirmed_after_second_pass(mgr, ota_install, monkeypatch):
+    """2.1.1 -> 2.2.0 crosses 2.2.0: back on 2.1.1 after the restart, the app waits for the
+    second pass (step install with second_pass, reboot while down) and confirms 2.2.0."""
+    seen = []
+    result, dev, _phases = await ota_run(mgr, monkeypatch, DONE, [None, "2.1.1", "2.1.1", None, "2.2.0"],
+                                         old="2.1.1", target="2.2.0", hook=second_pass_views(mgr, seen))
+    assert result == (True, None) and dev["status"] == manager_core.STATUS_CURRENT
+    passes = [(view["step"], progress) for view, progress in seen if view and view["second_pass"]]
+    assert ("install", None) in passes and ("reboot", None) in passes  # no stale progress of the first pass
+    install = next(view for view, _ in seen if view and view["second_pass"])
+    assert (install["n"], install["usual"], install["give_up"]) == (4, 0.3, 0.4)
+
+
+@pytest.mark.parametrize("signal", ["device", "offer"])
+async def test_ota_two_step_by_device_steps_or_offer(mgr, ota_install, monkeypatch, signal):
+    """1.4.0 -> 1.5.0 does not cross 2.2.0: the device's nsteps or the offer with several
+    steps (step_target "") still makes the app wait for the second pass."""
+    asked = []
+
+    async def nsteps(_session, _origin, version, _auth=None):
+        asked.append(version)
+        return 1 if signal == "device" else None
+
+    monkeypatch.setattr(shelly, "update_nsteps", nsteps)
+    options = {"step_target": ""} if signal == "offer" else {}
+    result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, [None, "1.4.0", None, "1.5.0"], **options)
+    assert result == (True, None) and asked == ["1.5.0"]
+
+
+async def test_ota_two_step_second_pass_never_comes(mgr, ota_install, monkeypatch):
+    """Nothing starts within TWO_STEP_START_S: an error that says to start the update again;
+    the file stays provided for the retry, nothing more is served after the error."""
+    result, dev, _phases = await ota_run(mgr, monkeypatch, DONE, [None, "2.1.1"], old="2.1.1", target="2.2.0",
+                                         full=True)
+    assert result is False and dev["status"] == manager_core.STATUS_ERROR and dev["install_failed"]
+    assert dev["message"] == ("After the restart the Shelly still reports 2.1.1. The update to 2.2.0 can run in two "
+                              "steps, but the second step did not start within 0.4 s – start the update again")
+    assert mgr.events.entries[-1]["event"] == "failed" and "two_step" not in mgr.events.entries[-1]
+    assert not mgr.may_download("x.zip", "192.168.1.10")
+
+
+async def test_ota_two_step_other_version_is_an_error(mgr, ota_install, monkeypatch):
+    result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, [None, "2.1.1", "2.1.5"], old="2.1.1",
+                                          target="2.2.0")
+    assert isinstance(result, shelly.ShellyError) and "reports 2.1.5 instead of 2.2.0" in str(result)
+
+
+async def test_second_pass_download_is_served_again(mgr, ota_install, monkeypatch):
+    """During the second pass the file is still served to the device; a new download starts
+    the second pass. Back on the old version after its restart: the update was not applied."""
+    served, old_answers = [], []
+
+    def hook(version):
+        if version == "2.1.1":
+            old_answers.append(version)
+        if len(old_answers) == 2 and not served:  # the first answer on 2.1.1 started the wait
+            served.append(mgr.may_download("x.zip", "192.168.1.10"))
+            mgr.record_download("x.zip", "192.168.1.10")
+
+    result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, [None, "2.1.1", "2.1.1", None, "2.1.1"],
+                                          old="2.1.1", target="2.2.0", hook=hook)
+    assert served == [True]
+    assert isinstance(result, shelly.ShellyError) and "still reports 2.1.1 – the update was not applied" in str(result)
+
+
+async def test_second_pass_restart_cut_off_while_down(mgr, ota_install, monkeypatch):
+    """The device goes down shortly before TWO_STEP_START_S ends: the second pass has started,
+    so the boot limit applies – without an answer the error is "No answer", not "did not start"."""
+    versions = [None, *["2.1.1"] * 14, None]
+    result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, versions, old="2.1.1", target="2.2.0")
+    assert isinstance(result, shelly.ShellyError) and "No answer from the Shelly within 0.3 s" in str(result)
+
+
+async def test_two_step_log_mark(mgr, ota_install, monkeypatch):
+    """A confirmed two-step installation is marked in the log; a normal one is not."""
+    result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, [None, "2.1.1", None, "2.2.0"], old="2.1.1",
+                                          target="2.2.0", full=True)
+    entry = mgr.events.entries[-1]
+    assert result is True and entry["event"] == "confirmed" and entry["two_step"] is True
+    result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, [None, "1.5.0"], full=True)
+    assert result is True and "two_step" not in mgr.events.entries[-1]
+
+
+async def test_polling_waits_for_the_second_pass(run_install, monkeypatch):
+    """Without OTA events: downloaded, restarted, back on 2.1.1 – the limit grows by the
+    second-pass window, and 2.2.0 after the usual limit is confirmed."""
+    monkeypatch.setattr(manager_installs, "TWO_STEP_START_S", 0.8)
+    ok, diagnosis, dev, polls = await run_install("2.1.1", "2.2.0", ["2.1.1", None, *["2.1.1"] * 35, "2.2.0"],
+                                                  served=True)
+    assert ok and diagnosis is None and polls > 30 and dev["status"] == manager_core.STATUS_CURRENT
+
+
+async def test_polling_second_pass_missing_is_unconfirmed(run_install, monkeypatch, mgr):
+    monkeypatch.setattr(manager_installs, "TWO_STEP_START_S", 0.4)
+    ok, diagnosis, dev, _polls = await run_install("2.1.1", "2.2.0", ["2.1.1", None, "2.1.1"], served=True)
+    assert not ok and dev["status"] == manager_core.STATUS_UNCLEAR
+    assert diagnosis == ("The Shelly still reports 2.1.1. The update to 2.2.0 can run in two steps, but the second "
+                         "step did not finish – check the device, then install again")
+    assert mgr.install_steps[A]["second_pass"]
+
+
+async def test_update_nsteps_reads_the_available_updates(monkeypatch):
+    """Sys.GetStatus available_updates: nsteps of the entry with the target version (stable or
+    beta, compared as version numbers); 0 is a value; anything else, or a failed request, is None."""
+    from conftest import REAL_UPDATE_NSTEPS
+
+    answer = {}
+
+    async def rpc(_session, _origin, method, *_a, **_k):
+        assert method == "Sys.GetStatus"
+        if isinstance(answer.get("raise"), BaseException):
+            raise answer["raise"]
+        if answer.get("slow"):
+            await asyncio.sleep(1)
+        return answer["status"]
+
+    monkeypatch.setattr(shelly, "_rpc", rpc)
+    monkeypatch.setattr(shelly, "NSTEPS_TIMEOUT_S", 0.05)
+    cases = [
+        ({"available_updates": {"stable": {"version": "2.2.0", "nsteps": 1}}}, 1),
+        ({"available_updates": {"beta": {"version": "2.2.0", "nsteps": 0}}}, 0),
+        ({"available_updates": {"stable": {"version": "2.2.1", "nsteps": 1}, "beta": {"version": "2.2.0"}}}, None),
+        ({"available_updates": {"stable": {"version": "2.2.0", "nsteps": True}}}, None),
+        ({"available_updates": {"stable": {"version": "2.2.0", "nsteps": "1"}}}, None),
+        ({"available_updates": {"stable": {"version": "2.2.0", "nsteps": 99}}}, None),
+        ({"available_updates": {"stable": {"version": "2.2.0-beta1", "nsteps": 1}}}, None),
+        ({"available_updates": {"stable": {"version": None, "nsteps": 1}}}, None),
+        ({"available_updates": []}, None),
+        ({}, None),
+    ]
+    for status, expected in cases:
+        answer.update(status=status)
+        assert await REAL_UPDATE_NSTEPS(None, "http://h", "2.2.0") == expected, status
+    for failure in (shelly.ShellyError("x"), shelly.AuthBlockedError("blocked"), TimeoutError()):
+        answer["raise"] = failure
+        assert await REAL_UPDATE_NSTEPS(None, "http://h", "2.2.0") is None
+    answer.update(slow=True, status=cases[0][0])
+    answer["raise"] = None
+    assert await REAL_UPDATE_NSTEPS(None, "http://h", "2.2.0") is None  # own time limit
 
 
 async def test_ota_no_answer_after_restart_is_an_error(mgr, ota_install, monkeypatch):
@@ -960,11 +1133,17 @@ async def test_weak_signal_doubles_the_stall_limit(mgr):
 
 
 def test_step_view_turns_late(mgr):
-    """The pill turns yellow once a step takes longer than usual, or from the second attempt."""
+    """The pill turns yellow once a step takes longer than usual, or from the second attempt.
+    The second pass of a two-step update stays with the following steps."""
     install_device(mgr)
     mgr._set_step(A, "verify", give_up=90)
     view = mgr.install_step_view(A)
     assert (view["step"], view["n"], view["usual"], view["give_up"], view["late"]) == ("verify", 6, 30, 90, False)
+    assert view["second_pass"] is False
+    mgr._update_step(A, second_pass=True)
+    mgr._set_step(A, "reboot", give_up=90)
+    assert mgr.install_step_view(A)["second_pass"] is True
+    mgr._set_step(A, "verify", give_up=90)
     mgr.install_steps[A]["quiet"] -= 31
     assert mgr.install_step_view(A)["late"] and mgr.install_step_view(A)["seconds"] == 31
     mgr._set_step(A, "precheck", give_up=60)

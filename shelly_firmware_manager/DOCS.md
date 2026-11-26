@@ -211,7 +211,7 @@ is above 0), each with its count. A dot on the icon shows that a filter other th
 | Ready | Firmware provided (from the firmware store or downloaded), waiting for your approval – "Install" next to the status opens the installation dialog |
 | Scheduled | Installation approved for a later time; the time is shown under the version (see [Scheduled installation](#scheduled-installation)) |
 | Updated | The installation was confirmed; shown until the next check of the device. If the backup before the update shows changed settings or a script that no longer runs, a line below the firmware says so (see [Comparison after an update](#backups)) |
-| Queued / step of the installation | Installation waiting for a free slot / running: the label names the step – **Backup …**, **Restarting …**, **Waiting for device …**, **Installing** (with the percentage for Gen2+), **Verifying …** – blue while it runs, yellow while a step takes longer than usual. The tooltip (phones: the device details) names the step, how long it has been running, when the app gives up and the Wi-Fi signal |
+| Queued / step of the installation | Installation waiting for a free slot / running: the label names the step – **Backup …**, **Restarting …**, **Waiting for device …**, **Installing** (with the percentage for Gen2+), **Installing again …** (second step of a two-step update), **Verifying …** – blue while it runs, yellow while a step takes longer than usual. The tooltip (phones: the device details) names the step, how long it has been running, when the app gives up and the Wi-Fi signal |
 | Unconfirmed | The installation ran, but the target version was not confirmed (see the details); stays in **Updates Available** until the next check of the device |
 | Error | Check, download or installation failed; after a failed installation – or with a stored version while the Shelly server could not be asked – the device stays in **Updates Available** and can be installed (again) |
 | Asleep | Battery device that did not answer the last check – it sleeps; the IP is dimmed. Wake it up and check it again |
@@ -447,8 +447,18 @@ the percentage). An error reported by the Shelly ends the installation at once. 
 a download request after 2 minutes, or without new progress for 60 seconds (120 seconds
 when the Wi-Fi signal was weak at the start), the installation fails. After 100 % the
 Shelly must restart within 30 seconds (the label shows "Restarting …") and report exactly
-the target version within 90 seconds after the restart ("Verifying …"); the old version,
-another version or no answer is an error.
+the target version within 90 seconds after the restart ("Verifying …"). Another version or
+no answer is an error; so is the old version, unless a two-step update is expected.
+
+Firmware 2.2.0 and later can install in two steps: it reorganises the memory of a Shelly
+on an older version. The Shelly then restarts on its old version and is meant to install
+the update a second time by itself. The app expects this when the update crosses 2.2.0,
+or when the Shelly update server or the device names several steps.
+
+The app then sends no second command. It keeps the file ready for the Shelly, shows
+**Installing again …** and waits up to 3 minutes for the second step to start. Do not
+switch the Shelly off meanwhile. If nothing starts, the installation fails: start it again.
+Without the device connection the result is "Unconfirmed": check the device, then install.
 
 Devices without this connection (Gen1, or when it is not available) are checked every
 10 seconds until they report exactly the target version (at most 5 minutes). If that
@@ -871,6 +881,9 @@ Gen2+ firmware is downloaded over HTTPS only.
 | Not reachable (device details) | The device did not answer its last check. **Try again** shows whether Home Assistant still knows its address, whether the port is open and whether the device answers; check the device, its network and its address in the Shelly integration |
 | The comparison could not be made (Comparison after update) | The device could not be read again after the update or its backup **Before update** is gone. The update itself is not affected; check the device's settings in its web interface if in doubt |
 | The Shelly downloaded the firmware but still reports … | The device did not install it – check the log in the Shelly web UI |
+| After the restart the Shelly still reports … – the update was not applied | The Shelly restarted but kept its old version. Check the log in the Shelly web UI, then try the installation again from **Updates Available** |
+| After the restart the Shelly still reports … The update to … can run in two steps, but the second step did not start within 180 s | The Shelly came back on its old version and did not start the second step of a [two-step update](#installing-updates). Start the installation again from **Updates Available**; do not switch the Shelly off while it installs |
+| Target version not confirmed. The Shelly still reports … The update to … can run in two steps, but the second step did not finish | The second step of a two-step update did not come. Check the device (row menu ⋮ → **Check for updates**), then install it again |
 | The Shelly reports an update error … It downloaded the firmware but rejected it | The installed firmware may be too old for a direct update to this version: check the device again – the Shelly update server names the required intermediate version (or install one via the web interface of the Shelly or an upload) |
 | Check warning: the Shelly update server no longer answers with the next step | Shelly changed its update server: required intermediate versions cannot be detected. Prefer the web interface of the Shelly for devices on very old firmware |
 | Error … Stored version X is ready and can be installed manually | The Shelly server could not be asked. Check again later, or install the stored version at your own risk |
