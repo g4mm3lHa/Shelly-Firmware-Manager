@@ -682,7 +682,7 @@ confirmation). After clearing, one entry remains that names who cleared the log.
 ### Settings
 
 First the card **Device Passwords**, then all options from [Configuration](#configuration) in the cards **Checks**, **Download
-Server** (with **Test connection**, see [Download base URL](#download-base-url)), **Firmware & Storage**, **Backups**, **Logs** and **Advanced**, with one Save button. The
+Server** (with **Test connection**, see [Download base URL](#download-base-url)), **Firmware & Storage**, **Backups**, **Logs**, **Advanced** and **Display** (Base colour), with one Save button. The
 i-icon next to a setting shows its help (on touch devices with a tap). While you type, a
 hint warns if the download base URL is a host name or not in your local network; while
 installations are disabled because of it, a notice above the tabs explains why. The card

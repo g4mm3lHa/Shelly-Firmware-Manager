@@ -929,7 +929,7 @@ export default {
   "The first {n} are shown.": "Vengono mostrati i primi {n}.",
   "The installed version of every device is stored.": "Viene memorizzata la versione installata di ogni dispositivo.",
   "The IP address is not the LAN address of Home Assistant.": "L'indirizzo IP non è l'indirizzo LAN di Home Assistant.",
-  "The language applies at once and only in this browser – no “Save settings” needed. The base colour is saved with “Save settings” for all browsers. Logs, error messages and the documentation stay English.": "La lingua si applica subito e solo in questo browser – non serve «Salva impostazioni». Il colore di base viene salvato con «Salva impostazioni» per tutti i browser. I log, i messaggi di errore e la documentazione restano in inglese.",
+  "The language applies at once and only in this browser – no “Save settings” needed. The base colour is saved with “Save settings” for all browsers. Logs, error messages and the documentation stay English.": "La lingua si applica subito e solo in questo browser – non serve «Salva le impostazioni». Il colore di base viene salvato con «Salva le impostazioni» per tutti i browser. I log, i messaggi di errore e la documentazione restano in inglese.",
   "The last attempt failed ({time}): {error}": "L'ultimo tentativo non è riuscito ({time}): {error}",
   "The last backup ({time}) stays.": "L'ultimo backup ({time}) resta.",
   "The last connection test failed. If the connection fails, the installation stops.": "L'ultimo test di connessione non è riuscito. Se la connessione fallisce, l'installazione si interrompe.",
