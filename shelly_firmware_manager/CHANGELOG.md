@@ -43,8 +43,6 @@ Changed
 Fixed
 - Settings: "Test connection" drops the old result after a change of the address or the
   host port.
-- Activity log: a setting the change leaves as it is gets no line (e.g. "Access point:
-  on → on").
 - Settings tab: a new language reloads the page on the Settings tab instead of Devices.
 
 ## 3.12.1

@@ -8,7 +8,7 @@
 import {t} from "./i18n.js";
 
 // Keep in sync with the server (tests/test_i18n.py checks the fixed texts).
-export const SERVER_TEXTS = [
+const SERVER_TEXTS = [
   // Checks and status of a device
   "Battery device asleep – wake it up (e.g. press its button) and check it again. Last attempt: {error}",
   "Gen1 updates are disabled in the settings",
