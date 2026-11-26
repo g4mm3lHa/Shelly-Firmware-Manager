@@ -33,7 +33,7 @@ import store_transfer
 import timetable
 from backup_store import BackupError, normalize_mac
 from events import worst
-from shelly import AuthError, ShellyError, clip, error_text
+from shelly import AuthBlockedError, AuthError, ShellyError, clip, error_text
 
 from manager_core import Device, STATUS_ERROR, STATUS_INSTALLING, severity_of, unexpected_text, unreachable
 from manager_devices import DeviceSettings
@@ -218,8 +218,11 @@ class Backups(DeviceSettings):
         log_entry: bool,
     ) -> None:
         """Note a failed backup on the device and in the log. Before an installation
-        it is always an error: the installation does not start."""
-        if isinstance(err, AuthError):
+        it is always an error: the installation does not start. A sign-in block is no
+        password problem: it is noted as failed, so "Back up now" stays usable."""
+        if isinstance(err, AuthBlockedError):
+            code = NONE_FAILED
+        elif isinstance(err, AuthError):
             code = NONE_PASSWORD
         elif unreachable(err):
             code = NONE_ASLEEP if dev.get("battery") is True else NONE_UNREACHABLE

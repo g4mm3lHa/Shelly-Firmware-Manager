@@ -398,6 +398,66 @@ async def test_change_failure_keeps_previous_credential(mgr, device):
     assert mgr.events.entries[-1]["severity"] == "error"
 
 
+BLOCKED = "The Shelly temporarily blocks sign-ins (too many attempts) – wait a few minutes and try again"
+
+
+def counted_reads(monkeypatch, blocked=False):
+    """Count the verification reads of the device fixture; blocked: every read raises the
+    sign-in block instead."""
+    calls = []
+    fake = shelly.read_settings
+
+    async def read(*args, **kwargs):
+        calls.append(1)
+        if blocked:
+            raise shelly.AuthBlockedError(BLOCKED)
+        return await fake(*args, **kwargs)
+
+    monkeypatch.setattr(shelly, "read_settings", read)
+    return calls
+
+
+@pytest.mark.parametrize("mode", ["change", "remove"])
+async def test_refused_set_auth_is_not_verified(mgr, device, monkeypatch, mode):
+    """Gen2+: Shelly.SetAuth refused with the stored current password was not executed –
+    no verification reads (each would be one more failed sign-in), a text of its own, the
+    stored password stays."""
+    await mgr.set_device_password(A, "enable", "pw-1", confirm=True, acknowledged=True)
+    old = dict(mgr.credentials.entries[A])
+    device.update(apply=False, fail_write=shelly.AuthError("The Shelly rejected the password"))
+    reads = counted_reads(monkeypatch)
+    with pytest.raises(shelly.AuthError, match="^The Shelly rejected the stored current password – nothing was changed$"):
+        await mgr.set_device_password(A, mode, "pw-2", confirm=True, acknowledged=True)
+    assert reads == [] and device["writes"] == 2 and mgr.credentials.entries[A] == old
+
+
+async def test_blocked_set_auth_is_not_verified(mgr, device, monkeypatch):
+    """Gen2+: Shelly.SetAuth answered with the sign-in block: the block text, no reads."""
+    await mgr.set_device_password(A, "enable", "pw-1", confirm=True, acknowledged=True)
+    old = dict(mgr.credentials.entries[A])
+    device.update(apply=False, fail_write=shelly.AuthBlockedError(BLOCKED))
+    reads = counted_reads(monkeypatch)
+    with pytest.raises(shelly.AuthBlockedError, match="temporarily blocks sign-ins"):
+        await mgr.set_device_password(A, "change", "pw-2", confirm=True, acknowledged=True)
+    assert reads == [] and mgr.credentials.entries[A] == old
+
+
+async def test_blocked_verification_is_not_a_rejected_password(mgr, device, monkeypatch):
+    """A sign-in block during the verification says nothing about the password: "store"
+    shows the block text; "enable" keeps the stored password and names the block, with no
+    second verification read."""
+    device["protected"] = True
+    reads = counted_reads(monkeypatch, blocked=True)
+    with pytest.raises(shelly.AuthBlockedError, match="temporarily blocks sign-ins"):
+        await mgr.set_device_password(A, "store", "pw-1", confirm=True)
+    assert not mgr.credentials.has_device_password(A) and reads == [1]
+    device["protected"] = False
+    with pytest.raises(shelly.ShellyError) as err:
+        await mgr.set_device_password(A, "enable", "pw-1", confirm=True, acknowledged=True)
+    assert str(err.value) == f"The new password could not be confirmed – the previously stored password was kept ({BLOCKED})"
+    assert not isinstance(err.value, shelly.AuthError) and not mgr.credentials.has_device_password(A) and reads == [1, 1]
+
+
 async def test_remove_protection_deletes_only_after_success(mgr, device):
     """Credentials are deleted only when the device reports no protection."""
     await mgr.set_device_password(A, "enable", "pw-1", confirm=True, acknowledged=True)

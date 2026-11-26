@@ -13,7 +13,9 @@ from typing import Any
 
 import aiohttp
 import shelly
-from shelly import UNSUPPORTED, AuthError, DeviceAuth, HttpsRequiredError, ShellyError, clip, error_text
+from shelly import (
+    UNSUPPORTED, AuthBlockedError, AuthError, DeviceAuth, HttpsRequiredError, ShellyError, clip, error_text,
+)
 
 from manager_core import (
     ACTIVITY_CHECKING, ACTIVITY_DOWNLOADING, ACTIVITY_RELOADING, ACTIVITY_SERVER, BATTERY_FROM_DEVICE, Device,
@@ -398,7 +400,10 @@ class DeviceSettings(Transfers):
         the device (/shelly) – stored credentials never count as protection.
         Device writes are verified afterwards; local credentials change only after
         a verified success, so an ambiguous answer never loses the recovery
-        credential. Results are logged – never the password or hash."""
+        credential. Exception: a Gen2+ Shelly.SetAuth refused at sign-in (wrong stored
+        password, or the device blocks sign-ins) was not executed and is not verified –
+        each further signed request would count as one more failed attempt on the
+        device. Results are logged – never the password or hash."""
         if mode not in PASSWORD_MODES:
             raise ValueError("Unknown password action")
         if confirm is not True:
@@ -558,6 +563,17 @@ class DeviceSettings(Transfers):
         try:
             await shelly.set_protection(self.session, gen, origin, realm, new, current)
             answer: BaseException | None = None
+        except AuthError as err:
+            # Gen2+: Shelly.SetAuth refused at sign-in (401) or blocked (429) was not
+            # executed. Nothing is verified then: each further signed read would count
+            # as one more failed attempt towards the device's sign-in block. Gen1 keeps
+            # the verification of an ambiguous /settings/login answer.
+            if gen < 2:
+                answer = err
+            elif isinstance(err, AuthBlockedError) or current is None:
+                raise
+            else:
+                raise AuthError("The Shelly rejected the stored current password – nothing was changed") from None
         except (TimeoutError, ShellyError, aiohttp.ClientError) as err:
             answer = err  # the change may still have been applied: verify below
         # Verification against the device itself
@@ -571,7 +587,20 @@ class DeviceSettings(Transfers):
                 self.credentials.remove(device_id)
                 return {"protected": False}
             raise ShellyError(self._unverified("Password protection was not confirmed as removed", answer))
-        if protected is True and new is not None and await self._auth_works(dev, new):
+        try:
+            confirmed = protected is True and new is not None and await self._auth_works(dev, new)
+            if not confirmed and mode == "change" and await self._auth_works(dev, current):
+                raise ShellyError(
+                    self._unverified("The password was not changed – the previous password still works", answer)
+                )
+        except AuthBlockedError as err:
+            # A blocked device answers no further sign-in: the stored password stays
+            raise ShellyError(
+                self._unverified(
+                    "The new password could not be confirmed – the previously stored password was kept", err
+                )
+            ) from None
+        if confirmed and new is not None:
             # Replaces (or, if not kept, deletes) the old credential only now
             try:
                 if keep:
@@ -586,10 +615,6 @@ class DeviceSettings(Transfers):
                     "stored password of this device"
                 ) from None
             return {"protected": True}
-        if mode == "change" and await self._auth_works(dev, current):
-            raise ShellyError(
-                self._unverified("The password was not changed – the previous password still works", answer)
-            )
         raise ShellyError(
             self._unverified(
                 "The new password could not be confirmed – the previously stored password was kept", answer
@@ -598,9 +623,12 @@ class DeviceSettings(Transfers):
 
     async def _auth_works(self, dev: Device, auth: DeviceAuth | None) -> bool:
         """True if an authenticated read succeeds with auth. Only meaningful while
-        the device is protected – an unprotected device accepts anything."""
+        the device is protected – an unprotected device accepts anything. A sign-in
+        block (AuthBlockedError) is raised: it says nothing about the password."""
         try:
             await shelly.read_settings(self.session, dev["gen"], dev["origin"], dev.get("type"), auth)
+        except AuthBlockedError:
+            raise
         except (TimeoutError, ShellyError, aiohttp.ClientError):  # AuthError included
             return False
         return True

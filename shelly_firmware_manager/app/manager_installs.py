@@ -21,7 +21,7 @@ import data_paths
 import shelly
 import shelly_cloud
 import shelly_net
-from shelly import DeviceAuth, ShellyError, error_text
+from shelly import AuthError, DeviceAuth, ShellyError, error_text
 
 from manager_checks import Checks
 from manager_core import (
@@ -69,7 +69,9 @@ MAX_SERVED_IPS = 16  # download diagnosis: client addresses recorded per file
 PRECHECK_ATTEMPTS = 5
 PRECHECK_WINDOW_S = 60
 PRECHECK_PAUSE_S = 5  # pause between two attempts
-LINK_TIMEOUT_S = 5  # reading running time and Wi-Fi signal (optional, never stops an installation)
+# Reading running time and Wi-Fi signal: optional, never stops an installation – except a
+# refused or blocked sign-in (the update command would be refused the same way)
+LINK_TIMEOUT_S = 5
 WEAK_RSSI = -80  # dBm and lower: weak signal (as the check list of the installation dialog)
 
 # Steps of an installation as the status pill shows them (install_step_view), in their
@@ -356,10 +358,14 @@ class Installs(Checks):
 
     async def _read_link(self, device_id: str, dev: Device) -> dict[str, int | None]:
         """Running time and Wi-Fi signal of the device ({} if it cannot be read in
-        LINK_TIMEOUT_S – both are optional)."""
+        LINK_TIMEOUT_S – both are optional). A refused or blocked sign-in (AuthError) is
+        raised: the update command would be refused the same way, and one more signed
+        request counts as one more failed attempt on the device."""
         try:
             async with asyncio.timeout(LINK_TIMEOUT_S):
                 return await shelly.link_status(self.session, dev["gen"], dev["origin"], self._auth(device_id, dev))
+        except AuthError:
+            raise
         except (TimeoutError, ShellyError, aiohttp.ClientError, OSError) as err:
             log.debug("%s: running time and Wi-Fi signal not read: %s", dev.get("name"), err)
             return {}

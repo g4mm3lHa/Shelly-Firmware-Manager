@@ -182,7 +182,8 @@ def _texts_of(node: ast.expr) -> list[str]:
 
 
 # Errors that become a status message of a device (or the answer of an install dialog)
-ERRORS = {"ShellyError", "AuthError", "AddressError", "HttpsRequiredError", "OtaError", "UnsupportedError"}
+ERRORS = {"ShellyError", "AuthError", "AuthBlockedError", "AddressError", "HttpsRequiredError", "OtaError",
+          "UnsupportedError"}
 # Functions whose returned text is a status message or the error of a connection test
 MESSAGE_FUNCTIONS = {"_install_diagnosis", "_ota_error_text", "fetch_error"}
 # Functions whose "error" values (keyword or ["error"]) are the result of a connection test

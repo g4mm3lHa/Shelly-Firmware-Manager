@@ -550,6 +550,17 @@ async def test_device_that_requires_https_is_an_error(mgr, net, monkeypatch):
     assert dev["settings_error"]["severity"] == "error" and not dev["unreachable"]
 
 
+async def test_sign_in_block_fails_the_check_as_an_error(mgr, net):
+    """A Shelly that still blocks sign-ins after the one short wait: an error of the device
+    (red, like a refused password) with the block text, not a "settings unknown" warning."""
+    text = "The Shelly temporarily blocks sign-ins (too many attempts) – wait a few minutes and try again"
+    net.settings_error = shelly.AuthBlockedError(text)
+    assert await mgr.scan()
+    dev = mgr.devices[A]
+    assert dev["status"] == manager_core.STATUS_ERROR and dev["error_level"] == "error" and dev["message"] == text
+    assert dev["settings_error"] == {"message": text, "severity": "error"} and not dev["unreachable"]
+
+
 # ---------------------------------------------------------------- Unexpected errors stay with their device
 
 

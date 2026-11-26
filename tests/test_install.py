@@ -104,11 +104,13 @@ REAL_CHANNEL = shelly.OtaChannel  # conftest replaces it with a fake per test
 class FakeShelly:
     """Local Gen2 RPC WebSocket at /rpc with optional Digest auth (official format)."""
 
-    def __init__(self, password=None, events=(), redirect=None, keep_open=False):
+    def __init__(self, password=None, events=(), redirect=None, keep_open=False, blocked=None):
         """redirect: target URL the device redirects the WebSocket request to (None: no
         redirect). keep_open: after the events the WebSocket stays open until release
-        is set (a device still running; closing it stands for the restart)."""
-        self.password, self.events, self.redirect = password, list(events), redirect
+        is set (a device still running; closing it stands for the restart). blocked(frame)
+        -> bool answers the frame with error code 429 before the password check (the
+        sign-in block of firmware 2.0+)."""
+        self.password, self.events, self.redirect, self.blocked = password, list(events), redirect, blocked
         self.keep_open, self.release = keep_open, asyncio.Event()
         self.realm = "shellyplus1-aabbcc"
         self.frames = []
@@ -132,6 +134,10 @@ class FakeShelly:
                 continue
             frame = json.loads(msg.data)
             self.frames.append(frame)
+            if self.blocked is not None and self.blocked(frame):
+                await ws.send_json({"id": frame["id"], "src": self.realm, "dst": frame["src"],
+                                    "error": {"code": 429, "message": "Too many requests"}})
+                continue
             if self.password and not (frame.get("auth") and self.valid(frame["auth"])):
                 await ws.send_json({"id": frame["id"], "src": self.realm, "dst": frame["src"],
                                     "error": {"code": 401, "message": json.dumps(self.challenge())}})
@@ -189,6 +195,73 @@ async def test_channel_digest_auth_with_stored_ha1():
         async with REAL_CHANNEL(dev.origin, other) as ch:
             with pytest.raises(shelly.ShellyError, match="another device ID"):
                 await ch.update("http://h/x.zip")
+
+
+@pytest.fixture
+def short_block_wait(monkeypatch):
+    """The wait after code 429 to a frame without credentials, shortened for the tests."""
+    monkeypatch.setattr(shelly, "AUTH_BLOCK_WAIT_S", 0.01)
+
+
+async def test_channel_429_to_the_unsigned_frame_waits_once(short_block_wait):
+    """Code 429 to the first, unsigned frame: one wait, a new unsigned frame, then the
+    signed one is accepted."""
+    async with FakeShelly(password="pw-1", blocked=lambda frame: frame["id"] == 1) as dev:
+        async with REAL_CHANNEL(dev.origin, shelly.DeviceAuth(gen=2, password="pw-1")) as ch:
+            assert await ch.update("http://h/x.zip") is True
+    assert [f["id"] for f in dev.frames] == [1, 2, 3] and ["auth" in f for f in dev.frames] == [False, False, True]
+
+
+async def test_channel_429_after_the_wait_or_to_the_signed_frame_is_blocked(short_block_wait):
+    """Code 429 still there after the wait, or to the signed frame: AuthBlockedError and no
+    further frame; without credentials code 429 is an ordinary device error."""
+    auth = shelly.DeviceAuth(gen=2, password="pw-1")
+    async with FakeShelly(password="pw-1", blocked=lambda frame: "auth" not in frame) as dev:
+        async with REAL_CHANNEL(dev.origin, auth) as ch:
+            with pytest.raises(shelly.AuthBlockedError, match="temporarily blocks sign-ins"):
+                await ch.update("http://h/x.zip")
+    assert len(dev.frames) == 2 and not any("auth" in f for f in dev.frames)
+    async with FakeShelly(password="pw-1", blocked=lambda frame: "auth" in frame) as dev:
+        async with REAL_CHANNEL(dev.origin, auth) as ch:
+            with pytest.raises(shelly.AuthBlockedError):
+                await ch.update("http://h/x.zip")
+    assert len(dev.frames) == 2 and "auth" in dev.frames[1]
+    async with FakeShelly(blocked=lambda _frame: True) as dev, REAL_CHANNEL(dev.origin) as ch:
+        with pytest.raises(shelly.ShellyError, match=r"^Device reports: Too many requests \(code 429\)$") as err:
+            await ch.update("http://h/x.zip")
+    assert not isinstance(err.value, shelly.AuthError) and len(dev.frames) == 1
+
+
+class StubSocket:
+    """WebSocket whose first frame is answered with the given error and whose second
+    send fails (the connection ended)."""
+
+    def __init__(self, error):
+        self.error, self.sent = error, []
+
+    async def send_json(self, frame):
+        if self.sent:
+            raise ConnectionResetError("Cannot write to closing transport")
+        self.sent.append(frame)
+
+    async def receive(self, timeout=None):
+        return SimpleNamespace(type=WSMsgType.TEXT, data=json.dumps({"id": 1, "error": self.error}))
+
+
+@pytest.mark.parametrize("error", [
+    {"code": 401, "message": json.dumps({"auth_type": "digest", "nonce": 7, "realm": "r", "algorithm": "SHA-256"})},
+    {"code": 429, "message": "Too many requests"},
+])
+async def test_channel_retry_frame_that_cannot_be_sent_never_falls_back(short_block_wait, error):
+    """The first frame was refused (not executed); the retry frame cannot be sent: a
+    ShellyError (nothing installed), never ChannelUnavailable – that would send the
+    update command over HTTP."""
+    channel = REAL_CHANNEL("http://127.0.0.1:9", shelly.DeviceAuth(gen=2, password="pw-1"))
+    channel.ws = StubSocket(error)
+    with pytest.raises(shelly.ShellyError, match="^Connection to the Shelly lost before the update command – "
+                                                 "nothing was installed$"):
+        await channel.update("http://h/x.zip")
+    assert len(channel.ws.sent) == 1
 
 
 def test_ws_auth_refuses_downgrades():
@@ -750,6 +823,8 @@ def weak_wifi(mgr, monkeypatch, quick_install):
         return {"mac": "AA", "build": "b-old", "version": "1.4.0", **answer}
 
     async def link(*_args, **_kwargs):
+        if isinstance(state["link"], BaseException):
+            raise state["link"]
         return state["link"]
 
     async def trigger(*_args):
@@ -840,6 +915,20 @@ async def test_a_refusal_is_not_tried_again(mgr, monkeypatch, weak_wifi):
     ok, _dev, entry = await run_weak(mgr, monkeypatch)
     assert not ok and weak_wifi["sent"] == 0 and "changed since the check" in entry["detail"]
     assert weak_wifi["answers"] == [{}]
+
+
+@pytest.mark.parametrize("refusal", [
+    shelly.AuthError("The Shelly rejected the password"),
+    shelly.AuthBlockedError("The Shelly temporarily blocks sign-ins (too many attempts) – wait a few minutes and try again"),
+])
+async def test_refused_sign_in_of_the_link_read_installs_nothing(mgr, monkeypatch, weak_wifi, refusal):
+    """Reading running time and Wi-Fi signal is optional, but a refused or blocked sign-in
+    stops the installation before the update command: the command would be refused the
+    same way, and one more signed request is one more failed attempt on the device."""
+    weak_wifi["link"] = refusal
+    ok, dev, entry = await run_weak(mgr, monkeypatch)
+    assert not ok and weak_wifi["sent"] == 0 and entry["event"] == "failed" and entry["detail"] == str(refusal)
+    assert dev["status"] == manager_core.STATUS_ERROR
 
 
 def aiohttp_connector_error():

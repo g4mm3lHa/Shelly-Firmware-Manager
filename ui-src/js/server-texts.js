@@ -71,6 +71,7 @@ const SERVER_TEXTS = [
   "Connection to the Shelly lost before the update command – no answer in {attempts} attempts within {seconds} s. Nothing was installed.",
   "Connection to the Shelly lost before the update command – no answer in {attempts} attempts within {seconds} s. Nothing was installed. Wi-Fi signal: {rssi} dBm (weak).",
   "The Shelly restarted unexpectedly before the update command (running for {seconds} s). Nothing was installed.",
+  "Connection to the Shelly lost before the update command – nothing was installed",
   // Access point form (answer of the server; the form checks the same before)
   "The password contains a character the Shelly cannot use: {char}",
   "Invalid access point password (8 to 63 characters)",
@@ -93,6 +94,8 @@ const SERVER_TEXTS = [
   "Device not reachable ({error})",
   "The Shelly rejected the password",
   "The Shelly requires a password – store it in the device's password dialog",
+  "The Shelly temporarily blocks sign-ins (too many attempts) – wait a few minutes and try again",
+  "The Shelly rejected the stored current password – nothing was changed",
   "Stored device password belongs to another device ID – enter it again",
   "Authentication with the Shelly failed",
   "Unexpected authentication request from the Shelly",

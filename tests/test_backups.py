@@ -692,8 +692,8 @@ async def test_backup_now_stores_logs_and_applies_the_retention(net, shellys):
 
 
 async def test_failed_backups_name_the_reason(backed, net, shellys):
-    """Not reachable, asleep (battery device) and a missing password are told apart;
-    a removed device is not backed up; nothing is stored."""
+    """Not reachable, asleep (battery device), a missing password and a sign-in block are
+    told apart; a removed device is not backed up; nothing is stored."""
     mgr = backed
     fake(shellys, net, A).down = True
     with pytest.raises(ShellyError, match="Device not reachable"):
@@ -714,6 +714,17 @@ async def test_failed_backups_name_the_reason(backed, net, shellys):
     with pytest.raises(ShellyError, match="requires a password"):
         await mgr.backup_now(B, "alice")
     assert mgr.devices[B]["backup_failed"]["reason"] == "password"
+    assert backup_events(mgr, "failed")[-1]["severity"] == "error"
+
+    async def blocked(_method, _params=None):
+        raise shelly.AuthBlockedError("The Shelly temporarily blocks sign-ins (too many attempts) – wait a few "
+                                      "minutes and try again")
+
+    # A sign-in block is no password problem: noted as failed ("Back up now" stays usable)
+    fake(shellys, net, B).rpc = blocked
+    with pytest.raises(ShellyError, match="temporarily blocks sign-ins"):
+        await mgr.backup_now(B, "alice")
+    assert mgr.devices[B]["backup_failed"]["reason"] == "failed"
     assert backup_events(mgr, "failed")[-1]["severity"] == "error"
     mgr.devices[C]["removed"] = 1
     with pytest.raises(ShellyError, match="Removed from Home Assistant"):
