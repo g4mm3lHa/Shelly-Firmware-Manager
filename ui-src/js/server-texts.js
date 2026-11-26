@@ -68,6 +68,7 @@ const SERVER_TEXTS = [
   "The Shelly applied the update but did not restart within {seconds} s",
   "After the restart the Shelly still reports {version} – the update was not applied",
   "After the restart the Shelly still reports {version}. The update to {target} can run in two steps, but the second step did not start within {seconds} s – start the update again",
+  "After the restart the Shelly still reports {version}. The update to {target} can run in two steps, but the second step did not finish within {seconds} s – start the update again",
   "After the restart the Shelly reports {version} instead of {target}",
   "No answer from the Shelly within {seconds} s after the restart",
   "Connection to the Shelly lost before the update command – no answer in {attempts} attempts within {seconds} s. Nothing was installed.",

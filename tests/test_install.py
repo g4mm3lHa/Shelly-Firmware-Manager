@@ -27,14 +27,15 @@ def test_install_timing_constants():
     abort after 2 min without download, at most 5 min. OTA events: 60 s without
     progress (120 s with a weak Wi-Fi signal), 30 s for the restart, 90 s after it, polled
     every 5 s. Before the update command: 5 attempts within 60 s while the Shelly does not
-    answer. Two-step update: the second pass must start within 3 min, usually within 2.5 min;
-    it is expected from 2.2.0 on."""
+    answer. Two-step update: the second pass must start within 3 min, usually within 2.5 min,
+    and end within 5 min after its new download; it is expected from 2.2.0 on."""
     assert (manager_installs.INSTALL_FIRST_CHECK_S, manager_installs.INSTALL_POLL_S) == (30, 10)
     assert (manager_installs.INSTALL_NO_DOWNLOAD_S, manager_installs.INSTALL_WAIT_S) == (120, 300)
     assert (manager_installs.OTA_STALL_S, manager_installs.OTA_STALL_WEAK_S, manager_installs.OTA_RESTART_WAIT_S) == (60, 120, 30)
     assert (manager_installs.OTA_BOOT_WAIT_S, manager_installs.OTA_POLL_S) == (90, 5)
     assert (manager_installs.PRECHECK_ATTEMPTS, manager_installs.PRECHECK_WINDOW_S, manager_installs.WEAK_RSSI) == (5, 60, -80)
     assert (manager_installs.TWO_STEP_START_S, manager_installs.TWO_STEP_USUAL_S) == (180, 150)
+    assert manager_installs.TWO_STEP_FINISH_S == 300
     assert manager_installs.TWO_STEP_VERSION == (2, 2, 0)
 
 
@@ -319,6 +320,7 @@ def ota_install(monkeypatch):
     monkeypatch.setattr(manager_installs, "OTA_BOOT_WAIT_S", 0.3)
     monkeypatch.setattr(manager_installs, "TWO_STEP_START_S", 0.4)
     monkeypatch.setattr(manager_installs, "TWO_STEP_USUAL_S", 0.3)
+    monkeypatch.setattr(manager_installs, "TWO_STEP_FINISH_S", 0.6)
     monkeypatch.setattr(shelly_cloud, "file_sha256", lambda *_a: "s")
     calls = {"http": 0}
 
@@ -439,6 +441,38 @@ def second_pass_views(mgr, seen):
     return lambda _version: seen.append((mgr.install_step_view(A), mgr.devices[A].get("ota_progress")))
 
 
+def running_for(monkeypatch, uptime):
+    """shelly.link_status reports the running time uptime (0: the device just restarted;
+    a large value: it kept running, the connection was lost). Returns the list of reads."""
+    reads = []
+
+    async def link(*_args, **_kwargs):
+        reads.append(uptime)
+        return {"uptime": uptime, "rssi": None}
+
+    monkeypatch.setattr(shelly, "link_status", link)
+    return reads
+
+
+def serve_again(mgr, address="192.168.1.10", at=2, seen=None):
+    """hook for ota_run: before the at-th answer on the old version 2.1.1 the download server
+    serves the file again to address (the device's own one by default). seen: step views."""
+    old_answers = []
+
+    def hook(version):
+        if seen is not None:
+            seen.append(mgr.install_step_view(A))
+        if version == "2.1.1":
+            old_answers.append(version)
+        if len(old_answers) == at and not hook.done:
+            hook.done = True
+            mgr.may_download("x.zip", address)
+            mgr.record_download("x.zip", address)
+
+    hook.done = False
+    return hook
+
+
 async def test_ota_two_step_update_confirmed_after_second_pass(mgr, ota_install, monkeypatch):
     """2.1.1 -> 2.2.0 crosses 2.2.0: back on 2.1.1 after the restart, the app waits for the
     second pass (step install with second_pass, reboot while down) and confirms 2.2.0."""
@@ -488,7 +522,9 @@ async def test_ota_two_step_other_version_is_an_error(mgr, ota_install, monkeypa
 
 async def test_second_pass_download_is_served_again(mgr, ota_install, monkeypatch):
     """During the second pass the file is still served to the device; a new download starts
-    the second pass. Back on the old version after its restart: the update was not applied."""
+    the second pass. Back on the old version after its restart (it runs shorter than the gap):
+    the update was not applied."""
+    running_for(monkeypatch, 0)
     served, old_answers = [], []
 
     def hook(version):
@@ -526,6 +562,7 @@ async def test_polling_waits_for_the_second_pass(run_install, monkeypatch):
     """Without OTA events: downloaded, restarted, back on 2.1.1 – the limit grows by the
     second-pass window, and 2.2.0 after the usual limit is confirmed."""
     monkeypatch.setattr(manager_installs, "TWO_STEP_START_S", 0.8)
+    running_for(monkeypatch, 0)
     ok, diagnosis, dev, polls = await run_install("2.1.1", "2.2.0", ["2.1.1", None, *["2.1.1"] * 35, "2.2.0"],
                                                   served=True)
     assert ok and diagnosis is None and polls > 30 and dev["status"] == manager_core.STATUS_CURRENT
@@ -533,11 +570,72 @@ async def test_polling_waits_for_the_second_pass(run_install, monkeypatch):
 
 async def test_polling_second_pass_missing_is_unconfirmed(run_install, monkeypatch, mgr):
     monkeypatch.setattr(manager_installs, "TWO_STEP_START_S", 0.4)
+    running_for(monkeypatch, 0)
     ok, diagnosis, dev, _polls = await run_install("2.1.1", "2.2.0", ["2.1.1", None, "2.1.1"], served=True)
     assert not ok and dev["status"] == manager_core.STATUS_UNCLEAR
     assert diagnosis == ("The Shelly still reports 2.1.1. The update to 2.2.0 can run in two steps, but the second "
                          "step did not finish – check the device, then install again")
     assert mgr.install_steps[A]["second_pass"]
+
+
+@pytest.mark.parametrize("uptime", [None, 10_000])
+async def test_polling_lost_connection_is_no_second_pass(run_install, monkeypatch, mgr, uptime):
+    """One poll without answer while the first pass still downloads, then the old version: the
+    device kept running (or its running time is unknown), so no second pass is shown, the limit
+    stays, and 2.2.0 in one pass is no two-step installation."""
+    asked = []
+
+    async def nsteps(*_args, **_kwargs):
+        asked.append(True)
+        return 1
+
+    monkeypatch.setattr(shelly, "update_nsteps", nsteps)
+    reads = running_for(monkeypatch, uptime)
+    ok, diagnosis, _dev, _polls = await run_install("2.1.1", "2.2.0", ["2.1.1", None, "2.1.1", "2.2.0"], served=True)
+    assert ok and diagnosis is None
+    assert not mgr.install_steps[A]["second_pass"] and not asked and reads[-1:] == [uptime]
+    assert mgr.install_steps[A]["give_up"] == manager_installs.INSTALL_WAIT_S
+
+
+async def test_second_pass_lost_connection_during_download_goes_on(mgr, ota_install, monkeypatch):
+    """One poll without answer during the new download, then the old version again: the device
+    kept running (the connection was lost), so the second pass goes on with its total limit and
+    the target version is confirmed."""
+    running_for(monkeypatch, 10_000)
+    seen = []
+    versions = [None, "2.1.1", "2.1.1", None, "2.1.1", "2.1.1", "2.2.0"]
+    result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, versions, old="2.1.1", target="2.2.0",
+                                          hook=serve_again(mgr, seen=seen))
+    assert result == (True, None)
+    after = [view for view in seen if view and view["second_pass"]]
+    assert [view["step"] for view in after][-2:] == ["install", "install"]
+    assert (after[-1]["give_up"], after[-1]["usual"]) == (0.6, manager_installs.STEP_USUAL_POLLING_S)
+
+
+async def test_second_pass_total_limit_after_the_new_download(mgr, ota_install, monkeypatch):
+    """After the new download the whole second pass has TWO_STEP_FINISH_S: still the old version
+    then is an error that names the limit and says to start the update again; the pill can turn
+    yellow before it (usual below give_up)."""
+    monkeypatch.setattr(manager_installs, "TWO_STEP_START_S", 5)
+    monkeypatch.setattr(manager_installs, "TWO_STEP_FINISH_S", 0.2)
+    monkeypatch.setattr(manager_installs, "STEP_USUAL_POLLING_S", 0.1)
+    seen = []
+    result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, [None, "2.1.1"], old="2.1.1", target="2.2.0",
+                                          hook=serve_again(mgr, seen=seen))
+    assert isinstance(result, shelly.ShellyError)
+    assert str(result) == ("After the restart the Shelly still reports 2.1.1. The update to 2.2.0 can run in two "
+                           "steps, but the second step did not finish within 0.2 s – start the update again")
+    downloading = [view for view in seen if view and view["give_up"] == 0.2]
+    assert downloading and downloading[-1]["usual"] < downloading[-1]["give_up"]
+
+
+async def test_second_pass_ignores_downloads_of_other_addresses(mgr, ota_install, monkeypatch):
+    """A download from an address of no known device (another Shelly behind Docker without the
+    sender IP) does not start the second pass: the start window stays."""
+    monkeypatch.setattr(manager_installs, "TWO_STEP_FINISH_S", 0.1)
+    result, _dev, _phases = await ota_run(mgr, monkeypatch, DONE, [None, "2.1.1"], old="2.1.1", target="2.2.0",
+                                          hook=serve_again(mgr, address="172.30.32.1"))
+    assert isinstance(result, shelly.ShellyError) and "did not start within 0.4 s" in str(result)
 
 
 async def test_update_nsteps_reads_the_available_updates(monkeypatch):

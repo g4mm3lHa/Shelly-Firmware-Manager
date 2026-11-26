@@ -59,6 +59,9 @@ OTA_TICK_S = 1  # events: check interval while the update runs
 TWO_STEP_VERSION = (2, 2, 0)  # first version that reorganises the memory (major, minor, patch)
 TWO_STEP_START_S = 180  # the second pass must start within 3 min (download again, or a restart)
 TWO_STEP_USUAL_S = 150  # it usually starts within 2.5 min (longer = late: the pill turns yellow)
+# Once the device downloads the file again, the whole second pass (download, writing, restart)
+# must end within this time: the download server reports no progress, so one total limit applies
+TWO_STEP_FINISH_S = INSTALL_WAIT_S
 
 # "Restart the device first" (retry after a failed installation): after the restart
 # command the device goes down, then it must answer again within RESTART_WAIT_S
@@ -681,6 +684,11 @@ class Installs(Checks):
             )
         raise ShellyError(f"No answer from the Shelly within {OTA_BOOT_WAIT_S} s after the restart")
 
+    @staticmethod
+    def _two_step_possible(dev: Device) -> bool:
+        """A two-step update can only happen on a Gen2+ device and never on a downgrade."""
+        return dev.get("gen", 1) >= 2 and not dev.get("downgrade")
+
     async def _two_step_expected(self, device_id: str, dev: Device, reported: str) -> bool:
         """A Gen2+ update that came back on its old version (reported) may run in two
         steps: True if one of these signals says so –
@@ -691,8 +699,9 @@ class Installs(Checks):
           Shelly cloud for a day),
         - the update crosses TWO_STEP_VERSION: the old version (major, minor, patch)
           is below it, the target at or above it (pre-releases count as their number).
-        Never for Gen1 or a downgrade. All signals are logged, for the diagnosis."""
-        if dev.get("gen", 1) < 2 or dev.get("downgrade"):
+        Never for Gen1 or a downgrade (_two_step_possible). All signals are logged, for
+        the diagnosis."""
+        if not self._two_step_possible(dev):
             return False
         target = str(dev["pending_version"])
         offer = dev.get("step_target") == ""
@@ -710,6 +719,18 @@ class Installs(Checks):
         )  # fmt: skip
         return expected
 
+    async def _restarted(self, device_id: str, dev: Device, last_alive: float) -> bool:
+        """The device answers again after a gap without answers (last_alive: time of its
+        answer before the gap): True if it restarted in the gap – it runs shorter than the
+        time since last_alive, the rule of the pre-check (_after_answer). False after a
+        lost connection, and when the running time cannot be read. One signed request; a
+        refused or blocked sign-in (AuthError) is raised (see _read_link)."""
+        uptime = (await self._read_link(device_id, dev)).get("uptime")
+        restarted = uptime is not None and uptime < time.monotonic() - last_alive
+        log.info("%s: answers again after %d s without an answer (running for %s s) – %s", dev["name"],
+                 round(time.monotonic() - last_alive), uptime, "restarted" if restarted else "connection lost")
+        return restarted
+
     async def _await_second_pass(self, device_id: str, dev: Device, version: str) -> tuple[bool, str | None]:
         """Two-step update: the device came back on its old version (version) after an
         applied update and installs it a second time by itself – the app never sends a
@@ -720,24 +741,29 @@ class Installs(Checks):
 
         Two phases:
         - the second pass must start within TWO_STEP_START_S: the app serves the file to
-          the device again, or the device stops answering (it restarts);
-        - once started, the usual limits apply: after a new download the device must
-          restart within the stall limit plus OTA_RESTART_WAIT_S (the download reports no
-          progress here), after going down it must answer within OTA_BOOT_WAIT_S.
+          this device's own address again, or the device stops answering (it restarts).
+          A download that cannot be attributed to a device (see _served_count) does not
+          start it;
+        - once the device downloaded the file again, the whole second pass (download,
+          writing, restart) must end within TWO_STEP_FINISH_S – the download server
+          reports no progress; after going down the device must answer within
+          OTA_BOOT_WAIT_S.
         Exactly the target version: confirmed. Another version: error. The old version
-        after a restart that followed a new download: the update was not applied (error).
-        The old version after a restart without a new download goes on waiting within the
-        first window. Returns (True, None); raises ShellyError otherwise."""
+        after a gap without answers that followed a new download: the running time
+        decides (_restarted) – a restart means the update was not applied (error), a lost
+        connection goes on waiting for the second pass. The old version after a gap
+        without a new download goes on waiting within the first window. Returns
+        (True, None); raises ShellyError otherwise."""
         target = shelly.parse_version(dev["pending_version"])
         old = shelly.parse_version(version)
         dev.pop("ota_progress", None)  # the progress of the first pass is over
         dev.pop("ota_phase", None)
         started = time.monotonic()
         deadline = started + TWO_STEP_START_S  # the second pass must have started by then
-        restart_limit = self._stall_limit(device_id) + OTA_RESTART_WAIT_S  # after a new download
-        served = self._served_count(dev)  # downloads of the file by this device so far
+        served = self._served_count(dev, own_only=True)  # downloads of the file by this device so far
         served_at: float | None = None  # time the device downloaded the file again
         down_since: float | None = None  # time the device stopped answering
+        last_alive = started  # last answer of the device (it just answered on its old version)
         self._set_step(device_id, "install", usual=TWO_STEP_USUAL_S, give_up=TWO_STEP_START_S)
         self._update_step(device_id, second_pass=True)
         log.info("%s: waiting up to %d s for the second pass of the update", dev["name"], TWO_STEP_START_S)
@@ -746,9 +772,9 @@ class Installs(Checks):
             info = await self._poll_version(device_id, dev)
             now = time.monotonic()
             if info is None:
-                if down_since is None:  # the device restarts: the second pass runs
+                if down_since is None:  # the device restarts (or the connection is lost)
                     down_since = now
-                    log.info("%s: second pass – the Shelly restarts (%s)", dev["name"],
+                    log.info("%s: second pass – no answer from the Shelly (%s)", dev["name"],
                              "after downloading the file again" if served_at is not None else "no new download seen")
                     self._set_step(device_id, "reboot", usual=OTA_RESTART_WAIT_S, give_up=OTA_BOOT_WAIT_S)
                 elif now - down_since >= OTA_BOOT_WAIT_S:
@@ -764,19 +790,28 @@ class Installs(Checks):
                 )
             if down_since is not None:  # answers again on the old version
                 down_since = None
-                if served_at is not None:
+                if served_at is None:  # no new download seen: the first window goes on
+                    self._set_step(device_id, "install", usual=TWO_STEP_USUAL_S, give_up=TWO_STEP_START_S)
+                    self._update_step(device_id, since=started, quiet=started)
+                elif await self._restarted(device_id, dev, last_alive):
                     raise ShellyError(
                         f"After the restart the Shelly still reports {info['version']} – the update was not applied"
                     )
-                self._set_step(device_id, "install", usual=TWO_STEP_USUAL_S, give_up=TWO_STEP_START_S)
-                self._update_step(device_id, since=started, quiet=started)  # the first window goes on
-            if served_at is None and self._served_count(dev) > served:
+                else:  # connection lost during the new download: the second pass goes on
+                    self._set_step(device_id, "install", usual=STEP_USUAL_POLLING_S, give_up=TWO_STEP_FINISH_S)
+                    self._update_step(device_id, since=served_at, quiet=served_at)
+            last_alive = time.monotonic()
+            if served_at is None and self._served_count(dev, own_only=True) > served:
                 served_at = now
                 log.info("%s: second pass – the Shelly downloads the file again from the app", dev["name"])
-                self._update_step(device_id, quiet=now, give_up=restart_limit)
+                self._update_step(device_id, quiet=now, usual=STEP_USUAL_POLLING_S, give_up=TWO_STEP_FINISH_S)
             if served_at is not None:
-                if now - served_at >= restart_limit:
-                    raise ShellyError(f"The update stopped: no progress from the Shelly for {restart_limit} s")
+                if now - served_at >= TWO_STEP_FINISH_S:
+                    raise ShellyError(
+                        f"After the restart the Shelly still reports {info['version']}. The update to "
+                        f"{dev['pending_version']} can run in two steps, but the second step did not finish within "
+                        f"{TWO_STEP_FINISH_S} s – start the update again"
+                    )
             elif now >= deadline:
                 raise ShellyError(
                     f"After the restart the Shelly still reports {info['version']}. The update to "
@@ -826,27 +861,33 @@ class Installs(Checks):
         2 min, stop waiting – the update will never arrive. A Gen2+ ota_error event
         still ends the wait at once (raises OtaError).
 
-        Two-step update: a Gen2+ device that downloaded the file, restarted and answers
-        on its old version is asked once whether a second pass is expected
-        (_two_step_expected). If so, the step shows the second pass and the limit grows
-        to at least TWO_STEP_START_S from then, and to OTA_BOOT_WAIT_S from each restart
-        after it. Without the target version the result stays unconfirmed, with the
-        two-step diagnosis."""
+        Two-step update: a Gen2+ device that downloaded the file, stopped answering and
+        answers again on its old version is checked for a restart by its running time
+        (_restarted: a lost connection, or an unknown running time, is no restart and
+        waits for the next gap). After a restart the device is asked once whether a second
+        pass is expected (_two_step_expected). If so, the step shows the second pass and
+        the limit grows to at least TWO_STEP_START_S from then, and to OTA_BOOT_WAIT_S
+        from each restart after it. Without the target version the result stays
+        unconfirmed, with the two-step diagnosis."""
         target = shelly.parse_version(dev["pending_version"])
         old = shelly.parse_version(dev["version"]) if dev.get("version") else None
         unexpected = None  # last reported version that is neither old nor target
         limit: float = INSTALL_WAIT_S  # upper limit of the wait (longer for a second pass)
         two_step: bool | None = None  # second pass expected (None: not asked yet)
-        went_down = False  # the device stopped answering after the download (its restart)
+        went_down = False  # the device stopped answering after the download (maybe its restart)
+        gap_from = 0.0  # time of the last answer before that gap (the restart check measures from it)
         down = False  # it did not answer the last query
         started = time.monotonic()
+        last_alive = started  # last answer of the device (before the first one: the update command)
         await self._pause(ota, INSTALL_FIRST_CHECK_S, dev)
         while (elapsed := time.monotonic() - started) < limit:
             downloaded = self._downloaded(dev)
+            check_restart = False  # back on the old version after a gap: did it restart?
             try:
                 info = await shelly.device_info(self.session, dev["origin"], self._auth_for(device_id))
                 down = False
                 reported = shelly.parse_version(info["version"])
+                last_alive = time.monotonic()  # a valid answer: the device runs
                 if reported == target:
                     return await self._confirm(device_id, dev, info), None
                 # Neither old nor target: keep waiting (polling is unchanged), but the
@@ -854,18 +895,25 @@ class Installs(Checks):
                 unexpected = info["version"] if reported != old else None
                 if not unexpected and not downloaded and elapsed >= INSTALL_NO_DOWNLOAD_S:
                     break  # reachable, old version, nothing downloaded
-                if not unexpected and went_down and two_step is None:
-                    two_step = await self._two_step_expected(device_id, dev, info["version"])
-                    if two_step:
-                        limit = max(limit, elapsed + TWO_STEP_START_S)
-                        self._update_step(device_id, second_pass=True, give_up=round(limit))
+                check_restart = not unexpected and went_down and two_step is None
             except (TimeoutError, aiohttp.ClientError, ShellyError) as err:
                 log.debug("Waiting for %s: %s", dev["name"], err)  # restart – expected
                 if two_step and not down:  # the second pass restarts the device
                     limit = max(limit, elapsed + OTA_BOOT_WAIT_S)
                     self._update_step(device_id, give_up=round(limit))
-                went_down = went_down or downloaded
+                if downloaded and not went_down:
+                    went_down, gap_from = True, last_alive
                 down = True
+            if check_restart:
+                if not self._two_step_possible(dev):
+                    two_step = False  # Gen1 or a downgrade: no running time needed
+                elif await self._restarted(device_id, dev, gap_from):
+                    two_step = await self._two_step_expected(device_id, dev, info["version"])
+                    if two_step:
+                        limit = max(limit, elapsed + TWO_STEP_START_S)
+                        self._update_step(device_id, second_pass=True, give_up=round(limit))
+                else:
+                    went_down = False  # a lost connection, not the restart: wait for the next gap
             if dev.get("ota_progress") is None:  # the device's own progress is more precise
                 dev["message"] = (
                     "Firmware transferred, waiting for restart"
@@ -996,15 +1044,18 @@ class Installs(Checks):
         if client_ip in served or len(served) < MAX_SERVED_IPS:
             served[client_ip] = served.get(client_ip, 0) + 1
 
-    def _served_count(self, dev: Device) -> int:
+    def _served_count(self, dev: Device, own_only: bool = False) -> int:
         """GETs of this device's file served to it so far. A request from an address that
         belongs to no known device (Docker without the sender IP, see
         restrict_downloads_to_devices) cannot be attributed and counts for every device
-        of that file."""
+        of that file – unless own_only: then only the requests from the device's own
+        address count (another Shelly's download of the same file never counts)."""
         served = (self.downloads.get(str(dev.get("file"))) or {}).get("served") or {}
+        own = int(served.get(shelly_net.origin_ip(dev.get("origin", "")), 0))
+        if own_only:
+            return own
         known = {shelly_net.origin_ip(d["origin"]) for d in self.devices.values() if d.get("origin")}
-        own = served.get(shelly_net.origin_ip(dev.get("origin", "")), 0)
-        return int(own) + sum(int(count) for address, count in served.items() if address not in known)
+        return own + sum(int(count) for address, count in served.items() if address not in known)
 
     def _reset_download(self, dev: Device) -> None:
         """Forget earlier downloads of this device only (installation start)."""

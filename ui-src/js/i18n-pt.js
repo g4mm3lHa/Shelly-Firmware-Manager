@@ -51,6 +51,7 @@ export default {
   "After the restart the Shelly reports {version} instead of {target}": "Após o reinício o Shelly indica {version} em vez de {target}",
   "After the restart the Shelly still reports {version} – the update was not applied": "Após o reinício o Shelly continua a indicar {version} – a atualização não foi aplicada",
   "After the restart the Shelly still reports {version}. The update to {target} can run in two steps, but the second step did not start within {seconds} s – start the update again": "Após o reinício o Shelly continua a indicar {version}. A atualização para {target} pode decorrer em dois passos, mas o segundo passo não começou em {seconds} s – inicie a atualização novamente",
+  "After the restart the Shelly still reports {version}. The update to {target} can run in two steps, but the second step did not finish within {seconds} s – start the update again": "Após o reinício o Shelly continua a indicar {version}. A atualização para {target} pode decorrer em dois passos, mas o segundo passo não terminou em {seconds} s – inicie a atualização novamente",
   "All": "Todos",
   "All areas": "Todas as áreas",
   "All at once": "Todos de uma vez",

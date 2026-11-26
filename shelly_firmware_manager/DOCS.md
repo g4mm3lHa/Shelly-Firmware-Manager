@@ -456,9 +456,13 @@ the update a second time by itself. The app expects this when the update crosses
 or when the Shelly update server or the device names several steps.
 
 The app then sends no second command. It keeps the file ready for the Shelly, shows
-**Installing again …** and waits up to 3 minutes for the second step to start. Do not
-switch the Shelly off meanwhile. If nothing starts, the installation fails: start it again.
-Without the device connection the result is "Unconfirmed": check the device, then install.
+**Installing again …** and waits up to 3 minutes for the second step to start. Once the
+Shelly downloads the file again, the second step has 5 minutes to finish. Do not switch
+the Shelly off meanwhile.
+
+If the second step does not start or finish in time, the installation fails: start it
+again. A missed answer only counts as a restart when the running time of the Shelly shows
+one. Without the device connection the result is "Unconfirmed": check the device, then install.
 
 Devices without this connection (Gen1, or when it is not available) are checked every
 10 seconds until they report exactly the target version (at most 5 minutes). If that
@@ -883,6 +887,7 @@ Gen2+ firmware is downloaded over HTTPS only.
 | The Shelly downloaded the firmware but still reports … | The device did not install it – check the log in the Shelly web UI |
 | After the restart the Shelly still reports … – the update was not applied | The Shelly restarted but kept its old version. Check the log in the Shelly web UI, then try the installation again from **Updates Available** |
 | After the restart the Shelly still reports … The update to … can run in two steps, but the second step did not start within 180 s | The Shelly came back on its old version and did not start the second step of a [two-step update](#installing-updates). Start the installation again from **Updates Available**; do not switch the Shelly off while it installs |
+| After the restart the Shelly still reports … The update to … can run in two steps, but the second step did not finish within 300 s | The Shelly downloaded the file again but did not reach the target version within 5 minutes. Start the installation again from **Updates Available**; do not switch the Shelly off while it installs |
 | Target version not confirmed. The Shelly still reports … The update to … can run in two steps, but the second step did not finish | The second step of a two-step update did not come. Check the device (row menu ⋮ → **Check for updates**), then install it again |
 | The Shelly reports an update error … It downloaded the firmware but rejected it | The installed firmware may be too old for a direct update to this version: check the device again – the Shelly update server names the required intermediate version (or install one via the web interface of the Shelly or an upload) |
 | Check warning: the Shelly update server no longer answers with the next step | Shelly changed its update server: required intermediate versions cannot be detected. Prefer the web interface of the Shelly for devices on very old firmware |

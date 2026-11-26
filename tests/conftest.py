@@ -271,6 +271,7 @@ def quick_install(monkeypatch):
     monkeypatch.setattr(manager_installs, "INSTALL_NO_DOWNLOAD_S", 0.1)
     monkeypatch.setattr(manager_installs, "INSTALL_WAIT_S", 0.3)
     monkeypatch.setattr(manager_installs, "TWO_STEP_START_S", 0.3)  # second pass of a two-step update
+    monkeypatch.setattr(manager_installs, "TWO_STEP_FINISH_S", 0.3)
 
 
 @pytest.fixture
