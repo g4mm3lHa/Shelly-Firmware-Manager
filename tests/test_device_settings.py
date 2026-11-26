@@ -562,8 +562,9 @@ async def test_bulk_validation(mgr, several):
 async def test_gen2_cloud_and_bluetooth_proxy(device_api):
     """Cloud switch (Shelly.GetConfig) and its connection (Cloud.GetStatus, only while
     on; extended reads may take it from Shelly.GetStatus, see
-    test_gen2_sys_and_cloud_status_in_one_request); Home Assistant's Bluetooth proxy script (Script.List, only while Bluetooth is
-    on: running script with exactly that name)."""
+    test_gen2_sys_and_cloud_status_in_one_request); Home Assistant's Bluetooth proxy
+    script (Script.List, only while Bluetooth is on: running script with exactly that
+    name)."""
     calls, answers = device_api
     answers["Shelly.GetConfig"] = {"cloud": {"enable": True}, "ble": {"enable": True}}
     answers["Cloud.GetStatus"] = {"connected": False}
