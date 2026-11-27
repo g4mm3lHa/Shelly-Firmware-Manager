@@ -1,0 +1,41 @@
+# Version update pull requests for the pinned dependencies, daily and grouped per
+# ecosystem, against "beta" (releases reach main only through beta). Security update
+# pull requests are not used; fixes for alerts are taken over the same way.
+#
+# pip: a pull request changes only requirements.txt (version and hashes). The Docker
+# image installs offline from the bundled wheels, so the matching musllinux cp312 wheels
+# for aarch64 and amd64 must be added to shelly_firmware_manager/wheels/ before such a
+# pull request is merged; without them the image build on beta fails.
+# docker: the base image of both stages; Python stays on 3.12 (the bundled wheels are
+# cp312), so only patch versions and new digests are proposed.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /shelly_firmware_manager
+    target-branch: beta
+    schedule:
+      interval: daily
+    groups:
+      pip:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /shelly_firmware_manager
+    target-branch: beta
+    schedule:
+      interval: daily
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+    groups:
+      docker:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: beta
+    schedule:
+      interval: daily
+    groups:
+      github-actions:
+        patterns: ["*"]
